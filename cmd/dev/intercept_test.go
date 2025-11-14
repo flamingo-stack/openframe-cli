@@ -65,14 +65,14 @@ func TestInterceptCmd_FlagBinding(t *testing.T) {
 	flags := &models.InterceptFlags{}
 
 	// Simulate flag parsing
-	cmd.Flags().Set("port", "9090")
-	cmd.Flags().Set("namespace", "production")
-	cmd.Flags().Set("mount", "/tmp/mount")
-	cmd.Flags().Set("env-file", ".env.test")
-	cmd.Flags().Set("global", "true")
-	cmd.Flags().Set("header", "key1=value1,key2=value2")
-	cmd.Flags().Set("replace", "true")
-	cmd.Flags().Set("remote-port", "http")
+	_ = cmd.Flags().Set("port", "9090")
+	_ = cmd.Flags().Set("namespace", "production")
+	_ = cmd.Flags().Set("mount", "/tmp/mount")
+	_ = cmd.Flags().Set("env-file", ".env.test")
+	_ = cmd.Flags().Set("global", "true")
+	_ = cmd.Flags().Set("header", "key1=value1,key2=value2")
+	_ = cmd.Flags().Set("replace", "true")
+	_ = cmd.Flags().Set("remote-port", "http")
 
 	// Get flag values manually (simulating what the RunE function would do)
 	port, _ := cmd.Flags().GetInt("port")

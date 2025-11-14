@@ -108,11 +108,6 @@ func (s *ScaffoldInstaller) installLinuxWget() error {
 	return nil
 }
 
-func (s *ScaffoldInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Suppress output - only show on error
-	return cmd.Run()
-}
 
 func (s *ScaffoldInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)

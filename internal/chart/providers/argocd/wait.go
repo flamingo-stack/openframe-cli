@@ -103,7 +103,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil && spinner.IsActive {
-			spinner.Stop()
+			_ = spinner.Stop()
 			spinnerStopped = true
 		}
 	}
@@ -408,7 +408,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			if allReady {
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil && spinner.IsActive {
-					spinner.Stop()
+					_ = spinner.Stop()
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()

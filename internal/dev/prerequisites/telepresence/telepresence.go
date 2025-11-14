@@ -137,12 +137,6 @@ func (t *TelepresenceInstaller) installLinuxWget() error {
 	return nil
 }
 
-func (t *TelepresenceInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
 
 func (t *TelepresenceInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)

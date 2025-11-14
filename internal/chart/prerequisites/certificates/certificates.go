@@ -301,11 +301,11 @@ func (c *CertificateInstaller) generateCertificates() error {
 		// Refresh trust stores
 		if commandExists("update-ca-certificates") {
 			updateCmd := exec.Command("sudo", "update-ca-certificates")
-			updateCmd.Run()
+			_ = updateCmd.Run() // Best effort - ignore errors
 		}
 		if commandExists("update-ca-trust") {
 			updateCmd := exec.Command("sudo", "update-ca-trust", "extract")
-			updateCmd.Run()
+			_ = updateCmd.Run() // Best effort - ignore errors
 		}
 	}
 
@@ -319,11 +319,6 @@ func (c *CertificateInstaller) generateCertificates() error {
 	return nil
 }
 
-func (c *CertificateInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
-}
 
 func (c *CertificateInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)

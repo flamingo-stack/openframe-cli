@@ -8,7 +8,6 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -324,23 +323,6 @@ ports:
 	return tmpFile.Name(), nil
 }
 
-// isTestCluster determines if a cluster name indicates it's a test cluster
-func (m *K3dManager) isTestCluster(name string) bool {
-	testPatterns := []string{
-		"test", "cleanup", "status", "list", "delete", "create",
-		"multi", "single", "default_config", "with_type", "manual",
-	}
-
-	for _, pattern := range testPatterns {
-		if strings.Contains(name, pattern) {
-			return true
-		}
-	}
-
-	return len(name) > timestampSuffixLen &&
-		name[len(name)-timestampSuffixLen:] != name &&
-		strings.ContainsAny(name[len(name)-timestampSuffixLen:], "0123456789")
-}
 
 // findAvailablePorts finds the specified number of available TCP ports using intelligent approach
 func (m *K3dManager) findAvailablePorts(count int) ([]int, error) {

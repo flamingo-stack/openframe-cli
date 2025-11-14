@@ -66,7 +66,7 @@ func TestInstallCommandWithDryRun(t *testing.T) {
 	cmd := getInstallCmd()
 
 	// Test that dry-run flag is properly parsed and accessible
-	cmd.Flags().Set("dry-run", "true")
+	_ = cmd.Flags().Set("dry-run", "true")
 
 	dryRun, err := cmd.Flags().GetBool("dry-run")
 	assert.NoError(t, err, "Should be able to get dry-run flag")
@@ -182,9 +182,9 @@ func TestRunInstallCommand(t *testing.T) {
 	assert.NotNil(t, cmd.RunE, "runInstallCommand should be assigned to RunE")
 
 	// Test flag extraction functionality
-	cmd.Flags().Set("dry-run", "true")
-	cmd.Flags().Set("force", "true")
-	cmd.Flags().Set("github-branch", "develop")
+	_ = cmd.Flags().Set("dry-run", "true")
+	_ = cmd.Flags().Set("force", "true")
+	_ = cmd.Flags().Set("github-branch", "develop")
 
 	flags, err := extractInstallFlags(cmd)
 	assert.NoError(t, err, "Should extract flags without error")

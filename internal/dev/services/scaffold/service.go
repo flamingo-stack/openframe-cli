@@ -15,7 +15,6 @@ import (
 	clusterUI "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	clusterUtils "github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/dev/models"
-	"github.com/flamingo-stack/openframe-cli/internal/dev/prerequisites/scaffold"
 	"github.com/flamingo-stack/openframe-cli/internal/dev/providers/chart"
 	"github.com/flamingo-stack/openframe-cli/internal/dev/providers/kubectl"
 	"github.com/flamingo-stack/openframe-cli/internal/dev/ui"
@@ -116,53 +115,7 @@ func (s *Service) RunScaffoldWorkflow(ctx context.Context, args []string, flags 
 	return nil
 }
 
-// checkPrerequisites validates that Skaffold is installed
-func (s *Service) checkPrerequisites() error {
-	installer := scaffold.NewScaffoldInstaller()
-	if !installer.IsInstalled() {
-		pterm.Warning.Println("Missing Prerequisites: skaffold")
 
-		// Ask user if they want to install automatically
-		if s.shouldInstallSkaffold() {
-			pterm.Info.Println("Starting installation of 1 tool(s): skaffold")
-
-			// Create and start spinner matching cluster prerequisites pattern
-			spinner, _ := pterm.DefaultSpinner.Start("[1/1] Installing skaffold...")
-
-			if err := installer.Install(); err != nil {
-				spinner.Fail(fmt.Sprintf("Failed to install skaffold: %v", err))
-				return fmt.Errorf("failed to install Skaffold: %w", err)
-			}
-
-			spinner.Success("Successfully installed skaffold")
-		} else {
-			// Show installation instructions in table format like cluster prerequisites
-			pterm.Println() // Add blank line for spacing
-			pterm.Info.Println("Installation skipped. Here are manual installation instructions:")
-
-			instruction := installer.GetInstallHelp()
-			tableData := pterm.TableData{{"Tool", "Installation Instructions"}}
-			tableData = append(tableData, []string{pterm.Cyan("skaffold"), instruction})
-
-			_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-
-			// Exit gracefully without error when user declines installation
-			os.Exit(0)
-		}
-	}
-	// No output when Skaffold is already installed - silent success
-
-	return nil
-}
-
-// shouldInstallSkaffold prompts user for Skaffold installation
-func (s *Service) shouldInstallSkaffold() bool {
-	result, _ := pterm.DefaultInteractiveConfirm.
-		WithDefaultText("Do you want to install Skaffold automatically?").
-		WithDefaultValue(true).
-		Show()
-	return result
-}
 
 // getClusterName determines cluster name from args or interactive selection
 func (s *Service) getClusterName(args []string) (string, error) {
@@ -202,36 +155,6 @@ func (s *Service) getClusterName(args []string) (string, error) {
 	return selector.SelectCluster(clusters, []string{})
 }
 
-// installCharts installs charts on the specified cluster using the chart provider
-func (s *Service) installCharts(clusterName string, flags *models.ScaffoldFlags) error {
-	// Use the chart provider to handle chart installation
-	chartProvider := chart.NewProvider(s.executor, s.verbose)
-
-	// Create context with 1-minute timeout for chart installation in skaffold workflow
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
-
-	// Channel to receive the result of chart installation
-	done := make(chan error, 1)
-
-	// Run chart installation in a goroutine
-	go func() {
-		err := chartProvider.InstallCharts(clusterName, flags.HelmValuesFile)
-		done <- err
-	}()
-
-	// Wait for either completion or timeout
-	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("chart install failed: %w", err)
-		}
-		pterm.Success.Println("Charts installed successfully")
-		return nil
-	case <-ctx.Done():
-		return nil
-	}
-}
 
 // runSkaffoldDev runs the Skaffold development workflow with retry logic
 func (s *Service) runSkaffoldDev(ctx context.Context, selectedService *ui.ServiceSelection, flags *models.ScaffoldFlags) error {

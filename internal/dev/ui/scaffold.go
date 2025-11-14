@@ -199,25 +199,6 @@ func (su *SkaffoldUI) categorizeSkaffoldFiles(files []SkaffoldFile) []SkaffoldCa
 	return result
 }
 
-// displayCategorizedFiles shows the skaffold files organized by category
-func (su *SkaffoldUI) displayCategorizedFiles(categories []SkaffoldCategory) {
-	for _, category := range categories {
-		if len(category.Files) == 0 {
-			continue
-		}
-
-		pterm.Printf("%s%s (%d files)\n", category.Icon, category.Name, len(category.Files))
-
-		for _, file := range category.Files {
-			if file.ServiceName != "" {
-				pterm.Printf("   • %s %s\n", pterm.Cyan(file.ServiceName), pterm.Gray("("+file.FilePath+")"))
-			} else {
-				pterm.Printf("   • %s\n", file.FilePath)
-			}
-		}
-		pterm.Println()
-	}
-}
 
 // extractServiceName extracts a clean service name from the file path
 func (su *SkaffoldUI) extractServiceName(filePath string) string {

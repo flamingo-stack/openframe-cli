@@ -175,9 +175,9 @@ func TestMockCommandExecutor_GetExecutedCommands(t *testing.T) {
 	ctx := context.Background()
 	
 	// Execute some commands
-	mockExec.Execute(ctx, "echo", "hello")
-	mockExec.Execute(ctx, "ls", "-la")
-	mockExec.Execute(ctx, "pwd")
+	_, _ = mockExec.Execute(ctx, "echo", "hello")
+	_, _ = mockExec.Execute(ctx, "ls", "-la")
+	_, _ = mockExec.Execute(ctx, "pwd")
 	
 	commands := mockExec.GetExecutedCommands()
 	

@@ -158,7 +158,7 @@ func (s *ClusterService) DeleteCluster(name string, clusterType models.ClusterTy
 	}
 
 	if spinner != nil {
-		spinner.Stop() // Stop spinner without message - UI layer will show success
+		_ = spinner.Stop() // Stop spinner without message - UI layer will show success
 	}
 
 	// Don't show summary here - let the UI layer handle it

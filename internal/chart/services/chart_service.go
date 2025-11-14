@@ -45,7 +45,7 @@ func NewChartService(dryRun, verbose bool) *ChartService {
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	_ = configService.Initialize()
 
 	return &ChartService{
 		executor:       chartExec,
@@ -224,7 +224,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Check if cancelled by signal (CTRL-C)
 	if interrupted || ctx.Err() != nil {
 		// User interrupted - clean up temporary files silently
-		w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
+		_ = w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
 		return fmt.Errorf("installation cancelled by user")
 	}
 
@@ -360,32 +360,6 @@ func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr s
 	return wizard.ConfigureHelmValuesWithMode(deploymentMode)
 }
 
-// waitForArgoCDSync waits for ArgoCD applications to be synced
-func (w *InstallationWorkflow) waitForArgoCDSync(ctx context.Context, config config.ChartInstallConfig) error {
-	if !config.HasAppOfApps() {
-		// No ArgoCD apps to wait for
-		return nil
-	}
-
-	// pterm.Info.Println("🔄 Waiting for ArgoCD applications to sync...")
-
-	// Create ArgoCD service to wait for applications
-	pathResolver := w.chartService.configService.GetPathResolver()
-	argoCDService := NewArgoCD(w.chartService.helmManager, pathResolver, w.chartService.executor)
-
-	// Wait for applications to be synced with context for cancellation
-	if err := argoCDService.WaitForApplications(ctx, config); err != nil {
-		// Check if it was cancelled by user
-		if ctx.Err() == context.Canceled {
-			pterm.Info.Println("ArgoCD sync cancelled by user")
-			return fmt.Errorf("ArgoCD sync cancelled by user")
-		}
-		return fmt.Errorf("ArgoCD applications sync failed: %w", err)
-	}
-
-	// pterm.Success.Println("✅ All ArgoCD applications synced successfully")
-	return nil
-}
 
 // buildConfiguration constructs the installation configuration
 func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {

@@ -364,6 +364,6 @@ func BenchmarkScaffoldRunner_RunDev(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mockRunner.RunDev(ctx, args)
+		_ = mockRunner.RunDev(ctx, args)
 	}
 }
