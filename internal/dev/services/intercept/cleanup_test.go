@@ -1,6 +1,7 @@
 package intercept
 
 import (
+	"context"
 	"os"
 	"syscall"
 	"testing"

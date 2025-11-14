@@ -8,7 +8,6 @@ package messages
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
