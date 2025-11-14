@@ -175,13 +175,13 @@ func (t *TelepresenceInstaller) initializeTelepresence() error {
 	cmd.Stderr = nil
 	
 	// Allow this to fail - the goal is just to initialize the daemon
-	cmd.Run()
-	
+	_ = cmd.Run() // Best effort - ignore errors
+
 	// Immediately quit to clean up
 	quitCmd := exec.Command("telepresence", "quit")
 	quitCmd.Stdout = nil
 	quitCmd.Stderr = nil
-	quitCmd.Run()
+	_ = quitCmd.Run() // Best effort - ignore errors
 	
 	return nil
 }

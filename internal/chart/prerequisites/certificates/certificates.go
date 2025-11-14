@@ -214,7 +214,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 				for _, sha := range strings.Split(shas, "\n") {
 					if sha != "" {
 						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain)
-						deleteCmd.Run() // Best effort
+						_ = deleteCmd.Run() // Best effort - ignore errors
 					}
 				}
 			}
@@ -248,9 +248,9 @@ func (c *CertificateInstaller) generateCertificates() error {
 		if !commandExists("certutil") {
 			if commandExists("apt-get") {
 				updateCmd := exec.Command("sudo", "apt-get", "update", "-y")
-				updateCmd.Run()
+				_ = updateCmd.Run() // Best effort - ignore errors
 				installCmd := exec.Command("sudo", "apt-get", "install", "-y", "libnss3-tools", "ca-certificates")
-				installCmd.Run()
+				_ = installCmd.Run() // Best effort - ignore errors
 			}
 		}
 
@@ -283,7 +283,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 							if len(parts) > 0 {
 								nick := parts[0]
 								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick)
-								deleteCmd.Run() // Best effort
+								_ = deleteCmd.Run() // Best effort - ignore errors
 							}
 						}
 					}
@@ -296,7 +296,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 		installSystemCmd.Stdin = os.Stdin
 		installSystemCmd.Stdout = os.Stdout
 		installSystemCmd.Stderr = os.Stderr
-		installSystemCmd.Run()
+		_ = installSystemCmd.Run() // Best effort - ignore errors
 
 		// Refresh trust stores
 		if commandExists("update-ca-certificates") {

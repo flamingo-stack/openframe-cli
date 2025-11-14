@@ -278,7 +278,7 @@ func showInterceptInstallationInstructions(missing []string, installers map[stri
 		}
 	}
 
-	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+	_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 }
 
 // CheckInterceptPrerequisites checks prerequisites for intercept command including cluster availability
@@ -387,7 +387,7 @@ func showScaffoldInstallationInstructions(missing []string, installers map[strin
 		}
 	}
 
-	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+	_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 }
 
 // checkClusterAvailability checks if clusters exist for intercept (similar to chart install)

@@ -206,20 +206,20 @@ func TestService_Cleanup(t *testing.T) {
 
 				// Test leave command if expected
 				if tt.expectLeaveCommand && tt.service.currentService != "" {
-					_, _ = mockExecutor.Execute(nil, "telepresence", "leave", tt.service.currentService)
+					_, _ = mockExecutor.Execute(context.TODO(), "telepresence", "leave", tt.service.currentService)
 					// Command should be executed (error or not)
 					assert.True(t, mockExecutor.WasCommandExecuted("telepresence leave"))
 				}
 
 				// Test quit command if expected
 				if tt.expectQuitCommand {
-					_, _ = mockExecutor.Execute(nil, "telepresence", "quit")
+					_, _ = mockExecutor.Execute(context.TODO(), "telepresence", "quit")
 					assert.True(t, mockExecutor.WasCommandExecuted("telepresence quit"))
 				}
 
 				// Test restore command if expected
 				if tt.expectRestoreCommand && tt.service.originalNamespace != "" && tt.service.originalNamespace != tt.service.currentNamespace {
-					_, _ = mockExecutor.Execute(nil, "telepresence", "connect", "--namespace", tt.service.originalNamespace)
+					_, _ = mockExecutor.Execute(context.TODO(), "telepresence", "connect", "--namespace", tt.service.originalNamespace)
 					assert.True(t, mockExecutor.WasCommandExecuted("telepresence connect"))
 				}
 			}

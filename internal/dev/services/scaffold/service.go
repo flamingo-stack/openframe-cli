@@ -144,7 +144,7 @@ func (s *Service) checkPrerequisites() error {
 			tableData := pterm.TableData{{"Tool", "Installation Instructions"}}
 			tableData = append(tableData, []string{pterm.Cyan("skaffold"), instruction})
 
-			pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+			_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 
 			// Exit gracefully without error when user declines installation
 			os.Exit(0)
