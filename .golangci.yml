@@ -1,0 +1,34 @@
+run:
+  timeout: 5m
+  skip-dirs:
+    - vendor
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - govet
+    - gosimple
+    - ineffassign
+    - unused
+
+linters-settings:
+  govet:
+    settings:
+      printf:
+        funcs:
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderMessage
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderInfo
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderSuccess
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderWarning
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderError
+          - (*github.com/flamingo-stack/openframe-cli/internal/shared/ui/messages.Templates).renderProgress
+
+issues:
+  exclude-rules:
+    # Exclude printf checks for template.go since it uses an indirection pattern
+    - path: internal/shared/ui/messages/templates\.go
+      linters:
+        - govet
+      text: "call has arguments but no formatting directives"
