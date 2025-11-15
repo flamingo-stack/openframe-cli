@@ -193,10 +193,10 @@ func TestMockCommandExecutor_GetCommandCount(t *testing.T) {
 	assert.Equal(t, 0, mockExec.GetCommandCount())
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "test1")
+	_, _ = mockExec.Execute(ctx, "test1")
 	assert.Equal(t, 1, mockExec.GetCommandCount())
-	
-	mockExec.Execute(ctx, "test2")
+
+	_, _ = mockExec.Execute(ctx, "test2")
 	assert.Equal(t, 2, mockExec.GetCommandCount())
 }
 
@@ -204,8 +204,8 @@ func TestMockCommandExecutor_WasCommandExecuted(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "echo", "hello", "world")
-	mockExec.Execute(ctx, "ls", "-la")
+	_, _ = mockExec.Execute(ctx, "echo", "hello", "world")
+	_, _ = mockExec.Execute(ctx, "ls", "-la")
 	
 	assert.True(t, mockExec.WasCommandExecuted("echo"))
 	assert.True(t, mockExec.WasCommandExecuted("hello"))
@@ -221,10 +221,10 @@ func TestMockCommandExecutor_GetLastCommand(t *testing.T) {
 	assert.Equal(t, "", mockExec.GetLastCommand())
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "first")
+	_, _ = mockExec.Execute(ctx, "first")
 	assert.Equal(t, "first", mockExec.GetLastCommand())
-	
-	mockExec.Execute(ctx, "second", "command")
+
+	_, _ = mockExec.Execute(ctx, "second", "command")
 	assert.Equal(t, "second command", mockExec.GetLastCommand())
 }
 
@@ -236,7 +236,7 @@ func TestMockCommandExecutor_Reset(t *testing.T) {
 	mockExec.SetResponse("test", &CommandResult{Stdout: "test"})
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "some", "command")
+	_, _ = mockExec.Execute(ctx, "some", "command")
 	
 	// Verify state exists by checking behavior
 	assert.Equal(t, 1, mockExec.GetCommandCount())

@@ -173,11 +173,9 @@ func (s *Service) showInterceptInstructions(serviceName string, flags *models.In
 // waitForInterrupt keeps the process alive until interrupted
 func (s *Service) waitForInterrupt() error {
 	// Wait for signal to be received
-	select {
-	case <-s.signalChannel:
-		// Signal received, cleanup will be handled by the signal handler
-		return nil
-	}
+	<-s.signalChannel
+	// Signal received, cleanup will be handled by the signal handler
+	return nil
 }
 
 // StopIntercept manually stops an intercept (alternative to Ctrl+C)
@@ -241,7 +239,7 @@ func (s *Service) ensureCorrectNamespace(ctx context.Context, targetNamespace st
 		}
 
 		// Quit and reconnect to new namespace (like bash script)
-		s.executor.Execute(timeoutCtx, "telepresence", "quit")
+		_, _ = s.executor.Execute(timeoutCtx, "telepresence", "quit") // Ignore error, we're switching namespaces
 
 		_, err = s.executor.Execute(timeoutCtx, "telepresence", "connect", "--namespace", targetNamespace)
 		if err != nil {
