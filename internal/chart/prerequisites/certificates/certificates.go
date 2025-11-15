@@ -214,7 +214,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 				for _, sha := range strings.Split(shas, "\n") {
 					if sha != "" {
 						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain)
-						deleteCmd.Run() // Best effort
+						_ = deleteCmd.Run() // Best effort - ignore errors
 					}
 				}
 			}
@@ -248,9 +248,9 @@ func (c *CertificateInstaller) generateCertificates() error {
 		if !commandExists("certutil") {
 			if commandExists("apt-get") {
 				updateCmd := exec.Command("sudo", "apt-get", "update", "-y")
-				updateCmd.Run()
+				_ = updateCmd.Run() // Best effort - ignore errors
 				installCmd := exec.Command("sudo", "apt-get", "install", "-y", "libnss3-tools", "ca-certificates")
-				installCmd.Run()
+				_ = installCmd.Run() // Best effort - ignore errors
 			}
 		}
 
@@ -283,7 +283,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 							if len(parts) > 0 {
 								nick := parts[0]
 								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick)
-								deleteCmd.Run() // Best effort
+								_ = deleteCmd.Run() // Best effort - ignore errors
 							}
 						}
 					}
@@ -296,16 +296,16 @@ func (c *CertificateInstaller) generateCertificates() error {
 		installSystemCmd.Stdin = os.Stdin
 		installSystemCmd.Stdout = os.Stdout
 		installSystemCmd.Stderr = os.Stderr
-		installSystemCmd.Run()
+		_ = installSystemCmd.Run() // Best effort - ignore errors
 
 		// Refresh trust stores
 		if commandExists("update-ca-certificates") {
 			updateCmd := exec.Command("sudo", "update-ca-certificates")
-			updateCmd.Run()
+			_ = updateCmd.Run() // Best effort - ignore errors
 		}
 		if commandExists("update-ca-trust") {
 			updateCmd := exec.Command("sudo", "update-ca-trust", "extract")
-			updateCmd.Run()
+			_ = updateCmd.Run() // Best effort - ignore errors
 		}
 	}
 
@@ -319,11 +319,6 @@ func (c *CertificateInstaller) generateCertificates() error {
 	return nil
 }
 
-func (c *CertificateInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
-}
 
 func (c *CertificateInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)

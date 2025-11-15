@@ -72,7 +72,7 @@ func TestBootstrapService_Interface(t *testing.T) {
 	// Test successful execution
 	mockBootstrap.On("Execute", mock.Anything, []string{"test-cluster"}).Return(nil)
 
-	err := mockBootstrap.Execute(nil, []string{"test-cluster"})
+	err := mockBootstrap.Execute(context.TODO(), []string{"test-cluster"})
 	assert.NoError(t, err)
 
 	mockBootstrap.AssertExpectations(t)
@@ -85,7 +85,7 @@ func TestBootstrapService_Execute_WithError(t *testing.T) {
 	expectedErr := assert.AnError
 	mockBootstrap.On("Execute", mock.Anything, []string{"invalid-cluster"}).Return(expectedErr)
 
-	err := mockBootstrap.Execute(nil, []string{"invalid-cluster"})
+	err := mockBootstrap.Execute(context.TODO(), []string{"invalid-cluster"})
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
 
@@ -98,7 +98,7 @@ func TestBootstrapService_Execute_MultipleArgs(t *testing.T) {
 	args := []string{"cluster1", "cluster2", "cluster3"}
 	mockBootstrap.On("Execute", mock.Anything, args).Return(nil)
 
-	err := mockBootstrap.Execute(nil, args)
+	err := mockBootstrap.Execute(context.TODO(), args)
 	assert.NoError(t, err)
 
 	mockBootstrap.AssertExpectations(t)
@@ -291,7 +291,7 @@ func TestScaffoldInterfaces_Integration(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "v2.16.1", version)
 
-		err = mockBootstrap.Execute(nil, []string{"test-cluster"})
+		err = mockBootstrap.Execute(context.TODO(), []string{"test-cluster"})
 		assert.NoError(t, err)
 
 		err = mockRunner.RunDev(ctx, []string{"dev", "--port-forward"})
@@ -321,7 +321,7 @@ func TestScaffoldInterfaces_ErrorHandling(t *testing.T) {
 	}
 
 	// Test bootstrap failure
-	err := mockBootstrap.Execute(nil, []string{"test-cluster"})
+	err := mockBootstrap.Execute(context.TODO(), []string{"test-cluster"})
 	assert.Error(t, err)
 
 	mockChecker.AssertExpectations(t)
@@ -364,6 +364,6 @@ func BenchmarkScaffoldRunner_RunDev(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mockRunner.RunDev(ctx, args)
+		_ = mockRunner.RunDev(ctx, args)
 	}
 }

@@ -137,12 +137,6 @@ func (t *TelepresenceInstaller) installLinuxWget() error {
 	return nil
 }
 
-func (t *TelepresenceInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
 
 func (t *TelepresenceInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)
@@ -175,13 +169,13 @@ func (t *TelepresenceInstaller) initializeTelepresence() error {
 	cmd.Stderr = nil
 	
 	// Allow this to fail - the goal is just to initialize the daemon
-	cmd.Run()
-	
+	_ = cmd.Run() // Best effort - ignore errors
+
 	// Immediately quit to clean up
 	quitCmd := exec.Command("telepresence", "quit")
 	quitCmd.Stdout = nil
 	quitCmd.Stderr = nil
-	quitCmd.Run()
+	_ = quitCmd.Run() // Best effort - ignore errors
 	
 	return nil
 }

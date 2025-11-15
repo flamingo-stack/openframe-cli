@@ -156,7 +156,7 @@ func TestProvider_GetDefaultDevValuesWithDevFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldWd, err := os.Getwd()
 	assert.NoError(t, err)
-	defer os.Chdir(oldWd)
+	defer func() { _ = os.Chdir(oldWd) }()
 
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)

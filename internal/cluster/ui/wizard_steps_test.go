@@ -49,7 +49,7 @@ func TestWizardSteps_ConfirmConfiguration(t *testing.T) {
 		// Test that it doesn't panic with valid config
 		assert.NotPanics(t, func() {
 			// This would show UI in real usage, but shouldn't panic
-			steps.ConfirmConfiguration(config)
+			_, _ = steps.ConfirmConfiguration(config)
 		})
 	})
 }

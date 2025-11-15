@@ -156,30 +156,6 @@ func (j *JqInstaller) installArch() error {
 	return nil
 }
 
-func (j *JqInstaller) installLinuxDirect() error {
-	fmt.Println("Installing jq directly from GitHub releases...")
-	
-	// Download jq binary directly
-	arch := "amd64"
-	if runtime.GOARCH == "386" {
-		arch = "i386"
-	} else if runtime.GOARCH == "arm64" {
-		arch = "arm64"
-	}
-	
-	downloadCmd := fmt.Sprintf("sudo curl -L https://github.com/stedolan/jq/releases/latest/download/jq-linux-%s -o /usr/local/bin/jq", arch)
-	if err := j.runShellCommand(downloadCmd); err != nil {
-		return fmt.Errorf("failed to download jq: %w", err)
-	}
-
-	// Make executable
-	if err := j.runCommand("sudo", "chmod", "+x", "/usr/local/bin/jq"); err != nil {
-		return fmt.Errorf("failed to make jq executable: %w", err)
-	}
-
-	fmt.Println("jq installed successfully")
-	return nil
-}
 
 func (j *JqInstaller) runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
@@ -188,12 +164,6 @@ func (j *JqInstaller) runCommand(name string, args ...string) error {
 	return cmd.Run()
 }
 
-func (j *JqInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
 
 // isDebianLike checks if the system is Debian-based using the user's method
 func (j *JqInstaller) isDebianLike() bool {

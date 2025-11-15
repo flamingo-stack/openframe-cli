@@ -30,7 +30,10 @@ func (p *PathResolver) GetCertificateDirectory() string {
 	// Check if the directory exists
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
 		// Create the directory if it doesn't exist
-		os.MkdirAll(certDir, 0755)
+		if err := os.MkdirAll(certDir, 0755); err != nil {
+			// If we can't create the directory, return empty string
+			return ""
+		}
 	}
 
 	return certDir

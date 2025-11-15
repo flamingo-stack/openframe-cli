@@ -132,7 +132,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Ignore if already exists
 		if !strings.Contains(err.Error(), "already exists") {
 			if spinner != nil {
-				spinner.Stop()
+				_ = spinner.Stop()
 			}
 			return fmt.Errorf("failed to add ArgoCD repository: %w", err)
 		}
@@ -142,7 +142,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	_, err = h.executor.Execute(ctx, "helm", "repo", "update")
 	if err != nil {
 		if spinner != nil {
-			spinner.Stop()
+			_ = spinner.Stop()
 		}
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
@@ -151,7 +151,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
 	if err != nil {
 		if spinner != nil {
-			spinner.Stop()
+			_ = spinner.Stop()
 		}
 		return fmt.Errorf("failed to create temporary values file: %w", err)
 	}
@@ -160,7 +160,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Write the ArgoCD values to the temporary file
 	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
 		if spinner != nil {
-			spinner.Stop()
+			_ = spinner.Stop()
 		}
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
@@ -201,13 +201,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
 			if spinner != nil {
-				spinner.Stop()
+				_ = spinner.Stop()
 			}
 			return ctx.Err() // Return context cancellation directly without extra messaging
 		}
 
 		if spinner != nil {
-			spinner.Stop()
+			_ = spinner.Stop()
 		}
 		// Include stderr output for better debugging
 		if result != nil && result.Stderr != "" {
@@ -217,7 +217,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	if spinner != nil {
-		spinner.Stop()
+		_ = spinner.Stop()
 	}
 
 	return nil

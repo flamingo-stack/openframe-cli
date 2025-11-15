@@ -100,19 +100,6 @@ func (v *ConfigurationValidator) isDeploymentEnabled(values map[string]interface
 	return false
 }
 
-// hasBranch checks if a deployment type has a branch configured
-func (v *ConfigurationValidator) hasBranch(values map[string]interface{}, deploymentType string) bool {
-	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if section, ok := deployment[deploymentType].(map[string]interface{}); ok {
-			if repository, ok := section["repository"].(map[string]interface{}); ok {
-				if branch, ok := repository["branch"].(string); ok {
-					return strings.TrimSpace(branch) != ""
-				}
-			}
-		}
-	}
-	return false
-}
 
 // hasPassword checks if a deployment type has a password configured
 func (v *ConfigurationValidator) hasPassword(values map[string]interface{}, deploymentType, passwordType string) bool {

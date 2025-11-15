@@ -175,9 +175,9 @@ func TestMockCommandExecutor_GetExecutedCommands(t *testing.T) {
 	ctx := context.Background()
 	
 	// Execute some commands
-	mockExec.Execute(ctx, "echo", "hello")
-	mockExec.Execute(ctx, "ls", "-la")
-	mockExec.Execute(ctx, "pwd")
+	_, _ = mockExec.Execute(ctx, "echo", "hello")   //nolint:errcheck // Test code intentionally ignores errors
+	_, _ = mockExec.Execute(ctx, "ls", "-la")       //nolint:errcheck // Test code intentionally ignores errors
+	_, _ = mockExec.Execute(ctx, "pwd")             //nolint:errcheck // Test code intentionally ignores errors
 	
 	commands := mockExec.GetExecutedCommands()
 	
@@ -191,12 +191,12 @@ func TestMockCommandExecutor_GetCommandCount(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
 	
 	assert.Equal(t, 0, mockExec.GetCommandCount())
-	
+
 	ctx := context.Background()
-	mockExec.Execute(ctx, "test1")
+	_, _ = mockExec.Execute(ctx, "test1") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, 1, mockExec.GetCommandCount())
-	
-	mockExec.Execute(ctx, "test2")
+
+	_, _ = mockExec.Execute(ctx, "test2") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, 2, mockExec.GetCommandCount())
 }
 
@@ -204,8 +204,8 @@ func TestMockCommandExecutor_WasCommandExecuted(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "echo", "hello", "world")
-	mockExec.Execute(ctx, "ls", "-la")
+	_, _ = mockExec.Execute(ctx, "echo", "hello", "world") //nolint:errcheck // Test code intentionally ignores errors
+	_, _ = mockExec.Execute(ctx, "ls", "-la")              //nolint:errcheck // Test code intentionally ignores errors
 	
 	assert.True(t, mockExec.WasCommandExecuted("echo"))
 	assert.True(t, mockExec.WasCommandExecuted("hello"))
@@ -221,10 +221,10 @@ func TestMockCommandExecutor_GetLastCommand(t *testing.T) {
 	assert.Equal(t, "", mockExec.GetLastCommand())
 	
 	ctx := context.Background()
-	mockExec.Execute(ctx, "first")
+	_, _ = mockExec.Execute(ctx, "first") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, "first", mockExec.GetLastCommand())
-	
-	mockExec.Execute(ctx, "second", "command")
+
+	_, _ = mockExec.Execute(ctx, "second", "command") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, "second command", mockExec.GetLastCommand())
 }
 
@@ -234,9 +234,9 @@ func TestMockCommandExecutor_Reset(t *testing.T) {
 	// Set up some state
 	mockExec.SetShouldFail(true, "error")
 	mockExec.SetResponse("test", &CommandResult{Stdout: "test"})
-	
+
 	ctx := context.Background()
-	mockExec.Execute(ctx, "some", "command")
+	_, _ = mockExec.Execute(ctx, "some", "command") //nolint:errcheck // Test code intentionally ignores errors
 	
 	// Verify state exists by checking behavior
 	assert.Equal(t, 1, mockExec.GetCommandCount())
@@ -267,14 +267,14 @@ func TestMockCommandExecutor_PatternMatching(t *testing.T) {
 	ctx := context.Background()
 	
 	// Commands containing "kubectl" should match
-	actualResult, _ := mockExec.Execute(ctx, "kubectl", "get", "pods")
+	actualResult, _ := mockExec.Execute(ctx, "kubectl", "get", "pods") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, "pattern matched", actualResult.Stdout)
-	
-	actualResult, _ = mockExec.Execute(ctx, "run", "kubectl", "version")
+
+	actualResult, _ = mockExec.Execute(ctx, "run", "kubectl", "version") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, "pattern matched", actualResult.Stdout)
-	
+
 	// Commands not containing "kubectl" should use default
-	actualResult, _ = mockExec.Execute(ctx, "docker", "ps")
+	actualResult, _ = mockExec.Execute(ctx, "docker", "ps") //nolint:errcheck // Test code intentionally ignores errors
 	assert.Equal(t, "mock output", actualResult.Stdout)
 }
 
@@ -303,7 +303,7 @@ func TestMockCommandExecutor_EdgeCases(t *testing.T) {
 			test: func(t *testing.T) {
 				mockExec := NewMockCommandExecutor()
 				ctx := context.Background()
-				_, err := mockExec.Execute(ctx, "solo")
+				_, err := mockExec.Execute(ctx, "solo") //nolint:errcheck // Test code intentionally ignores errors
 				assert.NoError(t, err)
 				assert.Equal(t, "solo", mockExec.GetLastCommand())
 			},
@@ -314,12 +314,12 @@ func TestMockCommandExecutor_EdgeCases(t *testing.T) {
 				mockExec := NewMockCommandExecutor()
 				mockExec.SetResponse("kubectl", &CommandResult{Stdout: "k8s"})
 				mockExec.SetResponse("docker", &CommandResult{Stdout: "container"})
-				
+
 				ctx := context.Background()
-				result1, _ := mockExec.Execute(ctx, "kubectl", "get", "pods")
-				result2, _ := mockExec.Execute(ctx, "docker", "ps")
-				result3, _ := mockExec.Execute(ctx, "other")
-				
+				result1, _ := mockExec.Execute(ctx, "kubectl", "get", "pods") //nolint:errcheck // Test code intentionally ignores errors
+				result2, _ := mockExec.Execute(ctx, "docker", "ps")            //nolint:errcheck // Test code intentionally ignores errors
+				result3, _ := mockExec.Execute(ctx, "other")                   //nolint:errcheck // Test code intentionally ignores errors
+
 				assert.Equal(t, "k8s", result1.Stdout)
 				assert.Equal(t, "container", result2.Stdout)
 				assert.Equal(t, "mock output", result3.Stdout)
@@ -360,7 +360,7 @@ func TestMockCommandExecutor_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		go func(n int) {
 			defer func() { done <- true }()
-			_, err := mockExec.Execute(ctx, "concurrent", "test")
+			_, err := mockExec.Execute(ctx, "concurrent", "test") //nolint:errcheck // Test code intentionally ignores errors
 			assert.NoError(t, err)
 		}(i)
 	}
@@ -382,7 +382,7 @@ func BenchmarkMockCommandExecutor_Execute(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mockExec.Execute(ctx, "test", "command")
+		_, _ = mockExec.Execute(ctx, "test", "command") //nolint:errcheck // Benchmark code intentionally ignores errors
 	}
 }
 

@@ -63,7 +63,7 @@ func ConfirmAction(message string) (bool, error) {
 	for {
 		_, err := os.Stdin.Read(buf)
 		if err != nil {
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			return false, err
 		}
 		
@@ -71,19 +71,19 @@ func ConfirmAction(message string) (bool, error) {
 		
 		switch char {
 		case '\r', '\n': // Enter key
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			fmt.Println()
 			return true, nil // Default to yes
 		case 'y', 'Y':
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			fmt.Println("y")
 			return true, nil
 		case 'n', 'N':
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			fmt.Println("n")
 			return false, nil
 		case 3: // Ctrl+C
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			fmt.Println()
 			return false, fmt.Errorf("interrupted")
 		// Ignore other characters and continue reading

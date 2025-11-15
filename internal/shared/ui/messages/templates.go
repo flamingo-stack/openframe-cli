@@ -8,10 +8,11 @@ package messages
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // MessageType represents different types of messages
@@ -224,7 +225,8 @@ func (t *Templates) ShowResourceNotFound(resourceType, resourceName string) {
 
 // ShowOperationCancelled shows a standardized cancellation message
 func (t *Templates) ShowOperationCancelled(resource, operation string) {
-	t.renderMessage(WarningMessage, "operation_cancelled", resource, strings.Title(operation)) //nolint:govet
+	caser := cases.Title(language.English)
+	t.renderMessage(WarningMessage, "operation_cancelled", resource, caser.String(operation)) //nolint:govet
 }
 
 // ShowValidationError shows a standardized validation error

@@ -1,0 +1,25 @@
+# Build outputs
+/build/
+openframe
+openframe-*
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Release artifacts
+/releases/
+
+# Go workspace
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

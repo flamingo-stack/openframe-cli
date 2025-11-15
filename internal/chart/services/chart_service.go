@@ -17,7 +17,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
-	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
@@ -45,7 +44,7 @@ func NewChartService(dryRun, verbose bool) *ChartService {
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	_ = configService.Initialize()
 
 	return &ChartService{
 		executor:       chartExec,
@@ -120,7 +119,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	}()
 
 	// Step 1: Determine configuration mode and run appropriate workflow
-	var chartConfig *types.ChartConfiguration
+	var chartConfig *utilTypes.ChartConfiguration
 	if req.DryRun {
 		// Create minimal configuration for dry-run mode using base values from current directory
 		modifier := templates.NewHelmValuesModifier()
@@ -129,7 +128,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 			return fmt.Errorf("failed to load base values for dry-run: %w", err)
 		}
 
-		chartConfig = &types.ChartConfiguration{
+		chartConfig = &utilTypes.ChartConfiguration{
 			BaseHelmValuesPath: "helm-values.yaml",
 			TempHelmValuesPath: "helm-values-tmp.yaml", // Use tmp file in current directory for dry-run
 			ExistingValues:     baseValues,
@@ -224,7 +223,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Check if cancelled by signal (CTRL-C)
 	if interrupted || ctx.Err() != nil {
 		// User interrupted - clean up temporary files silently
-		w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
+		_ = w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
 		return fmt.Errorf("installation cancelled by user")
 	}
 
@@ -262,7 +261,7 @@ func (w *InstallationWorkflow) regenerateCertificates() error {
 }
 
 // runConfigurationWizard runs the configuration wizard to get user preferences
-func (w *InstallationWorkflow) runConfigurationWizard() (*types.ChartConfiguration, error) {
+func (w *InstallationWorkflow) runConfigurationWizard() (*utilTypes.ChartConfiguration, error) {
 	wizard := configuration.NewConfigurationWizard()
 
 	// Configure Helm values from current directory
@@ -275,7 +274,7 @@ func (w *InstallationWorkflow) runConfigurationWizard() (*types.ChartConfigurati
 }
 
 // loadExistingConfiguration loads existing helm-values.yaml for non-interactive mode
-func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr string) (*types.ChartConfiguration, error) {
+func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr string) (*utilTypes.ChartConfiguration, error) {
 	modifier := templates.NewHelmValuesModifier()
 
 	// Load existing helm-values.yaml
@@ -285,21 +284,21 @@ func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr strin
 	}
 
 	// Convert string to DeploymentMode
-	var deploymentMode types.DeploymentMode
+	var deploymentMode utilTypes.DeploymentMode
 	switch deploymentModeStr {
 	case "oss-tenant":
-		deploymentMode = types.DeploymentModeOSS
+		deploymentMode = utilTypes.DeploymentModeOSS
 	case "saas-tenant":
-		deploymentMode = types.DeploymentModeSaaS
+		deploymentMode = utilTypes.DeploymentModeSaaS
 	case "saas-shared":
-		deploymentMode = types.DeploymentModeSaaSShared
+		deploymentMode = utilTypes.DeploymentModeSaaSShared
 	default:
 		return nil, fmt.Errorf("invalid deployment mode: %s", deploymentModeStr)
 	}
 
 	// Auto-configure the specified deployment mode using existing HelmValuesModifier
 	// Only set the deployment mode - let existing logic handle branches and passwords
-	if err := modifier.ApplyConfiguration(values, &types.ChartConfiguration{
+	if err := modifier.ApplyConfiguration(values, &utilTypes.ChartConfiguration{
 		DeploymentMode: &deploymentMode,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to auto-configure deployment mode: %w", err)
@@ -312,18 +311,18 @@ func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr strin
 	}
 
 	// Extract SaaS repository password from helm values for SaaS Shared mode
-	var saasConfig *types.SaaSConfig
-	if deploymentMode == types.DeploymentModeSaaSShared {
+	var saasConfig *utilTypes.SaaSConfig
+	if deploymentMode == utilTypes.DeploymentModeSaaSShared {
 		repositoryPassword := modifier.GetSaaSRepositoryPassword(values)
 		if repositoryPassword == "" {
 			return nil, fmt.Errorf("repository password not found in helm-values.yaml under deployment.saas.repository.password")
 		}
-		saasConfig = &types.SaaSConfig{
+		saasConfig = &utilTypes.SaaSConfig{
 			RepositoryPassword: repositoryPassword,
 		}
 	}
 
-	result := &types.ChartConfiguration{
+	result := &utilTypes.ChartConfiguration{
 		BaseHelmValuesPath: "helm-values.yaml",
 		TempHelmValuesPath: tempFilePath, // Use temporary file like interactive mode
 		ExistingValues:     values,
@@ -342,16 +341,16 @@ func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr strin
 }
 
 // runPartialConfigurationWizard runs wizard with pre-selected deployment mode
-func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr string) (*types.ChartConfiguration, error) {
+func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr string) (*utilTypes.ChartConfiguration, error) {
 	// Convert string to DeploymentMode
-	var deploymentMode types.DeploymentMode
+	var deploymentMode utilTypes.DeploymentMode
 	switch deploymentModeStr {
 	case "oss-tenant":
-		deploymentMode = types.DeploymentModeOSS
+		deploymentMode = utilTypes.DeploymentModeOSS
 	case "saas-tenant":
-		deploymentMode = types.DeploymentModeSaaS
+		deploymentMode = utilTypes.DeploymentModeSaaS
 	case "saas-shared":
-		deploymentMode = types.DeploymentModeSaaSShared
+		deploymentMode = utilTypes.DeploymentModeSaaSShared
 	default:
 		return nil, fmt.Errorf("invalid deployment mode: %s", deploymentModeStr)
 	}
@@ -360,35 +359,9 @@ func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr s
 	return wizard.ConfigureHelmValuesWithMode(deploymentMode)
 }
 
-// waitForArgoCDSync waits for ArgoCD applications to be synced
-func (w *InstallationWorkflow) waitForArgoCDSync(ctx context.Context, config config.ChartInstallConfig) error {
-	if !config.HasAppOfApps() {
-		// No ArgoCD apps to wait for
-		return nil
-	}
-
-	// pterm.Info.Println("🔄 Waiting for ArgoCD applications to sync...")
-
-	// Create ArgoCD service to wait for applications
-	pathResolver := w.chartService.configService.GetPathResolver()
-	argoCDService := NewArgoCD(w.chartService.helmManager, pathResolver, w.chartService.executor)
-
-	// Wait for applications to be synced with context for cancellation
-	if err := argoCDService.WaitForApplications(ctx, config); err != nil {
-		// Check if it was cancelled by user
-		if ctx.Err() == context.Canceled {
-			pterm.Info.Println("ArgoCD sync cancelled by user")
-			return fmt.Errorf("ArgoCD sync cancelled by user")
-		}
-		return fmt.Errorf("ArgoCD applications sync failed: %w", err)
-	}
-
-	// pterm.Success.Println("✅ All ArgoCD applications synced successfully")
-	return nil
-}
 
 // buildConfiguration constructs the installation configuration
-func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
+func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *utilTypes.ChartConfiguration) (config.ChartInstallConfig, error) {
 	configBuilder := config.NewBuilder(w.chartService.operationsUI)
 
 	// Determine repository URL based on deployment mode
@@ -396,10 +369,10 @@ func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequ
 	if chartConfig.DeploymentMode != nil {
 		// Always use deployment mode to determine repository URL if deployment mode is specified
 		// This ensures that SaaS Shared mode gets the correct repository
-		githubRepo = types.GetRepositoryURL(*chartConfig.DeploymentMode)
+		githubRepo = utilTypes.GetRepositoryURL(*chartConfig.DeploymentMode)
 
 		// Inject authentication token for private SaaS Shared repository
-		if *chartConfig.DeploymentMode == types.DeploymentModeSaaSShared && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
+		if *chartConfig.DeploymentMode == utilTypes.DeploymentModeSaaSShared && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
 			// Replace https:// with https://x-access-token:TOKEN@
 			// This format is required for GitHub PAT authentication in non-interactive mode
 			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)

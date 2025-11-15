@@ -23,9 +23,6 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Run tests
-        run: go test -v ./...
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:

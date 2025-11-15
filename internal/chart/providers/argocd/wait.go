@@ -103,7 +103,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil && spinner.IsActive {
-			spinner.Stop()
+			_ = spinner.Stop()
 			spinnerStopped = true
 		}
 	}
@@ -203,7 +203,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			currentHealthyCount := 0
 			currentlyReady := 0
 			healthyApps := make([]string, 0)
-			syncedApps := make([]string, 0)
 			notReadyApps := make([]string, 0)
 
 			for _, app := range apps {
@@ -213,9 +212,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					healthyApps = append(healthyApps, app.Name)
 				}
 
-				if app.Sync == "Synced" {
-					syncedApps = append(syncedApps, app.Name)
-				}
 
 				// Count currently ready apps (both healthy and synced)
 				if app.Health == "Healthy" && app.Sync == "Synced" {
@@ -408,7 +404,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			if allReady {
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil && spinner.IsActive {
-					spinner.Stop()
+					_ = spinner.Stop()
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()

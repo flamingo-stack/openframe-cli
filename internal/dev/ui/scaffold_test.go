@@ -78,7 +78,7 @@ func TestSkaffoldUI_findSkaffoldYamlFiles(t *testing.T) {
 	// Change to temp directory to test relative paths
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)

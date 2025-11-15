@@ -7,6 +7,8 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Selector handles cluster selection logic across different commands
@@ -161,5 +163,6 @@ func (s *Selector) showNoClusterMessage() {
 
 // showOperationCancelled displays a cancellation message
 func (s *Selector) showOperationCancelled() {
-	pterm.Info.Printf("No cluster selected. %s cancelled.\n", strings.Title(s.operation))
+	caser := cases.Title(language.English)
+	pterm.Info.Printf("No cluster selected. %s cancelled.\n", caser.String(s.operation))
 }
