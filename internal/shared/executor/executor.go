@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -70,18 +71,21 @@ func (e *RealCommandExecutor) Execute(ctx context.Context, name string, args ...
 // ExecuteWithOptions implements CommandExecutor.ExecuteWithOptions
 func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options ExecuteOptions) (*CommandResult, error) {
 	start := time.Now()
-	
-	// Build full command string for logging
+
+	// Wrap command for Windows if needed (kubectl/helm via WSL)
+	command, args := e.wrapCommandForWindows(options.Command, options.Args)
+
+	// Build full command string for logging (use original command for readability)
 	fullCommand := options.Command
 	if len(options.Args) > 0 {
 		fullCommand += " " + strings.Join(options.Args, " ")
 	}
-	
+
 	result := &CommandResult{
 		Stdout: "",
 		Stderr: "",
 	}
-	
+
 	// Handle dry-run mode
 	if e.dryRun {
 		if e.verbose {
@@ -90,9 +94,9 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		result.Duration = time.Since(start)
 		return result, nil
 	}
-	
-	// Create the command
-	cmd := exec.CommandContext(ctx, options.Command, options.Args...)
+
+	// Create the command with wrapped command/args
+	cmd := exec.CommandContext(ctx, command, args...)
 	
 	// Set working directory if specified
 	if options.Dir != "" {
@@ -110,8 +114,8 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
-		cmd = exec.CommandContext(ctx, options.Command, options.Args...)
-		
+		cmd = exec.CommandContext(ctx, command, args...)
+
 		// Reapply directory and env since we recreated the command
 		if options.Dir != "" {
 			cmd.Dir = options.Dir
@@ -168,4 +172,85 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 		envStrings = append(envStrings, fmt.Sprintf("%s=%s", key, value))
 	}
 	return envStrings
+}
+
+// shellEscape escapes an argument for safe use in a bash shell
+// Arguments containing special characters are wrapped in single quotes
+// Single quotes within the argument are properly escaped
+func shellEscape(arg string) string {
+	// Check if the argument needs escaping
+	needsEscape := false
+	for _, ch := range arg {
+		if ch == '{' || ch == '}' || ch == '$' || ch == '\\' || ch == '"' ||
+		   ch == '\'' || ch == '`' || ch == '\n' || ch == '\t' || ch == ' ' ||
+		   ch == '*' || ch == '?' || ch == '[' || ch == ']' || ch == '|' ||
+		   ch == '&' || ch == ';' || ch == '<' || ch == '>' || ch == '(' || ch == ')' {
+			needsEscape = true
+			break
+		}
+	}
+
+	if !needsEscape {
+		return arg
+	}
+
+	// Use single quotes and escape any single quotes in the argument
+	// by ending the single-quoted string, adding an escaped single quote, and starting again
+	escaped := strings.ReplaceAll(arg, "'", "'\"'\"'")
+	return "'" + escaped + "'"
+}
+
+// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2
+// This avoids issues with batch file wrappers not preserving special characters
+// and ensures all Kubernetes tools run in the same environment
+func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
+	// Only wrap on Windows
+	if runtime.GOOS != "windows" {
+		return command, args
+	}
+
+	// Only wrap kubectl, helm, and k3d commands
+	if command != "kubectl" && command != "helm" && command != "k3d" {
+		return command, args
+	}
+
+	// Determine WSL user - try to detect from environment or use default
+	wslUser := os.Getenv("WSL_USER")
+	if wslUser == "" {
+		// Default to "runner" for CI environments, but could be configured
+		wslUser = "runner"
+	}
+
+	// Escape arguments that contain special characters for shell interpretation
+	escapedArgs := make([]string, len(args))
+	for i, arg := range args {
+		escapedArgs[i] = shellEscape(arg)
+	}
+
+	// For k3d, we need Docker access which requires elevated permissions
+	// Use 'sudo -E' to run k3d with necessary permissions while preserving environment
+	// The -E flag preserves environment variables like KUBECONFIG
+	if command == "k3d" {
+		// Build command with sudo -E prefix
+		newArgs := make([]string, 0, len(escapedArgs)+6)
+		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "sudo", "-E", command)
+		newArgs = append(newArgs, escapedArgs...)
+		return "wsl", newArgs
+	}
+
+	// For helm, use the helm-wrapper.sh script which sets proper environment variables
+	// This ensures Helm has access to writable directories in CI environments
+	if command == "helm" {
+		newArgs := make([]string, 0, len(escapedArgs)+5)
+		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "/usr/local/bin/helm-wrapper.sh")
+		newArgs = append(newArgs, escapedArgs...)
+		return "wsl", newArgs
+	}
+
+	// For kubectl, run directly as user
+	newArgs := make([]string, 0, len(escapedArgs)+5)
+	newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, command)
+	newArgs = append(newArgs, escapedArgs...)
+
+	return "wsl", newArgs
 }

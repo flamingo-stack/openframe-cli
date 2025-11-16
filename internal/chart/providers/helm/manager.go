@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -26,9 +27,31 @@ func NewHelmManager(exec executor.CommandExecutor) *HelmManager {
 	}
 }
 
+// getHelmEnv returns environment variables for Helm to use writable directories
+// This is especially important in CI environments where home directory may not have write permissions
+func (h *HelmManager) getHelmEnv() map[string]string {
+	// Define the directories
+	helmDirs := map[string]string{
+		"HELM_CACHE_HOME":  "/tmp/helm/cache",
+		"HELM_CONFIG_HOME": "/tmp/helm/config",
+		"HELM_DATA_HOME":   "/tmp/helm/data",
+	}
+
+	// Ensure directories exist
+	for _, dir := range helmDirs {
+		os.MkdirAll(dir, 0755)
+	}
+
+	return helmDirs
+}
+
 // IsHelmInstalled checks if Helm is available
 func (h *HelmManager) IsHelmInstalled(ctx context.Context) error {
-	_, err := h.executor.Execute(ctx, "helm", "version", "--short")
+	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    []string{"version", "--short"},
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		return errors.ErrHelmNotAvailable
 	}
@@ -42,7 +65,11 @@ func (h *HelmManager) IsChartInstalled(ctx context.Context, releaseName, namespa
 		args = append(args, "-f", releaseName)
 	}
 
-	result, err := h.executor.Execute(ctx, "helm", args...)
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		return false, err
 	}
@@ -60,13 +87,21 @@ func (h *HelmManager) IsChartInstalled(ctx context.Context, releaseName, namespa
 // InstallArgoCD installs ArgoCD using Helm with exact commands specified
 func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error {
 	// Add ArgoCD Helm repository
-	_, err := h.executor.Execute(ctx, "helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm")
+	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    []string{"repo", "add", "argo", "https://argoproj.github.io/argo-helm"},
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to add ArgoCD repository: %w", err)
 	}
 
 	// Update repositories
-	_, err = h.executor.Execute(ctx, "helm", "repo", "update")
+	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    []string{"repo", "update"},
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
@@ -84,6 +119,15 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	}
 	tmpFile.Close()
 
+	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
+	valuesFilePath := tmpFile.Name()
+	if runtime.GOOS == "windows" {
+		valuesFilePath, err = h.convertWindowsPathToWSL(tmpFile.Name())
+		if err != nil {
+			return fmt.Errorf("failed to convert values file path for WSL: %w", err)
+		}
+	}
+
 	// Install ArgoCD with upgrade --install
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
@@ -92,14 +136,18 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--create-namespace",
 		"--wait",
 		"--timeout", "5m",
-		"-f", tmpFile.Name(),
+		"-f", valuesFilePath,
 	}
 
 	if config.DryRun {
 		args = append(args, "--dry-run")
 	}
 
-	result, err := h.executor.Execute(ctx, "helm", args...)
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
@@ -127,7 +175,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Add ArgoCD repository silently
-	_, err := h.executor.Execute(ctx, "helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm")
+	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    []string{"repo", "add", "argo", "https://argoproj.github.io/argo-helm"},
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		// Ignore if already exists
 		if !strings.Contains(err.Error(), "already exists") {
@@ -139,7 +191,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Update repositories silently
-	_, err = h.executor.Execute(ctx, "helm", "repo", "update")
+	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    []string{"repo", "update"},
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		if spinner != nil {
 			spinner.Stop()
@@ -166,11 +222,26 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 	tmpFile.Close()
 
+	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
+	valuesFilePath := tmpFile.Name()
+	if runtime.GOOS == "windows" {
+		valuesFilePath, err = h.convertWindowsPathToWSL(tmpFile.Name())
+		if err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			return fmt.Errorf("failed to convert values file path for WSL: %w", err)
+		}
+	}
+
 	// Installation details are now silent - just show in verbose mode
 	if config.Verbose {
 		pterm.Info.Printf("   Version: 8.2.7\n")
 		pterm.Info.Printf("   Namespace: argocd\n")
-		pterm.Info.Printf("   Values file: %s\n", tmpFile.Name())
+		pterm.Info.Printf("   Values file (Windows): %s\n", tmpFile.Name())
+		if runtime.GOOS == "windows" {
+			pterm.Info.Printf("   Values file (WSL): %s\n", valuesFilePath)
+		}
 	}
 
 	// Install ArgoCD with upgrade --install
@@ -181,7 +252,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--create-namespace",
 		"--wait",
 		"--timeout", "5m",
-		"-f", tmpFile.Name(),
+		"-f", valuesFilePath,
 	}
 
 	if config.DryRun {
@@ -196,7 +267,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
 	}
 
-	result, err := h.executor.Execute(ctx, "helm", args...)
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
@@ -235,27 +310,59 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		return fmt.Errorf("chart path is required for app-of-apps installation")
 	}
 
+	// Convert Windows paths to WSL paths if needed (for Helm running in WSL2)
+	valuesFilePath := appConfig.ValuesFile
+	certFilePath := certFile
+	keyFilePath := keyFile
+
+	if runtime.GOOS == "windows" {
+		var err error
+
+		// Convert values file path
+		if valuesFilePath != "" {
+			valuesFilePath, err = h.convertWindowsPathToWSL(appConfig.ValuesFile)
+			if err != nil {
+				return fmt.Errorf("failed to convert values file path for WSL: %w", err)
+			}
+		}
+
+		// Convert certificate file paths
+		if certFile != "" {
+			certFilePath, err = h.convertWindowsPathToWSL(certFile)
+			if err != nil {
+				return fmt.Errorf("failed to convert cert file path for WSL: %w", err)
+			}
+		}
+
+		if keyFile != "" {
+			keyFilePath, err = h.convertWindowsPathToWSL(keyFile)
+			if err != nil {
+				return fmt.Errorf("failed to convert key file path for WSL: %w", err)
+			}
+		}
+	}
+
 	// Install app-of-apps using the local chart path
 	args := []string{
 		"upgrade", "--install", "app-of-apps", appConfig.ChartPath,
 		"--namespace", appConfig.Namespace,
 		"--wait",
 		"--timeout", appConfig.Timeout,
-		"-f", appConfig.ValuesFile,
+		"-f", valuesFilePath,
 	}
 
 	// Only add certificate files if they exist and are not empty paths
 	if certFile != "" && keyFile != "" {
-		// Check if files actually exist before adding them
+		// Check if files actually exist before adding them (use original Windows paths for os.Stat)
 		if _, err := os.Stat(certFile); err == nil {
 			if _, err := os.Stat(keyFile); err == nil {
 				args = append(args,
-					// OSS mode certificates
-					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.cert=%s", certFile),
-					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.key=%s", keyFile),
-					// SaaS mode certificates
-					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.cert=%s", certFile),
-					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.key=%s", keyFile),
+					// OSS mode certificates (use WSL paths for Helm)
+					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.cert=%s", certFilePath),
+					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.key=%s", keyFilePath),
+					// SaaS mode certificates (use WSL paths for Helm)
+					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.cert=%s", certFilePath),
+					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.key=%s", keyFilePath),
 				)
 			}
 		}
@@ -266,7 +373,11 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 	}
 
 	// Execute helm command with local chart path
-	result, err := h.executor.Execute(ctx, "helm", args...)
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
 
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
@@ -288,7 +399,11 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error) {
 	args := []string{"status", releaseName, "-n", namespace, "--output", "json"}
 
-	_, err := h.executor.Execute(ctx, "helm", args...)
+	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
 	if err != nil {
 		return models.ChartInfo{}, fmt.Errorf("failed to get chart status: %w", err)
 	}
@@ -301,4 +416,25 @@ func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace
 		Status:    "deployed", // Parse from JSON
 		Version:   "1.0.0",    // Parse from JSON
 	}, nil
+}
+
+// convertWindowsPathToWSL converts a Windows path to a WSL path format
+// Example: C:\Users\foo\file.txt -> /mnt/c/Users/foo/file.txt
+// This is necessary when passing file paths from Windows to commands running in WSL2
+func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error) {
+	if windowsPath == "" {
+		return "", fmt.Errorf("empty path provided")
+	}
+
+	// Replace backslashes with forward slashes
+	path := strings.ReplaceAll(windowsPath, "\\", "/")
+
+	// Convert drive letter (e.g., C: -> /mnt/c)
+	if len(path) >= 2 && path[1] == ':' {
+		driveLetter := strings.ToLower(string(path[0]))
+		// Remove the drive letter and colon, then prepend /mnt/<drive>
+		path = "/mnt/" + driveLetter + path[2:]
+	}
+
+	return path, nil
 }
