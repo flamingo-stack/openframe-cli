@@ -8,12 +8,10 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'cli/**'
       - '.github/workflows/test-windows-cli.yml'
   push:
-    branches: [main, feat/windows-cli]
+    branches: [main]
     paths:
-      - 'cli/**'
   workflow_dispatch:
 
 jobs:
@@ -30,12 +28,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - name: Build CLI
         shell: bash
         run: |
-          cd cli
           go build -o openframe.exe .
 
       - name: Install WSL2 and configure
@@ -109,7 +106,6 @@ jobs:
           Write-Host "Testing Bootstrap OSS Tenant Workflow"
           Write-Host "========================================"
 
-          cd cli
 
           Write-Host ""
           Write-Host "Note: Docker, kubectl, k3d, and helm will be automatically installed by the CLI during bootstrap"
