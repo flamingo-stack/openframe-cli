@@ -1,9 +1,11 @@
 package prerequisites
 
 import (
+	"os"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 )
@@ -45,6 +47,12 @@ func NewPrerequisiteChecker() *PrerequisiteChecker {
 				IsInstalled: func() bool { return k3d.NewK3dInstaller().IsInstalled() },
 				InstallHelp: func() string { return k3d.NewK3dInstaller().GetInstallHelp() },
 			},
+			{
+				Name:        "helm",
+				Command:     "helm",
+				IsInstalled: func() bool { return helm.NewHelmInstaller().IsInstalled() },
+				InstallHelp: func() string { return helm.NewHelmInstaller().GetInstallHelp() },
+			},
 		},
 	}
 }
@@ -80,5 +88,11 @@ func (pc *PrerequisiteChecker) GetInstallInstructions(missingTools []string) []s
 
 func CheckPrerequisites() error {
 	installer := NewInstaller()
-	return installer.CheckAndInstall()
+	// Check if we're in a CI environment (GitHub Actions, GitLab CI, CircleCI, etc.)
+	nonInteractive := os.Getenv("CI") != "" ||
+		os.Getenv("GITHUB_ACTIONS") != "" ||
+		os.Getenv("GITLAB_CI") != "" ||
+		os.Getenv("CIRCLECI") != ""
+
+	return installer.CheckAndInstallNonInteractive(nonInteractive)
 }

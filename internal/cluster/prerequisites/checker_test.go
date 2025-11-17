@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 )
@@ -12,11 +13,11 @@ import (
 func TestNewPrerequisiteChecker(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	if len(checker.requirements) != 3 {
-		t.Errorf("Expected 3 requirements, got %d", len(checker.requirements))
+	if len(checker.requirements) != 4 {
+		t.Errorf("Expected 4 requirements, got %d", len(checker.requirements))
 	}
 
-	expectedNames := []string{"Docker", "kubectl", "k3d"}
+	expectedNames := []string{"Docker", "kubectl", "k3d", "helm"}
 	for i, req := range checker.requirements {
 		if req.Name != expectedNames[i] {
 			t.Errorf("Expected requirement %d to be %s, got %s", i, expectedNames[i], req.Name)
@@ -41,6 +42,7 @@ func TestInstallHelp(t *testing.T) {
 		{"docker", docker.NewDockerInstaller().GetInstallHelp},
 		{"kubectl", kubectl.NewKubectlInstaller().GetInstallHelp},
 		{"k3d", k3d.NewK3dInstaller().GetInstallHelp},
+		{"helm", helm.NewHelmInstaller().GetInstallHelp},
 	}
 
 	for _, tt := range tests {
