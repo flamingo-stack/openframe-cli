@@ -82,7 +82,41 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		}
 	}
 
-	args := []string{"cluster", "create", "--config", configFile, "--timeout", m.timeout}
+	// Prepare kubeconfig directory before k3d operations (Windows/WSL and Linux CI)
+	if err := m.prepareKubeconfigDirectory(ctx); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not prepare kubeconfig directory: %v\n", err)
+		}
+		// Don't fail - k3d will create it, but log the warning
+	}
+
+	// Clean up any stale lock files that might prevent k3d from updating kubeconfig
+	if err := m.cleanupStaleLockFiles(ctx); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not cleanup stale lock files: %v\n", err)
+		}
+		// Don't fail - this is not critical
+	}
+
+	// Convert Windows path to WSL path if running on Windows
+	configFilePath := configFile
+	if runtime.GOOS == "windows" {
+		configFilePath, err = m.convertWindowsPathToWSL(configFile)
+		if err != nil {
+			return models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to convert config file path for WSL: %w", err))
+		}
+		if m.verbose {
+			fmt.Printf("DEBUG: Converted Windows path '%s' to WSL path '%s'\n", configFile, configFilePath)
+		}
+	}
+
+	args := []string{
+		"cluster", "create",
+		"--config", configFilePath,
+		"--timeout", m.timeout,
+		"--kubeconfig-update-default", // Update default kubeconfig with new cluster context
+		"--kubeconfig-switch-context", // Automatically switch to new cluster context
+	}
 	if m.verbose {
 		args = append(args, "--verbose")
 	}
@@ -91,10 +125,27 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		return models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create cluster %s: %w", config.Name, err))
 	}
 
-	// Set kubectl context to the newly created cluster
-	contextName := fmt.Sprintf("k3d-%s", config.Name)
-	if _, err := m.executor.Execute(ctx, "kubectl", "config", "use-context", contextName); err != nil {
-		return models.NewClusterOperationError("context-switch", config.Name, fmt.Errorf("failed to switch kubectl context to %s: %w", contextName, err))
+	// Fix kubeconfig permissions if k3d ran with sudo (Windows/WSL and Linux CI)
+	// This is necessary because k3d creates ~/.kube/config with root ownership when run with sudo
+	if err := m.fixKubeconfigPermissions(ctx); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not fix kubeconfig permissions: %v\n", err)
+		}
+		// Don't fail - this is not critical, just log the warning
+	}
+
+	// Clean up any lock files after fixing permissions to ensure kubectl can access the config
+	// This is critical because lock files may have been created with root ownership
+	if err := m.cleanupStaleLockFiles(ctx); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not cleanup lock files after permission fix: %v\n", err)
+		}
+		// Don't fail - this is not critical
+	}
+
+	// Verify the cluster is reachable
+	if err := m.verifyClusterReachable(ctx, config.Name); err != nil {
+		return models.NewClusterOperationError("create", config.Name, fmt.Errorf("cluster created but not reachable: %w", err))
 	}
 
 	return nil
@@ -439,6 +490,187 @@ func (m *K3dManager) isPortAvailable(port int) bool {
 	}
 	defer listener.Close()
 	return true
+}
+
+// convertWindowsPathToWSL converts a Windows path to a WSL path format
+// Example: C:\Users\foo\file.txt -> /mnt/c/Users/foo/file.txt
+func (m *K3dManager) convertWindowsPathToWSL(windowsPath string) (string, error) {
+	if windowsPath == "" {
+		return "", fmt.Errorf("empty path provided")
+	}
+
+	// Replace backslashes with forward slashes
+	path := strings.ReplaceAll(windowsPath, "\\", "/")
+
+	// Convert drive letter (e.g., C: -> /mnt/c)
+	if len(path) >= 2 && path[1] == ':' {
+		driveLetter := strings.ToLower(string(path[0]))
+		// Remove the drive letter and colon, then prepend /mnt/<drive>
+		path = "/mnt/" + driveLetter + path[2:]
+	}
+
+	return path, nil
+}
+
+// getWSLUser determines the correct WSL user to use for kubeconfig operations
+// It tries to detect the non-root user that k3d/kubectl will run as
+func (m *K3dManager) getWSLUser(ctx context.Context) (string, error) {
+	// First, try to get the user specified for the runner user (standard in GitHub Actions)
+	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", "runner", "whoami")
+	if err == nil && strings.TrimSpace(result.Stdout) == "runner" {
+		return "runner", nil
+	}
+
+	// If runner doesn't exist, try to find the first non-root user with a home directory
+	result, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "getent passwd | grep '/home/' | head -1 | cut -d: -f1")
+	if err == nil && strings.TrimSpace(result.Stdout) != "" {
+		username := strings.TrimSpace(result.Stdout)
+		// Verify this user exists and has a home directory
+		if verifyResult, verifyErr := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "whoami"); verifyErr == nil {
+			if strings.TrimSpace(verifyResult.Stdout) == username {
+				return username, nil
+			}
+		}
+	}
+
+	// If we can't detect a proper user, default to "runner" (common in CI environments)
+	// This is safer than using root, which causes permission issues
+	return "runner", nil
+}
+
+// prepareKubeconfigDirectory ensures ~/.kube directory exists with proper permissions on Windows/WSL and Linux
+func (m *K3dManager) prepareKubeconfigDirectory(ctx context.Context) error {
+	if runtime.GOOS == "windows" {
+		// Get the WSL user that k3d will run as
+		// The wrappers in the workflow use "runner", so we should detect or default to that
+		username, err := m.getWSLUser(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get WSL user: %w", err)
+		}
+
+		// Create .kube directory with proper permissions in WSL
+		createCmd := "mkdir -p ~/.kube && chmod 755 ~/.kube"
+		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", createCmd)
+		if err != nil {
+			return fmt.Errorf("failed to create .kube directory: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Println("✓ Prepared kubeconfig directory in WSL")
+		}
+	} else {
+		// Linux/macOS: Create .kube directory with proper permissions
+		createCmd := "mkdir -p ~/.kube && chmod 755 ~/.kube"
+		_, err := m.executor.Execute(ctx, "bash", "-c", createCmd)
+		if err != nil {
+			return fmt.Errorf("failed to create .kube directory: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Println("✓ Prepared kubeconfig directory")
+		}
+	}
+
+	return nil
+}
+
+// fixKubeconfigPermissions fixes kubeconfig file permissions on Windows/WSL and Linux
+// This is needed because k3d running with sudo creates ~/.kube/config with root ownership
+func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
+	if runtime.GOOS == "windows" {
+		// Get the WSL user that k3d will run as
+		// The wrappers in the workflow use "runner", so we should detect or default to that
+		username, err := m.getWSLUser(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get WSL user: %w", err)
+		}
+
+		// Fix ownership and permissions of both .kube directory and kubeconfig file in WSL
+		// This is critical because k3d runs with sudo and creates files as root,
+		// but kubectl needs to run as the regular user
+		fixCmd := fmt.Sprintf("test -d ~/.kube && sudo chown -R %s:%s ~/.kube && sudo chmod 755 ~/.kube && test -f ~/.kube/config && sudo chmod 600 ~/.kube/config", username, username)
+		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fixCmd)
+		if err != nil {
+			return fmt.Errorf("failed to fix kubeconfig permissions: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Println("✓ Fixed kubeconfig directory and file permissions for WSL user")
+		}
+	} else {
+		// Linux/macOS: Fix permissions without changing ownership (assuming we're the owner)
+		// First check if the file exists and needs fixing
+		fixCmd := "test -f ~/.kube/config && chmod 600 ~/.kube/config || true"
+		_, err := m.executor.Execute(ctx, "bash", "-c", fixCmd)
+		if err != nil {
+			return fmt.Errorf("failed to fix kubeconfig permissions: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Println("✓ Fixed kubeconfig permissions")
+		}
+	}
+
+	return nil
+}
+
+// verifyClusterReachable checks if the cluster is reachable via kubectl
+func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
+	// Try to reach the cluster using kubectl
+	contextName := fmt.Sprintf("k3d-%s", clusterName)
+
+	// First verify the context exists
+	if _, err := m.executor.Execute(ctx, "kubectl", "config", "get-contexts", contextName); err != nil {
+		return fmt.Errorf("kubectl context not found: %w", err)
+	}
+
+	// Set the current context to the cluster (in case k3d didn't switch it properly)
+	if _, err := m.executor.Execute(ctx, "kubectl", "config", "use-context", contextName); err != nil {
+		return fmt.Errorf("failed to switch kubectl context: %w", err)
+	}
+
+	// Then verify we can reach the cluster API using the explicit context
+	result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
+	if err != nil {
+		return fmt.Errorf("cluster not reachable: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Printf("✓ Cluster is reachable:\n%s\n", result.Stdout)
+	}
+
+	return nil
+}
+
+// cleanupStaleLockFiles removes any stale kubeconfig lock files
+func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
+	if runtime.GOOS == "windows" {
+		// Get the WSL user
+		username, err := m.getWSLUser(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get WSL user: %w", err)
+		}
+
+		// Remove lock files in WSL
+		cleanupCmd := "rm -f ~/.kube/config.lock ~/.kube/config.lock.* 2>/dev/null || true"
+		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
+		if err != nil {
+			return fmt.Errorf("failed to cleanup lock files: %w", err)
+		}
+	} else {
+		// Linux/macOS: Remove lock files
+		cleanupCmd := "rm -f ~/.kube/config.lock ~/.kube/config.lock.* 2>/dev/null || true"
+		_, err := m.executor.Execute(ctx, "bash", "-c", cleanupCmd)
+		if err != nil {
+			return fmt.Errorf("failed to cleanup lock files: %w", err)
+		}
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Cleaned up stale kubeconfig lock files")
+	}
+
+	return nil
 }
 
 // k3dClusterInfo represents the JSON structure returned by k3d cluster list
