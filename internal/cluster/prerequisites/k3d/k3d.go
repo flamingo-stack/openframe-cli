@@ -174,18 +174,6 @@ func (k *K3dInstaller) installBinary() error {
 	return nil
 }
 
-func (k *K3dInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
-func (k *K3dInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
 func (k *K3dInstaller) installWindows() error {
 	fmt.Println("Installing k3d inside WSL2...")
 
@@ -278,4 +266,16 @@ func containsPath(pathEnv, dir string) bool {
 		}
 	}
 	return false
+}
+
+func (k *K3dInstaller) runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	// Completely silence output during installation
+	return cmd.Run()
+}
+
+func (k *K3dInstaller) runShellCommand(command string) error {
+	cmd := exec.Command("bash", "-c", command)
+	// Completely silence output during installation
+	return cmd.Run()
 }
