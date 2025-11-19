@@ -512,6 +512,32 @@ func (m *K3dManager) convertWindowsPathToWSL(windowsPath string) (string, error)
 	return path, nil
 }
 
+// k3dClusterInfo represents the JSON structure returned by k3d cluster list
+type k3dClusterInfo struct {
+	Name           string    `json:"name"`
+	ServersCount   int       `json:"serversCount"`
+	ServersRunning int       `json:"serversRunning"`
+	AgentsCount    int       `json:"agentsCount"`
+	AgentsRunning  int       `json:"agentsRunning"`
+	Image          string    `json:"image,omitempty"`
+	Nodes          []k3dNode `json:"nodes"`
+}
+
+// k3dNode represents a node in the k3d cluster
+type k3dNode struct {
+	Name          string                   `json:"name"`
+	Role          string                   `json:"role"`
+	Created       time.Time                `json:"created"`
+	RuntimeLabels map[string]string        `json:"runtimeLabels,omitempty"`
+	PortMappings  map[string][]PortMapping `json:"portMappings,omitempty"`
+}
+
+// PortMapping represents a port mapping for k3d nodes
+type PortMapping struct {
+	HostIP   string `json:"HostIp"`
+	HostPort string `json:"HostPort"`
+}
+
 // getWSLUser determines the correct WSL user to use for kubeconfig operations
 // It tries to detect the non-root user that k3d/kubectl will run as
 func (m *K3dManager) getWSLUser(ctx context.Context) (string, error) {
@@ -671,32 +697,6 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// k3dClusterInfo represents the JSON structure returned by k3d cluster list
-type k3dClusterInfo struct {
-	Name           string    `json:"name"`
-	ServersCount   int       `json:"serversCount"`
-	ServersRunning int       `json:"serversRunning"`
-	AgentsCount    int       `json:"agentsCount"`
-	AgentsRunning  int       `json:"agentsRunning"`
-	Image          string    `json:"image,omitempty"`
-	Nodes          []k3dNode `json:"nodes"`
-}
-
-// k3dNode represents a node in the k3d cluster
-type k3dNode struct {
-	Name          string                   `json:"name"`
-	Role          string                   `json:"role"`
-	Created       time.Time                `json:"created"`
-	RuntimeLabels map[string]string        `json:"runtimeLabels,omitempty"`
-	PortMappings  map[string][]PortMapping `json:"portMappings,omitempty"`
-}
-
-// PortMapping represents a port mapping for k3d nodes
-type PortMapping struct {
-	HostIP   string `json:"HostIp"`
-	HostPort string `json:"HostPort"`
 }
 
 // Factory functions for backward compatibility
