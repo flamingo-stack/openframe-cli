@@ -174,17 +174,16 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 	return envStrings
 }
 
-// shellEscape escapes an argument for safe use in a bash shell
-// Arguments containing special characters are wrapped in single quotes
-// Single quotes within the argument are properly escaped
+// shellEscape escapes an argument for safe use when passing to WSL
+// WSL passes arguments directly to the target command, so we only need to handle
+// characters that could confuse the WSL argument parser itself (spaces, quotes, backslashes)
+// We should NOT escape characters like {}, $, etc. that are part of command syntax (e.g., jsonpath)
 func shellEscape(arg string) string {
-	// Check if the argument needs escaping
+	// Only escape if the argument contains spaces, quotes, or backslashes
+	// These are the characters that WSL argument parsing cares about
 	needsEscape := false
 	for _, ch := range arg {
-		if ch == '{' || ch == '}' || ch == '$' || ch == '\\' || ch == '"' ||
-		   ch == '\'' || ch == '`' || ch == '\n' || ch == '\t' || ch == ' ' ||
-		   ch == '*' || ch == '?' || ch == '[' || ch == ']' || ch == '|' ||
-		   ch == '&' || ch == ';' || ch == '<' || ch == '>' || ch == '(' || ch == ')' {
+		if ch == ' ' || ch == '"' || ch == '\'' || ch == '\\' {
 			needsEscape = true
 			break
 		}
@@ -194,10 +193,11 @@ func shellEscape(arg string) string {
 		return arg
 	}
 
-	// Use single quotes and escape any single quotes in the argument
-	// by ending the single-quoted string, adding an escaped single quote, and starting again
-	escaped := strings.ReplaceAll(arg, "'", "'\"'\"'")
-	return "'" + escaped + "'"
+	// For arguments with spaces or quotes, wrap in double quotes
+	// and escape internal double quotes and backslashes
+	escaped := strings.ReplaceAll(arg, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+	return "\"" + escaped + "\""
 }
 
 // wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2
