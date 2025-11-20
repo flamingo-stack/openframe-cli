@@ -209,7 +209,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "kubectl",
-		Args:    []string{"apply", "-n", "argocd", "-f", "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml"},
+		Args:    []string{"apply", "-k", "https://github.com/argoproj/argo-cd/manifests/crds?ref=stable"},
 	})
 	if err != nil {
 		if spinner != nil {
