@@ -203,6 +203,21 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
 
+	// Install ArgoCD CRDs
+	if config.Verbose {
+		pterm.Info.Println("Installing ArgoCD CRDs...")
+	}
+	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    []string{"apply", "-n", "argocd", "-f", "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml"},
+	})
+	if err != nil {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
+	}
+
 	// Create a temporary file with ArgoCD values
 	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
 	if err != nil {
