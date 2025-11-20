@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
@@ -207,9 +208,53 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	if config.Verbose {
 		pterm.Info.Println("Installing ArgoCD CRDs...")
 	}
+
+	// First, verify kubectl can connect to the cluster with retries
+	maxRetries := 10
+	retryDelay := 3 // seconds
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    []string{"cluster-info"},
+		})
+
+		if err == nil && result.ExitCode == 0 {
+			// Cluster is accessible
+			break
+		}
+
+		lastErr = err
+		if i < maxRetries-1 {
+			if config.Verbose {
+				pterm.Info.Printf("Waiting for cluster to be ready... (attempt %d/%d)\n", i+1, maxRetries)
+			}
+			// Check if context was cancelled
+			select {
+			case <-ctx.Done():
+				if spinner != nil {
+					spinner.Stop()
+				}
+				return ctx.Err()
+			case <-time.After(time.Duration(retryDelay) * time.Second):
+				// Continue to next retry
+			}
+		}
+	}
+
+	if lastErr != nil {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		return fmt.Errorf("failed to connect to cluster after %d retries: %w", maxRetries, lastErr)
+	}
+
+	// Now install CRDs with --validate=false to handle cases where openapi download might be flaky
+	// Using the direct YAML file approach instead of Kustomize (-k) for simplicity
 	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "kubectl",
-		Args:    []string{"apply", "-k", "https://github.com/argoproj/argo-cd/manifests/crds?ref=stable"},
+		Args:    []string{"apply", "-n", "argocd", "-f", "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml", "--validate=false"},
 	})
 	if err != nil {
 		if spinner != nil {
