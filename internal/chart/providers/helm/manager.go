@@ -251,16 +251,24 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Now install CRDs with --validate=false to handle cases where openapi download might be flaky
-	// Using the direct YAML file approach instead of Kustomize (-k) for simplicity
-	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    []string{"apply", "-n", "argocd", "-f", "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml", "--validate=false"},
-	})
-	if err != nil {
-		if spinner != nil {
-			spinner.Stop()
+	// Install each CRD file individually as the combined crds.yaml is no longer available
+	crdUrls := []string{
+		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/application-crd.yaml",
+		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/applicationset-crd.yaml",
+		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/appproject-crd.yaml",
+	}
+
+	for _, crdUrl := range crdUrls {
+		_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    []string{"apply", "-n", "argocd", "-f", crdUrl, "--validate=false"},
+		})
+		if err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
 		}
-		return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
 	}
 
 	// Create a temporary file with ArgoCD values
