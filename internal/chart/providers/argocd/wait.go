@@ -75,6 +75,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return nil
 	}
 
+	// Wait for ArgoCD CRD and pods to be ready before checking applications
+	if err := m.waitForArgoCDReady(localCtx, config.Verbose); err != nil {
+		return fmt.Errorf("ArgoCD not ready: %w", err)
+	}
+
 	// Show initial verbose info if enabled
 	if config.Verbose {
 		pterm.Info.Println("Starting ArgoCD application synchronization...")
@@ -417,4 +422,64 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			}
 		}
 	}
+}
+
+// waitForArgoCDReady waits for ArgoCD CRD and pods to be ready
+func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool) error {
+	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
+	retryInterval := 3 * time.Second
+
+	// Wait for ArgoCD CRD to be available
+	if verbose {
+		pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Check if CRD exists
+		result, err := m.executor.Execute(ctx, "kubectl", "get", "crd", "applications.argoproj.io")
+		if err == nil && result.ExitCode == 0 {
+			if verbose {
+				pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
+			}
+			break
+		}
+
+		if i == maxRetries-1 {
+			return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
+		}
+
+		if verbose && i%5 == 0 { // Log every 15 seconds
+			pterm.Info.Println("🕒 Waiting for ArgoCD CRD applications.argoproj.io...")
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	// Wait for ArgoCD pods to be ready
+	if verbose {
+		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
+	}
+
+	// Use kubectl wait with timeout
+	result, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "wait",
+		"--for=condition=Ready", "pod",
+		"-l", "app.kubernetes.io/part-of=argocd",
+		"--timeout=300s")
+
+	if err != nil || result.ExitCode != 0 {
+		return fmt.Errorf("timeout waiting for ArgoCD pods to be ready: %w", err)
+	}
+
+	if verbose {
+		pterm.Success.Println("ArgoCD pods are ready")
+	}
+
+	return nil
 }
