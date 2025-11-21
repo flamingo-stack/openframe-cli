@@ -117,7 +117,7 @@ func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  3,
+		NodeCount:  4,
 	}
 }
 

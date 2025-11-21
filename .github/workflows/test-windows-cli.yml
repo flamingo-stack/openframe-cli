@@ -130,6 +130,16 @@ jobs:
             wsl.exe -d Ubuntu -u runner kubectl get pods -n argocd 2>&1 | Out-Host
 
             Write-Host ""
+            Write-Host "Installing ArgoCD CRDs..."
+            wsl.exe -d Ubuntu -u runner kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml 2>&1 | Out-Host
+
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "[OK] ArgoCD CRDs installed successfully"
+            } else {
+              Write-Host "[WARNING] ArgoCD CRDs installation returned exit code: $LASTEXITCODE"
+            }
+
+            Write-Host ""
             Write-Host "Waiting for ArgoCD applications to be created (30 seconds)..."
             Start-Sleep -Seconds 30
 

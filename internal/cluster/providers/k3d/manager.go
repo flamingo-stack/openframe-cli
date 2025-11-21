@@ -313,9 +313,9 @@ func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig) (string, e
 	}
 
 	servers := 1
-	agents := config.NodeCount
-	if agents < 1 {
-		agents = 1
+	agents := config.NodeCount - 1
+	if agents < 0 {
+		agents = 0
 	}
 
 	configContent := fmt.Sprintf(`apiVersion: k3d.io/v1alpha5
@@ -326,15 +326,10 @@ servers: %d
 agents: %d
 image: %s`, config.Name, servers, agents, image)
 
-	// Always use dynamic ports to avoid conflicts, regardless of cluster name
-	ports, err := m.findAvailablePorts(3)
-	if err != nil || len(ports) < 3 {
-		return "", fmt.Errorf("failed to allocate available ports: %w", err)
-	}
-
-	apiPort := strconv.Itoa(ports[0])
-	httpPort := strconv.Itoa(ports[1])
-	httpsPort := strconv.Itoa(ports[2])
+	// Use fixed default ports for consistent cluster configuration
+	apiPort := defaultAPIPort
+	httpPort := defaultHTTPPort
+	httpsPort := defaultHTTPSPort
 
 	configContent += fmt.Sprintf(`
 kubeAPI:

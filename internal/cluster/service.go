@@ -739,7 +739,7 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  3,
+		NodeCount:  4,
 	}
 	if clusterName == "" {
 		config.Name = "openframe-dev" // default name

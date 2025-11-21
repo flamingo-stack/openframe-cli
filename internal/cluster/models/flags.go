@@ -57,7 +57,7 @@ func AddGlobalFlags(cmd *cobra.Command, global *GlobalFlags) {
 // AddCreateFlags adds create-specific flags to a command
 func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
 	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d, gke)")
-	cmd.Flags().IntVarP(&flags.NodeCount, "nodes", "n", 3, "Number of worker nodes (default 3)")
+	cmd.Flags().IntVarP(&flags.NodeCount, "nodes", "n", 4, "Number of nodes (default 4)")
 	cmd.Flags().StringVar(&flags.K8sVersion, "version", "", "Kubernetes version")
 	cmd.Flags().BoolVar(&flags.SkipWizard, "skip-wizard", false, "Skip interactive wizard")
 }
