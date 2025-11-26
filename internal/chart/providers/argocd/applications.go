@@ -11,7 +11,8 @@ import (
 
 // Manager handles ArgoCD-specific operations
 type Manager struct {
-	executor executor.CommandExecutor
+	executor    executor.CommandExecutor
+	clusterName string // Optional cluster name for explicit context (e.g., "k3d-openframe")
 }
 
 // NewManager creates a new ArgoCD manager
@@ -19,6 +20,28 @@ func NewManager(exec executor.CommandExecutor) *Manager {
 	return &Manager{
 		executor: exec,
 	}
+}
+
+// NewManagerWithCluster creates a new ArgoCD manager with explicit cluster context
+func NewManagerWithCluster(exec executor.CommandExecutor, clusterName string) *Manager {
+	return &Manager{
+		executor:    exec,
+		clusterName: clusterName,
+	}
+}
+
+// SetClusterName sets the cluster name for explicit context usage
+func (m *Manager) SetClusterName(name string) {
+	m.clusterName = name
+}
+
+// getKubectlArgs returns kubectl args with explicit context if cluster name is set
+func (m *Manager) getKubectlArgs(args ...string) []string {
+	if m.clusterName != "" {
+		contextName := "k3d-" + m.clusterName
+		return append([]string{"--context", contextName}, args...)
+	}
+	return args
 }
 
 // Application represents an ArgoCD application status
@@ -30,10 +53,15 @@ type Application struct {
 
 // getTotalExpectedApplications tries to determine the total number of applications that will be created
 func (m *Manager) getTotalExpectedApplications(ctx context.Context, config config.ChartInstallConfig) int {
+	// Set cluster name from config if available
+	if config.ClusterName != "" && m.clusterName == "" {
+		m.clusterName = config.ClusterName
+	}
+
 	// Method 1: Get all resources that app-of-apps will create from its status
 	// This shows ALL planned applications across all sync waves
-	manifestResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")
+	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
+		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")...)
 
 	if err == nil && manifestResult.Stdout != "" {
 		resources := strings.Fields(manifestResult.Stdout)
@@ -47,8 +75,8 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 	// Method 2: Get the source manifest from app-of-apps and count applications
 	// This gives us the definitive count from the source repository
-	sourceResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.spec.source}")
+	sourceResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
+		"-o", "jsonpath={.spec.source}")...)
 
 	if err == nil && sourceResult.Stdout != "" && config.Verbose {
 		pterm.Debug.Printf("App-of-apps source: %s\n", sourceResult.Stdout)
@@ -56,8 +84,8 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 	// Method 3: Try to get the complete resource list from app-of-apps status
 	// This includes all resources that will be created, not just current ones
-	allResourcesResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={range .status.resources[*]}{.kind}{\":\"}{.name}{\"\\n\"}{end}")
+	allResourcesResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
+		"-o", "jsonpath={range .status.resources[*]}{.kind}{\":\"}{.name}{\"\\n\"}{end}")...)
 
 	if err == nil && allResourcesResult.Stdout != "" {
 		lines := strings.Split(strings.TrimSpace(allResourcesResult.Stdout), "\n")
@@ -77,14 +105,14 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 	// Method 4: Check ArgoCD server API for planned applications
 	// Query the ArgoCD server pod directly for application information
-	serverPod, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "pod",
-		"-l", "app.kubernetes.io/name=argocd-server", "-o", "jsonpath={.items[0].metadata.name}")
+	serverPod, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "pod",
+		"-l", "app.kubernetes.io/name=argocd-server", "-o", "jsonpath={.items[0].metadata.name}")...)
 
 	if err == nil && serverPod.Stdout != "" {
 		podName := strings.TrimSpace(serverPod.Stdout)
 		// Try to query ArgoCD's internal application list via kubectl exec
-		appsResult, _ := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "exec", podName, "--",
-			"argocd", "app", "list", "-o", "name")
+		appsResult, _ := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "exec", podName, "--",
+			"argocd", "app", "list", "-o", "name")...)
 		if appsResult != nil && appsResult.Stdout != "" {
 			apps := strings.Split(strings.TrimSpace(appsResult.Stdout), "\n")
 			count := 0
@@ -102,10 +130,10 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		}
 	}
 
-	// Method 4: Try to get all applications including those being created
+	// Method 5: Try to get all applications including those being created
 	// This includes applications in all states (even those not yet synced due to sync waves)
-	allAppsResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")...)
 
 	if err == nil && allAppsResult.Stdout != "" {
 		apps := strings.Split(strings.TrimSpace(allAppsResult.Stdout), "\n")
@@ -125,7 +153,7 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		}
 	}
 
-	// Method 2: Check helm values to count applications defined
+	// Method 6: Check helm values to count applications defined
 	helmResult, err := m.executor.Execute(ctx, "helm", "get", "values", "app-of-apps", "-n", "argocd")
 	if err == nil && helmResult.Stdout != "" {
 		// Count application definitions in various formats
@@ -152,9 +180,9 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		}
 	}
 
-	// Method 3: Check ApplicationSets which generate multiple applications
-	appSetResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applicationsets.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	// Method 7: Check ApplicationSets which generate multiple applications
+	appSetResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applicationsets.argoproj.io",
+		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")...)
 
 	if err == nil && appSetResult.Stdout != "" {
 		appSets := strings.Split(strings.TrimSpace(appSetResult.Stdout), "\n")
@@ -187,8 +215,8 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
 	// Use direct kubectl command instead of parsing JSON string to avoid control character issues
 	// Use conditional jsonpath to handle missing status fields
-	result, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\t\"}{.status.health.status}{\"\\t\"}{.status.sync.status}{\"\\n\"}{end}")
+	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\t\"}{.status.health.status}{\"\\t\"}{.status.sync.status}{\"\\n\"}{end}")...)
 
 	if err != nil {
 		// If kubectl fails, try fallback approach

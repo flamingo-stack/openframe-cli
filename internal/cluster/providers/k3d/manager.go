@@ -635,7 +635,7 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 	return nil
 }
 
-// verifyClusterReachable checks if the cluster is reachable via kubectl
+// verifyClusterReachable checks if the cluster is reachable via kubectl with retries
 func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
 	// Try to reach the cluster using kubectl
 	contextName := fmt.Sprintf("k3d-%s", clusterName)
@@ -650,17 +650,52 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		return fmt.Errorf("failed to switch kubectl context: %w", err)
 	}
 
-	// Then verify we can reach the cluster API using the explicit context
-	result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
-	if err != nil {
-		return fmt.Errorf("cluster not reachable: %w", err)
+	// Verify cluster reachability with retries (important for Windows/WSL stability)
+	maxRetries := 15 // 15 retries * 2 seconds = 30 seconds max
+	retryDelay := 2 * time.Second
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
+		if err == nil && result.ExitCode == 0 {
+			if m.verbose {
+				fmt.Printf("✓ Cluster is reachable:\n%s\n", result.Stdout)
+			}
+
+			// On Windows, wait a bit more for cluster to fully stabilize
+			if runtime.GOOS == "windows" {
+				// Additional verification: check if we can list nodes
+				nodesResult, nodesErr := m.executor.Execute(ctx, "kubectl", "--context", contextName, "get", "nodes")
+				if nodesErr != nil || nodesResult.ExitCode != 0 {
+					if m.verbose {
+						fmt.Printf("Cluster API reachable but nodes not ready yet, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+					}
+					time.Sleep(retryDelay)
+					continue
+				}
+				if m.verbose {
+					fmt.Printf("✓ Cluster nodes are ready\n")
+				}
+			}
+
+			return nil
+		}
+
+		lastErr = err
+		if m.verbose {
+			fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d)\n", i+1, maxRetries)
+		}
+		time.Sleep(retryDelay)
 	}
 
-	if m.verbose {
-		fmt.Printf("✓ Cluster is reachable:\n%s\n", result.Stdout)
-	}
-
-	return nil
+	return fmt.Errorf("cluster not reachable after %d retries: %w", maxRetries, lastErr)
 }
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files

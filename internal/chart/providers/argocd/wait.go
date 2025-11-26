@@ -21,6 +21,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return nil
 	}
 
+	// Set cluster name from config for explicit context usage (important for Windows/WSL)
+	if config.ClusterName != "" {
+		m.clusterName = config.ClusterName
+	}
+
 	// Check if already cancelled before starting
 	if ctx.Err() != nil {
 		return fmt.Errorf("operation already cancelled: %w", ctx.Err())
@@ -291,8 +296,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 								for _, app := range stuckApps {
 									pterm.Info.Printf("\n--- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
 
-									// Get namespace
-									nsResult, err := m.executor.Execute(localCtx, "kubectl", "-n", "argocd", "get", "app", app.Name, "-o", "jsonpath={.spec.destination.namespace}")
+									// Get namespace using explicit context
+									nsArgs := m.getKubectlArgs("-n", "argocd", "get", "app", app.Name, "-o", "jsonpath={.spec.destination.namespace}")
+									nsResult, err := m.executor.Execute(localCtx, "kubectl", nsArgs...)
 									if err != nil || nsResult == nil || nsResult.Stdout == "" {
 										pterm.Warning.Printf("Could not get namespace for %s\n", app.Name)
 										continue
@@ -301,11 +307,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 									// Get pods with issues: not Running or with restarts
 									podQuery := "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\t\"}{.status.phase}{\"\\t\"}{.status.containerStatuses[0].restartCount}{\"\\n\"}{end}"
-									problemPodsResult, _ := m.executor.Execute(localCtx, "kubectl", "-n", ns, "get", "pods", "-o", podQuery)
+									problemPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", podQuery)
+									problemPodsResult, _ := m.executor.Execute(localCtx, "kubectl", problemPodsArgs...)
 
 									// Also get pods with restarts but Running
 									restartPodsQuery := "jsonpath={range .items[?(@.status.phase==\"Running\")]}{.metadata.name}{\"\\t\"}{.status.containerStatuses[0].restartCount}{\"\\n\"}{end}"
-									restartPodsResult, _ := m.executor.Execute(localCtx, "kubectl", "-n", ns, "get", "pods", "-o", restartPodsQuery)
+									restartPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", restartPodsQuery)
+									restartPodsResult, _ := m.executor.Execute(localCtx, "kubectl", restartPodsArgs...)
 
 									problemPods := make(map[string]bool)
 
@@ -342,14 +350,16 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									for podName := range problemPods {
 										pterm.Info.Printf("\n  Pod: %s\n", podName)
 
-										// Get pod status summary
-										statusResult, _ := m.executor.Execute(localCtx, "kubectl", "-n", ns, "get", "pod", podName, "-o", "jsonpath={.status.phase}{'/'}{.status.containerStatuses[*].state}")
+										// Get pod status summary using explicit context
+										statusArgs := m.getKubectlArgs("-n", ns, "get", "pod", podName, "-o", "jsonpath={.status.phase}{'/'}{.status.containerStatuses[*].state}")
+										statusResult, _ := m.executor.Execute(localCtx, "kubectl", statusArgs...)
 										if statusResult != nil && statusResult.Stdout != "" {
 											pterm.Info.Printf("  Status: %s\n", statusResult.Stdout)
 										}
 
-										// Get recent events for this pod
-										eventsResult, _ := m.executor.Execute(localCtx, "kubectl", "-n", ns, "get", "events", "--field-selector", "involvedObject.name="+podName, "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message", "--no-headers")
+										// Get recent events for this pod using explicit context
+										eventsArgs := m.getKubectlArgs("-n", ns, "get", "events", "--field-selector", "involvedObject.name="+podName, "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message", "--no-headers")
+										eventsResult, _ := m.executor.Execute(localCtx, "kubectl", eventsArgs...)
 										if eventsResult != nil && eventsResult.Stdout != "" {
 											eventLines := strings.Split(strings.TrimSpace(eventsResult.Stdout), "\n")
 											if len(eventLines) > 5 {
@@ -363,8 +373,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 											}
 										}
 
-										// Get last 20 lines of logs
-										logsResult, _ := m.executor.Execute(localCtx, "kubectl", "-n", ns, "logs", podName, "--tail=20", "--all-containers=true", "--prefix=true")
+										// Get last 20 lines of logs using explicit context
+										logsArgs := m.getKubectlArgs("-n", ns, "logs", podName, "--tail=20", "--all-containers=true", "--prefix=true")
+										logsResult, _ := m.executor.Execute(localCtx, "kubectl", logsArgs...)
 										if logsResult != nil && logsResult.Stdout != "" {
 											pterm.Info.Println("  Recent Logs:")
 											for _, line := range strings.Split(logsResult.Stdout, "\n") {
@@ -442,8 +453,20 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool) error {
 		default:
 		}
 
-		// Check if CRD exists
-		result, err := m.executor.Execute(ctx, "kubectl", "get", "crd", "applications.argoproj.io")
+		// First verify cluster is still reachable (important for Windows/WSL stability)
+		clusterCheckArgs := m.getKubectlArgs("cluster-info")
+		clusterResult, clusterErr := m.executor.Execute(ctx, "kubectl", clusterCheckArgs...)
+		if clusterErr != nil || clusterResult.ExitCode != 0 {
+			if verbose {
+				pterm.Warning.Printf("Cluster connectivity issue detected, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+			}
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		// Check if CRD exists using explicit context
+		crdArgs := m.getKubectlArgs("get", "crd", "applications.argoproj.io")
+		result, err := m.executor.Execute(ctx, "kubectl", crdArgs...)
 		if err == nil && result.ExitCode == 0 {
 			if verbose {
 				pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
@@ -462,16 +485,17 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool) error {
 		time.Sleep(retryInterval)
 	}
 
-	// Wait for ArgoCD pods to be ready
+	// Wait for ArgoCD pods to be ready using explicit context
 	if verbose {
 		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
 	}
 
-	// Use kubectl wait with timeout
-	result, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "wait",
+	// Use kubectl wait with timeout and explicit context
+	waitArgs := m.getKubectlArgs("-n", "argocd", "wait",
 		"--for=condition=Ready", "pod",
 		"-l", "app.kubernetes.io/part-of=argocd",
 		"--timeout=300s")
+	result, err := m.executor.Execute(ctx, "kubectl", waitArgs...)
 
 	if err != nil || result.ExitCode != 0 {
 		return fmt.Errorf("timeout waiting for ArgoCD pods to be ready: %w", err)

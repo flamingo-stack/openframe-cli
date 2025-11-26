@@ -93,6 +93,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				NodeCount: 3,
 			},
 			setupMock: func(m *MockExecutor) {
+				// Mock bash for kubeconfig directory prep and cleanup
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 				m.On("Execute", mock.Anything, "kubectl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "Switched to context \"k3d-test-cluster\"."}, nil)
 			},
@@ -106,6 +108,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				K8sVersion: "v1.25.0-k3s1",
 			},
 			setupMock: func(m *MockExecutor) {
+				// Mock bash for kubeconfig directory prep and cleanup
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 				m.On("Execute", mock.Anything, "kubectl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "Switched to context \"k3d-test-cluster\"."}, nil)
 			},
@@ -145,6 +149,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				NodeCount: 3,
 			},
 			setupMock: func(m *MockExecutor) {
+				// Mock bash for kubeconfig directory prep and cleanup
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error"))
 			},
 			expectedError: "failed to create cluster test-cluster",
@@ -175,6 +181,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 
 func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 	executor := &MockExecutor{}
+	// Mock bash for kubeconfig directory prep and cleanup
+	executor.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 	executor.On("Execute", mock.Anything, "kubectl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "Switched to context \"k3d-test-cluster\"."}, nil)
 

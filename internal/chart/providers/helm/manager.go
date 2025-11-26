@@ -31,16 +31,20 @@ func NewHelmManager(exec executor.CommandExecutor) *HelmManager {
 // getHelmEnv returns environment variables for Helm to use writable directories
 // This is especially important in CI environments where home directory may not have write permissions
 func (h *HelmManager) getHelmEnv() map[string]string {
-	// Define the directories
+	// Define the directories - these are WSL/Linux paths
+	// On Windows, helm runs inside WSL via the helm-wrapper.sh script which sets these
 	helmDirs := map[string]string{
 		"HELM_CACHE_HOME":  "/tmp/helm/cache",
 		"HELM_CONFIG_HOME": "/tmp/helm/config",
 		"HELM_DATA_HOME":   "/tmp/helm/data",
 	}
 
-	// Ensure directories exist
-	for _, dir := range helmDirs {
-		os.MkdirAll(dir, 0755)
+	// Only create directories on non-Windows platforms
+	// On Windows, the directories are created inside WSL by the wrapper script
+	if runtime.GOOS != "windows" {
+		for _, dir := range helmDirs {
+			os.MkdirAll(dir, 0755)
+		}
 	}
 
 	return helmDirs
@@ -205,14 +209,22 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// First, verify kubectl can connect to the cluster with retries
+	// Use explicit context if cluster name is provided (important for Windows/WSL)
 	maxRetries := 10
 	retryDelay := 3 // seconds
 	var lastErr error
 
+	// Build kubectl args with explicit context if cluster name is provided
+	kubectlArgs := []string{"cluster-info"}
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		kubectlArgs = []string{"--context", contextName, "cluster-info"}
+	}
+
 	for i := 0; i < maxRetries; i++ {
 		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 			Command: "kubectl",
-			Args:    []string{"cluster-info"},
+			Args:    kubectlArgs,
 		})
 
 		if err == nil && result.ExitCode == 0 {
