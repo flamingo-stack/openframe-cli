@@ -204,11 +204,6 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
 
-	// Install ArgoCD CRDs
-	if config.Verbose {
-		pterm.Info.Println("Installing ArgoCD CRDs...")
-	}
-
 	// First, verify kubectl can connect to the cluster with retries
 	maxRetries := 10
 	retryDelay := 3 // seconds
@@ -250,25 +245,34 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to connect to cluster after %d retries: %w", maxRetries, lastErr)
 	}
 
-	// Now install CRDs with --validate=false to handle cases where openapi download might be flaky
-	// Install each CRD file individually as the combined crds.yaml is no longer available
-	crdUrls := []string{
-		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/application-crd.yaml",
-		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/applicationset-crd.yaml",
-		"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/appproject-crd.yaml",
-	}
-
-	for _, crdUrl := range crdUrls {
-		_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-			Command: "kubectl",
-			Args:    []string{"apply", "-n", "argocd", "-f", crdUrl, "--validate=false"},
-		})
-		if err != nil {
-			if spinner != nil {
-				spinner.Stop()
-			}
-			return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
+	// Install ArgoCD CRDs unless skipped
+	if !config.SkipCRDs {
+		if config.Verbose {
+			pterm.Info.Println("Installing ArgoCD CRDs...")
 		}
+
+		// Install CRDs with --validate=false to handle cases where openapi download might be flaky
+		// Install each CRD file individually as the combined crds.yaml is no longer available
+		crdUrls := []string{
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/application-crd.yaml",
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/applicationset-crd.yaml",
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/appproject-crd.yaml",
+		}
+
+		for _, crdUrl := range crdUrls {
+			_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+				Command: "kubectl",
+				Args:    []string{"apply", "-n", "argocd", "-f", crdUrl, "--validate=false"},
+			})
+			if err != nil {
+				if spinner != nil {
+					spinner.Stop()
+				}
+				return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
+			}
+		}
+	} else if config.Verbose {
+		pterm.Info.Println("Skipping ArgoCD CRDs installation (--skip-crds)")
 	}
 
 	// Create a temporary file with ArgoCD values

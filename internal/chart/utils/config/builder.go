@@ -207,6 +207,8 @@ func (b *Builder) BuildInstallConfigWithCustomHelmPath(
 	// Set Silent flag based on NonInteractive mode
 	config.Silent = nonInteractive
 	config.NonInteractive = nonInteractive
+	// Skip CRDs installation in non-interactive (CI) mode - ArgoCD Helm chart manages them
+	config.SkipCRDs = nonInteractive
 
 	return config, nil
 }
