@@ -498,7 +498,53 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
 	}
 
-	// Use kubectl wait with timeout and explicit context
+	// First, wait for pods to exist before trying to wait for them to be Ready
+	// kubectl wait returns an error if no pods match the selector
+	podExistenceTimeout := 120 * time.Second // 2 minutes for pods to be created
+	podExistenceInterval := 3 * time.Second
+	podExistenceStart := time.Now()
+	podsExist := false
+
+	for time.Since(podExistenceStart) < podExistenceTimeout {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Check if any ArgoCD pods exist
+		checkArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
+			"-l", "app.kubernetes.io/part-of=argocd",
+			"-o", "jsonpath={.items[*].metadata.name}")
+		checkResult, checkErr := m.executor.Execute(ctx, "kubectl", checkArgs...)
+
+		if checkErr == nil && checkResult != nil && strings.TrimSpace(checkResult.Stdout) != "" {
+			podNames := strings.Fields(checkResult.Stdout)
+			if len(podNames) > 0 {
+				if verbose {
+					pterm.Info.Printf("Found %d ArgoCD pod(s), waiting for them to be ready...\n", len(podNames))
+				}
+				podsExist = true
+				break
+			}
+		}
+
+		if verbose && int(time.Since(podExistenceStart).Seconds())%15 == 0 {
+			pterm.Info.Println("Waiting for ArgoCD pods to be created...")
+		}
+
+		time.Sleep(podExistenceInterval)
+	}
+
+	if !podsExist {
+		// No pods found - collect diagnostics and return error
+		pterm.Warning.Println("No ArgoCD pods found after waiting. Collecting diagnostics...")
+		m.printArgoCDPodDiagnostics(ctx)
+		return fmt.Errorf("timeout waiting for ArgoCD pods to be created (no pods found with label app.kubernetes.io/part-of=argocd)")
+	}
+
+	// Now wait for pods to be Ready using kubectl wait with timeout
 	waitArgs := m.getKubectlArgs("-n", "argocd", "wait",
 		"--for=condition=Ready", "pod",
 		"-l", "app.kubernetes.io/part-of=argocd",
@@ -521,6 +567,32 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 // printArgoCDPodDiagnostics prints diagnostic information about ArgoCD pods when they fail to become ready
 func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	pterm.Warning.Println("ArgoCD pods failed to become ready. Collecting diagnostics...")
+
+	// First check Helm release status to understand if ArgoCD was installed correctly
+	helmStatusArgs := []string{"status", "argo-cd", "-n", "argocd"}
+	helmResult, _ := m.executor.Execute(ctx, "helm", helmStatusArgs...)
+	if helmResult != nil && helmResult.Stdout != "" {
+		pterm.Info.Println("\nHelm release status:")
+		// Show just the first few lines of status
+		statusLines := strings.Split(helmResult.Stdout, "\n")
+		for i, line := range statusLines {
+			if i < 10 {
+				pterm.Info.Printf("  %s\n", line)
+			}
+		}
+	} else {
+		pterm.Warning.Println("Could not get Helm release status for argo-cd")
+	}
+
+	// Check for deployments in argocd namespace
+	deployArgs := m.getKubectlArgs("-n", "argocd", "get", "deployments", "-o", "wide")
+	deployResult, _ := m.executor.Execute(ctx, "kubectl", deployArgs...)
+	if deployResult != nil && deployResult.Stdout != "" {
+		pterm.Info.Println("\nArgoCD deployments:")
+		for _, line := range strings.Split(strings.TrimSpace(deployResult.Stdout), "\n") {
+			pterm.Info.Printf("  %s\n", line)
+		}
+	}
 
 	// Get all pods in argocd namespace with their status
 	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", "wide")

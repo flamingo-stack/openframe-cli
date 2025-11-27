@@ -375,6 +375,50 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
 
+	// Verify that ArgoCD deployments exist after Helm install
+	// This catches cases where Helm --wait returns too quickly
+	if config.Verbose {
+		pterm.Debug.Println("Verifying ArgoCD deployments were created...")
+	}
+
+	// Build kubectl args with explicit context if cluster name is provided
+	verifyArgs := []string{"-n", "argocd", "get", "deployments", "-l", "app.kubernetes.io/part-of=argocd", "-o", "jsonpath={.items[*].metadata.name}"}
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		verifyArgs = append([]string{"--context", contextName}, verifyArgs...)
+	}
+
+	verifyResult, verifyErr := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    verifyArgs,
+	})
+
+	if verifyErr != nil || verifyResult == nil || strings.TrimSpace(verifyResult.Stdout) == "" {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		// Helm reported success but no ArgoCD deployments exist - this is an error condition
+		pterm.Warning.Println("Helm install reported success but no ArgoCD deployments found")
+		pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
+
+		// Try to get more info about what Helm thinks is installed
+		statusArgs := []string{"status", "argo-cd", "-n", "argocd"}
+		statusResult, _ := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "helm",
+			Args:    statusArgs,
+			Env:     h.getHelmEnv(),
+		})
+		if statusResult != nil && statusResult.Stdout != "" {
+			pterm.Info.Printf("Helm status:\n%s\n", statusResult.Stdout)
+		}
+
+		return fmt.Errorf("ArgoCD Helm install completed but no deployments were created - this may indicate a Helm or cluster connectivity issue")
+	}
+
+	if config.Verbose {
+		pterm.Debug.Printf("Found ArgoCD deployments: %s\n", verifyResult.Stdout)
+	}
+
 	if spinner != nil {
 		spinner.Stop()
 	}
