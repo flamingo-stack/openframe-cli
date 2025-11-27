@@ -81,7 +81,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}
 
 	// Wait for ArgoCD CRD and pods to be ready before checking applications
-	if err := m.waitForArgoCDReady(localCtx, config.Verbose); err != nil {
+	if err := m.waitForArgoCDReady(localCtx, config.Verbose, config.SkipCRDs); err != nil {
 		return fmt.Errorf("ArgoCD not ready: %w", err)
 	}
 
@@ -436,53 +436,61 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 }
 
 // waitForArgoCDReady waits for ArgoCD CRD and pods to be ready
-func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool) error {
+func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs bool) error {
 	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
 	retryInterval := 3 * time.Second
 
-	// Wait for ArgoCD CRD to be available
-	if verbose {
-		pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
-	}
-
-	for i := 0; i < maxRetries; i++ {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled: %w", ctx.Err())
-		default:
+	// Skip CRD wait if CRDs installation was skipped (e.g., in non-interactive/CI mode)
+	// In this case, the ArgoCD Helm chart will install CRDs as part of the release
+	if skipCRDs {
+		if verbose {
+			pterm.Info.Println("Skipping ArgoCD CRD wait (CRDs managed by Helm chart)")
+		}
+	} else {
+		// Wait for ArgoCD CRD to be available
+		if verbose {
+			pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
 		}
 
-		// First verify cluster is still reachable (important for Windows/WSL stability)
-		clusterCheckArgs := m.getKubectlArgs("cluster-info")
-		clusterResult, clusterErr := m.executor.Execute(ctx, "kubectl", clusterCheckArgs...)
-		if clusterErr != nil || clusterResult.ExitCode != 0 {
-			if verbose {
-				pterm.Warning.Printf("Cluster connectivity issue detected, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+		for i := 0; i < maxRetries; i++ {
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("operation cancelled: %w", ctx.Err())
+			default:
 			}
+
+			// First verify cluster is still reachable (important for Windows/WSL stability)
+			clusterCheckArgs := m.getKubectlArgs("cluster-info")
+			clusterResult, clusterErr := m.executor.Execute(ctx, "kubectl", clusterCheckArgs...)
+			if clusterErr != nil || clusterResult.ExitCode != 0 {
+				if verbose {
+					pterm.Warning.Printf("Cluster connectivity issue detected, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+				}
+				time.Sleep(retryInterval)
+				continue
+			}
+
+			// Check if CRD exists using explicit context
+			crdArgs := m.getKubectlArgs("get", "crd", "applications.argoproj.io")
+			result, err := m.executor.Execute(ctx, "kubectl", crdArgs...)
+			if err == nil && result.ExitCode == 0 {
+				if verbose {
+					pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
+				}
+				break
+			}
+
+			if i == maxRetries-1 {
+				return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
+			}
+
+			if verbose && i%5 == 0 { // Log every 15 seconds
+				pterm.Info.Println("🕒 Waiting for ArgoCD CRD applications.argoproj.io...")
+			}
+
 			time.Sleep(retryInterval)
-			continue
 		}
-
-		// Check if CRD exists using explicit context
-		crdArgs := m.getKubectlArgs("get", "crd", "applications.argoproj.io")
-		result, err := m.executor.Execute(ctx, "kubectl", crdArgs...)
-		if err == nil && result.ExitCode == 0 {
-			if verbose {
-				pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
-			}
-			break
-		}
-
-		if i == maxRetries-1 {
-			return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
-		}
-
-		if verbose && i%5 == 0 { // Log every 15 seconds
-			pterm.Info.Println("🕒 Waiting for ArgoCD CRD applications.argoproj.io...")
-		}
-
-		time.Sleep(retryInterval)
 	}
 
 	// Wait for ArgoCD pods to be ready using explicit context
