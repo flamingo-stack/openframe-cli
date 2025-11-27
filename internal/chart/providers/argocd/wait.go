@@ -506,6 +506,8 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	result, err := m.executor.Execute(ctx, "kubectl", waitArgs...)
 
 	if err != nil || result.ExitCode != 0 {
+		// Collect diagnostic info before returning error
+		m.printArgoCDPodDiagnostics(ctx)
 		return fmt.Errorf("timeout waiting for ArgoCD pods to be ready: %w", err)
 	}
 
@@ -514,4 +516,119 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	}
 
 	return nil
+}
+
+// printArgoCDPodDiagnostics prints diagnostic information about ArgoCD pods when they fail to become ready
+func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
+	pterm.Warning.Println("ArgoCD pods failed to become ready. Collecting diagnostics...")
+
+	// Get all pods in argocd namespace with their status
+	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", "wide")
+	podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
+	if podResult != nil && podResult.Stdout != "" {
+		pterm.Info.Println("ArgoCD pods status:")
+		for _, line := range strings.Split(strings.TrimSpace(podResult.Stdout), "\n") {
+			pterm.Info.Printf("  %s\n", line)
+		}
+	}
+
+	// Get pods that are not ready and show their details
+	notReadyQuery := "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\n\"}{end}"
+	notReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", notReadyQuery)
+	notReadyResult, _ := m.executor.Execute(ctx, "kubectl", notReadyArgs...)
+
+	var problemPods []string
+	if notReadyResult != nil && notReadyResult.Stdout != "" {
+		for _, pod := range strings.Split(strings.TrimSpace(notReadyResult.Stdout), "\n") {
+			if pod != "" {
+				problemPods = append(problemPods, pod)
+			}
+		}
+	}
+
+	// Also check for pods that are Running but not Ready (container issues)
+	runningNotReadyQuery := "jsonpath={range .items[?(@.status.phase==\"Running\")]}{.metadata.name}{\" \"}{.status.conditions[?(@.type==\"Ready\")].status}{\"\\n\"}{end}"
+	runningNotReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", runningNotReadyQuery)
+	runningNotReadyResult, _ := m.executor.Execute(ctx, "kubectl", runningNotReadyArgs...)
+	if runningNotReadyResult != nil && runningNotReadyResult.Stdout != "" {
+		for _, line := range strings.Split(strings.TrimSpace(runningNotReadyResult.Stdout), "\n") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && parts[1] != "True" && parts[0] != "" {
+				problemPods = append(problemPods, parts[0])
+			}
+		}
+	}
+
+	// Show details for problem pods
+	for _, podName := range problemPods {
+		pterm.Info.Printf("\n--- Pod: %s ---\n", podName)
+
+		// Get pod describe summary (conditions and events)
+		describeArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o",
+			"jsonpath={\"Phase: \"}{.status.phase}{\"\\nConditions:\\n\"}{range .status.conditions[*]}{\"  \"}{.type}{\"=\"}{.status}{\" (\"}{.reason}{\")\\n\"}{end}")
+		describeResult, _ := m.executor.Execute(ctx, "kubectl", describeArgs...)
+		if describeResult != nil && describeResult.Stdout != "" {
+			pterm.Info.Println(describeResult.Stdout)
+		}
+
+		// Get container statuses
+		containerArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o",
+			"jsonpath={\"Containers:\\n\"}{range .status.containerStatuses[*]}{\"  \"}{.name}{\": ready=\"}{.ready}{\", restarts=\"}{.restartCount}{\"\\n\"}{end}")
+		containerResult, _ := m.executor.Execute(ctx, "kubectl", containerArgs...)
+		if containerResult != nil && containerResult.Stdout != "" {
+			pterm.Info.Println(containerResult.Stdout)
+		}
+
+		// Get recent events for this pod
+		eventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
+			"--field-selector", "involvedObject.name="+podName,
+			"--sort-by=.lastTimestamp",
+			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,REASON:.reason,MESSAGE:.message",
+			"--no-headers")
+		eventsResult, _ := m.executor.Execute(ctx, "kubectl", eventsArgs...)
+		if eventsResult != nil && eventsResult.Stdout != "" {
+			eventLines := strings.Split(strings.TrimSpace(eventsResult.Stdout), "\n")
+			// Show last 5 events
+			if len(eventLines) > 5 {
+				eventLines = eventLines[len(eventLines)-5:]
+			}
+			pterm.Info.Println("Recent Events:")
+			for _, event := range eventLines {
+				if event != "" {
+					pterm.Info.Printf("  %s\n", event)
+				}
+			}
+		}
+
+		// Get container logs if pod exists
+		logsArgs := m.getKubectlArgs("-n", "argocd", "logs", podName, "--tail=10", "--all-containers=true")
+		logsResult, _ := m.executor.Execute(ctx, "kubectl", logsArgs...)
+		if logsResult != nil && logsResult.Stdout != "" {
+			pterm.Info.Println("Recent Logs (last 10 lines):")
+			for _, line := range strings.Split(strings.TrimSpace(logsResult.Stdout), "\n") {
+				pterm.Info.Printf("  %s\n", line)
+			}
+		}
+	}
+
+	// If no specific problem pods found, show general namespace events
+	if len(problemPods) == 0 {
+		pterm.Info.Println("\nNo specific problem pods found. Showing recent namespace events:")
+		nsEventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
+			"--sort-by=.lastTimestamp",
+			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,OBJECT:.involvedObject.name,REASON:.reason,MESSAGE:.message",
+			"--no-headers")
+		nsEventsResult, _ := m.executor.Execute(ctx, "kubectl", nsEventsArgs...)
+		if nsEventsResult != nil && nsEventsResult.Stdout != "" {
+			eventLines := strings.Split(strings.TrimSpace(nsEventsResult.Stdout), "\n")
+			if len(eventLines) > 10 {
+				eventLines = eventLines[len(eventLines)-10:]
+			}
+			for _, event := range eventLines {
+				if event != "" {
+					pterm.Info.Printf("  %s\n", event)
+				}
+			}
+		}
+	}
 }
