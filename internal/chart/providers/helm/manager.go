@@ -413,22 +413,6 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		pterm.Warning.Println("Helm install reported success but no ArgoCD deployments found")
 		pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
 
-		// Try to get more info about what Helm thinks is installed
-		statusArgs := []string{"status", "argo-cd", "-n", "argocd"}
-		// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
-		if config.ClusterName != "" {
-			contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
-			statusArgs = append(statusArgs, "--kube-context", contextName)
-		}
-		statusResult, _ := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-			Command: "helm",
-			Args:    statusArgs,
-			Env:     h.getHelmEnv(),
-		})
-		if statusResult != nil && statusResult.Stdout != "" {
-			pterm.Info.Printf("Helm status:\n%s\n", statusResult.Stdout)
-		}
-
 		return fmt.Errorf("ArgoCD Helm install completed but no deployments were created - this may indicate a Helm or cluster connectivity issue")
 	}
 
