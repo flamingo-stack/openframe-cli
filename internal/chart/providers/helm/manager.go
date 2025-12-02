@@ -144,6 +144,12 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"-f", valuesFilePath,
 	}
 
+	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		args = append(args, "--kube-context", contextName)
+	}
+
 	if config.DryRun {
 		args = append(args, "--dry-run")
 	}
@@ -339,6 +345,12 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"-f", valuesFilePath,
 	}
 
+	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		args = append(args, "--kube-context", contextName)
+	}
+
 	if config.DryRun {
 		args = append(args, "--dry-run")
 		if config.Verbose {
@@ -403,6 +415,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 		// Try to get more info about what Helm thinks is installed
 		statusArgs := []string{"status", "argo-cd", "-n", "argocd"}
+		// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
+		if config.ClusterName != "" {
+			contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+			statusArgs = append(statusArgs, "--kube-context", contextName)
+		}
 		statusResult, _ := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 			Command: "helm",
 			Args:    statusArgs,
