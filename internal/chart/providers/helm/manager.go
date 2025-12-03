@@ -959,18 +959,32 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		"argocd-application-controller",
 	}
 
-	// Wait settings
-	maxRetries := 45 // 45 retries * 2 seconds = 90 seconds max
-	retryInterval := 2 * time.Second
+	// Wait settings - optimized for CI environments
+	maxRetries := 30           // 30 retries * 3 seconds = 90 seconds max
+	retryInterval := 3 * time.Second
+	initialDelay := 5 * time.Second // Give Kubernetes time to create resources after Helm completes
 
 	pterm.Info.Println("Waiting for ArgoCD deployments to appear via kubectl...")
 
+	// Initial delay: Helm's --wait returns before Kubernetes controllers fully create Deployments
+	// This delay allows the deployment controller to process the Helm release and create resources
+	if verbose {
+		pterm.Debug.Printf("Initial delay of %v to allow Kubernetes controllers to create resources...\n", initialDelay)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(initialDelay):
+	}
+
 	// Build kubectl args with explicit context if cluster name is provided
-	baseArgs := []string{"-n", "argocd", "get", "deployment"}
+	// Use a single kubectl call to list all deployments in the namespace
+	baseArgs := []string{}
 	if clusterName != "" {
 		contextName := fmt.Sprintf("k3d-%s", clusterName)
-		baseArgs = append([]string{"--context", contextName}, baseArgs...)
+		baseArgs = append(baseArgs, "--context", contextName)
 	}
+	baseArgs = append(baseArgs, "-n", "argocd", "get", "deployments", "-o", "jsonpath={.items[*].metadata.name}")
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
@@ -980,28 +994,43 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		default:
 		}
 
-		allFound := true
-		for _, name := range expectedDeployments {
-			args := append(baseArgs, name, "-o", "name")
-			result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-				Command: "kubectl",
-				Args:    args,
-			})
+		// Single kubectl call to get all deployment names in the namespace
+		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    baseArgs,
+		})
 
-			if err != nil || result == nil || strings.TrimSpace(result.Stdout) == "" {
-				allFound = false
-				lastErr = fmt.Errorf("deployment %s not found", name)
-				break
+		if err == nil && result != nil {
+			foundDeployments := strings.Fields(strings.TrimSpace(result.Stdout))
+			foundSet := make(map[string]bool)
+			for _, d := range foundDeployments {
+				foundSet[d] = true
 			}
-		}
 
-		if allFound {
-			pterm.Success.Println("All ArgoCD deployments found.")
-			return nil
-		}
+			// Check if all expected deployments are present
+			allFound := true
+			var missingDeployments []string
+			for _, expected := range expectedDeployments {
+				if !foundSet[expected] {
+					allFound = false
+					missingDeployments = append(missingDeployments, expected)
+				}
+			}
 
-		if verbose {
-			pterm.Debug.Printf("Waiting for deployments (attempt %d/%d)...\n", i+1, maxRetries)
+			if allFound {
+				pterm.Success.Println("All ArgoCD deployments found.")
+				return nil
+			}
+
+			lastErr = fmt.Errorf("missing deployments: %v", missingDeployments)
+			if verbose {
+				pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): missing %v\n", i+1, maxRetries, missingDeployments)
+			}
+		} else {
+			lastErr = fmt.Errorf("kubectl error: %v", err)
+			if verbose {
+				pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): kubectl error\n", i+1, maxRetries)
+			}
 		}
 
 		time.Sleep(retryInterval)
