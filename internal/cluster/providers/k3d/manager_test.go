@@ -221,7 +221,7 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			}
 
 			manager := NewK3dManager(executor, false)
-			err := manager.CreateCluster(context.Background(), tt.config)
+			_, err := manager.CreateCluster(context.Background(), tt.config)
 
 			if tt.expectedError != "" {
 				assert.Error(t, err)
@@ -257,7 +257,7 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 		NodeCount: 3,
 	}
 
-	err := manager.CreateCluster(context.Background(), config)
+	_, err := manager.CreateCluster(context.Background(), config)
 	// Accept connection errors as "success" since the kubeconfig was loaded correctly
 	if err != nil {
 		assert.Contains(t, err.Error(), "cluster created but not reachable")

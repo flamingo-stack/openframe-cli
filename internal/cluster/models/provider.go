@@ -1,28 +1,32 @@
 package models
 
-import "context"
+import (
+	"context"
+
+	"k8s.io/client-go/rest"
+)
 
 // ClusterProvider defines the contract for cluster provider implementations
 // This is a domain interface that defines what cluster providers must do
 type ClusterProvider interface {
 	// Create creates a new cluster with the given configuration
 	Create(ctx context.Context, config ClusterConfig) error
-	
+
 	// Delete removes a cluster by name
 	Delete(ctx context.Context, name string, force bool) error
-	
+
 	// Start starts a stopped cluster
 	Start(ctx context.Context, name string) error
-	
+
 	// List returns all clusters managed by this provider
 	List(ctx context.Context) ([]ClusterInfo, error)
-	
+
 	// Status returns detailed status information for a specific cluster
 	Status(ctx context.Context, name string) (ClusterInfo, error)
-	
+
 	// DetectType checks if this provider manages the given cluster
 	DetectType(ctx context.Context, name string) (ClusterType, error)
-	
+
 	// GetKubeconfig returns the kubeconfig for accessing the cluster
 	GetKubeconfig(ctx context.Context, name string) (string, error)
 }
@@ -31,22 +35,26 @@ type ClusterProvider interface {
 // This represents the use cases that the application supports
 type ClusterService interface {
 	// CreateCluster creates a new cluster using the configured provider
-	CreateCluster(ctx context.Context, config ClusterConfig) error
-	
+	// Returns the *rest.Config for the created cluster
+	CreateCluster(ctx context.Context, config ClusterConfig) (*rest.Config, error)
+
 	// DeleteCluster removes a cluster
 	DeleteCluster(ctx context.Context, name string, clusterType ClusterType, force bool) error
-	
+
 	// StartCluster starts a stopped cluster
 	StartCluster(ctx context.Context, name string, clusterType ClusterType) error
-	
+
 	// ListClusters returns all available clusters
 	ListClusters(ctx context.Context) ([]ClusterInfo, error)
-	
+
 	// GetClusterStatus returns detailed status for a cluster
 	GetClusterStatus(ctx context.Context, name string) (ClusterInfo, error)
-	
+
 	// DetectClusterType determines what type of cluster this is
 	DetectClusterType(ctx context.Context, name string) (ClusterType, error)
+
+	// GetRestConfig returns the rest.Config for an existing cluster
+	GetRestConfig(ctx context.Context, name string) (*rest.Config, error)
 }
 
 // ProviderRegistry manages the available cluster providers

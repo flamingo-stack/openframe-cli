@@ -257,20 +257,22 @@ func TestErrorTypes(t *testing.T) {
 }
 
 func TestInterface_ClusterService(t *testing.T) {
-	t.Run("K3dManager implements ClusterService interface", func(t *testing.T) {
+	t.Run("K3dManager has ClusterService-like methods", func(t *testing.T) {
 		mockExecutor := executor.NewMockCommandExecutor()
 		manager := k3d.NewK3dManager(mockExecutor, false)
 
-		// Test that K3dManager implements ClusterService
-		var _ models.ClusterService = manager
+		// Note: K3dManager does not directly implement ClusterService interface
+		// as it has a different signature for CreateCluster (returns *rest.Config)
+		// The ClusterService in internal/cluster/service.go wraps the manager
 
-		// Verify interface methods exist
+		// Verify expected methods exist
 		assert.NotNil(t, manager.CreateCluster)
 		assert.NotNil(t, manager.DeleteCluster)
 		assert.NotNil(t, manager.StartCluster)
 		assert.NotNil(t, manager.ListClusters)
 		assert.NotNil(t, manager.GetClusterStatus)
 		assert.NotNil(t, manager.DetectClusterType)
+		assert.NotNil(t, manager.GetRestConfig)
 	})
 }
 

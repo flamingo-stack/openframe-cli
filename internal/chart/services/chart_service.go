@@ -24,6 +24,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/files"
 	"github.com/pterm/pterm"
+	"k8s.io/client-go/rest"
 )
 
 // ChartService handles high-level chart operations
@@ -37,8 +38,37 @@ type ChartService struct {
 	gitRepository  *git.Repository
 }
 
-// NewChartService creates a new chart service
-func NewChartService(dryRun, verbose bool) *ChartService {
+// NewChartService creates a new chart service with the given rest.Config
+// The config is used to create the Kubernetes client for native API operations
+func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartService, error) {
+	// Create executors
+	clusterExec := executor.NewRealCommandExecutor(false, verbose)
+	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
+
+	// Initialize configuration service
+	configService := config.NewService()
+	configService.Initialize()
+
+	// Create HelmManager with the rest.Config
+	helmManager, err := helm.NewHelmManager(chartExec, kubeConfig, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HelmManager: %w", err)
+	}
+
+	return &ChartService{
+		executor:       chartExec,
+		clusterService: cluster.NewClusterService(clusterExec),
+		configService:  configService,
+		operationsUI:   chartUI.NewOperationsUI(),
+		displayService: chartUI.NewDisplayService(),
+		helmManager:    helmManager,
+		gitRepository:  git.NewRepository(chartExec),
+	}, nil
+}
+
+// NewChartServiceDeferred creates a chart service without initializing HelmManager
+// The HelmManager will be initialized later after cluster selection
+func NewChartServiceDeferred(dryRun, verbose bool) (*ChartService, error) {
 	// Create executors
 	clusterExec := executor.NewRealCommandExecutor(false, verbose)
 	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
@@ -53,9 +83,21 @@ func NewChartService(dryRun, verbose bool) *ChartService {
 		configService:  configService,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
-		helmManager:    helm.NewHelmManager(chartExec),
+		helmManager:    nil, // Will be initialized after cluster selection
 		gitRepository:  git.NewRepository(chartExec),
+	}, nil
+}
+
+// initializeHelmManager initializes the HelmManager with the given rest.Config
+// This is called after cluster selection in deferred mode
+func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose bool) error {
+	chartExec := executor.NewRealCommandExecutor(false, verbose)
+	helmManager, err := helm.NewHelmManager(chartExec, kubeConfig, verbose)
+	if err != nil {
+		return fmt.Errorf("failed to create HelmManager: %w", err)
 	}
+	cs.helmManager = helmManager
+	return nil
 }
 
 // Install performs the complete chart installation process
@@ -83,6 +125,30 @@ func (cs *ChartService) InstallWithContext(ctx context.Context, req utilTypes.In
 
 	// Execute workflow with context
 	return workflow.ExecuteWithContext(ctx, req)
+}
+
+// InstallWithContextDeferred performs installation with deferred HelmManager initialization
+// This is used when KubeConfig is not available upfront (e.g., standalone chart install)
+func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req utilTypes.InstallationRequest) error {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("chart installation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	// Create installation workflow with direct dependencies
+	fileCleanup := files.NewFileCleanup()
+	fileCleanup.SetCleanupOnSuccessOnly(true) // Only clean temporary files after successful ArgoCD sync
+
+	workflow := &InstallationWorkflow{
+		chartService:   cs,
+		clusterService: cs.clusterService,
+		fileCleanup:    fileCleanup,
+	}
+
+	// Execute workflow with deferred initialization
+	return workflow.ExecuteWithContextDeferred(ctx, req)
 }
 
 // InstallationWorkflow orchestrates the installation process
@@ -232,6 +298,146 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// The installer waits for all ArgoCD applications after installing app-of-apps
 
 	// Step 9: Installation successful - clean up temporary files
+	if cleanupErr := w.fileCleanup.RestoreFilesOnSuccess(req.Verbose); cleanupErr != nil {
+		pterm.Warning.Printf("Failed to clean up files after successful installation: %v\n", cleanupErr)
+	}
+
+	return nil
+}
+
+// ExecuteWithContextDeferred runs the installation workflow with deferred HelmManager initialization
+// This is used when KubeConfig is not available upfront (e.g., standalone chart install)
+func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req utilTypes.InstallationRequest) error {
+	// Set up signal handling for graceful cleanup on interruption
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan) // Clean up signal handler
+
+	// Create a context that can be cancelled on signal OR parent context
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
+	// Track if we've been interrupted
+	interrupted := false
+
+	// Start signal handler goroutine
+	go func() {
+		<-sigChan
+		interrupted = true
+		cancel()
+	}()
+
+	// Step 1: Determine configuration mode and run appropriate workflow
+	var chartConfig *types.ChartConfiguration
+	if req.DryRun {
+		modifier := templates.NewHelmValuesModifier()
+		baseValues, err := modifier.LoadOrCreateBaseValues()
+		if err != nil {
+			return fmt.Errorf("failed to load base values for dry-run: %w", err)
+		}
+
+		chartConfig = &types.ChartConfiguration{
+			BaseHelmValuesPath: "helm-values.yaml",
+			TempHelmValuesPath: "helm-values-tmp.yaml",
+			ExistingValues:     baseValues,
+			ModifiedSections:   make([]string, 0),
+		}
+		pterm.Info.Println("Using existing configuration (dry-run mode)")
+	} else if req.NonInteractive {
+		if req.DeploymentMode == "" {
+			return fmt.Errorf("--deployment-mode is required when using --non-interactive")
+		}
+		pterm.Warning.Printf("Running in non-interactive mode with %s deployment\n", req.DeploymentMode)
+		var err error
+		chartConfig, err = w.loadExistingConfiguration(req.DeploymentMode)
+		if err != nil {
+			return fmt.Errorf("non-interactive configuration failed: %w", err)
+		}
+	} else if req.DeploymentMode != "" {
+		pterm.Warning.Printf("Deployment mode pre-selected: %s\n", req.DeploymentMode)
+		var err error
+		chartConfig, err = w.runPartialConfigurationWizard(req.DeploymentMode)
+		if err != nil {
+			return fmt.Errorf("configuration wizard failed: %w", err)
+		}
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
+		}
+	} else {
+		var err error
+		chartConfig, err = w.runConfigurationWizard()
+		if err != nil {
+			return fmt.Errorf("configuration wizard failed: %w", err)
+		}
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
+		}
+	}
+
+	// Step 2: Select cluster
+	clusterName, err := w.selectCluster(req.Args, req.Verbose)
+	if err != nil || clusterName == "" {
+		return err
+	}
+
+	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager
+	// This is the key difference from the regular workflow
+	clusterSvc, ok := w.clusterService.(*cluster.ClusterService)
+	if !ok {
+		return fmt.Errorf("cannot get rest.Config: cluster service is not a ClusterService")
+	}
+	kubeConfig, err := clusterSvc.GetRestConfig(clusterName)
+	if err != nil {
+		return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, err)
+	}
+	if err := w.chartService.initializeHelmManager(kubeConfig, req.Verbose); err != nil {
+		return fmt.Errorf("failed to initialize HelmManager: %w", err)
+	}
+
+	// Step 3: Confirm installation on the selected cluster (skip in non-interactive mode)
+	if !req.NonInteractive {
+		if !w.confirmInstallationOnCluster(clusterName) {
+			pterm.Info.Println("Installation cancelled.")
+			return fmt.Errorf("installation cancelled by user")
+		}
+	}
+
+	// Step 4: Regenerate certificates
+	if !req.NonInteractive {
+		if err := w.regenerateCertificates(); err != nil {
+			// Non-fatal
+		}
+	} else {
+		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
+	}
+
+	// Step 5: Build configuration
+	config, err := w.buildConfiguration(req, clusterName, chartConfig)
+	if err != nil {
+		chartErr := errors.WrapAsChartError("configuration", "build", err).WithCluster(clusterName)
+		return sharedErrors.HandleGlobalError(chartErr, req.Verbose)
+	}
+
+	// Step 6: Execute installation with retry support
+	err = w.performInstallationWithRetry(ctx, config)
+
+	// Step 7: Clean up generated files based on installation result
+	if err != nil {
+		if cleanupErr := w.fileCleanup.RestoreFiles(req.Verbose); cleanupErr != nil {
+			pterm.Warning.Printf("Failed to clean up files after error: %v\n", cleanupErr)
+		}
+		return err
+	}
+
+	if interrupted || ctx.Err() != nil {
+		w.fileCleanup.RestoreFiles(false)
+		return fmt.Errorf("installation cancelled by user")
+	}
+
 	if cleanupErr := w.fileCleanup.RestoreFilesOnSuccess(req.Verbose); cleanupErr != nil {
 		pterm.Warning.Printf("Failed to clean up files after successful installation: %v\n", cleanupErr)
 	}
@@ -496,6 +702,7 @@ func InstallChartsWithConfig(req utilTypes.InstallationRequest) error {
 }
 
 // InstallChartsWithConfigContext installs charts with the given configuration and context support
+// If KubeConfig is nil, it will be obtained after cluster selection (for standalone chart install)
 func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
@@ -517,8 +724,22 @@ func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.Installat
 	default:
 	}
 
-	// Create a chart service and perform the installation with context
-	chartService := NewChartService(req.DryRun, req.Verbose)
+	// If KubeConfig is provided (e.g., from bootstrap), use it directly
+	// Otherwise, defer to the chart service to get it after cluster selection
+	if req.KubeConfig != nil {
+		// Create a chart service with the KubeConfig and perform the installation with context
+		chartService, err := NewChartService(req.KubeConfig, req.DryRun, req.Verbose)
+		if err != nil {
+			return fmt.Errorf("failed to create chart service: %w", err)
+		}
+		return chartService.InstallWithContext(ctx, req)
+	}
 
-	return chartService.InstallWithContext(ctx, req)
+	// No KubeConfig provided - use deferred initialization
+	// This creates a minimal chart service that will get the config after cluster selection
+	chartService, err := NewChartServiceDeferred(req.DryRun, req.Verbose)
+	if err != nil {
+		return fmt.Errorf("failed to create chart service: %w", err)
+	}
+	return chartService.InstallWithContextDeferred(ctx, req)
 }

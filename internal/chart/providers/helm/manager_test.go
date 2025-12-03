@@ -10,7 +10,23 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/rest"
 )
+
+// createTestHelmManager creates a HelmManager for testing with a mock rest.Config
+func createTestHelmManager(exec executor.CommandExecutor) *HelmManager {
+	// Create a minimal rest.Config for testing
+	// Note: In tests, we use the manager directly without calling New since the
+	// kubernetes clients would fail to initialize with this fake config
+	return &HelmManager{
+		executor: exec,
+		verbose:  false,
+	}
+}
+
+// testRestConfig returns a dummy rest.Config for use in tests
+// This is not used in actual tests since createTestHelmManager creates the struct directly
+var _ = &rest.Config{} // Used to ensure the import is not removed
 
 // MockExecutor implements CommandExecutor for testing
 type MockExecutor struct {
@@ -101,7 +117,7 @@ func TestHelmManager_IsHelmInstalled(t *testing.T) {
 			mockExec := NewMockExecutor()
 			tt.setupMock(mockExec)
 
-			manager := NewHelmManager(mockExec)
+			manager := createTestHelmManager(mockExec)
 			err := manager.IsHelmInstalled(context.Background())
 
 			if tt.expectError {
@@ -166,7 +182,7 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 			mockExec := NewMockExecutor()
 			tt.setupMock(mockExec)
 
-			manager := NewHelmManager(mockExec)
+			manager := createTestHelmManager(mockExec)
 			result, err := manager.IsChartInstalled(context.Background(), tt.releaseName, tt.namespace)
 
 			if tt.expectError {
@@ -274,7 +290,7 @@ func TestHelmManager_InstallArgoCD(t *testing.T) {
 			mockExec := NewMockExecutor()
 			tt.setupMock(mockExec)
 
-			manager := NewHelmManager(mockExec)
+			manager := createTestHelmManager(mockExec)
 			err := manager.InstallArgoCD(context.Background(), tt.config)
 
 			if tt.expectError {
@@ -323,7 +339,7 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 			mockExec := NewMockExecutor()
 			tt.setupMock(mockExec)
 
-			manager := NewHelmManager(mockExec)
+			manager := createTestHelmManager(mockExec)
 			info, err := manager.GetChartStatus(context.Background(), tt.releaseName, tt.namespace)
 
 			if tt.expectError {

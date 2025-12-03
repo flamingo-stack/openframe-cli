@@ -24,7 +24,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/yaml"
 )
 
@@ -37,11 +36,30 @@ type HelmManager struct {
 	verbose       bool                 // Enable verbose logging
 }
 
-// NewHelmManager creates a new Helm manager
-func NewHelmManager(exec executor.CommandExecutor) *HelmManager {
-	return &HelmManager{
-		executor: exec,
+// NewHelmManager creates a new Helm manager with the given rest.Config
+// The config is used to create the Kubernetes client for native API operations
+func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose bool) (*HelmManager, error) {
+	if config == nil {
+		return nil, fmt.Errorf("rest.Config cannot be nil for HelmManager initialization")
 	}
+
+	coreClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Kubernetes core client: %w", err)
+	}
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Kubernetes dynamic client: %w", err)
+	}
+
+	return &HelmManager{
+		executor:      exec,
+		kubeConfig:    config,
+		dynamicClient: dynamicClient,
+		kubeClient:    coreClient,
+		verbose:       verbose,
+	}, nil
 }
 
 // getHelmEnv returns environment variables for Helm to use writable directories
@@ -285,23 +303,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			pterm.Info.Println("Installing ArgoCD CRDs using native Go client...")
 		}
 
-		// Build kube context for the dynamic client
-		kubeContext := ""
-		if config.ClusterName != "" {
-			kubeContext = fmt.Sprintf("k3d-%s", config.ClusterName)
-		}
-
-		// Initialize the dynamic client for programmatic CRD installation
-		// This reduces reliance on external kubectl binary
-		if err := h.initDynamicClient(kubeContext); err != nil {
+		// Verify clients are initialized (should be set in constructor)
+		if h.dynamicClient == nil {
 			if spinner != nil {
 				spinner.Stop()
 			}
-			return fmt.Errorf("failed to initialize Kubernetes client for CRD installation: %w", err)
+			return fmt.Errorf("dynamic client not initialized; ensure HelmManager was created with valid rest.Config")
 		}
-
-		// Set verbose mode for debug logging
-		h.verbose = config.Verbose
 
 		// Install CRDs programmatically using client-go dynamic client
 		crdUrls := []string{
@@ -582,41 +590,6 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	}
 
 	return path, nil
-}
-
-// initDynamicClient initializes the Kubernetes dynamic client for the given context
-// This reduces reliance on external kubectl binary for resource management
-func (h *HelmManager) initDynamicClient(kubeContext string) error {
-	// Build config from kubeconfig
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	configOverrides := &clientcmd.ConfigOverrides{}
-	if kubeContext != "" {
-		configOverrides.CurrentContext = kubeContext
-	}
-
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-	config, err := kubeConfig.ClientConfig()
-	if err != nil {
-		return fmt.Errorf("failed to build kubeconfig: %w", err)
-	}
-
-	h.kubeConfig = config
-
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create dynamic client: %w", err)
-	}
-
-	h.dynamicClient = dynamicClient
-
-	// Also initialize the typed Kubernetes client for deployment checks
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create typed kubernetes client: %w", err)
-	}
-
-	h.kubeClient = kubeClient
-	return nil
 }
 
 // applyManifestFromURL fetches a multi-document YAML manifest and applies its resources

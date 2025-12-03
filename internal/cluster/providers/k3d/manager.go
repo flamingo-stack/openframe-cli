@@ -66,18 +66,19 @@ func NewK3dManagerWithTimeout(exec executor.CommandExecutor, verbose bool, timeo
 }
 
 // CreateCluster creates a new K3D cluster using config file approach
-func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterConfig) error {
+// Returns the *rest.Config for the created cluster that can be used to interact with it
+func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
 	if err := m.validateClusterConfig(config); err != nil {
-		return err
+		return nil, err
 	}
 
 	if config.Type != models.ClusterTypeK3d {
-		return models.NewProviderNotFoundError(config.Type)
+		return nil, models.NewProviderNotFoundError(config.Type)
 	}
 
 	configFile, err := m.createK3dConfigFile(config)
 	if err != nil {
-		return models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create config file: %w", err))
+		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create config file: %w", err))
 	}
 	defer os.Remove(configFile)
 
@@ -108,7 +109,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	if runtime.GOOS == "windows" {
 		configFilePath, err = m.convertWindowsPathToWSL(configFile)
 		if err != nil {
-			return models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to convert config file path for WSL: %w", err))
+			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to convert config file path for WSL: %w", err))
 		}
 		if m.verbose {
 			fmt.Printf("DEBUG: Converted Windows path '%s' to WSL path '%s'\n", configFile, configFilePath)
@@ -127,7 +128,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	}
 
 	if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
-		return models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create cluster %s: %w", config.Name, err))
+		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create cluster %s: %w", config.Name, err))
 	}
 
 	// Fix kubeconfig permissions if k3d ran with sudo (Windows/WSL and Linux CI)
@@ -148,12 +149,19 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
-	// Verify the cluster is reachable
-	if err := m.verifyClusterReachable(ctx, config.Name); err != nil {
-		return models.NewClusterOperationError("create", config.Name, fmt.Errorf("cluster created but not reachable: %w", err))
+	// Verify the cluster is reachable and get the rest.Config
+	restConfig, err := m.verifyClusterReachable(ctx, config.Name)
+	if err != nil {
+		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("cluster created but not reachable: %w", err))
 	}
 
-	return nil
+	return restConfig, nil
+}
+
+// GetRestConfig returns the rest.Config for an existing cluster
+// This is used to get the config for a cluster that was already created
+func (m *K3dManager) GetRestConfig(ctx context.Context, clusterName string) (*rest.Config, error) {
+	return m.verifyClusterReachable(ctx, clusterName)
 }
 
 // DeleteCluster removes a K3D cluster
@@ -642,7 +650,8 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 
 // verifyClusterReachable checks if the cluster is reachable using native Go client
 // This reduces reliance on external kubectl binary for context management
-func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
+// Returns the *rest.Config that can be used to interact with the cluster
+func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) (*rest.Config, error) {
 	contextName := fmt.Sprintf("k3d-%s", clusterName)
 
 	var restConfig *rest.Config
@@ -653,18 +662,18 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Retrieve kubeconfig content directly from k3d inside WSL
 		kubeconfigContent, err := m.getKubeconfigContentFromWSL(ctx, clusterName)
 		if err != nil {
-			return fmt.Errorf("failed to retrieve kubeconfig content from WSL: %w", err)
+			return nil, fmt.Errorf("failed to retrieve kubeconfig content from WSL: %w", err)
 		}
 
 		// Load the content from string into memory
 		config, err := clientcmd.Load([]byte(kubeconfigContent))
 		if err != nil {
-			return fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
+			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
 		}
 
 		// Check if the context exists
 		if _, exists := config.Contexts[contextName]; !exists {
-			return fmt.Errorf("kubectl context %s not found in kubeconfig content", contextName)
+			return nil, fmt.Errorf("kubectl context %s not found in kubeconfig content", contextName)
 		}
 
 		// Switch the current context in memory
@@ -677,7 +686,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Build REST config from the in-memory kubeconfig
 		restConfig, err = clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
 		if err != nil {
-			return fmt.Errorf("failed to build REST config from in-memory kubeconfig: %w", err)
+			return nil, fmt.Errorf("failed to build REST config from in-memory kubeconfig: %w", err)
 		}
 	} else {
 		// Non-Windows: use file-based kubeconfig
@@ -686,18 +695,18 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Load the Kubeconfig file
 		config, err := clientcmd.LoadFromFile(kubeconfigPath)
 		if err != nil {
-			return fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
+			return nil, fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
 		}
 
 		// Check if the context exists
 		if _, exists := config.Contexts[contextName]; !exists {
-			return fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
+			return nil, fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
 		}
 
 		// Switch the current context
 		config.CurrentContext = contextName
 		if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
-			return fmt.Errorf("failed to switch and write kubectl context: %w", err)
+			return nil, fmt.Errorf("failed to switch and write kubectl context: %w", err)
 		}
 
 		if m.verbose {
@@ -710,7 +719,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 			&clientcmd.ConfigOverrides{CurrentContext: contextName},
 		).ClientConfig()
 		if err != nil {
-			return fmt.Errorf("failed to build REST config: %w", err)
+			return nil, fmt.Errorf("failed to build REST config: %w", err)
 		}
 	}
 
@@ -719,7 +728,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// Create Kubernetes client
 	coreClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
 	// Verify cluster reachability and node readiness with polling
@@ -735,7 +744,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+			return nil, fmt.Errorf("operation cancelled: %w", ctx.Err())
 		default:
 		}
 
@@ -752,7 +761,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 				continue
 			}
 			// Fatal error - don't retry
-			return fmt.Errorf("failed to connect to cluster API: %w", err)
+			return nil, fmt.Errorf("failed to connect to cluster API: %w", err)
 		}
 
 		// 2. Check for node existence (k3d should have at least one node)
@@ -783,7 +792,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 				fmt.Printf("  Found %d ready node(s) out of %d total\n", readyCount, len(nodes.Items))
 				fmt.Println("✓ Cluster API and nodes are ready.")
 			}
-			return nil
+			return restConfig, nil
 		}
 
 		lastErr = fmt.Errorf("no nodes in Ready state (found %d nodes, 0 ready)", len(nodes.Items))
@@ -793,7 +802,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		time.Sleep(retryDelay)
 	}
 
-	return fmt.Errorf("cluster not reachable after %d retries (last error: %w)", maxRetries, lastErr)
+	return nil, fmt.Errorf("cluster not reachable after %d retries (last error: %w)", maxRetries, lastErr)
 }
 
 // isTemporaryError checks if an error is temporary and should be retried

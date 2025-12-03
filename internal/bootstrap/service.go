@@ -10,6 +10,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/rest"
 )
 
 // Service provides bootstrap functionality
@@ -84,8 +85,9 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	config := s.buildClusterConfig(clusterName)
 	actualClusterName := config.Name
 
-	// Step 1: Create cluster with suppressed UI
-	if err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive); err != nil {
+	// Step 1: Create cluster with suppressed UI and get the rest.Config
+	kubeConfig, err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive)
+	if err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
 
@@ -94,7 +96,7 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	fmt.Println()
 
 	// Step 2: Install charts with deployment mode flags on the created cluster
-	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose); err != nil {
+	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
 
@@ -102,7 +104,8 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 }
 
 // createClusterSuppressed creates a cluster with suppressed UI elements
-func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) error {
+// Returns the *rest.Config for the created cluster
+func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Use the wrapper function that includes prerequisite checks
 	return cluster.CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, nonInteractive)
 }
@@ -122,7 +125,7 @@ func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
 }
 
 // installChartWithMode installs charts with deployment mode flags
-func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	// Use the chart installation function with deployment mode flags
 	return chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
@@ -134,5 +137,6 @@ func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonIn
 		CertDir:        "",                                                       // Auto-detected
 		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
+		KubeConfig:     kubeConfig,
 	})
 }

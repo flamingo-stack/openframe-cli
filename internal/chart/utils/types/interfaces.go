@@ -8,6 +8,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/git"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	clusterDomain "github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"k8s.io/client-go/rest"
 )
 
 // Core Service Interfaces
@@ -142,6 +143,7 @@ type InstallationRequest struct {
 	GitHubRepo     string
 	GitHubBranch   string
 	CertDir        string
-	DeploymentMode string // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
-	NonInteractive bool   // Skip all prompts, use existing helm-values.yaml
+	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
+	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
+	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
 }

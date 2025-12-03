@@ -96,7 +96,7 @@ func TestHelmManager_InstallAppOfAppsFromLocal(t *testing.T) {
 			mockExec := NewMockExecutor()
 			tt.setupMock(mockExec)
 
-			manager := NewHelmManager(mockExec)
+			manager := createTestHelmManager(mockExec)
 
 			err := manager.InstallAppOfAppsFromLocal(context.Background(), tt.config, tt.certFile, tt.keyFile)
 
