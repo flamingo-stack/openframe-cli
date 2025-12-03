@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Constants for configuration
@@ -635,22 +639,36 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 	return nil
 }
 
-// verifyClusterReachable checks if the cluster is reachable via kubectl with retries
+// verifyClusterReachable checks if the cluster is reachable using native Go client
+// This reduces reliance on external kubectl binary for context management
 func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
-	// Try to reach the cluster using kubectl
 	contextName := fmt.Sprintf("k3d-%s", clusterName)
 
-	// First verify the context exists
-	if _, err := m.executor.Execute(ctx, "kubectl", "config", "get-contexts", contextName); err != nil {
-		return fmt.Errorf("kubectl context not found: %w", err)
+	// Get kubeconfig path - use standard location
+	kubeconfigPath := m.getKubeconfigPath()
+
+	// 1. Load the Kubeconfig file using native Go client
+	config, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to load kubeconfig file: %w", err)
 	}
 
-	// Set the current context to the cluster (in case k3d didn't switch it properly)
-	if _, err := m.executor.Execute(ctx, "kubectl", "config", "use-context", contextName); err != nil {
-		return fmt.Errorf("failed to switch kubectl context: %w", err)
+	// 2. Check if the context exists (replaces kubectl config get-contexts)
+	if _, exists := config.Contexts[contextName]; !exists {
+		return fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
 	}
 
-	// Verify cluster reachability with retries (important for Windows/WSL stability)
+	// 3. Switch the current context (replaces kubectl config use-context)
+	config.CurrentContext = contextName
+	if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
+		return fmt.Errorf("failed to write kubeconfig with new context: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Printf("✓ Switched to kubectl context: %s\n", contextName)
+	}
+
+	// 4. Verify cluster is reachable using native Kubernetes client with retries
 	maxRetries := 15 // 15 retries * 2 seconds = 30 seconds max
 	retryDelay := 2 * time.Second
 	var lastErr error
@@ -663,39 +681,92 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		default:
 		}
 
-		result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
-		if err == nil && result.ExitCode == 0 {
+		// Build client config for the specific context
+		clientConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+			&clientcmd.ConfigOverrides{CurrentContext: contextName},
+		).ClientConfig()
+
+		if err != nil {
+			lastErr = fmt.Errorf("failed to build client config: %w", err)
 			if m.verbose {
-				fmt.Printf("✓ Cluster is reachable:\n%s\n", result.Stdout)
+				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
 			}
-
-			// On Windows, wait a bit more for cluster to fully stabilize
-			if runtime.GOOS == "windows" {
-				// Additional verification: check if we can list nodes
-				nodesResult, nodesErr := m.executor.Execute(ctx, "kubectl", "--context", contextName, "get", "nodes")
-				if nodesErr != nil || nodesResult.ExitCode != 0 {
-					if m.verbose {
-						fmt.Printf("Cluster API reachable but nodes not ready yet, waiting... (attempt %d/%d)\n", i+1, maxRetries)
-					}
-					time.Sleep(retryDelay)
-					continue
-				}
-				if m.verbose {
-					fmt.Printf("✓ Cluster nodes are ready\n")
-				}
-			}
-
-			return nil
+			time.Sleep(retryDelay)
+			continue
 		}
 
-		lastErr = err
+		// Create Kubernetes clientset
+		clientset, err := kubernetes.NewForConfig(clientConfig)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create kubernetes client: %w", err)
+			if m.verbose {
+				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		// Verify API server is reachable by getting server version
+		_, err = clientset.Discovery().ServerVersion()
+		if err != nil {
+			lastErr = fmt.Errorf("API server not reachable: %w", err)
+			if m.verbose {
+				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+
 		if m.verbose {
-			fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d)\n", i+1, maxRetries)
+			fmt.Printf("✓ Cluster API server is reachable\n")
 		}
-		time.Sleep(retryDelay)
+
+		// Additional verification: check if we can list nodes (especially important on Windows)
+		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			lastErr = fmt.Errorf("failed to list nodes: %w", err)
+			if m.verbose {
+				fmt.Printf("Cluster API reachable but nodes not ready yet, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		if len(nodes.Items) == 0 {
+			lastErr = fmt.Errorf("no nodes found in cluster")
+			if m.verbose {
+				fmt.Printf("Cluster API reachable but no nodes found, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		if m.verbose {
+			fmt.Printf("✓ Cluster nodes are ready (%d nodes)\n", len(nodes.Items))
+		}
+
+		return nil
 	}
 
 	return fmt.Errorf("cluster not reachable after %d retries: %w", maxRetries, lastErr)
+}
+
+// getKubeconfigPath returns the kubeconfig file path
+func (m *K3dManager) getKubeconfigPath() string {
+	// Check if KUBECONFIG environment variable is set
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		return kubeconfig
+	}
+
+	// Default to ~/.kube/config
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to clientcmd recommended path
+		return clientcmd.RecommendedHomeFile
+	}
+
+	return filepath.Join(homeDir, ".kube", "config")
 }
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files

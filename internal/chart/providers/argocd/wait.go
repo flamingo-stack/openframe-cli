@@ -12,6 +12,9 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/pterm/pterm"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // WaitForApplications waits for all ArgoCD applications to be Healthy and Synced
@@ -435,32 +438,189 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}
 }
 
-// waitForArgoCDReady waits for ArgoCD CRD and pods to be ready
+// waitForArgoCDReady waits for ArgoCD CRD and pods to be ready using native Go clients
+// This reduces reliance on external kubectl binary
 func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs bool) error {
 	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
 	retryInterval := 3 * time.Second
 
+	// Initialize Kubernetes clients for native API access
+	if err := m.initKubernetesClients(); err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to initialize native clients, falling back to kubectl: %v\n", err)
+		}
+		return m.waitForArgoCDReadyViaKubectl(ctx, verbose, skipCRDs)
+	}
+
 	// Skip CRD wait if CRDs installation was skipped (e.g., in non-interactive/CI mode)
-	// In this case, the ArgoCD Helm chart will install CRDs as part of the release
 	if skipCRDs {
 		if verbose {
 			pterm.Info.Println("Skipping ArgoCD CRD wait (CRDs managed by Helm chart)")
 		}
 	} else {
-		// Wait for ArgoCD CRD to be available
+		// Wait for ArgoCD CRD to be available using native apiextensions client
 		if verbose {
 			pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
 		}
 
 		for i := 0; i < maxRetries; i++ {
-			// Check context cancellation
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("operation cancelled: %w", ctx.Err())
 			default:
 			}
 
-			// First verify cluster is still reachable (important for Windows/WSL stability)
+			// Check CRD existence using native client
+			_, err := m.apiextClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, "applications.argoproj.io", metav1.GetOptions{})
+			if err == nil {
+				if verbose {
+					pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
+				}
+				break
+			}
+
+			if !k8serrors.IsNotFound(err) {
+				// Non-404 error - might be connectivity issue
+				if verbose {
+					pterm.Warning.Printf("Cluster connectivity issue detected: %v (attempt %d/%d)\n", err, i+1, maxRetries)
+				}
+			}
+
+			if i == maxRetries-1 {
+				return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
+			}
+
+			if verbose && i%5 == 0 {
+				pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
+			}
+
+			time.Sleep(retryInterval)
+		}
+	}
+
+	// Wait for ArgoCD pods to be ready using native Kubernetes client
+	if verbose {
+		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
+	}
+
+	podExistenceTimeout := 120 * time.Second
+	podExistenceInterval := 3 * time.Second
+	podExistenceStart := time.Now()
+	podsExist := false
+
+	for time.Since(podExistenceStart) < podExistenceTimeout {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// List ArgoCD pods using native client
+		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/part-of=argocd",
+		})
+
+		if err == nil && len(podList.Items) > 0 {
+			if verbose {
+				pterm.Info.Printf("Found %d ArgoCD pod(s), waiting for them to be ready...\n", len(podList.Items))
+			}
+			podsExist = true
+			break
+		}
+
+		if verbose && int(time.Since(podExistenceStart).Seconds())%15 == 0 {
+			pterm.Info.Println("Waiting for ArgoCD pods to be created...")
+		}
+
+		time.Sleep(podExistenceInterval)
+	}
+
+	if !podsExist {
+		pterm.Warning.Println("No ArgoCD pods found after waiting. Collecting diagnostics...")
+		m.printArgoCDPodDiagnostics(ctx)
+		return fmt.Errorf("timeout waiting for ArgoCD pods to be created (no pods found with label app.kubernetes.io/part-of=argocd)")
+	}
+
+	// Wait for all pods to be Ready using native client
+	podReadyTimeout := 5 * time.Minute
+	podReadyStart := time.Now()
+
+	for time.Since(podReadyStart) < podReadyTimeout {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/part-of=argocd",
+		})
+
+		if err != nil {
+			if verbose {
+				pterm.Warning.Printf("Failed to list pods: %v\n", err)
+			}
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		allReady := true
+		for _, pod := range podList.Items {
+			if !isPodReady(&pod) {
+				allReady = false
+				break
+			}
+		}
+
+		if allReady && len(podList.Items) > 0 {
+			if verbose {
+				pterm.Success.Println("ArgoCD pods are ready")
+			}
+			return nil
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	m.printArgoCDPodDiagnostics(ctx)
+	return fmt.Errorf("timeout waiting for ArgoCD pods to be ready")
+}
+
+// isPodReady checks if a pod has the Ready condition set to True
+func isPodReady(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForArgoCDReadyViaKubectl is the fallback method using kubectl
+func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool, skipCRDs bool) error {
+	maxRetries := 100
+	retryInterval := 3 * time.Second
+
+	if skipCRDs {
+		if verbose {
+			pterm.Info.Println("Skipping ArgoCD CRD wait (CRDs managed by Helm chart)")
+		}
+	} else {
+		if verbose {
+			pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
+		}
+
+		for i := 0; i < maxRetries; i++ {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("operation cancelled: %w", ctx.Err())
+			default:
+			}
+
 			clusterCheckArgs := m.getKubectlArgs("cluster-info")
 			clusterResult, clusterErr := m.executor.Execute(ctx, "kubectl", clusterCheckArgs...)
 			if clusterErr != nil || clusterResult.ExitCode != 0 {
@@ -471,7 +631,6 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 				continue
 			}
 
-			// Check if CRD exists using explicit context
 			crdArgs := m.getKubectlArgs("get", "crd", "applications.argoproj.io")
 			result, err := m.executor.Execute(ctx, "kubectl", crdArgs...)
 			if err == nil && result.ExitCode == 0 {
@@ -485,35 +644,30 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 				return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
 			}
 
-			if verbose && i%5 == 0 { // Log every 15 seconds
-				pterm.Info.Println("🕒 Waiting for ArgoCD CRD applications.argoproj.io...")
+			if verbose && i%5 == 0 {
+				pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
 			}
 
 			time.Sleep(retryInterval)
 		}
 	}
 
-	// Wait for ArgoCD pods to be ready using explicit context
 	if verbose {
 		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
 	}
 
-	// First, wait for pods to exist before trying to wait for them to be Ready
-	// kubectl wait returns an error if no pods match the selector
-	podExistenceTimeout := 120 * time.Second // 2 minutes for pods to be created
+	podExistenceTimeout := 120 * time.Second
 	podExistenceInterval := 3 * time.Second
 	podExistenceStart := time.Now()
 	podsExist := false
 
 	for time.Since(podExistenceStart) < podExistenceTimeout {
-		// Check context cancellation
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("operation cancelled: %w", ctx.Err())
 		default:
 		}
 
-		// Check if any ArgoCD pods exist
 		checkArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
 			"-l", "app.kubernetes.io/part-of=argocd",
 			"-o", "jsonpath={.items[*].metadata.name}")
@@ -538,13 +692,11 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	}
 
 	if !podsExist {
-		// No pods found - collect diagnostics and return error
 		pterm.Warning.Println("No ArgoCD pods found after waiting. Collecting diagnostics...")
 		m.printArgoCDPodDiagnostics(ctx)
 		return fmt.Errorf("timeout waiting for ArgoCD pods to be created (no pods found with label app.kubernetes.io/part-of=argocd)")
 	}
 
-	// Now wait for pods to be Ready using kubectl wait with timeout
 	waitArgs := m.getKubectlArgs("-n", "argocd", "wait",
 		"--for=condition=Ready", "pod",
 		"-l", "app.kubernetes.io/part-of=argocd",
@@ -552,7 +704,6 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	result, err := m.executor.Execute(ctx, "kubectl", waitArgs...)
 
 	if err != nil || result.ExitCode != 0 {
-		// Collect diagnostic info before returning error
 		m.printArgoCDPodDiagnostics(ctx)
 		return fmt.Errorf("timeout waiting for ArgoCD pods to be ready: %w", err)
 	}

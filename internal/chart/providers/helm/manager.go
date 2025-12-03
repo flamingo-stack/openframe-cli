@@ -3,6 +3,8 @@ package helm
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
@@ -14,11 +16,21 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/yaml"
 )
 
 // HelmManager handles Helm operations
 type HelmManager struct {
-	executor executor.CommandExecutor
+	executor      executor.CommandExecutor
+	kubeConfig    *rest.Config      // Stores the cluster connection config
+	dynamicClient dynamic.Interface // Dynamic client for programmatic resource management
+	verbose       bool              // Enable verbose logging
 }
 
 // NewHelmManager creates a new Helm manager
@@ -266,11 +278,28 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Install ArgoCD CRDs unless skipped
 	if !config.SkipCRDs {
 		if config.Verbose {
-			pterm.Info.Println("Installing ArgoCD CRDs...")
+			pterm.Info.Println("Installing ArgoCD CRDs using native Go client...")
 		}
 
-		// Install CRDs with --validate=false to handle cases where openapi download might be flaky
-		// Install each CRD file individually as the combined crds.yaml is no longer available
+		// Build kube context for the dynamic client
+		kubeContext := ""
+		if config.ClusterName != "" {
+			kubeContext = fmt.Sprintf("k3d-%s", config.ClusterName)
+		}
+
+		// Initialize the dynamic client for programmatic CRD installation
+		// This reduces reliance on external kubectl binary
+		if err := h.initDynamicClient(kubeContext); err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			return fmt.Errorf("failed to initialize Kubernetes client for CRD installation: %w", err)
+		}
+
+		// Set verbose mode for debug logging
+		h.verbose = config.Verbose
+
+		// Install CRDs programmatically using client-go dynamic client
 		crdUrls := []string{
 			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/application-crd.yaml",
 			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/applicationset-crd.yaml",
@@ -278,16 +307,16 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 
 		for _, crdUrl := range crdUrls {
-			_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-				Command: "kubectl",
-				Args:    []string{"apply", "-n", "argocd", "-f", crdUrl, "--validate=false"},
-			})
-			if err != nil {
+			if err := h.applyManifestFromURL(ctx, crdUrl); err != nil {
 				if spinner != nil {
 					spinner.Stop()
 				}
 				return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
 			}
+		}
+
+		if config.Verbose {
+			pterm.Success.Println("ArgoCD CRDs applied successfully via API")
 		}
 	} else if config.Verbose {
 		pterm.Info.Println("Skipping ArgoCD CRDs installation (--skip-crds)")
@@ -566,4 +595,125 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	}
 
 	return path, nil
+}
+
+// initDynamicClient initializes the Kubernetes dynamic client for the given context
+// This reduces reliance on external kubectl binary for resource management
+func (h *HelmManager) initDynamicClient(kubeContext string) error {
+	// Build config from kubeconfig
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+	if kubeContext != "" {
+		configOverrides.CurrentContext = kubeContext
+	}
+
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	config, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return fmt.Errorf("failed to build kubeconfig: %w", err)
+	}
+
+	h.kubeConfig = config
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	h.dynamicClient = dynamicClient
+	return nil
+}
+
+// applyManifestFromURL fetches a multi-document YAML manifest and applies its resources
+// using the dynamic client. This is used for CRD installation without relying on kubectl.
+func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) error {
+	// 1. Fetch the YAML manifest content
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch manifest from %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)
+	}
+
+	manifestBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest body: %w", err)
+	}
+
+	// 2. Split the manifest into individual documents (resources)
+	resources := strings.Split(string(manifestBytes), "---")
+
+	if h.dynamicClient == nil {
+		return fmt.Errorf("dynamic client not initialized; cannot apply manifest")
+	}
+
+	for _, resourceYAML := range resources {
+		if strings.TrimSpace(resourceYAML) == "" {
+			continue // Skip empty documents
+		}
+
+		// 3. Unmarshal YAML into an unstructured object
+		var unstructuredObj unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(resourceYAML), &unstructuredObj); err != nil {
+			return fmt.Errorf("failed to unmarshal YAML resource: %w", err)
+		}
+
+		// Skip if resource is empty after unmarshalling (e.g., just comments)
+		if unstructuredObj.Object == nil {
+			continue
+		}
+
+		// 4. Determine GroupVersionResource (GVR) for the dynamic client
+		gvk := unstructuredObj.GroupVersionKind()
+		gvr := schema.GroupVersionResource{
+			Group:    gvk.Group,
+			Version:  gvk.Version,
+			Resource: strings.ToLower(gvk.Kind) + "s", // Heuristic: pluralize Kind
+		}
+
+		// 5. Apply the resource (try Create first, then handle conflict with Update)
+		namespace := unstructuredObj.GetNamespace()
+
+		var resourceInterface dynamic.ResourceInterface
+		if namespace == "" {
+			// For cluster-scoped resources (like CRDs)
+			resourceInterface = h.dynamicClient.Resource(gvr)
+		} else {
+			// For namespaced resources
+			resourceInterface = h.dynamicClient.Resource(gvr).Namespace(namespace)
+		}
+
+		// Attempt to create the resource
+		_, err = resourceInterface.Create(ctx, &unstructuredObj, metav1.CreateOptions{})
+
+		// If creation fails due to conflict (already exists), attempt to update (replace)
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			// Get the existing resource to obtain its resourceVersion
+			existing, getErr := resourceInterface.Get(ctx, unstructuredObj.GetName(), metav1.GetOptions{})
+			if getErr != nil {
+				return fmt.Errorf("failed to get existing resource %s/%s: %w", gvk.Kind, unstructuredObj.GetName(), getErr)
+			}
+			unstructuredObj.SetResourceVersion(existing.GetResourceVersion())
+			_, err = resourceInterface.Update(ctx, &unstructuredObj, metav1.UpdateOptions{})
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to apply resource %s/%s: %w", gvk.Kind, unstructuredObj.GetName(), err)
+		}
+
+		if h.verbose {
+			pterm.Debug.Printf("Applied resource: %s/%s\n", gvk.Kind, unstructuredObj.GetName())
+		}
+	}
+
+	return nil
 }
