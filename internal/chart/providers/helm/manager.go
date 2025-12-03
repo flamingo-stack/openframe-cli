@@ -40,17 +40,46 @@ type HelmManager struct {
 // The config is used to create the Kubernetes client for native API operations
 func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose bool) (*HelmManager, error) {
 	if config == nil {
-		return nil, fmt.Errorf("rest.Config cannot be nil for HelmManager initialization")
+		// Return a minimal HelmManager that can still execute helm commands
+		// but will use kubectl fallback for deployment verification
+		if verbose {
+			pterm.Warning.Println("Creating HelmManager without rest.Config - native Go client will be unavailable")
+		}
+		return &HelmManager{
+			executor: exec,
+			verbose:  verbose,
+		}, nil
 	}
 
 	coreClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Kubernetes core client: %w", err)
+		// Log the error but continue with kubectl fallback capability
+		if verbose {
+			pterm.Warning.Printf("Failed to create Kubernetes core client (will use kubectl fallback): %v\n", err)
+		}
+		return &HelmManager{
+			executor:   exec,
+			kubeConfig: config,
+			verbose:    verbose,
+		}, nil
 	}
 
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Kubernetes dynamic client: %w", err)
+		if verbose {
+			pterm.Warning.Printf("Failed to create Kubernetes dynamic client: %v\n", err)
+		}
+		// Still return with coreClient available
+		return &HelmManager{
+			executor:   exec,
+			kubeConfig: config,
+			kubeClient: coreClient,
+			verbose:    verbose,
+		}, nil
+	}
+
+	if verbose {
+		pterm.Debug.Println("HelmManager initialized with native Go Kubernetes clients")
 	}
 
 	return &HelmManager{
@@ -431,17 +460,36 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Wait for ArgoCD deployments to be created after Helm install
 	// This addresses the race condition where Helm --wait returns before Kubernetes
 	// has actually created the Deployment objects (common in k3d/CI environments)
-	if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
-		if spinner != nil {
-			spinner.Stop()
+	if h.kubeClient != nil {
+		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			// Check if the error is due to context cancellation (CTRL-C)
+			if ctx.Err() == context.Canceled {
+				return ctx.Err()
+			}
+			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
+			pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
+			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 		}
-		// Check if the error is due to context cancellation (CTRL-C)
-		if ctx.Err() == context.Canceled {
-			return ctx.Err()
+	} else {
+		// Fallback to kubectl-based verification when native Go client is unavailable
+		// This can happen in Windows/WSL environments where the kubeconfig path handling differs
+		if config.Verbose {
+			pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
 		}
-		pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
-		pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
-		return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
+		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			if ctx.Err() == context.Canceled {
+				return ctx.Err()
+			}
+			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
+			pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
+			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
+		}
 	}
 
 	if spinner != nil {
@@ -736,5 +784,66 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 
 		return false, nil // Keep polling
 	})
+}
+
+// waitForArgoCDDeploymentsKubectl waits for ArgoCD deployments using kubectl
+// This is a fallback for when the native Go client is unavailable (e.g., Windows/WSL)
+func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clusterName string, verbose bool) error {
+	// List of expected deployments
+	expectedDeployments := []string{
+		"argocd-server",
+		"argocd-repo-server",
+		"argocd-application-controller",
+	}
+
+	// Wait settings
+	maxRetries := 45 // 45 retries * 2 seconds = 90 seconds max
+	retryInterval := 2 * time.Second
+
+	pterm.Info.Println("Waiting for ArgoCD deployments to appear via kubectl...")
+
+	// Build kubectl args with explicit context if cluster name is provided
+	baseArgs := []string{"-n", "argocd", "get", "deployment"}
+	if clusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		baseArgs = append([]string{"--context", contextName}, baseArgs...)
+	}
+
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		allFound := true
+		for _, name := range expectedDeployments {
+			args := append(baseArgs, name, "-o", "name")
+			result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+				Command: "kubectl",
+				Args:    args,
+			})
+
+			if err != nil || result == nil || strings.TrimSpace(result.Stdout) == "" {
+				allFound = false
+				lastErr = fmt.Errorf("deployment %s not found", name)
+				break
+			}
+		}
+
+		if allFound {
+			pterm.Success.Println("All ArgoCD deployments found.")
+			return nil
+		}
+
+		if verbose {
+			pterm.Debug.Printf("Waiting for deployments (attempt %d/%d)...\n", i+1, maxRetries)
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	return fmt.Errorf("deployments not found after %d retries: %w", maxRetries, lastErr)
 }
 
