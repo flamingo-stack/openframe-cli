@@ -740,3 +740,224 @@ func TestParseNodeCount(t *testing.T) {
 		})
 	}
 }
+
+func TestParseClusterInfoURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "standard cluster-info output",
+			input:    "Kubernetes control plane is running at https://127.0.0.1:6550",
+			expected: "https://127.0.0.1:6550",
+		},
+		{
+			name:     "cluster-info with additional lines",
+			input:    "Kubernetes control plane is running at https://127.0.0.1:6550\nCoreDNS is running at https://127.0.0.1:6550/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy",
+			expected: "https://127.0.0.1:6550",
+		},
+		{
+			name:     "cluster-info with ANSI codes",
+			input:    "\x1b[32mKubernetes control plane\x1b[0m is running at \x1b[33mhttps://127.0.0.1:6550\x1b[0m",
+			expected: "https://127.0.0.1:6550",
+		},
+		{
+			name:     "http URL",
+			input:    "Kubernetes control plane is running at http://localhost:8080",
+			expected: "http://localhost:8080",
+		},
+		{
+			name:     "no URL found",
+			input:    "Some random output without URLs",
+			expected: "",
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "URL with different port",
+			input:    "Kubernetes control plane is running at https://192.168.1.100:16443",
+			expected: "https://192.168.1.100:16443",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseClusterInfoURL(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestStripANSICodes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no ANSI codes",
+			input:    "plain text",
+			expected: "plain text",
+		},
+		{
+			name:     "simple color code",
+			input:    "\x1b[32mgreen text\x1b[0m",
+			expected: "green text",
+		},
+		{
+			name:     "multiple color codes",
+			input:    "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[34mblue\x1b[0m",
+			expected: "red green blue",
+		},
+		{
+			name:     "bold and underline",
+			input:    "\x1b[1mbold\x1b[0m \x1b[4munderline\x1b[0m",
+			expected: "bold underline",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "URL with ANSI codes",
+			input:    "\x1b[33mhttps://127.0.0.1:6550\x1b[0m",
+			expected: "https://127.0.0.1:6550",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripANSICodes(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractHostPort(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		expectedHost string
+		expectedPort string
+		expectError  bool
+	}{
+		{
+			name:         "https URL with port",
+			input:        "https://127.0.0.1:6550",
+			expectedHost: "127.0.0.1",
+			expectedPort: "6550",
+			expectError:  false,
+		},
+		{
+			name:         "http URL with port",
+			input:        "http://localhost:8080",
+			expectedHost: "localhost",
+			expectedPort: "8080",
+			expectError:  false,
+		},
+		{
+			name:         "host:port without scheme",
+			input:        "127.0.0.1:6443",
+			expectedHost: "127.0.0.1",
+			expectedPort: "6443",
+			expectError:  false,
+		},
+		{
+			name:         "IPv6 with port",
+			input:        "[::1]:6550",
+			expectedHost: "::1",
+			expectedPort: "6550",
+			expectError:  false,
+		},
+		{
+			name:        "no port specified",
+			input:       "https://127.0.0.1",
+			expectError: true,
+		},
+		{
+			name:        "just hostname",
+			input:       "localhost",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host, port, err := extractHostPort(tt.input)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedHost, host)
+				assert.Equal(t, tt.expectedPort, port)
+			}
+		})
+	}
+}
+
+func TestIsTemporaryError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "connection refused",
+			err:      errors.New("dial tcp 127.0.0.1:6550: connection refused"),
+			expected: true,
+		},
+		{
+			name:     "i/o timeout",
+			err:      errors.New("read tcp 127.0.0.1:6550: i/o timeout"),
+			expected: true,
+		},
+		{
+			name:     "no such host",
+			err:      errors.New("dial tcp: lookup foo.local: no such host"),
+			expected: true,
+		},
+		{
+			name:     "connection reset",
+			err:      errors.New("read tcp: connection reset by peer"),
+			expected: true,
+		},
+		{
+			name:     "service unavailable",
+			err:      errors.New("the server is currently unable to handle the request (Service Unavailable)"),
+			expected: true,
+		},
+		{
+			name:     "server currently unable",
+			err:      errors.New("server is currently unable to serve requests"),
+			expected: true,
+		},
+		{
+			name:     "permanent error",
+			err:      errors.New("unauthorized: invalid credentials"),
+			expected: false,
+		},
+		{
+			name:     "not found error",
+			err:      errors.New("resource not found"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isTemporaryError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

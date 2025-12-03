@@ -723,9 +723,52 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		}
 	}
 
-	// --- PHASE 2: Verify Cluster Reachability via API (Replaces kubectl cluster-info) ---
+	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---
 
-	// Create Kubernetes client
+	// On Windows/WSL2, the port might not be immediately available after k3d reports success
+	// Use kubectl cluster-info (via shell) to get the verified, live endpoint URL
+	// This is more reliable than trusting the kubeconfig's advertised IP/port
+	if runtime.GOOS == "windows" {
+		liveEndpoint, err := m.getClusterEndpointFromShell(ctx, contextName)
+		if err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not get live endpoint from kubectl cluster-info: %v\n", err)
+				fmt.Println("Will proceed with kubeconfig endpoint...")
+			}
+			// Don't fail - proceed with the kubeconfig endpoint
+		} else {
+			// Update the restConfig with the verified live endpoint
+			if liveEndpoint != restConfig.Host {
+				if m.verbose {
+					fmt.Printf("Updating API endpoint from %s to %s\n", restConfig.Host, liveEndpoint)
+				}
+				restConfig.Host = liveEndpoint
+			}
+		}
+	}
+
+	// Extract host and port from restConfig.Host for TCP check
+	host, port, err := extractHostPort(restConfig.Host)
+	if err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not extract host:port from %s: %v\n", restConfig.Host, err)
+		}
+		// Default to 127.0.0.1:6550 for k3d
+		host = "127.0.0.1"
+		port = defaultAPIPort
+	}
+
+	// Wait for TCP port to be available before attempting API calls
+	// This prevents flooding a dead port with requests on Windows/WSL2
+	tcpRetries := 10
+	tcpRetryDelay := 1 * time.Second
+	if err := m.waitForTCPPort(ctx, host, port, tcpRetries, tcpRetryDelay); err != nil {
+		return nil, fmt.Errorf("API server port not available: %w", err)
+	}
+
+	// --- PHASE 3: Verify Cluster Reachability via API ---
+
+	// Create Kubernetes client with the (possibly updated) restConfig
 	coreClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
@@ -817,6 +860,129 @@ func isTemporaryError(err error) bool {
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "Service Unavailable") ||
 		strings.Contains(errStr, "server is currently unable")
+}
+
+// waitForTCPPort performs a TCP connectivity check to verify the port is open
+// This is critical for Windows/WSL2 where the port may not be immediately available
+// after k3d reports cluster creation success
+func (m *K3dManager) waitForTCPPort(ctx context.Context, host string, port string, maxRetries int, retryDelay time.Duration) error {
+	address := net.JoinHostPort(host, port)
+
+	if m.verbose {
+		fmt.Printf("Waiting for TCP port %s to be available...\n", address)
+	}
+
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Attempt TCP connection with short timeout
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			conn.Close()
+			if m.verbose {
+				fmt.Printf("✓ TCP port %s is open\n", address)
+			}
+			return nil
+		}
+
+		lastErr = err
+		if m.verbose {
+			fmt.Printf("  TCP port not ready yet (attempt %d/%d): %v\n", i+1, maxRetries, err)
+		}
+		time.Sleep(retryDelay)
+	}
+
+	return fmt.Errorf("TCP port %s not available after %d retries: %w", address, maxRetries, lastErr)
+}
+
+// getClusterEndpointFromShell uses kubectl cluster-info to get the verified, live API endpoint URL
+// This is more reliable than trusting the kubeconfig's advertised IP/port immediately after cluster creation
+func (m *K3dManager) getClusterEndpointFromShell(ctx context.Context, contextName string) (string, error) {
+	result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
+	if err != nil {
+		return "", fmt.Errorf("kubectl cluster-info failed: %w", err)
+	}
+
+	// Parse the output to extract the API server URL
+	// Example output: "Kubernetes control plane is running at https://127.0.0.1:6550"
+	endpoint := parseClusterInfoURL(result.Stdout)
+	if endpoint == "" {
+		return "", fmt.Errorf("could not parse API endpoint from cluster-info output: %s", result.Stdout)
+	}
+
+	if m.verbose {
+		fmt.Printf("✓ Verified live API endpoint: %s\n", endpoint)
+	}
+
+	return endpoint, nil
+}
+
+// parseClusterInfoURL extracts the Kubernetes API server URL from kubectl cluster-info output
+func parseClusterInfoURL(output string) string {
+	// Look for "Kubernetes control plane is running at <URL>" or similar patterns
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		// Match patterns like "is running at https://..."
+		if strings.Contains(line, "is running at") {
+			parts := strings.Split(line, "is running at")
+			if len(parts) >= 2 {
+				// Extract the URL (trim ANSI codes and whitespace)
+				urlPart := strings.TrimSpace(parts[1])
+				// Remove any ANSI color codes
+				urlPart = stripANSICodes(urlPart)
+				// Find the URL starting with http
+				for _, word := range strings.Fields(urlPart) {
+					if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+						return word
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// stripANSICodes removes ANSI escape codes from a string
+func stripANSICodes(s string) string {
+	// Simple ANSI code removal - handles common escape sequences
+	result := strings.Builder{}
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
+}
+
+// extractHostPort extracts host and port from a URL string
+func extractHostPort(urlStr string) (string, string, error) {
+	// Remove scheme if present
+	urlStr = strings.TrimPrefix(urlStr, "https://")
+	urlStr = strings.TrimPrefix(urlStr, "http://")
+
+	host, port, err := net.SplitHostPort(urlStr)
+	if err != nil {
+		// If no port specified, try to determine from scheme
+		return urlStr, "", fmt.Errorf("could not split host:port from %s: %w", urlStr, err)
+	}
+
+	return host, port, nil
 }
 
 // getKubeconfigPath returns the kubeconfig file path (for non-Windows platforms)
