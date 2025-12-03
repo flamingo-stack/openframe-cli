@@ -16,6 +16,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -643,41 +644,77 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 // This reduces reliance on external kubectl binary for context management
 func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
 	contextName := fmt.Sprintf("k3d-%s", clusterName)
-	kubeconfigPath := m.getKubeconfigPath()
 
-	// --- PHASE 1: Native Kubeconfig Manipulation (Replaces kubectl config commands) ---
+	var restConfig *rest.Config
 
-	// Load the Kubeconfig file
-	config, err := clientcmd.LoadFromFile(kubeconfigPath)
-	if err != nil {
-		return fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
-	}
+	// On Windows, load kubeconfig content directly from WSL into memory
+	// to avoid Windows filesystem path issues
+	if runtime.GOOS == "windows" {
+		// Retrieve kubeconfig content directly from k3d inside WSL
+		kubeconfigContent, err := m.getKubeconfigContentFromWSL(ctx, clusterName)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve kubeconfig content from WSL: %w", err)
+		}
 
-	// Check if the context exists
-	if _, exists := config.Contexts[contextName]; !exists {
-		return fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
-	}
+		// Load the content from string into memory
+		config, err := clientcmd.Load([]byte(kubeconfigContent))
+		if err != nil {
+			return fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
+		}
 
-	// Switch the current context
-	config.CurrentContext = contextName
-	if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
-		return fmt.Errorf("failed to switch and write kubectl context: %w", err)
-	}
+		// Check if the context exists
+		if _, exists := config.Contexts[contextName]; !exists {
+			return fmt.Errorf("kubectl context %s not found in kubeconfig content", contextName)
+		}
 
-	if m.verbose {
-		fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
+		// Switch the current context in memory
+		config.CurrentContext = contextName
+
+		if m.verbose {
+			fmt.Printf("✓ Loaded kubeconfig from WSL and set context to %s\n", contextName)
+		}
+
+		// Build REST config from the in-memory kubeconfig
+		restConfig, err = clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
+		if err != nil {
+			return fmt.Errorf("failed to build REST config from in-memory kubeconfig: %w", err)
+		}
+	} else {
+		// Non-Windows: use file-based kubeconfig
+		kubeconfigPath := m.getKubeconfigPath()
+
+		// Load the Kubeconfig file
+		config, err := clientcmd.LoadFromFile(kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
+		}
+
+		// Check if the context exists
+		if _, exists := config.Contexts[contextName]; !exists {
+			return fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
+		}
+
+		// Switch the current context
+		config.CurrentContext = contextName
+		if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
+			return fmt.Errorf("failed to switch and write kubectl context: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
+		}
+
+		// Build rest.Config from the loaded Kubeconfig
+		restConfig, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+			&clientcmd.ConfigOverrides{CurrentContext: contextName},
+		).ClientConfig()
+		if err != nil {
+			return fmt.Errorf("failed to build REST config: %w", err)
+		}
 	}
 
 	// --- PHASE 2: Verify Cluster Reachability via API (Replaces kubectl cluster-info) ---
-
-	// Build rest.Config from the loaded Kubeconfig
-	restConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-		&clientcmd.ConfigOverrides{CurrentContext: contextName},
-	).ClientConfig()
-	if err != nil {
-		return fmt.Errorf("failed to build REST config: %w", err)
-	}
 
 	// Create Kubernetes client
 	coreClient, err := kubernetes.NewForConfig(restConfig)
@@ -773,7 +810,7 @@ func isTemporaryError(err error) bool {
 		strings.Contains(errStr, "server is currently unable")
 }
 
-// getKubeconfigPath returns the kubeconfig file path
+// getKubeconfigPath returns the kubeconfig file path (for non-Windows platforms)
 func (m *K3dManager) getKubeconfigPath() string {
 	// Check if KUBECONFIG environment variable is set
 	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
@@ -788,6 +825,20 @@ func (m *K3dManager) getKubeconfigPath() string {
 	}
 
 	return filepath.Join(homeDir, ".kube", "config")
+}
+
+// getKubeconfigContentFromWSL fetches kubeconfig content directly from k3d inside WSL
+// This avoids Windows filesystem path issues by loading content into memory
+func (m *K3dManager) getKubeconfigContentFromWSL(ctx context.Context, clusterName string) (string, error) {
+	args := []string{"kubeconfig", "get", clusterName}
+
+	// Execute the command - the executor will automatically wrap with 'wsl -d Ubuntu k3d ...'
+	result, err := m.executor.Execute(ctx, "k3d", args...)
+	if err != nil {
+		return "", fmt.Errorf("failed to get kubeconfig content from k3d: %w", err)
+	}
+
+	return result.Stdout, nil
 }
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files
