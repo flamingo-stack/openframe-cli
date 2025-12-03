@@ -16,6 +16,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -401,6 +402,18 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		pterm.Info.Printf("   Values file (Windows): %s\n", tmpFile.Name())
 		if runtime.GOOS == "windows" {
 			pterm.Info.Printf("   Values file (WSL): %s\n", valuesFilePath)
+		}
+	}
+
+	// Explicitly create and verify the argocd namespace exists BEFORE Helm install
+	// This addresses the race condition where Helm's --create-namespace may not complete properly
+	// in Windows/WSL environments, leading to "namespace not found" errors during deployment verification
+	if !config.DryRun {
+		if err := h.ensureArgoCDNamespace(ctx, config.ClusterName, config.Verbose); err != nil {
+			if spinner != nil {
+				spinner.Stop()
+			}
+			return fmt.Errorf("failed to ensure argocd namespace exists: %w", err)
 		}
 	}
 
@@ -794,6 +807,146 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 
 		return false, nil // Keep polling
 	})
+}
+
+// ensureArgoCDNamespace creates the argocd namespace if it doesn't exist and waits for it to be active
+// This addresses the race condition where Helm's --create-namespace may not complete before the command returns
+// On Windows/WSL, uses kubectl since the native Go client can't reach the cluster running in WSL
+func (h *HelmManager) ensureArgoCDNamespace(ctx context.Context, clusterName string, verbose bool) error {
+	namespace := "argocd"
+
+	// On Windows, use kubectl since the native Go client can't reach the cluster running in WSL
+	if runtime.GOOS == "windows" || h.kubeClient == nil {
+		return h.ensureArgoCDNamespaceKubectl(ctx, clusterName, verbose)
+	}
+
+	// Use native Go client for non-Windows platforms
+	if verbose {
+		pterm.Info.Println("Ensuring argocd namespace exists via native Go client...")
+	}
+
+	// Check if namespace already exists
+	_, err := h.kubeClient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err == nil {
+		if verbose {
+			pterm.Debug.Println("Namespace argocd already exists")
+		}
+		return nil
+	}
+
+	if !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	// Create the namespace
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+		},
+	}
+
+	_, err = h.kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create argocd namespace: %w", err)
+	}
+
+	if verbose {
+		pterm.Info.Println("Created argocd namespace, waiting for it to become Active...")
+	}
+
+	// Wait for namespace to become Active
+	return wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 30*time.Second, false, func(ctx context.Context) (bool, error) {
+		ns, err := h.kubeClient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+		if err != nil {
+			return false, nil // Keep polling on transient errors
+		}
+		if ns.Status.Phase == corev1.NamespaceActive {
+			if verbose {
+				pterm.Success.Println("Namespace argocd is Active")
+			}
+			return true, nil
+		}
+		return false, nil
+	})
+}
+
+// ensureArgoCDNamespaceKubectl creates the argocd namespace using kubectl (for Windows/WSL)
+func (h *HelmManager) ensureArgoCDNamespaceKubectl(ctx context.Context, clusterName string, verbose bool) error {
+	namespace := "argocd"
+
+	if verbose {
+		pterm.Info.Println("Ensuring argocd namespace exists via kubectl...")
+	}
+
+	// Build kubectl args with explicit context if cluster name is provided
+	baseArgs := []string{}
+	if clusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		baseArgs = append(baseArgs, "--context", contextName)
+	}
+
+	// Check if namespace exists
+	checkArgs := append(baseArgs, "get", "namespace", namespace, "-o", "name")
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    checkArgs,
+	})
+
+	if err == nil && result != nil && strings.TrimSpace(result.Stdout) != "" {
+		if verbose {
+			pterm.Debug.Println("Namespace argocd already exists")
+		}
+		return nil
+	}
+
+	// Create the namespace
+	createArgs := append(baseArgs, "create", "namespace", namespace)
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    createArgs,
+	})
+
+	if err != nil {
+		// Check if it's an "already exists" error (race condition)
+		if result != nil && strings.Contains(result.Stderr, "already exists") {
+			if verbose {
+				pterm.Debug.Println("Namespace argocd already exists (created by concurrent process)")
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to create argocd namespace: %w", err)
+	}
+
+	if verbose {
+		pterm.Info.Println("Created argocd namespace, waiting for it to become Active...")
+	}
+
+	// Wait for namespace to become Active
+	maxRetries := 60 // 60 * 500ms = 30 seconds
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		statusArgs := append(baseArgs, "get", "namespace", namespace, "-o", "jsonpath={.status.phase}")
+		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    statusArgs,
+		})
+
+		if err == nil && result != nil && strings.TrimSpace(result.Stdout) == "Active" {
+			if verbose {
+				pterm.Success.Println("Namespace argocd is Active")
+			}
+			return nil
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for argocd namespace to become Active")
 }
 
 // waitForArgoCDDeploymentsKubectl waits for ArgoCD deployments using kubectl
