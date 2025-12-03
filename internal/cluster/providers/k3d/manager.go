@@ -643,35 +643,56 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 // This reduces reliance on external kubectl binary for context management
 func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName string) error {
 	contextName := fmt.Sprintf("k3d-%s", clusterName)
-
-	// Get kubeconfig path - use standard location
 	kubeconfigPath := m.getKubeconfigPath()
 
-	// 1. Load the Kubeconfig file using native Go client
+	// --- PHASE 1: Native Kubeconfig Manipulation (Replaces kubectl config commands) ---
+
+	// Load the Kubeconfig file
 	config, err := clientcmd.LoadFromFile(kubeconfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to load kubeconfig file: %w", err)
+		return fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
 	}
 
-	// 2. Check if the context exists (replaces kubectl config get-contexts)
+	// Check if the context exists
 	if _, exists := config.Contexts[contextName]; !exists {
 		return fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
 	}
 
-	// 3. Switch the current context (replaces kubectl config use-context)
+	// Switch the current context
 	config.CurrentContext = contextName
 	if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
-		return fmt.Errorf("failed to write kubeconfig with new context: %w", err)
+		return fmt.Errorf("failed to switch and write kubectl context: %w", err)
 	}
 
 	if m.verbose {
-		fmt.Printf("✓ Switched to kubectl context: %s\n", contextName)
+		fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
 	}
 
-	// 4. Verify cluster is reachable using native Kubernetes client with retries
+	// --- PHASE 2: Verify Cluster Reachability via API (Replaces kubectl cluster-info) ---
+
+	// Build rest.Config from the loaded Kubeconfig
+	restConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+		&clientcmd.ConfigOverrides{CurrentContext: contextName},
+	).ClientConfig()
+	if err != nil {
+		return fmt.Errorf("failed to build REST config: %w", err)
+	}
+
+	// Create Kubernetes client
+	coreClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	// Verify cluster reachability and node readiness with polling
 	maxRetries := 15 // 15 retries * 2 seconds = 30 seconds max
 	retryDelay := 2 * time.Second
 	var lastErr error
+
+	if m.verbose {
+		fmt.Println("Waiting for cluster API and nodes to be reachable...")
+	}
 
 	for i := 0; i < maxRetries; i++ {
 		// Check context cancellation
@@ -681,75 +702,75 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		default:
 		}
 
-		// Build client config for the specific context
-		clientConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-			&clientcmd.ConfigOverrides{CurrentContext: contextName},
-		).ClientConfig()
-
+		// 1. Check API server connectivity (simple list operation)
+		nodes, err := coreClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
-			lastErr = fmt.Errorf("failed to build client config: %w", err)
-			if m.verbose {
-				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
+			// Check if the error is temporary (e.g., connection refused)
+			if isTemporaryError(err) {
+				lastErr = err
+				if m.verbose {
+					fmt.Printf("  Cluster not ready yet (attempt %d/%d): %v\n", i+1, maxRetries, err)
+				}
+				time.Sleep(retryDelay)
+				continue
 			}
-			time.Sleep(retryDelay)
-			continue
+			// Fatal error - don't retry
+			return fmt.Errorf("failed to connect to cluster API: %w", err)
 		}
 
-		// Create Kubernetes clientset
-		clientset, err := kubernetes.NewForConfig(clientConfig)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create kubernetes client: %w", err)
-			if m.verbose {
-				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-
-		// Verify API server is reachable by getting server version
-		_, err = clientset.Discovery().ServerVersion()
-		if err != nil {
-			lastErr = fmt.Errorf("API server not reachable: %w", err)
-			if m.verbose {
-				fmt.Printf("Waiting for cluster to be reachable... (attempt %d/%d): %v\n", i+1, maxRetries, lastErr)
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-
-		if m.verbose {
-			fmt.Printf("✓ Cluster API server is reachable\n")
-		}
-
-		// Additional verification: check if we can list nodes (especially important on Windows)
-		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-		if err != nil {
-			lastErr = fmt.Errorf("failed to list nodes: %w", err)
-			if m.verbose {
-				fmt.Printf("Cluster API reachable but nodes not ready yet, waiting... (attempt %d/%d)\n", i+1, maxRetries)
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-
+		// 2. Check for node existence (k3d should have at least one node)
 		if len(nodes.Items) == 0 {
 			lastErr = fmt.Errorf("no nodes found in cluster")
 			if m.verbose {
-				fmt.Printf("Cluster API reachable but no nodes found, waiting... (attempt %d/%d)\n", i+1, maxRetries)
+				fmt.Printf("  No nodes found yet (attempt %d/%d), waiting...\n", i+1, maxRetries)
 			}
 			time.Sleep(retryDelay)
 			continue
 		}
 
-		if m.verbose {
-			fmt.Printf("✓ Cluster nodes are ready (%d nodes)\n", len(nodes.Items))
+		// 3. Check if the required number of nodes are Ready
+		// Using string constants to avoid k8s.io/api/core/v1 dependency
+		readyCount := 0
+		for _, node := range nodes.Items {
+			for _, condition := range node.Status.Conditions {
+				if string(condition.Type) == "Ready" && string(condition.Status) == "True" {
+					readyCount++
+					break
+				}
+			}
 		}
 
-		return nil
+		// Success condition: Nodes exist and at least one is ready
+		if readyCount > 0 {
+			if m.verbose {
+				fmt.Printf("  Found %d ready node(s) out of %d total\n", readyCount, len(nodes.Items))
+				fmt.Println("✓ Cluster API and nodes are ready.")
+			}
+			return nil
+		}
+
+		lastErr = fmt.Errorf("no nodes in Ready state (found %d nodes, 0 ready)", len(nodes.Items))
+		if m.verbose {
+			fmt.Printf("  Nodes exist but none are Ready yet (attempt %d/%d), waiting...\n", i+1, maxRetries)
+		}
+		time.Sleep(retryDelay)
 	}
 
-	return fmt.Errorf("cluster not reachable after %d retries: %w", maxRetries, lastErr)
+	return fmt.Errorf("cluster not reachable after %d retries (last error: %w)", maxRetries, lastErr)
+}
+
+// isTemporaryError checks if an error is temporary and should be retried
+func isTemporaryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "Service Unavailable") ||
+		strings.Contains(errStr, "server is currently unable")
 }
 
 // getKubeconfigPath returns the kubeconfig file path

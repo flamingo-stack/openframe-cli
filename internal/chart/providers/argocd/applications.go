@@ -46,6 +46,43 @@ func NewManagerWithCluster(exec executor.CommandExecutor, clusterName string) *M
 	}
 }
 
+// NewManagerWithConfig creates a new ArgoCD manager with pre-configured Kubernetes clients
+// This is the preferred constructor when you already have a *rest.Config (e.g., after k3d cluster creation)
+func NewManagerWithConfig(exec executor.CommandExecutor, config *rest.Config) (*Manager, error) {
+	if config == nil {
+		return nil, fmt.Errorf("rest.Config cannot be nil")
+	}
+
+	m := &Manager{
+		executor:   exec,
+		kubeConfig: config,
+	}
+
+	// Create core Kubernetes client
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	m.kubeClient = kubeClient
+
+	// Create API extensions client (for CRD operations)
+	apiextClient, err := apiextensionsclientset.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create apiextensions client: %w", err)
+	}
+	m.apiextClient = apiextClient
+
+	// Create ArgoCD client
+	argocdClient, err := argocdclientset.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ArgoCD client: %w", err)
+	}
+	m.argocdClient = argocdClient
+
+	m.clientsInitialized = true
+	return m, nil
+}
+
 // initKubernetesClients initializes the native Kubernetes clients
 // This is called lazily when native client operations are needed
 func (m *Manager) initKubernetesClients() error {
@@ -136,33 +173,73 @@ type Application struct {
 }
 
 // getTotalExpectedApplications tries to determine the total number of applications that will be created
+// This function prioritizes native Go client calls over kubectl shell commands for better performance
 func (m *Manager) getTotalExpectedApplications(ctx context.Context, config config.ChartInstallConfig) int {
 	// Set cluster name from config if available
 	if config.ClusterName != "" && m.clusterName == "" {
 		m.clusterName = config.ClusterName
 	}
 
-	// Method 1: Use native ArgoCD client to get app-of-apps and count Application resources
-	if err := m.initKubernetesClients(); err == nil && m.argocdClient != nil {
-		app, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").Get(ctx, "app-of-apps", metav1.GetOptions{})
-		if err == nil {
-			appCount := 0
-			for _, res := range app.Status.Resources {
-				if res.Kind == "Application" {
-					appCount++
-				}
+	// Initialize clients if needed
+	if err := m.initKubernetesClients(); err != nil {
+		if config.Verbose {
+			pterm.Debug.Printf("Could not initialize native clients: %v\n", err)
+		}
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
+	if m.argocdClient == nil {
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
+	// --- Primary Method: Native ArgoCD Client ---
+
+	// Method 1: Get app-of-apps and count Application resources from its status
+	app, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").Get(ctx, "app-of-apps", metav1.GetOptions{})
+	if err == nil {
+		appCount := 0
+		for _, res := range app.Status.Resources {
+			if res.Kind == "Application" {
+				appCount++
 			}
-			if appCount > 0 {
-				if config.Verbose {
-					pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via native client)\n", appCount)
-				}
-				return appCount
+		}
+		if appCount > 0 {
+			if config.Verbose {
+				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via native client)\n", appCount)
 			}
+			return appCount
 		}
 	}
 
+	// Method 2: List all applications directly via native client
+	appList, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").List(ctx, metav1.ListOptions{})
+	if err == nil && len(appList.Items) > 0 {
+		// Count all apps except app-of-apps itself
+		count := 0
+		for _, a := range appList.Items {
+			if a.Name != "app-of-apps" {
+				count++
+			}
+		}
+		if count > 0 {
+			if config.Verbose {
+				pterm.Debug.Printf("Found %d ArgoCD applications (via native client)\n", count)
+			}
+			return count
+		}
+	}
+
+	// Default: return 0 to indicate unknown, will be discovered dynamically
+	if config.Verbose {
+		pterm.Debug.Println("Could not determine total expected applications upfront, will discover dynamically")
+	}
+
+	return 0
+}
+
+// getTotalExpectedApplicationsViaKubectl is the fallback method using kubectl commands
+func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, config config.ChartInstallConfig) int {
 	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl
-	// This shows ALL planned applications across all sync waves
 	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
 		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")...)
 
@@ -170,143 +247,33 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		resources := strings.Fields(manifestResult.Stdout)
 		if len(resources) > 0 {
 			if config.Verbose {
-				pterm.Debug.Printf("Detected %d applications planned by app-of-apps\n", len(resources))
+				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via kubectl)\n", len(resources))
 			}
 			return len(resources)
 		}
 	}
 
-	// Method 2: Get the source manifest from app-of-apps and count applications
-	// This gives us the definitive count from the source repository
-	sourceResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.spec.source}")...)
-
-	if err == nil && sourceResult.Stdout != "" && config.Verbose {
-		pterm.Debug.Printf("App-of-apps source: %s\n", sourceResult.Stdout)
-	}
-
-	// Method 3: Try to get the complete resource list from app-of-apps status
-	// This includes all resources that will be created, not just current ones
-	allResourcesResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={range .status.resources[*]}{.kind}{\":\"}{.name}{\"\\n\"}{end}")...)
-
-	if err == nil && allResourcesResult.Stdout != "" {
-		lines := strings.Split(strings.TrimSpace(allResourcesResult.Stdout), "\n")
-		appCount := 0
-		for _, line := range lines {
-			if strings.HasPrefix(line, "Application:") {
-				appCount++
-			}
-		}
-		if appCount > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Found %d total Application resources in app-of-apps status\n", appCount)
-			}
-			return appCount
-		}
-	}
-
-	// Method 4: Check ArgoCD server API for planned applications
-	// Query the ArgoCD server pod directly for application information
-	serverPod, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "pod",
-		"-l", "app.kubernetes.io/name=argocd-server", "-o", "jsonpath={.items[0].metadata.name}")...)
-
-	if err == nil && serverPod.Stdout != "" {
-		podName := strings.TrimSpace(serverPod.Stdout)
-		// Try to query ArgoCD's internal application list via kubectl exec
-		appsResult, _ := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "exec", podName, "--",
-			"argocd", "app", "list", "-o", "name")...)
-		if appsResult != nil && appsResult.Stdout != "" {
-			apps := strings.Split(strings.TrimSpace(appsResult.Stdout), "\n")
-			count := 0
-			for _, app := range apps {
-				if strings.TrimSpace(app) != "" && app != "app-of-apps" {
-					count++
-				}
-			}
-			if count > 0 {
-				if config.Verbose {
-					pterm.Debug.Printf("Found %d applications via ArgoCD CLI\n", count)
-				}
-				return count
-			}
-		}
-	}
-
-	// Method 5: Try to get all applications including those being created
-	// This includes applications in all states (even those not yet synced due to sync waves)
+	// Fallback Method 2: Try to get all applications including those being created
 	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
 		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")...)
 
 	if err == nil && allAppsResult.Stdout != "" {
 		apps := strings.Split(strings.TrimSpace(allAppsResult.Stdout), "\n")
-		// Filter out empty lines and count
 		count := 0
 		for _, app := range apps {
 			if strings.TrimSpace(app) != "" {
 				count++
 			}
 		}
-		// If we found a reasonable number of apps, use it
 		if count > 0 {
 			if config.Verbose {
-				pterm.Debug.Printf("Found %d total ArgoCD applications\n", count)
+				pterm.Debug.Printf("Found %d total ArgoCD applications (via kubectl)\n", count)
 			}
 			return count
 		}
 	}
 
-	// Method 6: Check helm values to count applications defined
-	helmResult, err := m.executor.Execute(ctx, "helm", "get", "values", "app-of-apps", "-n", "argocd")
-	if err == nil && helmResult.Stdout != "" {
-		// Count application definitions in various formats
-		// Look for patterns that indicate application definitions
-		appPatterns := []string{
-			"repoURL:",        // Each app typically has a repoURL
-			"targetRevision:", // And a targetRevision
-			"- name:",         // Applications might be in a list
-		}
-
-		maxCount := 0
-		for _, pattern := range appPatterns {
-			count := strings.Count(helmResult.Stdout, pattern)
-			if count > maxCount {
-				maxCount = count
-			}
-		}
-
-		if maxCount > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Estimated %d applications from helm values\n", maxCount)
-			}
-			return maxCount
-		}
-	}
-
-	// Method 7: Check ApplicationSets which generate multiple applications
-	appSetResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applicationsets.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")...)
-
-	if err == nil && appSetResult.Stdout != "" {
-		appSets := strings.Split(strings.TrimSpace(appSetResult.Stdout), "\n")
-		count := 0
-		for _, appSet := range appSets {
-			if strings.TrimSpace(appSet) != "" {
-				count++
-			}
-		}
-		// Each ApplicationSet typically generates 5-10 applications
-		// Use a conservative estimate
-		if count > 0 {
-			estimated := count * 7
-			if config.Verbose {
-				pterm.Debug.Printf("Estimated %d applications from %d ApplicationSets\n", estimated, count)
-			}
-			return estimated
-		}
-	}
-
-	// Default: return 0 to indicate unknown, will be discovered dynamically
+	// Default: return 0 to indicate unknown
 	if config.Verbose {
 		pterm.Debug.Println("Could not determine total expected applications upfront, will discover dynamically")
 	}
