@@ -717,86 +717,51 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 // This addresses the race condition where Helm's --wait returns before Kubernetes
 // has actually created the Deployment objects (common in k3d/CI environments)
 func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool) error {
-	// List of deployments we expect ArgoCD Helm chart to create
+	if h.kubeClient == nil {
+		return fmt.Errorf("Kubernetes core client not initialized")
+	}
+
+	// List of expected deployments
 	expectedDeployments := []string{
 		"argocd-server",
 		"argocd-repo-server",
 		"argocd-application-controller",
 	}
 
-	// Use exponential backoff to wait resiliently for the deployments to be created
-	timeout := 60 * time.Second
-	retryInterval := 2 * time.Second
+	// Wait settings
+	timeout := 90 * time.Second  // Increased timeout slightly for safety
+	retryInterval := 2 * time.Second // Check every 2 seconds
 
-	if verbose {
-		pterm.Info.Println("Waiting for ArgoCD deployments to appear...")
-	}
+	pterm.Info.Println("Waiting for ArgoCD deployments to appear via API...")
 
+	// Use wait.PollUntilContextTimeout for resilient polling
 	return wait.PollUntilContextTimeout(ctx, retryInterval, timeout, false, func(ctx context.Context) (bool, error) {
-		// Check if typed client is available
-		if h.kubeClient == nil {
-			// Fall back to kubectl if client not initialized
-			return h.checkDeploymentsViaKubectl(ctx)
-		}
 
-		missingCount := 0
+		missingDeployments := []string{}
 
 		for _, name := range expectedDeployments {
-			// Check if deployment exists using the typed client
+			// Native API call to check for deployment existence
 			_, err := h.kubeClient.AppsV1().Deployments("argocd").Get(ctx, name, metav1.GetOptions{})
 
 			if k8serrors.IsNotFound(err) {
-				missingCount++
+				missingDeployments = append(missingDeployments, name)
 			} else if err != nil {
-				// If it's a transient error (e.g., API timeout), log and retry
-				if verbose {
-					pterm.Debug.Printf("Transient error checking deployment %s: %v\n", name, err)
-				}
-				return false, nil // Keep polling
+				// If it's a transient API error (not 'Not Found'), log and retry
+				pterm.Warning.Printf("Transient API error checking deployment %s: %v\n", name, err)
+				return false, nil
 			}
 		}
 
-		if missingCount == 0 {
-			if verbose {
-				pterm.Success.Println("All ArgoCD deployments found.")
-			}
-			return true, nil // Success: All deployments exist
+		if len(missingDeployments) == 0 {
+			pterm.Success.Println("All ArgoCD deployments found.")
+			return true, nil // Success: All deployments exist.
 		}
 
 		if verbose {
-			pterm.Debug.Printf("Waiting for %d ArgoCD deployment(s) to be created...\n", missingCount)
+			pterm.Debug.Printf("Still missing deployments: %v\n", missingDeployments)
 		}
 
 		return false, nil // Keep polling
 	})
 }
 
-// checkDeploymentsViaKubectl is a fallback method to check deployments using kubectl
-func (h *HelmManager) checkDeploymentsViaKubectl(ctx context.Context) (bool, error) {
-	args := []string{"-n", "argocd", "get", "deployments", "-l", "app.kubernetes.io/part-of=argocd", "-o", "jsonpath={.items[*].metadata.name}"}
-
-	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    args,
-	})
-
-	if err != nil || result == nil {
-		return false, nil // Keep polling
-	}
-
-	deploymentNames := strings.TrimSpace(result.Stdout)
-	if deploymentNames == "" {
-		return false, nil // Keep polling - no deployments found yet
-	}
-
-	// Check if we have at least the core deployments
-	found := strings.Fields(deploymentNames)
-	requiredCount := 0
-	for _, name := range found {
-		if name == "argocd-server" || name == "argocd-repo-server" || name == "argocd-application-controller" {
-			requiredCount++
-		}
-	}
-
-	return requiredCount >= 3, nil
-}
