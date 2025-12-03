@@ -460,7 +460,12 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Wait for ArgoCD deployments to be created after Helm install
 	// This addresses the race condition where Helm --wait returns before Kubernetes
 	// has actually created the Deployment objects (common in k3d/CI environments)
-	if h.kubeClient != nil {
+	//
+	// On Windows/WSL2, always use kubectl fallback because:
+	// - The native Go client connects to 127.0.0.1:6550 from Windows
+	// - But this port is only accessible from inside WSL where k3d runs
+	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
+	if h.kubeClient != nil && runtime.GOOS != "windows" {
 		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
 			if spinner != nil {
 				spinner.Stop()
@@ -474,10 +479,15 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 		}
 	} else {
-		// Fallback to kubectl-based verification when native Go client is unavailable
-		// This can happen in Windows/WSL environments where the kubeconfig path handling differs
+		// Fallback to kubectl-based verification when:
+		// - Native Go client is unavailable
+		// - Running on Windows (kubectl runs via WSL wrapper and can reach the cluster)
 		if config.Verbose {
-			pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
+			if runtime.GOOS == "windows" {
+				pterm.Info.Println("Using kubectl for deployment verification (Windows/WSL environment)")
+			} else {
+				pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
+			}
 		}
 		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
 			if spinner != nil {

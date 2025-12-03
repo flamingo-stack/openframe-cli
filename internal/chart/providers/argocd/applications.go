@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
@@ -180,6 +181,14 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		m.clusterName = config.ClusterName
 	}
 
+	// On Windows/WSL2, always use kubectl fallback because:
+	// - The native Go client connects to 127.0.0.1:6550 from Windows
+	// - But this port is only accessible from inside WSL where k3d runs
+	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
+	if runtime.GOOS == "windows" {
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
 	// Initialize clients if needed
 	if err := m.initKubernetesClients(); err != nil {
 		if config.Verbose {
@@ -284,6 +293,14 @@ func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, co
 // parseApplications gets ArgoCD applications and their status using native ArgoCD client
 // This reduces reliance on external kubectl binary
 func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
+	// On Windows/WSL2, always use kubectl fallback because:
+	// - The native Go client connects to 127.0.0.1:6550 from Windows
+	// - But this port is only accessible from inside WSL where k3d runs
+	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
+	if runtime.GOOS == "windows" {
+		return m.parseApplicationsViaKubectl(ctx, verbose)
+	}
+
 	// Initialize clients if needed
 	if err := m.initKubernetesClients(); err != nil {
 		if verbose {
