@@ -749,6 +749,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// This is safe for local development clusters.
 	restConfig.Insecure = true
 	restConfig.TLSClientConfig.CAData = nil
+	restConfig.TLSClientConfig.CAFile = ""
 
 	if m.verbose {
 		fmt.Println("✓ TLS verification bypassed for local k3d cluster")
@@ -757,23 +758,19 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---
 
 	// On Windows/WSL2, the port might not be immediately available after k3d reports success
-	// Use kubectl cluster-info (via shell) to get the verified, live endpoint URL
-	// This is more reliable than trusting the kubeconfig's advertised IP/port
+	// Use kubectl cluster-info (via shell) to verify the cluster is reachable
+	// but DO NOT override the host - we already fixed it to use host.docker.internal
 	if runtime.GOOS == "windows" {
-		liveEndpoint, err := m.getClusterEndpointFromShell(ctx, contextName)
+		_, err := m.getClusterEndpointFromShell(ctx, contextName)
 		if err != nil {
 			if m.verbose {
-				fmt.Printf("Warning: Could not get live endpoint from kubectl cluster-info: %v\n", err)
-				fmt.Println("Will proceed with kubeconfig endpoint...")
+				fmt.Printf("Warning: Could not verify endpoint from kubectl cluster-info: %v\n", err)
+				fmt.Println("Will proceed with corrected kubeconfig endpoint (host.docker.internal)...")
 			}
-			// Don't fail - proceed with the kubeconfig endpoint
+			// Don't fail - proceed with the corrected kubeconfig endpoint
 		} else {
-			// Update the restConfig with the verified live endpoint
-			if liveEndpoint != restConfig.Host {
-				if m.verbose {
-					fmt.Printf("Updating API endpoint from %s to %s\n", restConfig.Host, liveEndpoint)
-				}
-				restConfig.Host = liveEndpoint
+			if m.verbose {
+				fmt.Printf("✓ Cluster endpoint verified via kubectl, using corrected host: %s\n", restConfig.Host)
 			}
 		}
 	}
