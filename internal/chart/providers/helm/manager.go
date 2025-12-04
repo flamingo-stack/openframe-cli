@@ -493,11 +493,9 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// This addresses the race condition where Helm --wait returns before Kubernetes
 	// has actually created the Deployment objects (common in k3d/CI environments)
 	//
-	// On Windows/WSL2, always use kubectl fallback because:
-	// - The native Go client connects to 127.0.0.1:6550 from Windows
-	// - But this port is only accessible from inside WSL where k3d runs
-	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
-	if h.kubeClient != nil && runtime.GOOS != "windows" {
+	// Use native Go client for all platforms (including Windows) for fast, reliable polling
+	// The kubeClient uses the same kubeconfig that was used to create the cluster
+	if h.kubeClient != nil {
 		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
 			if spinner != nil {
 				spinner.Stop()
@@ -507,19 +505,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 				return ctx.Err()
 			}
 			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
-			pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
+			pterm.Info.Println("This may indicate a Helm caching issue or cluster connectivity problem")
 			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 		}
 	} else {
-		// Fallback to kubectl-based verification when:
-		// - Native Go client is unavailable
-		// - Running on Windows (kubectl runs via WSL wrapper and can reach the cluster)
+		// Fallback to kubectl-based verification when native Go client is unavailable
 		if config.Verbose {
-			if runtime.GOOS == "windows" {
-				pterm.Info.Println("Using kubectl for deployment verification (Windows/WSL environment)")
-			} else {
-				pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
-			}
+			pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
 		}
 		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
 			if spinner != nil {
@@ -529,7 +521,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 				return ctx.Err()
 			}
 			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
-			pterm.Info.Println("This may indicate a Helm caching issue or WSL connectivity problem")
+			pterm.Info.Println("This may indicate a Helm caching issue or cluster connectivity problem")
 			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 		}
 	}
@@ -799,11 +791,12 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		"argocd-application-controller",
 	}
 
-	// Wait settings - increased for slow CI environments
-	timeout := 120 * time.Second     // 2 minutes for slow CI environments
-	retryInterval := 2 * time.Second // Check every 2 seconds
+	// CRITICAL: Use extended timeout since cluster operations can be slow
+	// Native API calls are fast (~ms), so we use frequent polling with longer total timeout
+	timeout := 90 * time.Second      // 90 seconds for slow CI/Windows environments
+	retryInterval := 1 * time.Second // Fast polling interval (native API is ~ms per call)
 
-	pterm.Info.Println("Waiting for ArgoCD deployments to appear via API...")
+	pterm.Info.Println("Waiting for ArgoCD deployments via NATIVE API...")
 
 	// Use wait.PollUntilContextTimeout for resilient polling
 	return wait.PollUntilContextTimeout(ctx, retryInterval, timeout, false, func(ctx context.Context) (bool, error) {
