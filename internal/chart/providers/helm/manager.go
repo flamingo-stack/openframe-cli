@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -31,10 +32,11 @@ import (
 // HelmManager handles Helm operations
 type HelmManager struct {
 	executor      executor.CommandExecutor
-	kubeConfig    *rest.Config         // Stores the cluster connection config
-	dynamicClient dynamic.Interface    // Dynamic client for programmatic resource management
-	kubeClient    kubernetes.Interface // Typed client for Deployment checks
-	verbose       bool                 // Enable verbose logging
+	kubeConfig    *rest.Config                      // Stores the cluster connection config
+	dynamicClient dynamic.Interface                 // Dynamic client for programmatic resource management
+	kubeClient    kubernetes.Interface              // Typed client for Deployment checks
+	crdClient     apiextensionsclient.Interface     // CRD client for checking CRD existence
+	verbose       bool                              // Enable verbose logging
 }
 
 // NewHelmManager creates a new Helm manager with the given rest.Config
@@ -79,6 +81,22 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 		}, nil
 	}
 
+	// Create CRD client for checking CRD existence
+	crdClient, err := apiextensionsclient.NewForConfig(config)
+	if err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to create CRD client: %v\n", err)
+		}
+		// Still return with other clients available
+		return &HelmManager{
+			executor:      exec,
+			kubeConfig:    config,
+			dynamicClient: dynamicClient,
+			kubeClient:    coreClient,
+			verbose:       verbose,
+		}, nil
+	}
+
 	if verbose {
 		pterm.Debug.Println("HelmManager initialized with native Go Kubernetes clients")
 	}
@@ -88,6 +106,7 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 		kubeConfig:    config,
 		dynamicClient: dynamicClient,
 		kubeClient:    coreClient,
+		crdClient:     crdClient,
 		verbose:       verbose,
 	}, nil
 }
@@ -765,6 +784,14 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		return fmt.Errorf("Kubernetes core client not initialized")
 	}
 
+	// First, wait for the ArgoCD Application CRD to exist
+	// This ensures the Helm chart has fully installed the CRDs before we check for deployments
+	if h.crdClient != nil {
+		if err := h.waitForArgoCDCRD(ctx, verbose); err != nil {
+			return fmt.Errorf("failed waiting for ArgoCD CRD: %w", err)
+		}
+	}
+
 	// List of expected deployments
 	expectedDeployments := []string{
 		"argocd-server",
@@ -772,8 +799,8 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		"argocd-application-controller",
 	}
 
-	// Wait settings
-	timeout := 90 * time.Second  // Increased timeout slightly for safety
+	// Wait settings - increased for slow CI environments
+	timeout := 120 * time.Second     // 2 minutes for slow CI environments
 	retryInterval := 2 * time.Second // Check every 2 seconds
 
 	pterm.Info.Println("Waiting for ArgoCD deployments to appear via API...")
@@ -806,6 +833,39 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		}
 
 		return false, nil // Keep polling
+	})
+}
+
+// waitForArgoCDCRD waits for the ArgoCD Application CRD to be created
+// This ensures the Helm chart has fully installed the CRDs before checking for deployments
+func (h *HelmManager) waitForArgoCDCRD(ctx context.Context, verbose bool) error {
+	if h.crdClient == nil {
+		return nil // Skip if CRD client is not available
+	}
+
+	timeout := 30 * time.Second      // 30 seconds for CRD to appear
+	retryInterval := 1 * time.Second // Check every second
+
+	if verbose {
+		pterm.Info.Println("Waiting for ArgoCD Application CRD to appear...")
+	}
+
+	return wait.PollUntilContextTimeout(ctx, retryInterval, timeout, false, func(ctx context.Context) (bool, error) {
+		_, err := h.crdClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, "applications.argoproj.io", metav1.GetOptions{})
+		if err == nil {
+			if verbose {
+				pterm.Success.Println("ArgoCD Application CRD found.")
+			}
+			return true, nil
+		}
+		if k8serrors.IsNotFound(err) {
+			return false, nil // Keep polling
+		}
+		// Log transient errors but keep polling
+		if verbose {
+			pterm.Debug.Printf("Transient error checking CRD: %v\n", err)
+		}
+		return false, nil
 	})
 }
 
@@ -959,8 +1019,8 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		"argocd-application-controller",
 	}
 
-	// Wait settings - optimized for CI environments
-	maxRetries := 30           // 30 retries * 3 seconds = 90 seconds max
+	// Wait settings - increased for slow CI environments
+	maxRetries := 40           // 40 retries * 3 seconds = 120 seconds max (2 minutes)
 	retryInterval := 3 * time.Second
 	initialDelay := 5 * time.Second // Give Kubernetes time to create resources after Helm completes
 
