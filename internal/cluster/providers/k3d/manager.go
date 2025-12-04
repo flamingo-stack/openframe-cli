@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -669,6 +670,25 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		config, err := clientcmd.Load([]byte(kubeconfigContent))
 		if err != nil {
 			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
+		}
+
+		// Fix Kubeconfig Host URL for WSL/Docker compatibility
+		// Replace 127.0.0.1/localhost with host.docker.internal which resolves correctly in WSL
+		for clusterName, cluster := range config.Clusters {
+			if strings.Contains(cluster.Server, "127.0.0.1") || strings.Contains(cluster.Server, "localhost") {
+				// Use regexp to safely extract the port
+				re := regexp.MustCompile(`:(\d+)`)
+				match := re.FindStringSubmatch(cluster.Server)
+
+				if len(match) > 1 {
+					// Replace 127.0.0.1/localhost with the stable host reference guaranteed by Docker/WSL
+					oldServer := cluster.Server
+					cluster.Server = fmt.Sprintf("https://host.docker.internal:%s", match[1])
+					if m.verbose {
+						fmt.Printf("Fixed KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
+					}
+				}
+			}
 		}
 
 		// Check if the context exists

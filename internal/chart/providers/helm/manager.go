@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -801,6 +802,12 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		return fmt.Errorf("Kubernetes core client not initialized")
 	}
 
+	// Wait for API port to be available before making API calls
+	// This prevents flooding a dead port with requests on Windows/WSL2
+	if err := h.waitForAPIPort(ctx, 45*time.Second); err != nil {
+		return fmt.Errorf("API port never opened: %w", err)
+	}
+
 	// List of expected deployments
 	expectedDeployments := []string{
 		"argocd-server",
@@ -1107,5 +1114,33 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 	}
 
 	return fmt.Errorf("deployments not found after %d retries: %w", maxRetries, lastErr)
+}
+
+// waitForAPIPort waits for the Kubernetes API port to be open before making API calls
+// This prevents flooding a dead port with requests on Windows/WSL2 where the port
+// might not be immediately available after k3d reports success
+func (h *HelmManager) waitForAPIPort(ctx context.Context, timeout time.Duration) error {
+	if h.kubeConfig == nil {
+		return nil // Skip if no kubeConfig available
+	}
+
+	// Extract host:port from kubeConfig.Host
+	apiAddress := strings.TrimPrefix(strings.TrimPrefix(h.kubeConfig.Host, "https://"), "http://")
+	if apiAddress == "" {
+		return nil // Skip if we can't determine the address
+	}
+
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	pterm.Info.Printf("Waiting for API port %s to open...\n", apiAddress)
+
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, timeout, false, func(ctx context.Context) (bool, error) {
+		conn, err := dialer.DialContext(ctx, "tcp", apiAddress)
+		if err == nil {
+			conn.Close()
+			pterm.Success.Printf("API port %s is open\n", apiAddress)
+			return true, nil // Port is open!
+		}
+		return false, nil // Keep polling
+	})
 }
 
