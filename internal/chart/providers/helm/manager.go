@@ -217,6 +217,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	}
 
 	// Install ArgoCD with upgrade --install
+	// CRDs are handled separately via native Go client, so we tell Helm to skip them
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
 		"--version=8.2.7",
@@ -225,6 +226,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--wait",
 		"--timeout", "5m",
 		"-f", valuesFilePath,
+		"--set", "crds.install=false",
 	}
 
 	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
@@ -347,6 +349,9 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Install ArgoCD CRDs unless skipped
+	// CRITICAL: CRDs must be installed and verified BEFORE Helm upgrade runs
+	// This eliminates the race condition where Helm tries to create CRD-based resources
+	// before the CRD definitions are available to the API server
 	if !config.SkipCRDs {
 		if config.Verbose {
 			pterm.Info.Println("Installing ArgoCD CRDs using native Go client...")
@@ -378,6 +383,20 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 		if config.Verbose {
 			pterm.Success.Println("ArgoCD CRDs applied successfully via API")
+		}
+
+		// Wait for CRDs to be available BEFORE running Helm
+		// This ensures the Kubernetes API server recognizes the CRD types
+		if h.crdClient != nil {
+			if config.Verbose {
+				pterm.Info.Println("Waiting for ArgoCD CRDs to be available...")
+			}
+			if err := h.waitForArgoCDCRD(ctx, config.Verbose); err != nil {
+				if spinner != nil {
+					spinner.Stop()
+				}
+				return fmt.Errorf("failed waiting for ArgoCD CRDs to become available: %w", err)
+			}
 		}
 	} else if config.Verbose {
 		pterm.Info.Println("Skipping ArgoCD CRDs installation (--skip-crds)")
@@ -437,6 +456,8 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Install ArgoCD with upgrade --install
+	// CRDs are handled separately via native Go client, so we tell Helm to skip them
+	// This prevents the race condition where Helm tries to install CRDs that we already installed
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
 		"--version=8.2.7",
@@ -445,6 +466,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--wait",
 		"--timeout", "5m",
 		"-f", valuesFilePath,
+		"--set", "crds.install=false",
 	}
 
 	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
@@ -456,7 +478,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	if config.DryRun {
 		args = append(args, "--dry-run")
 		if config.Verbose {
-			pterm.Info.Println("🔍 Running in dry-run mode...")
+			pterm.Info.Println("Running in dry-run mode...")
 		}
 	}
 
@@ -771,17 +793,12 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 // waitForArgoCDDeployments waits for ArgoCD deployments to be created in the cluster
 // This addresses the race condition where Helm's --wait returns before Kubernetes
 // has actually created the Deployment objects (common in k3d/CI environments)
+//
+// NOTE: CRDs are now installed and verified BEFORE Helm runs (see InstallArgoCDWithProgress),
+// so this function focuses only on verifying the deployments exist.
 func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool) error {
 	if h.kubeClient == nil {
 		return fmt.Errorf("Kubernetes core client not initialized")
-	}
-
-	// First, wait for the ArgoCD Application CRD to exist
-	// This ensures the Helm chart has fully installed the CRDs before we check for deployments
-	if h.crdClient != nil {
-		if err := h.waitForArgoCDCRD(ctx, verbose); err != nil {
-			return fmt.Errorf("failed waiting for ArgoCD CRD: %w", err)
-		}
 	}
 
 	// List of expected deployments
