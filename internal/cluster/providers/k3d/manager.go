@@ -743,6 +743,17 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		}
 	}
 
+	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
+	// The API server's certificate is issued to the cluster name or specific hostnames,
+	// which may not match when connecting via host.docker.internal or 127.0.0.1.
+	// This is safe for local development clusters.
+	restConfig.Insecure = true
+	restConfig.TLSClientConfig.CAData = nil
+
+	if m.verbose {
+		fmt.Println("✓ TLS verification bypassed for local k3d cluster")
+	}
+
 	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---
 
 	// On Windows/WSL2, the port might not be immediately available after k3d reports success
