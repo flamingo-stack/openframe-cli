@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 
 	"k8s.io/client-go/rest"
@@ -22,12 +23,31 @@ func ApplyInsecureTransport(config *rest.Config) *rest.Config {
 		return nil
 	}
 
+	// Build the TLS config for the custom transport
+	tlsConfig := &tls.Config{
+		// Skip server certificate verification (the main goal)
+		InsecureSkipVerify: true,
+	}
+
+	// CRITICAL: Preserve client certificate authentication data
+	// The client cert/key are used to authenticate to the Kubernetes API server
+	if len(config.TLSClientConfig.CertData) > 0 && len(config.TLSClientConfig.KeyData) > 0 {
+		cert, err := tls.X509KeyPair(config.TLSClientConfig.CertData, config.TLSClientConfig.KeyData)
+		if err == nil {
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+	}
+
+	// Also preserve CA data if present (for client cert verification by server)
+	if len(config.TLSClientConfig.CAData) > 0 {
+		certPool := x509.NewCertPool()
+		certPool.AppendCertsFromPEM(config.TLSClientConfig.CAData)
+		tlsConfig.RootCAs = certPool
+	}
+
 	// Create a custom transport that explicitly skips TLS verification at the HTTP level
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			// The magic setting: skips all server certificate verification checks
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig: tlsConfig,
 	}
 
 	// Set the custom RoundTripper on the rest.Config
@@ -36,8 +56,7 @@ func ApplyInsecureTransport(config *rest.Config) *rest.Config {
 
 	// CRITICAL: Clear the internal TLS fields to prevent conflict with the custom transport.
 	// The client-go library throws "not allowed" error when both Insecure=true and custom Transport are set.
-	// Since the custom transport method is the most reliable for WSL/TLS issues, we defer to it
-	// and clear the conflicting flags.
+	// Since the custom transport is now handling ALL TLS (including client certs), we can safely clear these.
 	config.Insecure = false // Must be false to allow custom Transport!
 	config.TLSClientConfig = rest.TLSClientConfig{}
 
