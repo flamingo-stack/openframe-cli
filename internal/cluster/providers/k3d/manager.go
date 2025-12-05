@@ -672,20 +672,33 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
 		}
 
-		// Fix Kubeconfig Host URL for WSL/Docker compatibility
-		// Replace 127.0.0.1/localhost with host.docker.internal which resolves correctly in WSL
+		// Normalize Kubeconfig Host URL for WSL/Docker compatibility
+		// Keep 127.0.0.1 as the host - it works with proper TLS bypass
+		// The key is ensuring Insecure=true is set on the rest.Config (done below)
 		for clusterName, cluster := range config.Clusters {
-			if strings.Contains(cluster.Server, "127.0.0.1") || strings.Contains(cluster.Server, "localhost") {
+			// Replace host.docker.internal back to 127.0.0.1 if it was previously changed
+			if strings.Contains(cluster.Server, "host.docker.internal") {
 				// Use regexp to safely extract the port
 				re := regexp.MustCompile(`:(\d+)`)
 				match := re.FindStringSubmatch(cluster.Server)
 
 				if len(match) > 1 {
-					// Replace 127.0.0.1/localhost with the stable host reference guaranteed by Docker/WSL
 					oldServer := cluster.Server
-					cluster.Server = fmt.Sprintf("https://host.docker.internal:%s", match[1])
+					cluster.Server = fmt.Sprintf("https://127.0.0.1:%s", match[1])
 					if m.verbose {
-						fmt.Printf("Fixed KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
+						fmt.Printf("Normalized KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
+					}
+				}
+			}
+			// Ensure localhost is also normalized to 127.0.0.1 for consistency
+			if strings.Contains(cluster.Server, "localhost") {
+				re := regexp.MustCompile(`:(\d+)`)
+				match := re.FindStringSubmatch(cluster.Server)
+				if len(match) > 1 {
+					oldServer := cluster.Server
+					cluster.Server = fmt.Sprintf("https://127.0.0.1:%s", match[1])
+					if m.verbose {
+						fmt.Printf("Normalized KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
 					}
 				}
 			}
@@ -745,8 +758,8 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
 	// The API server's certificate is issued to the cluster name or specific hostnames,
-	// which may not match when connecting via host.docker.internal or 127.0.0.1.
-	// This is safe for local development clusters.
+	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
+	// This is safe for local development clusters and solves handshake failures.
 	restConfig.Insecure = true
 	restConfig.TLSClientConfig.CAData = nil
 	restConfig.TLSClientConfig.CAFile = ""
@@ -759,18 +772,18 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 	// On Windows/WSL2, the port might not be immediately available after k3d reports success
 	// Use kubectl cluster-info (via shell) to verify the cluster is reachable
-	// but DO NOT override the host - we already fixed it to use host.docker.internal
+	// We use 127.0.0.1 with TLS bypass for reliable connectivity
 	if runtime.GOOS == "windows" {
 		_, err := m.getClusterEndpointFromShell(ctx, contextName)
 		if err != nil {
 			if m.verbose {
 				fmt.Printf("Warning: Could not verify endpoint from kubectl cluster-info: %v\n", err)
-				fmt.Println("Will proceed with corrected kubeconfig endpoint (host.docker.internal)...")
+				fmt.Println("Will proceed with 127.0.0.1 endpoint (TLS bypass enabled)...")
 			}
-			// Don't fail - proceed with the corrected kubeconfig endpoint
+			// Don't fail - proceed with the kubeconfig endpoint
 		} else {
 			if m.verbose {
-				fmt.Printf("✓ Cluster endpoint verified via kubectl, using corrected host: %s\n", restConfig.Host)
+				fmt.Printf("✓ Cluster endpoint verified via kubectl, using host: %s\n", restConfig.Host)
 			}
 		}
 	}
@@ -784,6 +797,12 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Default to 127.0.0.1:6550 for k3d
 		host = "127.0.0.1"
 		port = defaultAPIPort
+	}
+
+	// Brief pause before TCP check on Windows/WSL2
+	// This gives the port mapping time to stabilize after k3d reports success
+	if runtime.GOOS == "windows" {
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	// Wait for TCP port to be available before attempting API calls
