@@ -673,34 +673,31 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
 		}
 
-		// Normalize Kubeconfig Host URL for WSL/Docker compatibility
-		// Keep 127.0.0.1 as the host - it works with proper TLS bypass
-		// The key is ensuring Insecure=true is set on the rest.Config (done below)
-		for clusterName, cluster := range config.Clusters {
-			// Replace host.docker.internal back to 127.0.0.1 if it was previously changed
-			if strings.Contains(cluster.Server, "host.docker.internal") {
-				// Use regexp to safely extract the port
-				re := regexp.MustCompile(`:(\d+)`)
-				match := re.FindStringSubmatch(cluster.Server)
-
-				if len(match) > 1 {
-					oldServer := cluster.Server
-					cluster.Server = fmt.Sprintf("https://127.0.0.1:%s", match[1])
-					if m.verbose {
-						fmt.Printf("Normalized KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
-					}
-				}
+		// CRITICAL FIX: Use WSL internal IP to bypass Windows NAT/Firewall
+		// The Windows NAT layer blocks connections to 127.0.0.1 for ports exposed by WSL2/Docker.
+		// Using the internal WSL IP (e.g., 172.x.x.x) bypasses this restriction entirely.
+		wslInternalIP, err := m.getWSLInternalIP(ctx)
+		if err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not get WSL internal IP: %v\n", err)
+				fmt.Println("Falling back to 127.0.0.1 (may fail due to Windows NAT)")
 			}
-			// Ensure localhost is also normalized to 127.0.0.1 for consistency
-			if strings.Contains(cluster.Server, "localhost") {
-				re := regexp.MustCompile(`:(\d+)`)
-				match := re.FindStringSubmatch(cluster.Server)
-				if len(match) > 1 {
-					oldServer := cluster.Server
-					cluster.Server = fmt.Sprintf("https://127.0.0.1:%s", match[1])
-					if m.verbose {
-						fmt.Printf("Normalized KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
-					}
+			wslInternalIP = "127.0.0.1" // Fallback, but likely won't work
+		} else if m.verbose {
+			fmt.Printf("✓ Retrieved WSL internal IP: %s\n", wslInternalIP)
+		}
+
+		// Replace all server addresses with the WSL internal IP
+		for clusterName, cluster := range config.Clusters {
+			// Extract the port from the current server URL
+			re := regexp.MustCompile(`:(\d+)`)
+			match := re.FindStringSubmatch(cluster.Server)
+
+			if len(match) > 1 {
+				oldServer := cluster.Server
+				cluster.Server = fmt.Sprintf("https://%s:%s", wslInternalIP, match[1])
+				if m.verbose {
+					fmt.Printf("Rewrote KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
 				}
 			}
 		}
@@ -1061,6 +1058,36 @@ func (m *K3dManager) getKubeconfigContentFromWSL(ctx context.Context, clusterNam
 	}
 
 	return result.Stdout, nil
+}
+
+// getWSLInternalIP retrieves the internal IP address of the WSL2 eth0 interface.
+// This IP (e.g., 172.x.x.x) bypasses Windows NAT/Firewall that blocks 127.0.0.1.
+func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
+	// Get the WSL user for running the command
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Get the internal IP of eth0 in WSL
+	// This uses the standard ip command to extract the IPv4 address
+	ipCmd := "ip a show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1"
+	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", ipCmd)
+	if err != nil {
+		return "", fmt.Errorf("failed to get WSL internal IP: %w", err)
+	}
+
+	ip := strings.TrimSpace(result.Stdout)
+	if ip == "" {
+		return "", fmt.Errorf("WSL internal IP is empty")
+	}
+
+	// Validate that the IP looks like an IPv4 address
+	if !strings.Contains(ip, ".") {
+		return "", fmt.Errorf("invalid WSL internal IP format: %s", ip)
+	}
+
+	return ip, nil
 }
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files
