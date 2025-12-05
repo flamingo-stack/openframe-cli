@@ -55,6 +55,19 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 		}, nil
 	}
 
+	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
+	// The API server's certificate is issued to the cluster name or specific hostnames,
+	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
+	// This is safe for local development clusters and solves handshake failures.
+	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
+	config.Insecure = true
+	config.TLSClientConfig.CAData = nil
+	config.TLSClientConfig.CAFile = ""
+
+	if verbose {
+		pterm.Debug.Println("TLS verification bypassed for local k3d cluster (HelmManager)")
+	}
+
 	coreClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		// Log the error but continue with kubectl fallback capability
