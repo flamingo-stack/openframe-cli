@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -760,12 +761,11 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// The API server's certificate is issued to the cluster name or specific hostnames,
 	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
 	// This is safe for local development clusters and solves handshake failures.
-	restConfig.Insecure = true
-	restConfig.TLSClientConfig.CAData = nil
-	restConfig.TLSClientConfig.CAFile = ""
+	// Uses custom HTTP transport to bypass TLS at the deepest level.
+	restConfig = sharedconfig.ApplyInsecureTransport(restConfig)
 
 	if m.verbose {
-		fmt.Println("✓ TLS verification bypassed for local k3d cluster")
+		fmt.Println("✓ TLS verification bypassed for local k3d cluster (aggressive transport-level bypass)")
 	}
 
 	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---

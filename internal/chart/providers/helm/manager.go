@@ -15,6 +15,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 	corev1 "k8s.io/api/core/v1"
@@ -56,16 +57,12 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
-	// The API server's certificate is issued to the cluster name or specific hostnames,
-	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
-	// This is safe for local development clusters and solves handshake failures.
+	// Uses custom HTTP transport to bypass TLS at the deepest level.
 	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
-	config.Insecure = true
-	config.TLSClientConfig.CAData = nil
-	config.TLSClientConfig.CAFile = ""
+	config = sharedconfig.ApplyInsecureTransport(config)
 
 	if verbose {
-		pterm.Debug.Println("TLS verification bypassed for local k3d cluster (HelmManager)")
+		pterm.Debug.Println("TLS verification bypassed for local k3d cluster (HelmManager - aggressive transport-level bypass)")
 	}
 
 	coreClient, err := kubernetes.NewForConfig(config)

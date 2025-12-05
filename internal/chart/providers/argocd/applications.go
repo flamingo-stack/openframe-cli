@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 	argocdclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -55,13 +56,9 @@ func NewManagerWithConfig(exec executor.CommandExecutor, config *rest.Config) (*
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
-	// The API server's certificate is issued to the cluster name or specific hostnames,
-	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
-	// This is safe for local development clusters and solves handshake failures.
+	// Uses custom HTTP transport to bypass TLS at the deepest level.
 	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
-	config.Insecure = true
-	config.TLSClientConfig.CAData = nil
-	config.TLSClientConfig.CAFile = ""
+	config = sharedconfig.ApplyInsecureTransport(config)
 
 	m := &Manager{
 		executor:   exec,
@@ -121,12 +118,8 @@ func (m *Manager) initKubernetesClients() error {
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
-	// The API server's certificate is issued to the cluster name or specific hostnames,
-	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
-	// This is safe for local development clusters and solves handshake failures.
-	config.Insecure = true
-	config.TLSClientConfig.CAData = nil
-	config.TLSClientConfig.CAFile = ""
+	// Uses custom HTTP transport to bypass TLS at the deepest level.
+	config = sharedconfig.ApplyInsecureTransport(config)
 
 	// On Windows, normalize the host to 127.0.0.1 if needed
 	if runtime.GOOS == "windows" && strings.Contains(config.Host, "host.docker.internal") {
