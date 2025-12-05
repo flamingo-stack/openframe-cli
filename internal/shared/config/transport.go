@@ -34,12 +34,12 @@ func ApplyInsecureTransport(config *rest.Config) *rest.Config {
 	// This overrides any default transport behavior
 	config.Transport = transport
 
-	// Clear the old TLS config fields to prevent any conflicts
+	// CRITICAL: Clear the internal TLS fields to prevent conflict with the custom transport.
+	// The client-go library throws "not allowed" error when both Insecure=true and custom Transport are set.
+	// Since the custom transport method is the most reliable for WSL/TLS issues, we defer to it
+	// and clear the conflicting flags.
+	config.Insecure = false // Must be false to allow custom Transport!
 	config.TLSClientConfig = rest.TLSClientConfig{}
-
-	// Also explicitly set Insecure = true as a secondary check
-	// Some code paths may check this flag independently
-	config.Insecure = true
 
 	return config
 }
