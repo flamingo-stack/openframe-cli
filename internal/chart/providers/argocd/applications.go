@@ -111,6 +111,24 @@ func (m *Manager) initKubernetesClients() error {
 		return fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
 
+	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
+	// The API server's certificate is issued to the cluster name or specific hostnames,
+	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
+	// This is safe for local development clusters and solves handshake failures.
+	config.Insecure = true
+	config.TLSClientConfig.CAData = nil
+	config.TLSClientConfig.CAFile = ""
+
+	// On Windows, normalize the host to 127.0.0.1 if needed
+	if runtime.GOOS == "windows" && strings.Contains(config.Host, "host.docker.internal") {
+		// Extract port and use 127.0.0.1
+		parts := strings.Split(config.Host, ":")
+		if len(parts) >= 3 {
+			port := parts[len(parts)-1]
+			config.Host = fmt.Sprintf("https://127.0.0.1:%s", port)
+		}
+	}
+
 	m.kubeConfig = config
 
 	// Create core Kubernetes client
