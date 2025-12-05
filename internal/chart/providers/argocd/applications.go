@@ -56,9 +56,9 @@ func NewManagerWithConfig(exec executor.CommandExecutor, config *rest.Config) (*
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
-	// Uses custom HTTP transport to bypass TLS at the deepest level.
+	// Uses Insecure=true with CA data cleared, preserving client cert authentication.
 	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
-	config = sharedconfig.ApplyInsecureTransport(config)
+	config = sharedconfig.ApplyInsecureTLSConfig(config)
 
 	m := &Manager{
 		executor:   exec,

@@ -761,11 +761,11 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// The API server's certificate is issued to the cluster name or specific hostnames,
 	// which may not match when connecting via 127.0.0.1 from Windows/WSL2.
 	// This is safe for local development clusters and solves handshake failures.
-	// Uses custom HTTP transport to bypass TLS at the deepest level.
-	restConfig = sharedconfig.ApplyInsecureTransport(restConfig)
+	// Uses Insecure=true with CA data cleared, preserving client cert authentication.
+	restConfig = sharedconfig.ApplyInsecureTLSConfig(restConfig)
 
 	if m.verbose {
-		fmt.Println("✓ TLS verification bypassed for local k3d cluster (aggressive transport-level bypass)")
+		fmt.Println("✓ TLS verification bypassed for local k3d cluster (Insecure=true, auth preserved)")
 	}
 
 	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---

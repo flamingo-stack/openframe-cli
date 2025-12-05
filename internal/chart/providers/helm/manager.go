@@ -57,12 +57,12 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
-	// Uses custom HTTP transport to bypass TLS at the deepest level.
+	// Uses Insecure=true with CA data cleared, preserving client cert authentication.
 	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
-	config = sharedconfig.ApplyInsecureTransport(config)
+	config = sharedconfig.ApplyInsecureTLSConfig(config)
 
 	if verbose {
-		pterm.Debug.Println("TLS verification bypassed for local k3d cluster (HelmManager - aggressive transport-level bypass)")
+		pterm.Debug.Println("TLS verification bypassed for local k3d cluster (Insecure=true, auth preserved)")
 	}
 
 	coreClient, err := kubernetes.NewForConfig(config)
