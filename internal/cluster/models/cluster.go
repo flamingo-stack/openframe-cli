@@ -6,8 +6,9 @@ import "time"
 type ClusterType string
 
 const (
-	ClusterTypeK3d ClusterType = "k3d"
-	ClusterTypeGKE ClusterType = "gke"
+	ClusterTypeK3d  ClusterType = "k3d"
+	ClusterTypeKind ClusterType = "kind"
+	ClusterTypeGKE  ClusterType = "gke"
 )
 
 // ClusterConfig holds cluster configuration
@@ -38,9 +39,15 @@ type NodeInfo struct {
 
 // ProviderOptions contains provider-specific options
 type ProviderOptions struct {
-	K3d     *K3dOptions `json:"k3d,omitempty"`
-	GKE     *GKEOptions `json:"gke,omitempty"`
-	Verbose bool        `json:"verbose,omitempty"`
+	K3d     *K3dOptions  `json:"k3d,omitempty"`
+	Kind    *KindOptions `json:"kind,omitempty"`
+	GKE     *GKEOptions  `json:"gke,omitempty"`
+	Verbose bool         `json:"verbose,omitempty"`
+}
+
+// KindOptions contains kind-specific options
+type KindOptions struct {
+	PortMappings []string `json:"port_mappings,omitempty"`
 }
 
 // K3dOptions contains k3d-specific options

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/manager"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -35,11 +36,11 @@ const (
 	timestampSuffixLen = 6
 )
 
-// ClusterManager interface for managing clusters
-type ClusterManager interface {
-	DetectClusterType(ctx context.Context, name string) (models.ClusterType, error)
-	ListClusters(ctx context.Context) ([]models.ClusterInfo, error)
-	ListAllClusters(ctx context.Context) ([]models.ClusterInfo, error)
+func init() {
+	// Register the k3d manager factory
+	manager.RegisterManager(manager.ManagerTypeK3d, func(exec executor.CommandExecutor, verbose bool) manager.ClusterManager {
+		return NewK3dManager(exec, verbose)
+	})
 }
 
 // K3dManager manages K3D cluster operations

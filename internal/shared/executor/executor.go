@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -174,84 +173,15 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 	return envStrings
 }
 
-// shellEscape escapes an argument for safe use when passing to WSL
-// WSL passes arguments directly to the target command, so we only need to handle
-// characters that could confuse the WSL argument parser itself (spaces, quotes, backslashes)
-// We should NOT escape characters like {}, $, etc. that are part of command syntax (e.g., jsonpath)
-func shellEscape(arg string) string {
-	// Only escape if the argument contains spaces, quotes, or backslashes
-	// These are the characters that WSL argument parsing cares about
-	needsEscape := false
-	for _, ch := range arg {
-		if ch == ' ' || ch == '"' || ch == '\'' || ch == '\\' {
-			needsEscape = true
-			break
-		}
-	}
-
-	if !needsEscape {
-		return arg
-	}
-
-	// For arguments with spaces or quotes, wrap in double quotes
-	// and escape internal double quotes and backslashes
-	escaped := strings.ReplaceAll(arg, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-	return "\"" + escaped + "\""
-}
-
-// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2
-// This avoids issues with batch file wrappers not preserving special characters
-// and ensures all Kubernetes tools run in the same environment
+// wrapCommandForWindows is now a passthrough function that returns commands as-is
+// The new architecture uses native Windows executables (kind.exe, kubectl.exe, helm.exe)
+// instead of WSL wrappers, providing better performance and reliability on Windows.
+//
+// For Windows: Commands are executed directly using native .exe binaries
+// For Linux/macOS: Commands are executed directly as before
 func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
-	// Only wrap on Windows
-	if runtime.GOOS != "windows" {
-		return command, args
-	}
-
-	// Only wrap kubectl, helm, and k3d commands
-	if command != "kubectl" && command != "helm" && command != "k3d" {
-		return command, args
-	}
-
-	// Determine WSL user - try to detect from environment or use default
-	wslUser := os.Getenv("WSL_USER")
-	if wslUser == "" {
-		// Default to "runner" for CI environments, but could be configured
-		wslUser = "runner"
-	}
-
-	// Escape arguments that contain special characters for shell interpretation
-	escapedArgs := make([]string, len(args))
-	for i, arg := range args {
-		escapedArgs[i] = shellEscape(arg)
-	}
-
-	// For k3d, we need Docker access which requires elevated permissions
-	// Use 'sudo -E' to run k3d with necessary permissions while preserving environment
-	// The -E flag preserves environment variables like KUBECONFIG
-	if command == "k3d" {
-		// Build command with sudo -E prefix
-		newArgs := make([]string, 0, len(escapedArgs)+6)
-		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "sudo", "-E", command)
-		newArgs = append(newArgs, escapedArgs...)
-		return "wsl", newArgs
-	}
-
-	// For helm, use the helm-wrapper.sh script which sets proper environment variables
-	// This ensures Helm has access to writable directories in CI environments
-	// Run with explicit bash to ensure bash is used (not dash/sh)
-	if command == "helm" {
-		newArgs := make([]string, 0, len(escapedArgs)+6)
-		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "bash", "/usr/local/bin/helm-wrapper.sh")
-		newArgs = append(newArgs, escapedArgs...)
-		return "wsl", newArgs
-	}
-
-	// For kubectl, run directly as user
-	newArgs := make([]string, 0, len(escapedArgs)+5)
-	newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, command)
-	newArgs = append(newArgs, escapedArgs...)
-
-	return "wsl", newArgs
+	// Return command and args as is - no WSL wrapping needed
+	// On Windows, kind.exe, kubectl.exe, and helm.exe are used natively
+	// On Linux/macOS, k3d, kubectl, and helm are used natively
+	return command, args
 }

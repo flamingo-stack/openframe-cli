@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -112,9 +113,13 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 			NodeCount:  nodeCount,
 		}
 
-		// Set defaults if needed
+		// Set defaults if needed - use OS-appropriate cluster type
 		if config.Type == "" {
-			config.Type = models.ClusterTypeK3d
+			if runtime.GOOS == "windows" {
+				config.Type = models.ClusterTypeKind
+			} else {
+				config.Type = models.ClusterTypeK3d
+			}
 		}
 	}
 

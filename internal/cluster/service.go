@@ -4,23 +4,28 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/manager"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
+
+	// Import providers to register them with the factory
+	_ "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
+	_ "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/kind"
 )
 
 // ClusterService provides cluster configuration and management operations
 // This handles cluster lifecycle operations and configuration management
 type ClusterService struct {
-	manager    *k3d.K3dManager
+	manager    manager.ClusterManager
 	executor   executor.CommandExecutor
 	suppressUI bool // Suppress interactive UI elements for automation
 }
@@ -35,10 +40,13 @@ func isTerminalEnvironment() bool {
 }
 
 // NewClusterService creates a new cluster service with default configuration
+// Uses the factory to select the appropriate manager based on OS:
+// - Windows: KIND manager (native executables)
+// - Linux/macOS: K3D manager
 func NewClusterService(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	mgr := manager.GetClusterManager(exec, false)
 	return &ClusterService{
-		manager:    manager,
+		manager:    mgr,
 		executor:   exec,
 		suppressUI: false,
 	}
@@ -46,26 +54,39 @@ func NewClusterService(exec executor.CommandExecutor) *ClusterService {
 
 // NewClusterServiceSuppressed creates a cluster service with UI suppression
 func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	mgr := manager.GetClusterManager(exec, false)
 	return &ClusterService{
-		manager:    manager,
+		manager:    mgr,
 		executor:   exec,
 		suppressUI: true,
 	}
 }
 
 // NewClusterServiceWithOptions creates a cluster service with custom options
-func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager *k3d.K3dManager) *ClusterService {
+func NewClusterServiceWithOptions(exec executor.CommandExecutor, mgr manager.ClusterManager) *ClusterService {
 	return &ClusterService{
-		manager:  manager,
+		manager:  mgr,
 		executor: exec,
 	}
+}
+
+// GetDefaultClusterType returns the default cluster type based on the current OS
+func GetDefaultClusterType() models.ClusterType {
+	if runtime.GOOS == "windows" {
+		return models.ClusterTypeKind
+	}
+	return models.ClusterTypeK3d
 }
 
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Config, error) {
 	ctx := context.Background()
+
+	// Set default cluster type based on OS if not specified
+	if config.Type == "" {
+		config.Type = GetDefaultClusterType()
+	}
 
 	// Check if cluster already exists
 	if existingInfo, err := s.manager.GetClusterStatus(ctx, config.Name); err == nil {
@@ -80,11 +101,12 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 				"TYPE:     %s\n"+
 				"STATUS:   %s\n"+
 				"NODES:    %d\n"+
-				"NETWORK:  k3d-%s",
+				"NETWORK:  %s-%s",
 			pterm.Bold.Sprint(existingInfo.Name),
 			strings.ToUpper(string(existingInfo.Type)),
 			pterm.Green("Running"),
 			existingInfo.NodeCount,
+			existingInfo.Type,
 			existingInfo.Name,
 		)
 
@@ -508,23 +530,31 @@ func (s *ClusterService) isK3dWorkerNode(nodeName, clusterName string) bool {
 func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) {
 	fmt.Println()
 
+	// Determine API port based on cluster type
+	apiPort := "6550"
+	if info.Type == models.ClusterTypeKind {
+		apiPort = "6443"
+	}
+
 	// Create a clean box for the summary
 	boxContent := fmt.Sprintf(
 		"NAME:     %s\n"+
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
 			"NODES:    %d\n"+
-			"NETWORK:  k3d-%s\n"+
-			"API:      https://0.0.0.0:6550",
+			"NETWORK:  %s-%s\n"+
+			"API:      https://127.0.0.1:%s",
 		pterm.Bold.Sprint(info.Name),
 		strings.ToUpper(string(info.Type)),
 		pterm.Green("Ready"),
 		info.NodeCount,
+		info.Type,
 		info.Name,
+		apiPort,
 	)
 
 	pterm.DefaultBox.
-		WithTitle(" ✅ Cluster Created ").
+		WithTitle(" Cluster Created ").
 		WithTitleTopCenter().
 		Println(boxContent)
 }
@@ -613,6 +643,12 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 		statusDisplay = fmt.Sprintf("Partial (%s)", status.Status)
 	}
 
+	// Determine API port based on cluster type
+	apiPort := "6550"
+	if status.Type == models.ClusterTypeKind {
+		apiPort = "6443"
+	}
+
 	// Calculate age
 	ageStr := "Unknown"
 	if !status.CreatedAt.IsZero() {
@@ -632,33 +668,35 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
 			"NODES:    %d\n"+
-			"NETWORK:  k3d-%s\n"+
-			"API:      https://0.0.0.0:6550\n"+
+			"NETWORK:  %s-%s\n"+
+			"API:      https://127.0.0.1:%s\n"+
 			"AGE:      %s",
 		pterm.Bold.Sprint(status.Name),
 		strings.ToUpper(string(status.Type)),
 		statusDisplay,
 		status.NodeCount,
+		status.Type,
 		status.Name,
+		apiPort,
 		ageStr,
 	)
 
 	pterm.DefaultBox.
-		WithTitle(" 📊 Cluster Status ").
+		WithTitle(" Cluster Status ").
 		WithTitleTopCenter().
 		Println(boxContent)
 
 	// Network information
 	fmt.Println()
-	pterm.Info.Printf("🌐 Network Information:\n")
-	pterm.Printf("  Network:    k3d-%s\n", status.Name)
-	pterm.Printf("  API Server: https://0.0.0.0:6550\n")
+	pterm.Info.Printf("Network Information:\n")
+	pterm.Printf("  Network:    %s-%s\n", status.Type, status.Name)
+	pterm.Printf("  API Server: https://127.0.0.1:%s\n", apiPort)
 	pterm.Printf("  Kubeconfig: ~/.kube/config\n")
 
 	// Show resource usage if detailed
 	if detailed {
 		fmt.Println()
-		pterm.Info.Printf("💾 Resource Usage:\n")
+		pterm.Info.Printf("Resource Usage:\n")
 		pterm.Printf("  CPU:     0.2 cores (10%%)\n")
 		pterm.Printf("  Memory:  512MB (5%%)\n")
 		pterm.Printf("  Storage: 2.1GB (local)\n")
@@ -667,7 +705,7 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 
 	// Management commands
 	fmt.Println()
-	pterm.Info.Printf("⚙️ Management Commands:\n")
+	pterm.Info.Printf("Management Commands:\n")
 	pterm.Printf("  Delete cluster:      openframe cluster delete %s\n", status.Name)
 	pterm.Printf("  Access with kubectl: kubectl get nodes\n")
 	pterm.Printf("  View pods:           kubectl get pods -A\n")
@@ -749,10 +787,10 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 		service = NewClusterService(exec)
 	}
 
-	// Build cluster configuration
+	// Build cluster configuration with OS-appropriate cluster type
 	config := models.ClusterConfig{
 		Name:       clusterName,
-		Type:       models.ClusterTypeK3d,
+		Type:       GetDefaultClusterType(),
 		K8sVersion: "",
 		NodeCount:  4,
 	}
