@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -35,6 +36,21 @@ const (
 	portSearchStep     = 1000
 	timestampSuffixLen = 6
 )
+
+// isWSLAvailable checks if WSL with Ubuntu is available on Windows
+// Returns false on non-Windows platforms
+func isWSLAvailable() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	// Try to run a simple WSL command to check availability
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "ok")
+	err := cmd.Run()
+	return err == nil
+}
+
+// wslAvailable caches the WSL availability check result
+var wslAvailable = isWSLAvailable()
 
 func init() {
 	// Register the k3d manager factory
@@ -107,9 +123,9 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
-	// Convert Windows path to WSL path if running on Windows
+	// Convert Windows path to WSL path if running on Windows with WSL available
 	configFilePath := configFile
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		configFilePath, err = m.convertWindowsPathToWSL(configFile)
 		if err != nil {
 			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to convert config file path for WSL: %w", err))
@@ -349,8 +365,9 @@ image: %s`, config.Name, servers, agents, image)
 
 	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL internal IP
 	// This is necessary because the connectivity check uses the WSL eth0 IP to bypass Windows NAT
+	// On native Windows (no WSL), use 127.0.0.1
 	hostIP := "127.0.0.1"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		hostIP = "0.0.0.0"
 	}
 
@@ -584,7 +601,7 @@ func (m *K3dManager) getWSLUser(ctx context.Context) (string, error) {
 
 // prepareKubeconfigDirectory ensures ~/.kube directory exists with proper permissions on Windows/WSL and Linux
 func (m *K3dManager) prepareKubeconfigDirectory(ctx context.Context) error {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		// Get the WSL user that k3d will run as
 		// The wrappers in the workflow use "runner", so we should detect or default to that
 		username, err := m.getWSLUser(ctx)
@@ -601,6 +618,16 @@ func (m *K3dManager) prepareKubeconfigDirectory(ctx context.Context) error {
 
 		if m.verbose {
 			fmt.Println("✓ Prepared kubeconfig directory in WSL")
+		}
+	} else if runtime.GOOS == "windows" {
+		// Native Windows: Create .kube directory using PowerShell
+		kubeDir := filepath.Join(os.Getenv("USERPROFILE"), ".kube")
+		if err := os.MkdirAll(kubeDir, 0755); err != nil {
+			return fmt.Errorf("failed to create .kube directory: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Println("✓ Prepared kubeconfig directory on Windows")
 		}
 	} else {
 		// Linux/macOS: Create .kube directory with proper permissions
@@ -621,7 +648,7 @@ func (m *K3dManager) prepareKubeconfigDirectory(ctx context.Context) error {
 // fixKubeconfigPermissions fixes kubeconfig file permissions on Windows/WSL and Linux
 // This is needed because k3d running with sudo creates ~/.kube/config with root ownership
 func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		// Get the WSL user that k3d will run as
 		// The wrappers in the workflow use "runner", so we should detect or default to that
 		username, err := m.getWSLUser(ctx)
@@ -640,6 +667,11 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 
 		if m.verbose {
 			fmt.Println("✓ Fixed kubeconfig directory and file permissions for WSL user")
+		}
+	} else if runtime.GOOS == "windows" {
+		// Native Windows: No permission fixes needed, Windows handles permissions differently
+		if m.verbose {
+			fmt.Println("✓ Kubeconfig permissions (native Windows - no changes needed)")
 		}
 	} else {
 		// Linux/macOS: Fix permissions without changing ownership (assuming we're the owner)
@@ -666,9 +698,9 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 	var restConfig *rest.Config
 
-	// On Windows, load kubeconfig content directly from WSL into memory
+	// On Windows with WSL, load kubeconfig content directly from WSL into memory
 	// to avoid Windows filesystem path issues
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		// Retrieve kubeconfig content directly from k3d inside WSL
 		kubeconfigContent, err := m.getKubeconfigContentFromWSL(ctx, clusterName)
 		if err != nil {
@@ -778,7 +810,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	// On Windows/WSL2, the port might not be immediately available after k3d reports success
 	// Use kubectl cluster-info (via shell) to verify the cluster is reachable
 	// We use 127.0.0.1 with TLS bypass for reliable connectivity
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		_, err := m.getClusterEndpointFromShell(ctx, contextName)
 		if err != nil {
 			if m.verbose {
@@ -806,7 +838,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 	// Brief pause before TCP check on Windows/WSL2
 	// This gives the port mapping time to stabilize after k3d reports success
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		time.Sleep(500 * time.Millisecond)
 	}
 
@@ -1112,7 +1144,7 @@ func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files
 func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && wslAvailable {
 		// Get the WSL user
 		username, err := m.getWSLUser(ctx)
 		if err != nil {
@@ -1124,6 +1156,13 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup lock files: %w", err)
+		}
+	} else if runtime.GOOS == "windows" {
+		// Native Windows: Remove lock files using Go
+		kubeDir := filepath.Join(os.Getenv("USERPROFILE"), ".kube")
+		lockFiles, _ := filepath.Glob(filepath.Join(kubeDir, "config.lock*"))
+		for _, f := range lockFiles {
+			os.Remove(f)
 		}
 	} else {
 		// Linux/macOS: Remove lock files
