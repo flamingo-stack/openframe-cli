@@ -6,7 +6,6 @@ permissions:
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - '.github/workflows/test-windows-cli.yml'
   push:
@@ -35,67 +34,6 @@ jobs:
         run: |
           go build -o openframe.exe .
 
-      - name: Install WSL2 and configure
-        shell: powershell
-        run: |
-          # Set error action to continue
-          $ErrorActionPreference = 'Continue'
-
-          # Install WSL2 with Ubuntu (non-interactive)
-          Write-Host "Installing WSL2 with Ubuntu..."
-          echo Y | wsl --install -d Ubuntu --no-launch
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Warning: WSL installation returned exit code $LASTEXITCODE"
-            Write-Host "This may be expected on some systems. Continuing..."
-          }
-
-          # Wait for installation
-          Write-Host "Waiting for installation to complete..."
-          Start-Sleep -Seconds 20
-
-          # Set WSL2 as default
-          Write-Host "Setting WSL2 as default version..."
-          wsl --set-default-version 2
-
-          # Verify installation
-          Write-Host "Verifying WSL installation..."
-          wsl --list --verbose
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: WSL verification failed"
-            exit 1
-          }
-
-          # Initialize Ubuntu by running a simple command (this triggers first-time setup)
-          Write-Host "Initializing Ubuntu (first launch)..."
-          wsl -d Ubuntu -u root bash -c "echo 'Ubuntu initialized'" 2>&1 | Out-Host
-
-          # Wait for Ubuntu to be ready
-          Write-Host "Waiting for Ubuntu to initialize..."
-          Start-Sleep -Seconds 10
-
-          # Configure Ubuntu with runner user
-          Write-Host "Configuring Ubuntu user..."
-          wsl -d Ubuntu -u root bash -c "id runner 2>/dev/null || (useradd -m -s /bin/bash runner && echo 'runner:runner' | chpasswd && usermod -aG sudo runner)"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: Failed to create user"
-            exit 1
-          }
-
-          wsl -d Ubuntu -u root bash -c "grep -q '%sudo ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers"
-
-          # Verify user was created
-          Write-Host "Verifying user creation..."
-          wsl -d Ubuntu -u runner bash -c "whoami"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: User verification failed"
-            exit 1
-          }
-
-          Write-Host "[OK] WSL2 and Ubuntu configured successfully"
 
       - name: Test bootstrap OSS tenant workflow
         shell: powershell
