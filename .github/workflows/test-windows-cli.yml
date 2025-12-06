@@ -214,7 +214,7 @@ jobs:
           Write-Host "Tool versions:"
           Write-Host "  Docker: $(docker --version)"
           Write-Host "  KIND:   $(kind version)"
-          Write-Host "  kubectl: $(kubectl version --client --short 2>&1)"
+          Write-Host "  kubectl: $(kubectl version --client -o yaml 2>&1 | Select-String 'gitVersion' | ForEach-Object { $_.Line.Trim() })"
           Write-Host "  Helm:   $(helm version --short)"
 
           Write-Host ""
@@ -338,8 +338,9 @@ jobs:
           }
 
           # Check kubectl
-          $kubectl_version = kubectl version --client --short 2>&1
+          $kubectl_output = kubectl version --client -o yaml 2>&1
           if ($LASTEXITCODE -eq 0) {
+            $kubectl_version = ($kubectl_output | Select-String 'gitVersion' | ForEach-Object { $_.Line.Trim() })
             Write-Host "kubectl: $kubectl_version"
           } else {
             Write-Host "kubectl: Not available"
@@ -370,8 +371,10 @@ jobs:
           Write-Host ""
           Write-Host "Cluster Status:"
           Write-Host "==============="
-          $clusters = kind get clusters 2>&1
-          if ($LASTEXITCODE -eq 0 -and $clusters) {
+          $ErrorActionPreference = "SilentlyContinue"
+          $clusters = kind get clusters 2>$null
+          $ErrorActionPreference = "Continue"
+          if ($clusters -and $clusters -notmatch "No kind clusters found") {
             Write-Host "Active KIND clusters: $clusters"
           } else {
             Write-Host "No active KIND clusters (cleaned up or not created)"
@@ -392,8 +395,10 @@ jobs:
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\bin"
 
           # Delete any KIND clusters
-          $clusters = kind get clusters 2>&1
-          if ($LASTEXITCODE -eq 0 -and $clusters) {
+          $ErrorActionPreference = "SilentlyContinue"
+          $clusters = kind get clusters 2>$null
+          $ErrorActionPreference = "Continue"
+          if ($clusters -and $clusters -notmatch "No kind clusters found") {
             foreach ($cluster in $clusters -split "`n") {
               $cluster = $cluster.Trim()
               if ($cluster) {
