@@ -256,14 +256,48 @@ func (d *DockerInstaller) installArch() error {
 }
 
 func (d *DockerInstaller) installWindows() error {
-	fmt.Println("Docker Desktop is required on Windows.")
-	fmt.Println("Please install Docker Desktop from https://docker.com/products/docker-desktop")
+	fmt.Println("Installing Docker Desktop on Windows...")
+
+	// Try Chocolatey first
+	if commandExists("choco") {
+		fmt.Println("Installing Docker Desktop via Chocolatey...")
+		cmd := exec.Command("choco", "install", "docker-desktop", "-y")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ Docker Desktop installed successfully via Chocolatey!")
+			fmt.Println("")
+			fmt.Println("Please start Docker Desktop and wait for it to be ready, then run this command again.")
+			return nil
+		}
+		fmt.Println("Chocolatey installation failed, trying other methods...")
+	}
+
+	// Try winget
+	if commandExists("winget") {
+		fmt.Println("Installing Docker Desktop via winget...")
+		cmd := exec.Command("winget", "install", "--id", "Docker.DockerDesktop", "-e", "--accept-source-agreements", "--accept-package-agreements")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ Docker Desktop installed successfully via winget!")
+			fmt.Println("")
+			fmt.Println("Please start Docker Desktop and wait for it to be ready, then run this command again.")
+			return nil
+		}
+		fmt.Println("winget installation failed, trying other methods...")
+	}
+
+	// No package manager available - provide manual instructions
+	fmt.Println("")
+	fmt.Println("Could not install Docker Desktop automatically.")
+	fmt.Println("Please install Docker Desktop manually from https://docker.com/products/docker-desktop")
 	fmt.Println("")
 	fmt.Println("After installation:")
 	fmt.Println("  1. Start Docker Desktop")
 	fmt.Println("  2. Ensure it's running in Linux containers mode (default)")
 	fmt.Println("  3. Run this command again")
-	return fmt.Errorf("Docker Desktop must be installed manually on Windows")
+	return fmt.Errorf("Docker Desktop must be installed manually - no package manager available")
 }
 
 
