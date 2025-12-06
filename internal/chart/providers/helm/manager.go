@@ -528,7 +528,9 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	//
 	// Use native Go client for all platforms (including Windows) for fast, reliable polling
 	// The kubeClient uses the same kubeconfig that was used to create the cluster
-	if h.kubeClient != nil {
+	// On Windows/WSL2, always use kubectl because the native Go client can't reliably
+	// reach the cluster running inside WSL due to networking bridge issues
+	if h.kubeClient != nil && runtime.GOOS != "windows" {
 		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
 			if spinner != nil {
 				spinner.Stop()
@@ -542,9 +544,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 		}
 	} else {
-		// Fallback to kubectl-based verification when native Go client is unavailable
+		// Fallback to kubectl-based verification when native Go client is unavailable or on Windows
 		if config.Verbose {
-			pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
+			if runtime.GOOS == "windows" {
+				pterm.Info.Println("Using kubectl for deployment verification (Windows/WSL2 mode)")
+			} else {
+				pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
+			}
 		}
 		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
 			if spinner != nil {
