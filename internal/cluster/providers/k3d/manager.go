@@ -1078,6 +1078,18 @@ func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 	}
 
 	ip := strings.TrimSpace(result.Stdout)
+
+	// CRITICAL FIX: Clean up potential parsing artifacts from shell command
+	// The shell pipeline may return "inet 172.x.x.x" instead of just the IP
+	// due to shell escaping issues when executed through WSL
+	ip = strings.TrimPrefix(ip, "inet ")
+	ip = strings.TrimSpace(ip)
+
+	// Also handle potential CIDR notation if cut -d/ didn't work
+	if idx := strings.Index(ip, "/"); idx != -1 {
+		ip = ip[:idx]
+	}
+
 	if ip == "" {
 		return "", fmt.Errorf("WSL internal IP is empty")
 	}
