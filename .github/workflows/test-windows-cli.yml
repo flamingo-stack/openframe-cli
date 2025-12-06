@@ -15,7 +15,7 @@ on:
 
 jobs:
   test-windows-cli-bootstrap:
-    name: Test Bootstrap on Windows (Native KIND)
+    name: Test Bootstrap on Windows (k3d)
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -29,168 +29,6 @@ jobs:
           go-version: '1.24'
           cache-dependency-path: go.sum
 
-      - name: Install Docker Desktop
-        shell: powershell
-        run: |
-          Write-Host "Checking Docker installation..."
-
-          # Check if Docker is already available (GitHub runners have Docker pre-installed)
-          $dockerCheck = docker --version 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Docker is already installed: $dockerCheck"
-          } else {
-            Write-Host "Installing Docker via winget..."
-            winget install --id Docker.DockerDesktop -e --accept-source-agreements --accept-package-agreements
-
-            # Start Docker Desktop
-            Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-
-            Write-Host "Waiting for Docker to start..."
-            $maxWait = 120
-            $waited = 0
-            while ($waited -lt $maxWait) {
-              Start-Sleep -Seconds 5
-              $waited += 5
-              $dockerCheck = docker info 2>&1
-              if ($LASTEXITCODE -eq 0) {
-                Write-Host "Docker is ready after $waited seconds"
-                break
-              }
-              Write-Host "Waiting for Docker... ($waited/$maxWait seconds)"
-            }
-          }
-
-          # Verify Docker is working
-          docker info
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Docker is not running properly"
-            exit 1
-          }
-
-          Write-Host "[OK] Docker is ready"
-
-      - name: Install KIND
-        shell: powershell
-        run: |
-          Write-Host "Installing KIND..."
-
-          # Check if KIND is already installed
-          $kindCheck = kind version 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "KIND is already installed: $kindCheck"
-            return
-          }
-
-          # Try chocolatey first
-          $chocoCheck = choco --version 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Installing KIND via Chocolatey..."
-            choco install kind -y
-
-            # Refresh PATH
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          } else {
-            Write-Host "Installing KIND via direct download..."
-            $kindUrl = "https://kind.sigs.k8s.io/dl/v0.25.0/kind-windows-amd64"
-            $kindPath = "$env:USERPROFILE\bin\kind.exe"
-
-            # Create bin directory
-            New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin" | Out-Null
-
-            # Download KIND
-            Invoke-WebRequest -Uri $kindUrl -OutFile $kindPath
-
-            # Add to PATH
-            $env:Path += ";$env:USERPROFILE\bin"
-            [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")
-          }
-
-          # Verify installation
-          kind version
-          Write-Host "[OK] KIND installed successfully"
-
-      - name: Install kubectl
-        shell: powershell
-        run: |
-          Write-Host "Installing kubectl..."
-
-          # Check if kubectl is already installed
-          $kubectlCheck = kubectl version --client 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "kubectl is already installed"
-            return
-          }
-
-          # Try chocolatey first
-          $chocoCheck = choco --version 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Installing kubectl via Chocolatey..."
-            choco install kubernetes-cli -y
-
-            # Refresh PATH
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          } else {
-            Write-Host "Installing kubectl via direct download..."
-            $version = (Invoke-WebRequest -Uri "https://dl.k8s.io/release/stable.txt" -UseBasicParsing).Content.Trim()
-            $kubectlUrl = "https://dl.k8s.io/release/$version/bin/windows/amd64/kubectl.exe"
-            $kubectlPath = "$env:USERPROFILE\bin\kubectl.exe"
-
-            New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin" | Out-Null
-            Invoke-WebRequest -Uri $kubectlUrl -OutFile $kubectlPath
-
-            $env:Path += ";$env:USERPROFILE\bin"
-            [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")
-          }
-
-          # Verify installation
-          kubectl version --client
-          Write-Host "[OK] kubectl installed successfully"
-
-      - name: Install Helm
-        shell: powershell
-        run: |
-          Write-Host "Installing Helm..."
-
-          # Check if Helm is already installed
-          $helmCheck = helm version --short 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Helm is already installed: $helmCheck"
-            return
-          }
-
-          # Try chocolatey first
-          $chocoCheck = choco --version 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Installing Helm via Chocolatey..."
-            choco install kubernetes-helm -y
-
-            # Refresh PATH
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          } else {
-            Write-Host "Installing Helm via direct download..."
-            $helmVersion = "v3.16.3"
-            $helmUrl = "https://get.helm.sh/helm-$helmVersion-windows-amd64.zip"
-            $tempDir = [System.IO.Path]::GetTempPath()
-            $zipPath = Join-Path $tempDir "helm.zip"
-            $extractPath = Join-Path $tempDir "helm"
-
-            Invoke-WebRequest -Uri $helmUrl -OutFile $zipPath
-            Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-
-            New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin" | Out-Null
-            Copy-Item -Path (Join-Path $extractPath "windows-amd64\helm.exe") -Destination "$env:USERPROFILE\bin\helm.exe" -Force
-
-            $env:Path += ";$env:USERPROFILE\bin"
-            [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")
-
-            # Cleanup
-            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-          # Verify installation
-          helm version --short
-          Write-Host "[OK] Helm installed successfully"
 
       - name: Build CLI
         shell: bash
@@ -204,7 +42,7 @@ jobs:
         run: |
           Write-Host "========================================"
           Write-Host "Testing Bootstrap OSS Tenant Workflow"
-          Write-Host "(Native Windows with KIND)"
+          Write-Host "(Native Windows with k3d)"
           Write-Host "========================================"
 
           # Refresh PATH to ensure all tools are available
@@ -213,7 +51,6 @@ jobs:
           Write-Host ""
           Write-Host "Tool versions:"
           Write-Host "  Docker: $(docker --version)"
-          Write-Host "  KIND:   $(kind version)"
           Write-Host "  kubectl: $(kubectl version --client -o yaml 2>&1 | Select-String 'gitVersion' | ForEach-Object { $_.Line.Trim() })"
           Write-Host "  Helm:   $(helm version --short)"
 
@@ -221,7 +58,7 @@ jobs:
           Write-Host "Testing bootstrap command..."
           Write-Host ""
 
-          # Run bootstrap - CLI will use KIND on Windows automatically
+          # Run bootstrap - CLI will use k3d on all platforms
           .\openframe.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 
           if ($LASTEXITCODE -eq 0) {
@@ -287,8 +124,8 @@ jobs:
             Write-Host "Cleaning up bootstrap test cluster..."
             .\openframe.exe cluster delete openframe-test 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) {
-              Write-Host "Cleanup via CLI failed, trying KIND directly..."
-              kind delete cluster --name openframe-test
+              Write-Host "Cleanup via CLI failed, trying k3d directly..."
+              k3d cluster delete openframe-test
             }
 
             Write-Host "[OK] Bootstrap test completed successfully"
@@ -298,7 +135,7 @@ jobs:
 
             # Try to cleanup any partial cluster
             Write-Host "Attempting cleanup..."
-            kind delete cluster --name openframe-test 2>&1 | Out-Null
+            k3d cluster delete openframe-test 2>&1 | Out-Null
           }
 
       - name: Bootstrap test summary
@@ -329,12 +166,12 @@ jobs:
             Write-Host "Docker: Not available"
           }
 
-          # Check KIND
-          $kind_version = kind version 2>&1
+          # Check k3d
+          $k3d_version = k3d version 2>&1
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "KIND: $kind_version"
+            Write-Host "k3d: $k3d_version"
           } else {
-            Write-Host "KIND: Not available"
+            Write-Host "k3d: Not available"
           }
 
           # Check kubectl
@@ -358,26 +195,26 @@ jobs:
           Write-Host "Bootstrap Command:"
           Write-Host "=================="
           Write-Host "Command: openframe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive"
-          Write-Host "Expected: Create KIND cluster + Install ArgoCD + Install OpenFrame charts"
+          Write-Host "Expected: Create k3d cluster + Install ArgoCD + Install OpenFrame charts"
 
           Write-Host ""
           Write-Host "Architecture:"
           Write-Host "============="
           Write-Host "- Windows native execution (no WSL)"
-          Write-Host "- KIND for local Kubernetes cluster"
-          Write-Host "- Native kubectl.exe, helm.exe, kind.exe"
+          Write-Host "- k3d for local Kubernetes cluster"
+          Write-Host "- Native kubectl.exe, helm.exe, k3d.exe"
           Write-Host "- Docker Desktop for container runtime"
 
           Write-Host ""
           Write-Host "Cluster Status:"
           Write-Host "==============="
           $ErrorActionPreference = "SilentlyContinue"
-          $clusters = kind get clusters 2>$null
+          $clusters = k3d cluster list --no-headers 2>$null
           $ErrorActionPreference = "Continue"
-          if ($clusters -and $clusters -notmatch "No kind clusters found") {
-            Write-Host "Active KIND clusters: $clusters"
+          if ($clusters) {
+            Write-Host "Active k3d clusters: $clusters"
           } else {
-            Write-Host "No active KIND clusters (cleaned up or not created)"
+            Write-Host "No active k3d clusters (cleaned up or not created)"
           }
 
           Write-Host ""
@@ -394,16 +231,16 @@ jobs:
           # Refresh PATH
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\bin"
 
-          # Delete any KIND clusters
+          # Delete any k3d clusters
           $ErrorActionPreference = "SilentlyContinue"
-          $clusters = kind get clusters 2>$null
+          $clusters = k3d cluster list --no-headers 2>$null
           $ErrorActionPreference = "Continue"
-          if ($clusters -and $clusters -notmatch "No kind clusters found") {
-            foreach ($cluster in $clusters -split "`n") {
-              $cluster = $cluster.Trim()
+          if ($clusters) {
+            foreach ($line in $clusters -split "`n") {
+              $cluster = ($line -split '\s+')[0].Trim()
               if ($cluster) {
-                Write-Host "Deleting KIND cluster: $cluster"
-                kind delete cluster --name $cluster
+                Write-Host "Deleting k3d cluster: $cluster"
+                k3d cluster delete $cluster
               }
             }
           }

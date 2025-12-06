@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -71,10 +70,8 @@ func NewClusterServiceWithOptions(exec executor.CommandExecutor, mgr manager.Clu
 }
 
 // GetDefaultClusterType returns the default cluster type based on the current OS
+// k3d is preferred on all platforms as it's lighter weight and better maintained
 func GetDefaultClusterType() models.ClusterType {
-	if runtime.GOOS == "windows" {
-		return models.ClusterTypeKind
-	}
 	return models.ClusterTypeK3d
 }
 

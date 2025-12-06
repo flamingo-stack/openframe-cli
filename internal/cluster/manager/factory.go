@@ -1,8 +1,6 @@
 package manager
 
 import (
-	"runtime"
-
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
@@ -15,18 +13,9 @@ const (
 )
 
 // GetManagerType returns the appropriate manager type for the current OS
+// k3d is used on all platforms as the default cluster manager
 func GetManagerType() ManagerType {
-	switch runtime.GOOS {
-	case "windows":
-		// Windows uses native KIND executable (no WSL dependency)
-		return ManagerTypeKind
-	case "darwin", "linux":
-		// Unix-like systems use K3d
-		return ManagerTypeK3d
-	default:
-		// Fallback to K3d
-		return ManagerTypeK3d
-	}
+	return ManagerTypeK3d
 }
 
 // ManagerFactory is a function type that creates a ClusterManager

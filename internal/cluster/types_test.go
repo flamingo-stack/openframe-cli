@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/manager"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -279,15 +280,15 @@ func TestInterface_ClusterService(t *testing.T) {
 func TestInterface_ClusterManager(t *testing.T) {
 	t.Run("K3dManager implements ClusterManager interface", func(t *testing.T) {
 		mockExecutor := executor.NewMockCommandExecutor()
-		manager := k3d.NewK3dManager(mockExecutor, false)
+		k3dManager := k3d.NewK3dManager(mockExecutor, false)
 
 		// Test that K3dManager implements ClusterManager
-		var _ k3d.ClusterManager = manager
+		var _ manager.ClusterManager = k3dManager
 
 		// Verify interface methods exist
-		assert.NotNil(t, manager.DetectClusterType)
-		assert.NotNil(t, manager.ListClusters)
-		assert.NotNil(t, manager.ListAllClusters)
+		assert.NotNil(t, k3dManager.DetectClusterType)
+		assert.NotNil(t, k3dManager.ListClusters)
+		assert.NotNil(t, k3dManager.ListAllClusters)
 	})
 }
 
