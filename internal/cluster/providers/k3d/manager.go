@@ -346,10 +346,17 @@ image: %s`, config.Name, servers, agents, image)
 	httpPort := defaultHTTPPort
 	httpsPort := defaultHTTPSPort
 
+	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL internal IP
+	// This is necessary because the connectivity check uses the WSL eth0 IP to bypass Windows NAT
+	hostIP := "127.0.0.1"
+	if runtime.GOOS == "windows" {
+		hostIP = "0.0.0.0"
+	}
+
 	configContent += fmt.Sprintf(`
 kubeAPI:
-  host: "127.0.0.1"
-  hostIP: "127.0.0.1"
+  host: "%s"
+  hostIP: "%s"
   hostPort: "%s"
 options:
   k3s:
@@ -369,7 +376,7 @@ ports:
       - loadbalancer
   - port: %s:443
     nodeFilters:
-      - loadbalancer`, apiPort, httpPort, httpsPort)
+      - loadbalancer`, hostIP, hostIP, apiPort, httpPort, httpsPort)
 
 	tmpFile, err := os.CreateTemp("", "k3d-config-*.yaml")
 	if err != nil {
