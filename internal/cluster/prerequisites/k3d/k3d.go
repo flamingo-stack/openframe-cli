@@ -18,12 +18,6 @@ func commandExists(cmd string) bool {
 }
 
 func isK3dInstalled() bool {
-	// On Windows, check k3d in WSL2
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "k3d")
-		return cmd.Run() == nil
-	}
-
 	if !commandExists("k3d") {
 		return false
 	}
@@ -175,86 +169,94 @@ func (k *K3dInstaller) installBinary() error {
 }
 
 func (k *K3dInstaller) installWindows() error {
-	fmt.Println("Installing k3d inside WSL2...")
+	fmt.Println("Installing k3d natively on Windows...")
 
-	// Install k3d inside WSL2 Ubuntu using the official install script
-	installScript := `#!/bin/bash
-set -e
+	// Try package managers first
+	if commandExists("choco") {
+		fmt.Println("Installing k3d via Chocolatey...")
+		cmd := exec.Command("choco", "install", "k3d", "-y")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ k3d installed successfully via Chocolatey!")
+			return nil
+		}
+		fmt.Println("Chocolatey installation failed, trying other methods...")
+	}
 
-# Check if k3d is already installed
-if command -v k3d &> /dev/null; then
-    echo "k3d already installed in WSL2"
-    exit 0
-fi
+	if commandExists("winget") {
+		fmt.Println("Installing k3d via winget...")
+		cmd := exec.Command("winget", "install", "--id", "k3d-io.k3d", "-e", "--accept-source-agreements", "--accept-package-agreements")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ k3d installed successfully via winget!")
+			return nil
+		}
+		fmt.Println("winget installation failed, trying other methods...")
+	}
 
-echo "Installing k3d..."
+	// Fallback to direct binary download
+	return k.installWindowsBinary()
+}
 
-# Use the official k3d install script (redirect stderr to suppress progress output)
-curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash 2>/dev/null || curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+func (k *K3dInstaller) installWindowsBinary() error {
+	fmt.Println("Downloading k3d.exe binary...")
 
-echo "k3d installed successfully"
+	binDir := os.Getenv("USERPROFILE") + "\\bin"
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("failed to create bin directory: %w", err)
+	}
+
+	k3dPath := binDir + "\\k3d.exe"
+
+	// Download k3d using PowerShell
+	downloadCmd := `
+$ProgressPreference = 'SilentlyContinue'
+$releases = Invoke-RestMethod -Uri "https://api.github.com/repos/k3d-io/k3d/releases/latest"
+$version = $releases.tag_name
+$downloadUrl = "https://github.com/k3d-io/k3d/releases/download/$version/k3d-windows-amd64.exe"
+Write-Host "Downloading k3d $version..."
+Invoke-WebRequest -Uri $downloadUrl -OutFile "` + k3dPath + `"
+Write-Host "k3d installed successfully!"
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
+	cmd := exec.Command("powershell", "-Command", downloadCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to install k3d in WSL2: %w", err)
+		return fmt.Errorf("failed to download k3d.exe: %w", err)
 	}
 
-	// Create Windows wrapper
-	if err := k.createK3dWrapper(); err != nil {
-		return fmt.Errorf("failed to create k3d wrapper: %w", err)
-	}
+	// Add to PATH
+	k.addToPath(binDir)
 
-	fmt.Println("✓ k3d installed successfully in WSL2!")
+	fmt.Printf("✓ k3d.exe installed successfully at: %s\n", k3dPath)
 	return nil
 }
 
-func (k *K3dInstaller) createK3dWrapper() error {
-	fmt.Println("Creating k3d command for Windows...")
-
-	// Create a batch file wrapper that calls k3d in WSL2
-	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
-
-	wrapperPath := wrapperDir + "\\k3d.bat"
-	wrapperContent := `@echo off
-wsl -d Ubuntu k3d %*
-`
-
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil {
-		return fmt.Errorf("failed to create k3d wrapper: %w", err)
-	}
-
-	// Add to PATH if not already there
+func (k *K3dInstaller) addToPath(binDir string) {
 	addPathScript := fmt.Sprintf(`
 $binDir = "%s"
 $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentPath -notlike "*$binDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$currentPath;$binDir", "User")
-    $env:Path = "$env:Path;$binDir"
     Write-Host "Added $binDir to PATH"
 } else {
     Write-Host "PATH already contains $binDir"
 }
-`, wrapperDir)
+`, binDir)
 
 	cmd := exec.Command("powershell", "-Command", addPathScript)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run() // Ignore errors
 
-	// Update PATH for current process so k3d can be found immediately
+	// Update current process PATH
 	currentPath := os.Getenv("PATH")
-	if !containsPath(currentPath, wrapperDir) {
-		newPath := currentPath + ";" + wrapperDir
-		os.Setenv("PATH", newPath)
-		fmt.Printf("Updated current process PATH to include: %s\n", wrapperDir)
+	if !containsPath(currentPath, binDir) {
+		os.Setenv("PATH", currentPath+";"+binDir)
 	}
-
-	fmt.Printf("✓ k3d wrapper created at: %s\n", wrapperPath)
-	return nil
 }
 
 // containsPath checks if a PATH string contains a specific directory

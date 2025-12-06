@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -18,21 +17,11 @@ func commandExists(cmd string) bool {
 }
 
 func isDockerInstalled() bool {
-	// On Windows, check if Docker is installed in WSL2
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "docker")
-		return cmd.Run() == nil
-	}
-	// Just check if docker command exists, don't try to connect to daemon
+	// Check if docker command exists natively
 	return commandExists("docker")
 }
 
 func IsDockerRunning() bool {
-	// On Windows, check Docker in WSL2 directly
-	if runtime.GOOS == "windows" {
-		return isDockerRunningWSL()
-	}
-
 	if !commandExists("docker") {
 		return false
 	}
@@ -42,21 +31,6 @@ func IsDockerRunning() bool {
 	cmd := exec.CommandContext(ctx, "docker", "ps")
 	err := cmd.Run()
 	return err == nil
-}
-
-// isDockerRunningWSL checks if Docker is running in WSL2 on Windows
-func isDockerRunningWSL() bool {
-	// First check if WSL and Ubuntu are available
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "docker")
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-
-	// Check if Docker daemon is running in WSL2
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd = exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps > /dev/null 2>&1")
-	return cmd.Run() == nil
 }
 
 func IsDockerInstalledButNotRunning() bool {
@@ -282,275 +256,16 @@ func (d *DockerInstaller) installArch() error {
 }
 
 func (d *DockerInstaller) installWindows() error {
-	fmt.Println("Installing Docker CE via WSL2 on Windows...")
-	fmt.Println("This will install Docker Engine (same as Linux) without Docker Desktop")
-
-	// Step 1: Ensure WSL2 is installed
-	if err := d.ensureWSL2(); err != nil {
-		return fmt.Errorf("failed to setup WSL2: %w", err)
-	}
-
-	// Step 2: Ensure Ubuntu is installed in WSL2
-	if err := d.ensureUbuntuWSL(); err != nil {
-		return fmt.Errorf("failed to install Ubuntu in WSL2: %w", err)
-	}
-
-	// Step 3: Install Docker CE inside WSL2 Ubuntu
-	if err := d.installDockerInWSL(); err != nil {
-		return fmt.Errorf("failed to install Docker in WSL2: %w", err)
-	}
-
-	// Step 4: Configure Docker to expose socket and start on boot
-	if err := d.configureDockerWSL(); err != nil {
-		return fmt.Errorf("failed to configure Docker: %w", err)
-	}
-
-	// Step 5: Create Windows docker command wrapper
-	if err := d.createDockerWrapper(); err != nil {
-		return fmt.Errorf("failed to create docker command wrapper: %w", err)
-	}
-
-	fmt.Println("\n✓ Docker CE installed successfully in WSL2!")
-	fmt.Println("Docker is now available via the 'docker' command on Windows")
-	return nil
+	fmt.Println("Docker Desktop is required on Windows.")
+	fmt.Println("Please install Docker Desktop from https://docker.com/products/docker-desktop")
+	fmt.Println("")
+	fmt.Println("After installation:")
+	fmt.Println("  1. Start Docker Desktop")
+	fmt.Println("  2. Ensure it's running in Linux containers mode (default)")
+	fmt.Println("  3. Run this command again")
+	return fmt.Errorf("Docker Desktop must be installed manually on Windows")
 }
 
-func (d *DockerInstaller) ensureWSL2() error {
-	// Check if WSL is installed
-	cmd := exec.Command("wsl", "--status")
-	if err := cmd.Run(); err != nil {
-		fmt.Println("WSL2 not found. Installing WSL2...")
-		fmt.Println("Note: This will require a system restart")
-
-		// Install WSL2
-		installCmd := exec.Command("wsl", "--install", "--no-distribution")
-		installCmd.Stdout = os.Stdout
-		installCmd.Stderr = os.Stderr
-		if err := installCmd.Run(); err != nil {
-			return fmt.Errorf("failed to install WSL2. Please run as Administrator: %w", err)
-		}
-
-		fmt.Println("\n⚠ IMPORTANT: You must restart your computer now for WSL2 to work")
-		fmt.Println("After restart, run this command again to continue Docker installation")
-		os.Exit(0)
-	}
-
-	// Set WSL2 as default version
-	cmd = exec.Command("wsl", "--set-default-version", "2")
-	cmd.Run() // Ignore errors, might already be set
-
-	return nil
-}
-
-func (d *DockerInstaller) ensureUbuntuWSL() error {
-	// Check if Ubuntu is already installed using multiple methods
-	// Method 1: Check using wsl -l -v (more reliable, includes version info)
-	cmd := exec.Command("wsl", "-l", "-v")
-	output, err := cmd.Output()
-
-	// Convert output handling potential UTF-16 encoding on Windows
-	outputStr := d.decodeWSLOutput(output)
-
-	if err == nil && (strings.Contains(outputStr, "Ubuntu") || strings.Contains(outputStr, "ubuntu")) {
-		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Method 2: Try to run a command in Ubuntu distribution
-	cmd = exec.Command("wsl", "-d", "Ubuntu", "echo", "test")
-	if err := cmd.Run(); err == nil {
-		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Ubuntu not found, install it
-	fmt.Println("Installing Ubuntu in WSL2...")
-	cmd = exec.Command("wsl", "--install", "-d", "Ubuntu", "--no-launch")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// Check if error is because distribution already exists
-		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "ERROR_ALREADY_EXISTS") {
-			fmt.Println("✓ Ubuntu already exists in WSL2")
-			return nil
-		}
-		return fmt.Errorf("failed to install Ubuntu: %w", err)
-	}
-
-	fmt.Println("✓ Ubuntu installed successfully")
-	return nil
-}
-
-// decodeWSLOutput handles UTF-16 LE with BOM encoding that WSL sometimes uses on Windows
-func (d *DockerInstaller) decodeWSLOutput(data []byte) string {
-	// Check for UTF-16 LE BOM
-	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE {
-		// UTF-16 LE with BOM detected
-		// Convert UTF-16 to UTF-8
-		u16 := make([]uint16, 0, len(data)/2)
-		for i := 2; i < len(data)-1; i += 2 {
-			u16 = append(u16, uint16(data[i])|uint16(data[i+1])<<8)
-		}
-		runes := make([]rune, 0, len(u16))
-		for _, v := range u16 {
-			if v == 0 {
-				continue
-			}
-			runes = append(runes, rune(v))
-		}
-		return string(runes)
-	}
-	// Regular UTF-8
-	return string(data)
-}
-
-func (d *DockerInstaller) installDockerInWSL() error {
-	fmt.Println("Installing Docker CE inside WSL2 Ubuntu...")
-
-	// Create installation script that matches our Linux installation
-	installScript := `#!/bin/bash
-set -e
-
-# Check if docker is already installed
-if command -v docker &> /dev/null; then
-    echo "Docker already installed in WSL2"
-    exit 0
-fi
-
-echo "Installing Docker CE..."
-
-# Update package index
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-
-# Install prerequisites
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common
-
-# Add Docker's official GPG key
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-# Add Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Install Docker CE
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Add current user to docker group
-sudo usermod -aG docker $USER
-
-echo "Docker CE installed successfully"
-`
-
-	// Execute installation script in WSL2
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to install Docker in WSL2: %w", err)
-	}
-
-	return nil
-}
-
-func (d *DockerInstaller) configureDockerWSL() error {
-	fmt.Println("Configuring Docker to start automatically...")
-
-	configScript := `#!/bin/bash
-set -e
-
-# Create systemd override to start Docker on WSL boot
-# Note: WSL2 uses its own init system
-
-# Configure Docker to listen on both unix socket and tcp (for Windows access)
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<EOF
-{
-  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"],
-  "iptables": false
-}
-EOF
-
-# Create a script to start Docker daemon
-sudo tee /usr/local/bin/start-docker.sh > /dev/null <<'SCRIPT'
-#!/bin/bash
-if ! pgrep -x dockerd > /dev/null; then
-    sudo dockerd > /dev/null 2>&1 &
-fi
-SCRIPT
-
-sudo chmod +x /usr/local/bin/start-docker.sh
-
-# Add to bashrc to start on WSL launch
-if ! grep -q "start-docker.sh" ~/.bashrc; then
-    echo "/usr/local/bin/start-docker.sh" >> ~/.bashrc
-fi
-
-# Start Docker now
-sudo /usr/local/bin/start-docker.sh
-
-# Wait for Docker to be ready
-for i in {1..30}; do
-    if docker ps > /dev/null 2>&1; then
-        echo "Docker is running"
-        break
-    fi
-    sleep 1
-done
-
-echo "Docker configured successfully"
-`
-
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", configScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to configure Docker: %w", err)
-	}
-
-	return nil
-}
-
-func (d *DockerInstaller) createDockerWrapper() error {
-	fmt.Println("Creating docker command for Windows...")
-
-	// Create a batch file wrapper that calls docker in WSL2
-	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
-
-	wrapperPath := wrapperDir + "\\docker.bat"
-	wrapperContent := `@echo off
-wsl -d Ubuntu docker %*
-`
-
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil {
-		return fmt.Errorf("failed to create docker wrapper: %w", err)
-	}
-
-	// Add to PATH if not already there
-	addPathScript := fmt.Sprintf(`
-$binDir = "%s"
-$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($currentPath -notlike "*$binDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$binDir", "User")
-    $env:Path = "$env:Path;$binDir"
-    Write-Host "Added $binDir to PATH"
-} else {
-    Write-Host "PATH already contains $binDir"
-}
-`, wrapperDir)
-
-	cmd := exec.Command("powershell", "-Command", addPathScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run() // Ignore errors
-
-	fmt.Printf("✓ Docker wrapper created at: %s\n", wrapperPath)
-	fmt.Println("Note: You may need to restart your terminal for PATH changes to take effect")
-
-	return nil
-}
 
 func (d *DockerInstaller) runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)

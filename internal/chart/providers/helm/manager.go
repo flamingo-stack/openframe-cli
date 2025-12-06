@@ -686,25 +686,14 @@ func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace
 	}, nil
 }
 
-// convertWindowsPathToWSL converts a Windows path to a WSL path format
-// Example: C:\Users\foo\file.txt -> /mnt/c/Users/foo/file.txt
-// This is necessary when passing file paths from Windows to commands running in WSL2
+// convertWindowsPathToWSL is kept for API compatibility but no longer converts paths
+// since we now use native Windows tools instead of WSL2
 func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error) {
 	if windowsPath == "" {
 		return "", fmt.Errorf("empty path provided")
 	}
-
-	// Replace backslashes with forward slashes
-	path := strings.ReplaceAll(windowsPath, "\\", "/")
-
-	// Convert drive letter (e.g., C: -> /mnt/c)
-	if len(path) >= 2 && path[1] == ':' {
-		driveLetter := strings.ToLower(string(path[0]))
-		// Remove the drive letter and colon, then prepend /mnt/<drive>
-		path = "/mnt/" + driveLetter + path[2:]
-	}
-
-	return path, nil
+	// Return path as-is since we now use native Windows tools
+	return windowsPath, nil
 }
 
 // applyManifestFromURL fetches a multi-document YAML manifest and applies its resources
