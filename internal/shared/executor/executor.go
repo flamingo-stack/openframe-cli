@@ -253,11 +253,13 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 
 		// Create directories and run helm in a single bash command
 		// This ensures directories exist before helm tries to use them
+		// We use 2>&1 to redirect stderr to stdout so error messages are captured
+		// through the WSL/bash chain (otherwise stderr from helm gets lost)
 		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
 			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
 			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
 			"export HELM_DATA_HOME=/tmp/helm/data && " +
-			helmCmd
+			helmCmd + " 2>&1"
 
 		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
 		return "wsl", newArgs

@@ -235,7 +235,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "30m",
+		"--timeout", "7m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -264,9 +264,16 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		// Show diagnostic information about ArgoCD pods
 		h.showArgoCDDiagnostics(ctx, config.ClusterName)
 
-		// Include stderr output for better debugging
-		if result != nil && result.Stderr != "" {
-			return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, result.Stderr)
+		// Include stdout and stderr output for better debugging
+		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both
+		if result != nil {
+			output := result.Stderr
+			if output == "" {
+				output = result.Stdout
+			}
+			if output != "" {
+				return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, output)
+			}
 		}
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
@@ -478,7 +485,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "30m",
+		"--timeout", "7m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -522,9 +529,16 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Show diagnostic information about ArgoCD pods
 		h.showArgoCDDiagnostics(ctx, config.ClusterName)
 
-		// Include stderr output for better debugging
-		if result != nil && result.Stderr != "" {
-			return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, result.Stderr)
+		// Include stdout and stderr output for better debugging
+		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both
+		if result != nil {
+			output := result.Stderr
+			if output == "" {
+				output = result.Stdout
+			}
+			if output != "" {
+				return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, output)
+			}
 		}
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
