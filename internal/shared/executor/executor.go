@@ -238,15 +238,28 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		return "wsl", newArgs
 	}
 
-	// For helm, use the helm-wrapper.sh script which sets proper environment variables
-	// This ensures Helm has access to writable directories in CI environments
-	// Run with explicit bash to ensure bash is used (not dash/sh)
-	// NOTE: Using 'bash /script arg1 arg2' format - the args are passed directly to the script
-	// Do NOT use 'bash -c "command"' as WSL may split the command string incorrectly
+	// For helm, run directly via WSL with environment variables set using 'env'
+	// This is more reliable than using a wrapper script, as passing arguments through
+	// 'bash /script.sh arg1 arg2' can fail in some WSL/CI environments
+	// The 'env' command sets environment variables and then runs helm with all arguments
+	// Windows path conversion is already done in the calling code (manager.go)
+	// We use bash -c to first create the helm directories, then run helm with proper env vars
 	if command == "helm" {
-		newArgs := make([]string, 0, len(escapedArgs)+6)
-		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "bash", "/usr/local/bin/helm-wrapper.sh")
-		newArgs = append(newArgs, escapedArgs...)
+		// Build the helm command with all arguments properly quoted
+		helmCmd := "helm"
+		for _, arg := range escapedArgs {
+			helmCmd += " " + arg
+		}
+
+		// Create directories and run helm in a single bash command
+		// This ensures directories exist before helm tries to use them
+		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
+			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
+			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
+			"export HELM_DATA_HOME=/tmp/helm/data && " +
+			helmCmd
+
+		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
 		return "wsl", newArgs
 	}
 
