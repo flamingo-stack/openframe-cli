@@ -207,8 +207,9 @@ func (b *Builder) BuildInstallConfigWithCustomHelmPath(
 	// Set Silent flag based on NonInteractive mode
 	config.Silent = nonInteractive
 	config.NonInteractive = nonInteractive
-	// Skip CRDs installation in non-interactive (CI) mode - ArgoCD Helm chart manages them
-	config.SkipCRDs = nonInteractive
+	// Never skip CRDs - they must be installed via native Go client since Helm has crds.install=false
+	// This ensures CRDs are available before ArgoCD pods start, regardless of mode
+	config.SkipCRDs = false
 
 	return config, nil
 }
