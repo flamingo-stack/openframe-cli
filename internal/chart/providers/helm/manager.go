@@ -235,7 +235,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "5m",
+		"--timeout", "15m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -260,6 +260,9 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		if ctx.Err() == context.Canceled {
 			return ctx.Err() // Return context cancellation directly without extra messaging
 		}
+
+		// Show diagnostic information about ArgoCD pods
+		h.showArgoCDDiagnostics(ctx, config.ClusterName)
 
 		// Include stderr output for better debugging
 		if result != nil && result.Stderr != "" {
@@ -475,7 +478,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "5m",
+		"--timeout", "15m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -515,6 +518,10 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		if spinner != nil {
 			spinner.Stop()
 		}
+
+		// Show diagnostic information about ArgoCD pods
+		h.showArgoCDDiagnostics(ctx, config.ClusterName)
+
 		// Include stderr output for better debugging
 		if result != nil && result.Stderr != "" {
 			return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, result.Stderr)
@@ -1241,5 +1248,77 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 
 	pterm.Success.Printf("Helm release '%s' verified successfully\n", releaseName)
 	return nil
+}
+
+// showArgoCDDiagnostics outputs diagnostic information about ArgoCD pods when installation fails
+// This helps identify why the Helm install timed out (e.g., image pull issues, crashloops, pending pods)
+func (h *HelmManager) showArgoCDDiagnostics(ctx context.Context, clusterName string) {
+	pterm.Warning.Println("=== ArgoCD Installation Diagnostics ===")
+
+	// Build kubectl args with explicit context if cluster name is provided
+	baseArgs := []string{}
+	if clusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		baseArgs = append(baseArgs, "--context", contextName)
+	}
+
+	// Get pod status
+	pterm.Info.Println("Pod Status in argocd namespace:")
+	podArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "wide")
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    podArgs,
+	})
+	if err == nil && result != nil {
+		pterm.Println(result.Stdout)
+		if result.Stderr != "" {
+			pterm.Println(result.Stderr)
+		}
+	} else {
+		pterm.Error.Printf("Failed to get pods: %v\n", err)
+	}
+
+	// Get events in the namespace (sorted by timestamp)
+	pterm.Info.Println("\nRecent Events in argocd namespace:")
+	eventArgs := append(baseArgs, "get", "events", "-n", "argocd", "--sort-by=.lastTimestamp")
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    eventArgs,
+	})
+	if err == nil && result != nil {
+		pterm.Println(result.Stdout)
+		if result.Stderr != "" {
+			pterm.Println(result.Stderr)
+		}
+	} else {
+		pterm.Error.Printf("Failed to get events: %v\n", err)
+	}
+
+	// Describe pods that are not Running
+	pterm.Info.Println("\nDescribing non-running pods:")
+	describeArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\n\"}{end}")
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    describeArgs,
+	})
+	if err == nil && result != nil && strings.TrimSpace(result.Stdout) != "" {
+		pods := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+		for _, pod := range pods {
+			if pod == "" {
+				continue
+			}
+			pterm.Info.Printf("--- Describing pod: %s ---\n", pod)
+			describePodArgs := append(baseArgs, "describe", "pod", pod, "-n", "argocd")
+			descResult, descErr := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+				Command: "kubectl",
+				Args:    describePodArgs,
+			})
+			if descErr == nil && descResult != nil {
+				pterm.Println(descResult.Stdout)
+			}
+		}
+	}
+
+	pterm.Warning.Println("=== End of Diagnostics ===")
 }
 
