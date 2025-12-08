@@ -2,7 +2,7 @@ package argocd
 
 // GetArgoCDValues returns the ArgoCD Helm chart values as YAML string
 func GetArgoCDValues() string {
-	return `# global: 
+	return `# global:
 #   imagePullSecrets:
 #     - name: docker-pat-secret
 
@@ -24,9 +24,55 @@ configs:
       end
       return hs
 
+# Disable non-essential components for lightweight installation (especially CI/k3d)
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+applicationSet:
+  enabled: false
+
+# Resource constraints to prevent k3d/CI cluster overload
+controller:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+server:
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
 repoServer:
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "180s"
+
+redis:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
 `
 }
+

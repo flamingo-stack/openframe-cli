@@ -235,7 +235,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "15m",
+		"--timeout", "7m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -478,7 +478,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "15m",
+		"--timeout", "7m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
