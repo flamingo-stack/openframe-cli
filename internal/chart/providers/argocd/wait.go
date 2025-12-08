@@ -675,13 +675,20 @@ func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool
 		default:
 		}
 
+		// Use -o json to avoid Windows WSL escaping issues with jsonpath
 		checkArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
 			"-l", "app.kubernetes.io/part-of=argocd",
-			"-o", "jsonpath={.items[*].metadata.name}")
+			"-o", "json")
 		checkResult, checkErr := m.executor.Execute(ctx, "kubectl", checkArgs...)
 
 		if checkErr == nil && checkResult != nil && strings.TrimSpace(checkResult.Stdout) != "" {
-			podNames := strings.Fields(checkResult.Stdout)
+			var podList corev1.PodList
+			podNames := []string{}
+			if jsonErr := json.Unmarshal([]byte(checkResult.Stdout), &podList); jsonErr == nil {
+				for _, p := range podList.Items {
+					podNames = append(podNames, p.Name)
+				}
+			}
 			if len(podNames) > 0 {
 				if verbose {
 					pterm.Info.Printf("Found %d ArgoCD pod(s), waiting for them to be ready...\n", len(podNames))

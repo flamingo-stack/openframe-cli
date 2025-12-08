@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1142,13 +1144,13 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 	}
 
 	// Build kubectl args with explicit context if cluster name is provided
-	// Use a single kubectl call to list all deployments in the namespace
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
 	baseArgs := []string{}
 	if clusterName != "" {
 		contextName := fmt.Sprintf("k3d-%s", clusterName)
 		baseArgs = append(baseArgs, "--context", contextName)
 	}
-	baseArgs = append(baseArgs, "-n", "argocd", "get", "deployments", "-o", "jsonpath={.items[*].metadata.name}")
+	baseArgs = append(baseArgs, "-n", "argocd", "get", "deployments", "-o", "json")
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
@@ -1158,17 +1160,28 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		default:
 		}
 
-		// Single kubectl call to get all deployment names in the namespace
+		// Single kubectl call to get all deployments as JSON in the namespace
 		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 			Command: "kubectl",
 			Args:    baseArgs,
 		})
 
-		if err == nil && result != nil {
-			foundDeployments := strings.Fields(strings.TrimSpace(result.Stdout))
+		if err == nil && result != nil && result.Stdout != "" {
+			// Parse deployment list from JSON
+			var deploymentList appsv1.DeploymentList
+			if jsonErr := json.Unmarshal([]byte(result.Stdout), &deploymentList); jsonErr != nil {
+				lastErr = fmt.Errorf("failed to parse deployments JSON: %v", jsonErr)
+				if verbose {
+					pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): JSON parse error\n", i+1, maxRetries)
+				}
+				time.Sleep(retryInterval)
+				continue
+			}
+
+			// Build set of found deployments
 			foundSet := make(map[string]bool)
-			for _, d := range foundDeployments {
-				foundSet[d] = true
+			for _, d := range deploymentList.Items {
+				foundSet[d.Name] = true
 			}
 
 			// Check if all expected deployments are present
@@ -1339,14 +1352,21 @@ func (h *HelmManager) showArgoCDDiagnostics(ctx context.Context, clusterName str
 	}
 
 	// Get logs from all ArgoCD pods (helpful for CrashLoopBackOff debugging)
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
 	pterm.Info.Println("\nPod Logs (last 50 lines from each container):")
-	podListArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "jsonpath={.items[*].metadata.name}")
+	podListArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "json")
 	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "kubectl",
 		Args:    podListArgs,
 	})
 	if err == nil && result != nil && strings.TrimSpace(result.Stdout) != "" {
-		pods := strings.Fields(strings.TrimSpace(result.Stdout))
+		var podList corev1.PodList
+		pods := []string{}
+		if jsonErr := json.Unmarshal([]byte(result.Stdout), &podList); jsonErr == nil {
+			for _, p := range podList.Items {
+				pods = append(pods, p.Name)
+			}
+		}
 		for _, pod := range pods {
 			if pod == "" {
 				continue
