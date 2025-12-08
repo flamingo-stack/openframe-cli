@@ -240,16 +240,13 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 
 	// For helm, use the helm-wrapper.sh script which sets proper environment variables
 	// This ensures Helm has access to writable directories in CI environments
-	// CRITICAL: Use bash -c 'command' format to ensure arguments are properly passed
-	// WSL doesn't correctly pass arguments when using 'bash /script arg1 arg2' format
+	// Run with explicit bash to ensure bash is used (not dash/sh)
+	// NOTE: Using 'bash /script arg1 arg2' format - the args are passed directly to the script
+	// Do NOT use 'bash -c "command"' as WSL may split the command string incorrectly
 	if command == "helm" {
-		// Build the full command string to pass to bash -c
-		var cmdParts []string
-		cmdParts = append(cmdParts, "/usr/local/bin/helm-wrapper.sh")
-		cmdParts = append(cmdParts, escapedArgs...)
-		cmdString := strings.Join(cmdParts, " ")
-
-		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", cmdString}
+		newArgs := make([]string, 0, len(escapedArgs)+6)
+		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "bash", "/usr/local/bin/helm-wrapper.sh")
+		newArgs = append(newArgs, escapedArgs...)
 		return "wsl", newArgs
 	}
 
