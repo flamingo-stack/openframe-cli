@@ -233,7 +233,7 @@ func TestHelmManager_InstallArgoCD(t *testing.T) {
 				assert.Contains(t, installCmd, "--create-namespace")
 				assert.Contains(t, installCmd, "--wait")
 				assert.Contains(t, installCmd, "--timeout")
-				assert.Contains(t, installCmd, "5m")
+				assert.Contains(t, installCmd, "30m")
 				// Check that values file path contains argocd-values.yaml
 				hasValuesFile := false
 				for i, arg := range installCmd {

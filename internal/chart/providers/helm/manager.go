@@ -235,7 +235,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "7m",
+		"--timeout", "30m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -478,7 +478,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
-		"--timeout", "7m",
+		"--timeout", "30m",
 		"-f", valuesFilePath,
 		"--set", "crds.install=false",
 	}
@@ -722,9 +722,39 @@ func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace
 // convertWindowsPathToWSL converts a Windows path to a WSL path format
 // Example: C:\Users\foo\file.txt -> /mnt/c/Users/foo/file.txt
 // This is necessary when passing file paths from Windows to commands running in WSL2
+//
+// IMPORTANT: Uses `wsl wslpath` command for reliable conversion that handles:
+// - Windows 8.3 short filenames (e.g., RUNNER~1 -> runneradmin)
+// - Proper path escaping and special characters
+// Falls back to manual conversion if wslpath is not available.
 func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error) {
 	if windowsPath == "" {
 		return "", fmt.Errorf("empty path provided")
+	}
+
+	// First, try using WSL's wslpath command for reliable conversion
+	// This handles short filenames (8.3 format) like RUNNER~1 correctly
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"wslpath", "-u", windowsPath},
+	})
+
+	if err == nil && result != nil && result.ExitCode == 0 {
+		wslPath := strings.TrimSpace(result.Stdout)
+		if wslPath != "" {
+			if h.verbose {
+				pterm.Debug.Printf("Converted path via wslpath: %s -> %s\n", windowsPath, wslPath)
+			}
+			return wslPath, nil
+		}
+	}
+
+	// Fallback to manual conversion if wslpath is not available
+	if h.verbose {
+		pterm.Debug.Printf("wslpath unavailable, using manual path conversion for: %s\n", windowsPath)
 	}
 
 	// Replace backslashes with forward slashes
@@ -1292,6 +1322,45 @@ func (h *HelmManager) showArgoCDDiagnostics(ctx context.Context, clusterName str
 		}
 	} else {
 		pterm.Error.Printf("Failed to get events: %v\n", err)
+	}
+
+	// Get logs from all ArgoCD pods (helpful for CrashLoopBackOff debugging)
+	pterm.Info.Println("\nPod Logs (last 50 lines from each container):")
+	podListArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "jsonpath={.items[*].metadata.name}")
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "kubectl",
+		Args:    podListArgs,
+	})
+	if err == nil && result != nil && strings.TrimSpace(result.Stdout) != "" {
+		pods := strings.Fields(strings.TrimSpace(result.Stdout))
+		for _, pod := range pods {
+			if pod == "" {
+				continue
+			}
+			// Get current logs
+			pterm.Info.Printf("--- Logs from pod: %s ---\n", pod)
+			logArgs := append(baseArgs, "logs", pod, "-n", "argocd", "--all-containers=true", "--tail=50")
+			logResult, logErr := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+				Command: "kubectl",
+				Args:    logArgs,
+			})
+			if logErr == nil && logResult != nil && strings.TrimSpace(logResult.Stdout) != "" {
+				pterm.Println(logResult.Stdout)
+			} else if logErr != nil {
+				pterm.Debug.Printf("No current logs available for %s\n", pod)
+			}
+
+			// Get previous logs (from crashed containers)
+			prevLogArgs := append(baseArgs, "logs", pod, "-n", "argocd", "--all-containers=true", "--tail=50", "--previous")
+			prevLogResult, prevLogErr := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+				Command: "kubectl",
+				Args:    prevLogArgs,
+			})
+			if prevLogErr == nil && prevLogResult != nil && strings.TrimSpace(prevLogResult.Stdout) != "" {
+				pterm.Info.Printf("--- Previous logs from pod: %s (crashed container) ---\n", pod)
+				pterm.Println(prevLogResult.Stdout)
+			}
+		}
 	}
 
 	// Describe pods that are not Running
