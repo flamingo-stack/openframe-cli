@@ -629,12 +629,21 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 	}
 
 	// Convert Windows paths to WSL paths if needed (for Helm running in WSL2)
+	chartPath := appConfig.ChartPath
 	valuesFilePath := appConfig.ValuesFile
 	certFilePath := certFile
 	keyFilePath := keyFile
 
 	if runtime.GOOS == "windows" {
 		var err error
+
+		// Convert chart path
+		if chartPath != "" {
+			chartPath, err = h.convertWindowsPathToWSL(appConfig.ChartPath)
+			if err != nil {
+				return fmt.Errorf("failed to convert chart path for WSL: %w", err)
+			}
+		}
 
 		// Convert values file path
 		if valuesFilePath != "" {
@@ -662,7 +671,7 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 
 	// Install app-of-apps using the local chart path
 	args := []string{
-		"upgrade", "--install", "app-of-apps", appConfig.ChartPath,
+		"upgrade", "--install", "app-of-apps", chartPath,
 		"--namespace", appConfig.Namespace,
 		"--wait",
 		"--timeout", appConfig.Timeout,
