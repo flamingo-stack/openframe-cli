@@ -157,6 +157,14 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("cluster created but not reachable: %w", err))
 	}
 
+	// Additional kubectl verification checks (especially important for Windows/WSL)
+	if err := m.verifyClusterViaKubectl(ctx, config.Name); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: kubectl verification checks failed: %v\n", err)
+		}
+		// Don't fail - the native Go client verification passed, kubectl might just need more time
+	}
+
 	return restConfig, nil
 }
 
@@ -951,6 +959,80 @@ func (m *K3dManager) waitForTCPPort(ctx context.Context, host string, port strin
 	}
 
 	return fmt.Errorf("TCP port %s not available after %d retries: %w", address, maxRetries, lastErr)
+}
+
+// verifyClusterViaKubectl performs additional verification checks using kubectl
+// This helps diagnose issues where the native Go client works but kubectl-based tools (like Helm) might not
+func (m *K3dManager) verifyClusterViaKubectl(ctx context.Context, clusterName string) error {
+	contextName := fmt.Sprintf("k3d-%s", clusterName)
+
+	if m.verbose {
+		fmt.Println("Running kubectl verification checks...")
+	}
+
+	// 1. Check kubectl cluster-info
+	if m.verbose {
+		fmt.Printf("  Checking kubectl cluster-info --context %s...\n", contextName)
+	}
+	result, err := m.executor.Execute(ctx, "kubectl", "--context", contextName, "cluster-info")
+	if err != nil {
+		return fmt.Errorf("kubectl cluster-info failed: %w", err)
+	}
+	if m.verbose {
+		fmt.Printf("  kubectl cluster-info output:\n%s\n", result.Stdout)
+	}
+
+	// 2. Check kubectl get namespaces
+	if m.verbose {
+		fmt.Printf("  Checking kubectl get namespaces --context %s...\n", contextName)
+	}
+	result, err = m.executor.Execute(ctx, "kubectl", "--context", contextName, "get", "namespaces")
+	if err != nil {
+		return fmt.Errorf("kubectl get namespaces failed: %w", err)
+	}
+	if m.verbose {
+		fmt.Printf("  Namespaces in cluster:\n%s\n", result.Stdout)
+	}
+
+	// Verify kube-system namespace exists (indicates cluster is properly initialized)
+	if !strings.Contains(result.Stdout, "kube-system") {
+		return fmt.Errorf("kube-system namespace not found - cluster may not be fully initialized")
+	}
+
+	// 3. Check kubectl get nodes
+	if m.verbose {
+		fmt.Printf("  Checking kubectl get nodes --context %s...\n", contextName)
+	}
+	result, err = m.executor.Execute(ctx, "kubectl", "--context", contextName, "get", "nodes", "-o", "wide")
+	if err != nil {
+		return fmt.Errorf("kubectl get nodes failed: %w", err)
+	}
+	if m.verbose {
+		fmt.Printf("  Nodes in cluster:\n%s\n", result.Stdout)
+	}
+
+	// Verify at least one node is Ready
+	if !strings.Contains(result.Stdout, "Ready") {
+		return fmt.Errorf("no nodes in Ready state")
+	}
+
+	// 4. Verify kubeconfig context exists
+	if m.verbose {
+		fmt.Printf("  Checking kubectl config get-contexts for %s...\n", contextName)
+	}
+	result, err = m.executor.Execute(ctx, "kubectl", "config", "get-contexts", contextName)
+	if err != nil {
+		return fmt.Errorf("kubectl context %s not found: %w", contextName, err)
+	}
+	if m.verbose {
+		fmt.Printf("  Context info:\n%s\n", result.Stdout)
+	}
+
+	if m.verbose {
+		fmt.Println("✓ All kubectl verification checks passed")
+	}
+
+	return nil
 }
 
 // getClusterEndpointFromShell uses kubectl cluster-info to get the verified, live API endpoint URL

@@ -522,6 +522,26 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
 
+	// Log Helm output for debugging (helps identify if Helm actually created resources)
+	if config.Verbose && result != nil {
+		if result.Stdout != "" {
+			pterm.Info.Println("Helm stdout:")
+			pterm.Println(result.Stdout)
+		}
+		if result.Stderr != "" {
+			pterm.Info.Println("Helm stderr:")
+			pterm.Println(result.Stderr)
+		}
+	}
+
+	// Verify the Helm release was actually created by checking helm list
+	if err := h.verifyHelmRelease(ctx, "argo-cd", "argocd", config.ClusterName, config.Verbose); err != nil {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		return fmt.Errorf("ArgoCD Helm install completed but release verification failed: %w", err)
+	}
+
 	// Wait for ArgoCD deployments to be created after Helm install
 	// This addresses the race condition where Helm --wait returns before Kubernetes
 	// has actually created the Deployment objects (common in k3d/CI environments)
@@ -1158,5 +1178,68 @@ func (h *HelmManager) waitForAPIPort(ctx context.Context, timeout time.Duration)
 		}
 		return false, nil // Keep polling
 	})
+}
+
+// verifyHelmRelease checks if a Helm release was actually created by running helm list
+// This helps diagnose issues where Helm reports success but doesn't create resources
+func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namespace, clusterName string, verbose bool) error {
+	if verbose {
+		pterm.Info.Printf("Verifying Helm release '%s' in namespace '%s'...\n", releaseName, namespace)
+	}
+
+	// Build helm list args
+	args := []string{"list", "-n", namespace, "--filter", releaseName, "-o", "json"}
+
+	// Add explicit kube-context if cluster name is provided
+	if clusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		args = append(args, "--kube-context", contextName)
+	}
+
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to run helm list: %w", err)
+	}
+
+	// Log the helm list output
+	if verbose {
+		pterm.Info.Println("Helm list output:")
+		pterm.Println(result.Stdout)
+	}
+
+	// Check if the release exists in the output
+	// The JSON output will be an empty array "[]" if no releases found
+	output := strings.TrimSpace(result.Stdout)
+	if output == "" || output == "[]" {
+		return fmt.Errorf("Helm release '%s' not found in namespace '%s' - helm list returned empty", releaseName, namespace)
+	}
+
+	// Also run helm status for more details
+	statusArgs := []string{"status", releaseName, "-n", namespace}
+	if clusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		statusArgs = append(statusArgs, "--kube-context", contextName)
+	}
+
+	statusResult, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    statusArgs,
+		Env:     h.getHelmEnv(),
+	})
+	if err != nil {
+		return fmt.Errorf("Helm release exists but status check failed: %w", err)
+	}
+
+	if verbose {
+		pterm.Info.Println("Helm status output:")
+		pterm.Println(statusResult.Stdout)
+	}
+
+	pterm.Success.Printf("Helm release '%s' verified successfully\n", releaseName)
+	return nil
 }
 

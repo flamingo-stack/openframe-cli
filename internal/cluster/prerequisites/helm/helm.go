@@ -150,8 +150,19 @@ func (h *HelmInstaller) createHelmWrapper() error {
 	fmt.Println("Creating helm command for Windows...")
 
 	// First, create a bash helper script in WSL2 that converts Windows paths
+	// and sets proper Helm environment variables for CI environments
 	helperScript := `#!/bin/bash
 # Helper script to run helm with Windows path conversion
+# and proper environment setup for CI environments
+
+# Set Helm environment variables to use writable directories
+# This is especially important in CI environments where home directory may not have write permissions
+export HELM_CACHE_HOME="/tmp/helm/cache"
+export HELM_CONFIG_HOME="/tmp/helm/config"
+export HELM_DATA_HOME="/tmp/helm/data"
+
+# Create directories if they don't exist
+mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME"
 
 args=()
 for arg in "$@"; do
