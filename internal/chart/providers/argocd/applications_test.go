@@ -27,8 +27,13 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 		{
 			name: "successfully counts all applications",
 			setupMock: func(m *executor.MockCommandExecutor) {
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io", &executor.CommandResult{
-					Stdout: "app1\napp2\napp3\napp4\napp5\n",
+				// app-of-apps specific call returns empty
+				m.SetResponse("kubectl -n argocd get applications.argoproj.io app-of-apps", &executor.CommandResult{
+					Stdout: "",
+				})
+				// Return JSON format for -o json for the general applications query
+				m.SetResponse("-o json", &executor.CommandResult{
+					Stdout: `{"items":[{"metadata":{"name":"app1"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app2"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app3"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app4"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app5"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}}]}`,
 				})
 			},
 			expectedCount: 5,
@@ -46,9 +51,9 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 					Stdout: "",
 				})
 
-				// General kubectl call returns empty
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io", &executor.CommandResult{
-					Stdout: "",
+				// General kubectl call returns empty JSON (use -o json pattern)
+				m.SetResponse("-o json", &executor.CommandResult{
+					Stdout: `{"items":[]}`,
 				})
 
 				// Helm values call returns applications
@@ -80,9 +85,9 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 					Stdout: "",
 				})
 
-				// General kubectl call returns empty
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io", &executor.CommandResult{
-					Stdout: "",
+				// General kubectl call returns empty JSON (use -o json pattern)
+				m.SetResponse("-o json", &executor.CommandResult{
+					Stdout: `{"items":[]}`,
 				})
 
 				// Helm values call returns empty
@@ -134,8 +139,9 @@ func TestParseApplications(t *testing.T) {
 		{
 			name: "successfully parses healthy applications",
 			setupMock: func(m *executor.MockCommandExecutor) {
+				// Return JSON format for -o json
 				m.SetResponse("kubectl -n argocd get applications.argoproj.io", &executor.CommandResult{
-					Stdout: "app1\tHealthy\tSynced\napp2\tProgressing\tSynced\napp3\tHealthy\tOutOfSync\n",
+					Stdout: `{"items":[{"metadata":{"name":"app1"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app2"},"status":{"health":{"status":"Progressing"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app3"},"status":{"health":{"status":"Healthy"},"sync":{"status":"OutOfSync"}}}]}`,
 				})
 			},
 			expectedApps: []Application{
@@ -147,8 +153,9 @@ func TestParseApplications(t *testing.T) {
 		{
 			name: "handles applications with unknown status",
 			setupMock: func(m *executor.MockCommandExecutor) {
+				// Return JSON format with empty/unknown status
 				m.SetResponse("kubectl -n argocd get applications.argoproj.io", &executor.CommandResult{
-					Stdout: "app1\tHealthy\tSynced\napp2\t\t\napp3\tUnknown\tUnknown\n",
+					Stdout: `{"items":[{"metadata":{"name":"app1"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app2"},"status":{"health":{},"sync":{}}},{"metadata":{"name":"app3"},"status":{"health":{"status":"Unknown"},"sync":{"status":"Unknown"}}}]}`,
 				})
 			},
 			expectedApps: []Application{

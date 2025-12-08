@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -193,6 +194,26 @@ type Application struct {
 	Sync   string
 }
 
+// argoAppList is used for JSON parsing of ArgoCD applications from kubectl output
+type argoAppList struct {
+	Items []argoApp `json:"items"`
+}
+
+// argoApp represents the minimal ArgoCD application structure for JSON parsing
+type argoApp struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Status struct {
+		Health struct {
+			Status string `json:"status"`
+		} `json:"health"`
+		Sync struct {
+			Status string `json:"status"`
+		} `json:"sync"`
+	} `json:"status"`
+}
+
 // getTotalExpectedApplications tries to determine the total number of applications that will be created
 // This function prioritizes native Go client calls over kubectl shell commands for better performance
 func (m *Manager) getTotalExpectedApplications(ctx context.Context, config config.ChartInstallConfig) int {
@@ -283,22 +304,17 @@ func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, co
 	}
 
 	// Fallback Method 2: Try to get all applications including those being created
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
 	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")...)
+		"-o", "json")...)
 
 	if err == nil && allAppsResult.Stdout != "" {
-		apps := strings.Split(strings.TrimSpace(allAppsResult.Stdout), "\n")
-		count := 0
-		for _, app := range apps {
-			if strings.TrimSpace(app) != "" {
-				count++
-			}
-		}
-		if count > 0 {
+		var appList argoAppList
+		if err := json.Unmarshal([]byte(allAppsResult.Stdout), &appList); err == nil && len(appList.Items) > 0 {
 			if config.Verbose {
-				pterm.Debug.Printf("Found %d total ArgoCD applications (via kubectl)\n", count)
+				pterm.Debug.Printf("Found %d total ArgoCD applications (via kubectl)\n", len(appList.Items))
 			}
-			return count
+			return len(appList.Items)
 		}
 	}
 
@@ -370,43 +386,42 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 
 // parseApplicationsViaKubectl is the fallback method using kubectl
 func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool) ([]Application, error) {
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
 	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\t\"}{.status.health.status}{\"\\t\"}{.status.sync.status}{\"\\n\"}{end}")...)
+		"-o", "json")...)
 
 	if err != nil {
 		if verbose {
-			pterm.Warning.Printf("kubectl jsonpath failed: %v\n", err)
+			pterm.Warning.Printf("kubectl get applications failed: %v\n", err)
 		}
 		return []Application{}, nil
 	}
 
-	apps := make([]Application, 0)
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	var appList argoAppList
+	if err := json.Unmarshal([]byte(result.Stdout), &appList); err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to parse applications JSON: %v\n", err)
+		}
+		return []Application{}, nil
+	}
 
-	for _, line := range lines {
-		if line == "" {
-			continue
+	apps := make([]Application, 0, len(appList.Items))
+	for _, item := range appList.Items {
+		health := item.Status.Health.Status
+		sync := item.Status.Sync.Status
+
+		if health == "" {
+			health = "Unknown"
+		}
+		if sync == "" {
+			sync = "Unknown"
 		}
 
-		parts := strings.Split(line, "\t")
-		if len(parts) >= 3 {
-			health := strings.TrimSpace(parts[1])
-			sync := strings.TrimSpace(parts[2])
-
-			if health == "" {
-				health = "Unknown"
-			}
-			if sync == "" {
-				sync = "Unknown"
-			}
-
-			app := Application{
-				Name:   strings.TrimSpace(parts[0]),
-				Health: health,
-				Sync:   sync,
-			}
-			apps = append(apps, app)
-		}
+		apps = append(apps, Application{
+			Name:   item.Metadata.Name,
+			Health: health,
+			Sync:   sync,
+		})
 	}
 
 	return apps, nil

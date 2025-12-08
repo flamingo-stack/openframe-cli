@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -308,37 +309,29 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									}
 									ns := strings.TrimSpace(nsResult.Stdout)
 
-									// Get pods with issues: not Running or with restarts
-									podQuery := "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\t\"}{.status.phase}{\"\\t\"}{.status.containerStatuses[0].restartCount}{\"\\n\"}{end}"
-									problemPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", podQuery)
-									problemPodsResult, _ := m.executor.Execute(localCtx, "kubectl", problemPodsArgs...)
-
-									// Also get pods with restarts but Running
-									restartPodsQuery := "jsonpath={range .items[?(@.status.phase==\"Running\")]}{.metadata.name}{\"\\t\"}{.status.containerStatuses[0].restartCount}{\"\\n\"}{end}"
-									restartPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", restartPodsQuery)
-									restartPodsResult, _ := m.executor.Execute(localCtx, "kubectl", restartPodsArgs...)
+									// Get all pods as JSON to avoid Windows WSL escaping issues with jsonpath
+									allPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", "json")
+									allPodsResult, _ := m.executor.Execute(localCtx, "kubectl", allPodsArgs...)
 
 									problemPods := make(map[string]bool)
 
-									// Parse non-running pods
-									if problemPodsResult != nil && problemPodsResult.Stdout != "" {
-										for _, line := range strings.Split(strings.TrimSpace(problemPodsResult.Stdout), "\n") {
-											if line != "" {
-												podName := strings.Split(line, "\t")[0]
-												problemPods[podName] = true
-											}
-										}
-									}
-
-									// Parse pods with restarts
-									if restartPodsResult != nil && restartPodsResult.Stdout != "" {
-										for _, line := range strings.Split(strings.TrimSpace(restartPodsResult.Stdout), "\n") {
-											if line == "" {
-												continue
-											}
-											parts := strings.Split(line, "\t")
-											if len(parts) >= 2 && parts[1] != "0" && parts[1] != "" {
-												problemPods[parts[0]] = true
+									// Parse pods from JSON and identify problematic ones
+									if allPodsResult != nil && allPodsResult.Stdout != "" {
+										var podList corev1.PodList
+										if err := json.Unmarshal([]byte(allPodsResult.Stdout), &podList); err == nil {
+											for _, pod := range podList.Items {
+												// Non-running pods are problematic
+												if pod.Status.Phase != corev1.PodRunning {
+													problemPods[pod.Name] = true
+													continue
+												}
+												// Check for restarts in running pods
+												for _, cs := range pod.Status.ContainerStatuses {
+													if cs.RestartCount > 0 {
+														problemPods[pod.Name] = true
+														break
+													}
+												}
 											}
 										}
 									}
@@ -353,11 +346,25 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									for podName := range problemPods {
 										pterm.Info.Printf("\n  Pod: %s\n", podName)
 
-										// Get pod status summary using explicit context
-										statusArgs := m.getKubectlArgs("-n", ns, "get", "pod", podName, "-o", "jsonpath={.status.phase}{'/'}{.status.containerStatuses[*].state}")
-										statusResult, _ := m.executor.Execute(localCtx, "kubectl", statusArgs...)
-										if statusResult != nil && statusResult.Stdout != "" {
-											pterm.Info.Printf("  Status: %s\n", statusResult.Stdout)
+										// Get pod status as JSON to avoid Windows WSL escaping issues
+										podStatusArgs := m.getKubectlArgs("-n", ns, "get", "pod", podName, "-o", "json")
+										podStatusResult, _ := m.executor.Execute(localCtx, "kubectl", podStatusArgs...)
+										if podStatusResult != nil && podStatusResult.Stdout != "" {
+											var pod corev1.Pod
+											if err := json.Unmarshal([]byte(podStatusResult.Stdout), &pod); err == nil {
+												// Build status string similar to the old jsonpath output
+												var states []string
+												for _, cs := range pod.Status.ContainerStatuses {
+													if cs.State.Waiting != nil {
+														states = append(states, fmt.Sprintf("waiting(%s)", cs.State.Waiting.Reason))
+													} else if cs.State.Running != nil {
+														states = append(states, "running")
+													} else if cs.State.Terminated != nil {
+														states = append(states, fmt.Sprintf("terminated(%s)", cs.State.Terminated.Reason))
+													}
+												}
+												pterm.Info.Printf("  Status: %s/%s\n", pod.Status.Phase, strings.Join(states, ","))
+											}
 										}
 
 										// Get recent events for this pod using explicit context
@@ -756,28 +763,36 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	}
 
 	// Get pods that are not ready and show their details
-	notReadyQuery := "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\n\"}{end}"
-	notReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", notReadyQuery)
+	// Use --field-selector instead of jsonpath to avoid Windows WSL escaping issues
+	notReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase!=Running", "-o", "name")
 	notReadyResult, _ := m.executor.Execute(ctx, "kubectl", notReadyArgs...)
 
 	var problemPods []string
 	if notReadyResult != nil && notReadyResult.Stdout != "" {
 		for _, pod := range strings.Split(strings.TrimSpace(notReadyResult.Stdout), "\n") {
 			if pod != "" {
-				problemPods = append(problemPods, pod)
+				// Strip "pod/" prefix from -o name output
+				podName := strings.TrimPrefix(pod, "pod/")
+				problemPods = append(problemPods, podName)
 			}
 		}
 	}
 
 	// Also check for pods that are Running but not Ready (container issues)
-	runningNotReadyQuery := "jsonpath={range .items[?(@.status.phase==\"Running\")]}{.metadata.name}{\" \"}{.status.conditions[?(@.type==\"Ready\")].status}{\"\\n\"}{end}"
-	runningNotReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", runningNotReadyQuery)
-	runningNotReadyResult, _ := m.executor.Execute(ctx, "kubectl", runningNotReadyArgs...)
-	if runningNotReadyResult != nil && runningNotReadyResult.Stdout != "" {
-		for _, line := range strings.Split(strings.TrimSpace(runningNotReadyResult.Stdout), "\n") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 && parts[1] != "True" && parts[0] != "" {
-				problemPods = append(problemPods, parts[0])
+	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath
+	runningPodsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase=Running", "-o", "json")
+	runningPodsResult, _ := m.executor.Execute(ctx, "kubectl", runningPodsArgs...)
+	if runningPodsResult != nil && runningPodsResult.Stdout != "" {
+		var podList corev1.PodList
+		if err := json.Unmarshal([]byte(runningPodsResult.Stdout), &podList); err == nil {
+			for _, pod := range podList.Items {
+				// Check if the Ready condition is not True
+				for _, cond := range pod.Status.Conditions {
+					if cond.Type == corev1.PodReady && cond.Status != corev1.ConditionTrue {
+						problemPods = append(problemPods, pod.Name)
+						break
+					}
+				}
 			}
 		}
 	}
@@ -786,20 +801,31 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	for _, podName := range problemPods {
 		pterm.Info.Printf("\n--- Pod: %s ---\n", podName)
 
-		// Get pod describe summary (conditions and events)
-		describeArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o",
-			"jsonpath={\"Phase: \"}{.status.phase}{\"\\nConditions:\\n\"}{range .status.conditions[*]}{\"  \"}{.type}{\"=\"}{.status}{\" (\"}{.reason}{\")\\n\"}{end}")
-		describeResult, _ := m.executor.Execute(ctx, "kubectl", describeArgs...)
-		if describeResult != nil && describeResult.Stdout != "" {
-			pterm.Info.Println(describeResult.Stdout)
-		}
+		// Get pod details as JSON to avoid Windows WSL escaping issues with jsonpath
+		podArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o", "json")
+		podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
+		if podResult != nil && podResult.Stdout != "" {
+			var pod corev1.Pod
+			if err := json.Unmarshal([]byte(podResult.Stdout), &pod); err == nil {
+				// Print phase
+				pterm.Info.Printf("Phase: %s\n", pod.Status.Phase)
 
-		// Get container statuses
-		containerArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o",
-			"jsonpath={\"Containers:\\n\"}{range .status.containerStatuses[*]}{\"  \"}{.name}{\": ready=\"}{.ready}{\", restarts=\"}{.restartCount}{\"\\n\"}{end}")
-		containerResult, _ := m.executor.Execute(ctx, "kubectl", containerArgs...)
-		if containerResult != nil && containerResult.Stdout != "" {
-			pterm.Info.Println(containerResult.Stdout)
+				// Print conditions
+				pterm.Info.Println("Conditions:")
+				for _, cond := range pod.Status.Conditions {
+					reason := string(cond.Reason)
+					if reason == "" {
+						reason = "-"
+					}
+					pterm.Info.Printf("  %s=%s (%s)\n", cond.Type, cond.Status, reason)
+				}
+
+				// Print container statuses
+				pterm.Info.Println("Containers:")
+				for _, cs := range pod.Status.ContainerStatuses {
+					pterm.Info.Printf("  %s: ready=%t, restarts=%d\n", cs.Name, cs.Ready, cs.RestartCount)
+				}
+			}
 		}
 
 		// Get recent events for this pod

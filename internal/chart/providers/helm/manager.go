@@ -1296,7 +1296,7 @@ func (h *HelmManager) showArgoCDDiagnostics(ctx context.Context, clusterName str
 
 	// Describe pods that are not Running
 	pterm.Info.Println("\nDescribing non-running pods:")
-	describeArgs := append(baseArgs, "get", "pods", "-n", "argocd", "-o", "jsonpath={range .items[?(@.status.phase!=\"Running\")]}{.metadata.name}{\"\\n\"}{end}")
+	describeArgs := append(baseArgs, "get", "pods", "-n", "argocd", "--field-selector=status.phase!=Running", "-o", "name")
 	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "kubectl",
 		Args:    describeArgs,
