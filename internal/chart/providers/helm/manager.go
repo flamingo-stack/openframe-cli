@@ -880,12 +880,15 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 	return nil
 }
 
-// waitForArgoCDDeployments waits for ArgoCD deployments to be created in the cluster
+// waitForArgoCDDeployments waits for ArgoCD workloads to be created in the cluster
 // This addresses the race condition where Helm's --wait returns before Kubernetes
-// has actually created the Deployment objects (common in k3d/CI environments)
+// has actually created the Deployment/StatefulSet objects (common in k3d/CI environments)
 //
 // NOTE: CRDs are now installed and verified BEFORE Helm runs (see InstallArgoCDWithProgress),
-// so this function focuses only on verifying the deployments exist.
+// so this function focuses only on verifying the workloads exist.
+//
+// ArgoCD v3.x (Helm chart 8.x) deploys the application-controller as a StatefulSet,
+// while server and repo-server remain as Deployments.
 func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool) error {
 	if h.kubeClient == nil {
 		return fmt.Errorf("Kubernetes core client not initialized")
@@ -897,10 +900,14 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		return fmt.Errorf("API port never opened: %w", err)
 	}
 
-	// List of expected deployments
+	// List of expected Deployments (server and repo-server)
 	expectedDeployments := []string{
 		"argocd-server",
 		"argocd-repo-server",
+	}
+
+	// List of expected StatefulSets (application-controller in ArgoCD v3.x)
+	expectedStatefulSets := []string{
 		"argocd-application-controller",
 	}
 
@@ -909,19 +916,19 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 	timeout := 90 * time.Second      // 90 seconds for slow CI/Windows environments
 	retryInterval := 1 * time.Second // Fast polling interval (native API is ~ms per call)
 
-	pterm.Info.Println("Waiting for ArgoCD deployments via NATIVE API...")
+	pterm.Info.Println("Waiting for ArgoCD workloads via NATIVE API...")
 
 	// Use wait.PollUntilContextTimeout for resilient polling
 	return wait.PollUntilContextTimeout(ctx, retryInterval, timeout, false, func(ctx context.Context) (bool, error) {
 
-		missingDeployments := []string{}
+		missingWorkloads := []string{}
 
+		// Check Deployments
 		for _, name := range expectedDeployments {
-			// Native API call to check for deployment existence
 			_, err := h.kubeClient.AppsV1().Deployments("argocd").Get(ctx, name, metav1.GetOptions{})
 
 			if k8serrors.IsNotFound(err) {
-				missingDeployments = append(missingDeployments, name)
+				missingWorkloads = append(missingWorkloads, "deployment/"+name)
 			} else if err != nil {
 				// If it's a transient API error (not 'Not Found'), log and retry
 				pterm.Warning.Printf("Transient API error checking deployment %s: %v\n", name, err)
@@ -929,13 +936,26 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 			}
 		}
 
-		if len(missingDeployments) == 0 {
-			pterm.Success.Println("All ArgoCD deployments found.")
-			return true, nil // Success: All deployments exist.
+		// Check StatefulSets (application-controller in ArgoCD v3.x)
+		for _, name := range expectedStatefulSets {
+			_, err := h.kubeClient.AppsV1().StatefulSets("argocd").Get(ctx, name, metav1.GetOptions{})
+
+			if k8serrors.IsNotFound(err) {
+				missingWorkloads = append(missingWorkloads, "statefulset/"+name)
+			} else if err != nil {
+				// If it's a transient API error (not 'Not Found'), log and retry
+				pterm.Warning.Printf("Transient API error checking statefulset %s: %v\n", name, err)
+				return false, nil
+			}
+		}
+
+		if len(missingWorkloads) == 0 {
+			pterm.Success.Println("All ArgoCD workloads found.")
+			return true, nil // Success: All workloads exist.
 		}
 
 		if verbose {
-			pterm.Debug.Printf("Still missing deployments: %v\n", missingDeployments)
+			pterm.Debug.Printf("Still missing workloads: %v\n", missingWorkloads)
 		}
 
 		return false, nil // Keep polling
@@ -1115,13 +1135,20 @@ func (h *HelmManager) ensureArgoCDNamespaceKubectl(ctx context.Context, clusterN
 	return fmt.Errorf("timeout waiting for argocd namespace to become Active")
 }
 
-// waitForArgoCDDeploymentsKubectl waits for ArgoCD deployments using kubectl
+// waitForArgoCDDeploymentsKubectl waits for ArgoCD workloads using kubectl
 // This is a fallback for when the native Go client is unavailable (e.g., Windows/WSL)
+//
+// ArgoCD v3.x (Helm chart 8.x) deploys the application-controller as a StatefulSet,
+// while server and repo-server remain as Deployments.
 func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clusterName string, verbose bool) error {
-	// List of expected deployments
+	// List of expected Deployments (server and repo-server)
 	expectedDeployments := []string{
 		"argocd-server",
 		"argocd-repo-server",
+	}
+
+	// List of expected StatefulSets (application-controller in ArgoCD v3.x)
+	expectedStatefulSets := []string{
 		"argocd-application-controller",
 	}
 
@@ -1130,10 +1157,10 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 	retryInterval := 3 * time.Second
 	initialDelay := 5 * time.Second // Give Kubernetes time to create resources after Helm completes
 
-	pterm.Info.Println("Waiting for ArgoCD deployments to appear via kubectl...")
+	pterm.Info.Println("Waiting for ArgoCD workloads to appear via kubectl...")
 
-	// Initial delay: Helm's --wait returns before Kubernetes controllers fully create Deployments
-	// This delay allows the deployment controller to process the Helm release and create resources
+	// Initial delay: Helm's --wait returns before Kubernetes controllers fully create resources
+	// This delay allows the controllers to process the Helm release and create resources
 	if verbose {
 		pterm.Debug.Printf("Initial delay of %v to allow Kubernetes controllers to create resources...\n", initialDelay)
 	}
@@ -1143,14 +1170,12 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 	case <-time.After(initialDelay):
 	}
 
-	// Build kubectl args with explicit context if cluster name is provided
-	// Use -o json to avoid Windows WSL escaping issues with jsonpath
-	baseArgs := []string{}
+	// Build kubectl base args with explicit context if cluster name is provided
+	contextArgs := []string{}
 	if clusterName != "" {
 		contextName := fmt.Sprintf("k3d-%s", clusterName)
-		baseArgs = append(baseArgs, "--context", contextName)
+		contextArgs = append(contextArgs, "--context", contextName)
 	}
-	baseArgs = append(baseArgs, "-n", "argocd", "get", "deployments", "-o", "json")
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
@@ -1160,60 +1185,101 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		default:
 		}
 
-		// Single kubectl call to get all deployments as JSON in the namespace
+		var missingWorkloads []string
+
+		// Check Deployments
+		deployArgs := append(contextArgs, "-n", "argocd", "get", "deployments", "-o", "json")
 		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 			Command: "kubectl",
-			Args:    baseArgs,
+			Args:    deployArgs,
 		})
 
 		if err == nil && result != nil && result.Stdout != "" {
-			// Parse deployment list from JSON
 			var deploymentList appsv1.DeploymentList
 			if jsonErr := json.Unmarshal([]byte(result.Stdout), &deploymentList); jsonErr != nil {
 				lastErr = fmt.Errorf("failed to parse deployments JSON: %v", jsonErr)
 				if verbose {
-					pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): JSON parse error\n", i+1, maxRetries)
+					pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): JSON parse error\n", i+1, maxRetries)
 				}
 				time.Sleep(retryInterval)
 				continue
 			}
 
 			// Build set of found deployments
-			foundSet := make(map[string]bool)
+			foundDeployments := make(map[string]bool)
 			for _, d := range deploymentList.Items {
-				foundSet[d.Name] = true
+				foundDeployments[d.Name] = true
 			}
 
 			// Check if all expected deployments are present
-			allFound := true
-			var missingDeployments []string
 			for _, expected := range expectedDeployments {
-				if !foundSet[expected] {
-					allFound = false
-					missingDeployments = append(missingDeployments, expected)
+				if !foundDeployments[expected] {
+					missingWorkloads = append(missingWorkloads, "deployment/"+expected)
 				}
 			}
+		} else {
+			lastErr = fmt.Errorf("kubectl deployments error: %v", err)
+			if verbose {
+				pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): kubectl deployments error\n", i+1, maxRetries)
+			}
+			time.Sleep(retryInterval)
+			continue
+		}
 
-			if allFound {
-				pterm.Success.Println("All ArgoCD deployments found.")
-				return nil
+		// Check StatefulSets
+		stsArgs := append(contextArgs, "-n", "argocd", "get", "statefulsets", "-o", "json")
+		result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    stsArgs,
+		})
+
+		if err == nil && result != nil && result.Stdout != "" {
+			var statefulSetList appsv1.StatefulSetList
+			if jsonErr := json.Unmarshal([]byte(result.Stdout), &statefulSetList); jsonErr != nil {
+				lastErr = fmt.Errorf("failed to parse statefulsets JSON: %v", jsonErr)
+				if verbose {
+					pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): StatefulSet JSON parse error\n", i+1, maxRetries)
+				}
+				time.Sleep(retryInterval)
+				continue
 			}
 
-			lastErr = fmt.Errorf("missing deployments: %v", missingDeployments)
-			if verbose {
-				pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): missing %v\n", i+1, maxRetries, missingDeployments)
+			// Build set of found statefulsets
+			foundStatefulSets := make(map[string]bool)
+			for _, s := range statefulSetList.Items {
+				foundStatefulSets[s.Name] = true
+			}
+
+			// Check if all expected statefulsets are present
+			for _, expected := range expectedStatefulSets {
+				if !foundStatefulSets[expected] {
+					missingWorkloads = append(missingWorkloads, "statefulset/"+expected)
+				}
 			}
 		} else {
-			lastErr = fmt.Errorf("kubectl error: %v", err)
+			lastErr = fmt.Errorf("kubectl statefulsets error: %v", err)
 			if verbose {
-				pterm.Debug.Printf("Waiting for deployments (attempt %d/%d): kubectl error\n", i+1, maxRetries)
+				pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): kubectl statefulsets error\n", i+1, maxRetries)
 			}
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		// Check if all workloads are present
+		if len(missingWorkloads) == 0 {
+			pterm.Success.Println("All ArgoCD workloads found.")
+			return nil
+		}
+
+		lastErr = fmt.Errorf("missing workloads: %v", missingWorkloads)
+		if verbose {
+			pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): missing %v\n", i+1, maxRetries, missingWorkloads)
 		}
 
 		time.Sleep(retryInterval)
 	}
 
-	return fmt.Errorf("deployments not found after %d retries: %w", maxRetries, lastErr)
+	return fmt.Errorf("workloads not found after %d retries: %w", maxRetries, lastErr)
 }
 
 // waitForAPIPort waits for the Kubernetes API port to be open before making API calls
