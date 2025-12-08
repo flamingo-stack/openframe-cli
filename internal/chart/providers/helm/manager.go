@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -748,6 +749,15 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 		return "", fmt.Errorf("empty path provided")
 	}
 
+	// First, convert relative paths to absolute paths
+	// This is necessary because wslpath requires absolute paths and
+	// WSL won't be able to find files using Windows relative paths
+	absPath, err := filepath.Abs(windowsPath)
+	if err != nil {
+		// If we can't get absolute path, try with original
+		absPath = windowsPath
+	}
+
 	// First, try using WSL's wslpath command for reliable conversion
 	// This handles short filenames (8.3 format) like RUNNER~1 correctly
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -757,7 +767,7 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	// This prevents backslashes from being interpreted as escape characters
 	// when WSL passes arguments to the Linux command
 	// wslpath accepts both forward and backward slashes
-	windowsPathForWSL := strings.ReplaceAll(windowsPath, "\\", "/")
+	windowsPathForWSL := strings.ReplaceAll(absPath, "\\", "/")
 
 	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "wsl",
@@ -776,11 +786,11 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 
 	// Fallback to manual conversion if wslpath is not available
 	if h.verbose {
-		pterm.Debug.Printf("wslpath unavailable, using manual path conversion for: %s\n", windowsPath)
+		pterm.Debug.Printf("wslpath unavailable, using manual path conversion for: %s\n", absPath)
 	}
 
-	// Replace backslashes with forward slashes
-	path := strings.ReplaceAll(windowsPath, "\\", "/")
+	// Replace backslashes with forward slashes (use absPath which is already absolute)
+	path := strings.ReplaceAll(absPath, "\\", "/")
 
 	// Convert drive letter (e.g., C: -> /mnt/c)
 	if len(path) >= 2 && path[1] == ':' {
