@@ -788,9 +788,11 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	// wslpath accepts both forward and backward slashes
 	windowsPathForWSL := strings.ReplaceAll(absPath, "\\", "/")
 
+	// Must specify -d Ubuntu to use the correct distribution
+	// Without this, wsl may try to use a non-existent default distribution
 	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "wsl",
-		Args:    []string{"wslpath", "-u", windowsPathForWSL},
+		Args:    []string{"-d", "Ubuntu", "wslpath", "-u", windowsPathForWSL},
 	})
 
 	if err == nil && result != nil && result.ExitCode == 0 {
