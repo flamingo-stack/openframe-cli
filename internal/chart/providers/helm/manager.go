@@ -767,8 +767,18 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 		absPath = windowsPath
 	}
 
-	// First, try using WSL's wslpath command for reliable conversion
-	// This handles short filenames (8.3 format) like RUNNER~1 correctly
+	// Expand Windows 8.3 short filenames to long path names
+	// For example: C:\Users\RUNNER~1\... -> C:\Users\runneradmin\...
+	// This is critical because WSL doesn't understand Windows short filenames
+	expandedPath, err := expandShortPath(absPath)
+	if err == nil && expandedPath != "" {
+		absPath = expandedPath
+		if h.verbose {
+			pterm.Debug.Printf("Expanded short path: %s -> %s\n", windowsPath, absPath)
+		}
+	}
+
+	// Try using WSL's wslpath command for reliable conversion
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

@@ -524,6 +524,14 @@ func (m *K3dManager) convertWindowsPathToWSL(windowsPath string) (string, error)
 		return "", fmt.Errorf("empty path provided")
 	}
 
+	// Expand Windows 8.3 short filenames to long path names
+	// For example: C:\Users\RUNNER~1\... -> C:\Users\runneradmin\...
+	// This is critical because WSL doesn't understand Windows short filenames
+	expandedPath, err := expandShortPath(windowsPath)
+	if err == nil && expandedPath != "" {
+		windowsPath = expandedPath
+	}
+
 	// Replace backslashes with forward slashes
 	path := strings.ReplaceAll(windowsPath, "\\", "/")
 
