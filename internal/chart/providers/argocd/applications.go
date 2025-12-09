@@ -189,9 +189,10 @@ func (m *Manager) getKubectlArgs(args ...string) []string {
 
 // Application represents an ArgoCD application status
 type Application struct {
-	Name   string
-	Health string
-	Sync   string
+	Name      string
+	Health    string
+	Sync      string
+	Condition string // Status condition message (e.g., error messages from repo-server)
 }
 
 // argoAppList is used for JSON parsing of ArgoCD applications from kubectl output
@@ -211,6 +212,10 @@ type argoApp struct {
 		Sync struct {
 			Status string `json:"status"`
 		} `json:"sync"`
+		Conditions []struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"conditions"`
 	} `json:"status"`
 }
 
@@ -364,6 +369,7 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 	for _, argoApp := range appList.Items {
 		health := "Unknown"
 		sync := "Unknown"
+		condition := ""
 
 		// Safely extract Health and Sync status from the Go struct
 		if argoApp.Status.Health.Status != "" {
@@ -373,10 +379,19 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 			sync = string(argoApp.Status.Sync.Status)
 		}
 
+		// Extract condition messages (especially errors)
+		for _, cond := range argoApp.Status.Conditions {
+			if cond.Message != "" {
+				condition = cond.Message
+				break // Take the first condition message
+			}
+		}
+
 		app := Application{
-			Name:   argoApp.Name,
-			Health: health,
-			Sync:   sync,
+			Name:      argoApp.Name,
+			Health:    health,
+			Sync:      sync,
+			Condition: condition,
 		}
 		apps = append(apps, app)
 	}
@@ -423,6 +438,7 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 	for _, item := range appList.Items {
 		health := item.Status.Health.Status
 		sync := item.Status.Sync.Status
+		condition := ""
 
 		if health == "" {
 			health = "Unknown"
@@ -431,10 +447,19 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 			sync = "Unknown"
 		}
 
+		// Extract condition messages (especially errors)
+		for _, cond := range item.Status.Conditions {
+			if cond.Message != "" {
+				condition = cond.Message
+				break // Take the first condition message
+			}
+		}
+
 		apps = append(apps, Application{
-			Name:   item.Metadata.Name,
-			Health: health,
-			Sync:   sync,
+			Name:      item.Metadata.Name,
+			Health:    health,
+			Sync:      sync,
+			Condition: condition,
 		})
 	}
 
