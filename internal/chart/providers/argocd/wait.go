@@ -176,7 +176,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
 	clusterHealthCheckInterval := 10 * time.Second
+	clusterHealthCheckIntervalFast := 2 * time.Second // Faster checks when errors occur
 	lastClusterHealthCheck := time.Now()
+	resourceCheckInterval := 5 * time.Minute // Check system resources every 5 minutes
+	lastResourceCheck := time.Now()
 	consecutiveFailures = 0 // Reset for main loop
 
 	// Get expected applications count
@@ -209,8 +212,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				return fmt.Errorf("timeout waiting for ArgoCD applications after %v", timeout)
 			}
 
-			// Periodic cluster health check (every 10 seconds)
-			if time.Since(lastClusterHealthCheck) >= clusterHealthCheckInterval {
+			// Periodic cluster health check
+			// Use faster interval (2s) when we've seen failures, normal interval (10s) otherwise
+			currentHealthCheckInterval := clusterHealthCheckInterval
+			if consecutiveFailures > 0 {
+				currentHealthCheckInterval = clusterHealthCheckIntervalFast
+			}
+			if time.Since(lastClusterHealthCheck) >= currentHealthCheckInterval {
 				lastClusterHealthCheck = time.Now()
 				if err := m.checkClusterConnectivity(localCtx, false); err != nil {
 					consecutiveFailures++
@@ -229,6 +237,12 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 			}
 
+			// Periodic resource check (every 5 minutes) - helps diagnose resource exhaustion
+			if time.Since(lastResourceCheck) >= resourceCheckInterval {
+				lastResourceCheck = time.Now()
+				m.logResourceStatus(localCtx, config.Verbose)
+			}
+
 			// Check applications every 2 seconds
 			if time.Since(lastCheck) < checkInterval {
 				continue
@@ -241,8 +255,38 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				if localCtx.Err() != nil {
 					return fmt.Errorf("operation cancelled: %w", localCtx.Err())
 				}
-				// Ignore parse errors and retry
+
+				// Check if this is a cluster connectivity error
+				errStr := err.Error()
+				isConnectivityError := strings.Contains(errStr, "connection refused") ||
+					strings.Contains(errStr, "cluster unreachable") ||
+					strings.Contains(errStr, "was refused") ||
+					strings.Contains(errStr, "Unable to connect")
+
+				if isConnectivityError {
+					// Trigger immediate health check on connectivity errors
+					consecutiveFailures++
+					pterm.Warning.Printf("Application query failed - cluster may be unreachable (%d/%d): %v\n",
+						consecutiveFailures, maxConsecutiveFailures, err)
+
+					if consecutiveFailures >= maxConsecutiveFailures {
+						stopSpinner()
+						m.printClusterDiagnostics(localCtx)
+						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
+					}
+
+					// Force an immediate cluster health check
+					lastClusterHealthCheck = time.Time{} // Reset to trigger check on next iteration
+				}
+
+				// Retry on other errors
 				continue
+			}
+
+			// Reset consecutive failures on successful query
+			if consecutiveFailures > 0 {
+				pterm.Success.Println("Application queries restored")
+				consecutiveFailures = 0
 			}
 
 			totalApps := len(apps)
@@ -328,6 +372,30 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						} else {
 							pterm.Info.Printf("  Still waiting for %d applications (showing first 5): %v...\n",
 								len(notReadyApps), notReadyApps[:5])
+						}
+
+						// Check for applications stuck in "Unknown" status
+						unknownApps := []string{}
+						for _, app := range apps {
+							if app.Health == "Unknown" || app.Sync == "Unknown" {
+								unknownApps = append(unknownApps, app.Name)
+							}
+						}
+
+						// After 2 minutes, warn about Unknown status as it may indicate ArgoCD controller issues
+						if len(unknownApps) > 0 && elapsed > 2*time.Minute {
+							pterm.Warning.Printf("  Applications with 'Unknown' status: %v\n", unknownApps)
+							pterm.Warning.Println("  This may indicate the ArgoCD Application Controller is not processing applications.")
+							pterm.Warning.Println("  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
+
+							// Check ArgoCD controller pod status every 2 minutes when apps are stuck in Unknown
+							if int(elapsed.Seconds())%120 == 0 {
+								controllerArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-l", "app.kubernetes.io/name=argocd-application-controller", "-o", "wide")
+								controllerResult, _ := m.executor.Execute(localCtx, "kubectl", controllerArgs...)
+								if controllerResult != nil && controllerResult.Stdout != "" {
+									pterm.Info.Printf("  ArgoCD Application Controller status:\n%s\n", controllerResult.Stdout)
+								}
+							}
 						}
 
 						// DEBUG: Show pod details for stuck applications after 7 min, every 5 minutes
@@ -1025,8 +1093,53 @@ func (m *Manager) printClusterDiagnostics(ctx context.Context) {
 			pterm.Println(wslResult.Stdout)
 		}
 
+		// === Resource Checks for Windows/WSL ===
+		pterm.Info.Println("\n=== System Resources ===")
+
+		// Check memory usage in WSL
+		memResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"free -h 2>/dev/null || echo 'Could not get memory info'")
+		if memResult != nil && memResult.Stdout != "" {
+			pterm.Info.Println("Memory usage (WSL):")
+			pterm.Println(memResult.Stdout)
+		}
+
+		// Check disk space in WSL
+		diskResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"df -h / /tmp 2>/dev/null | head -5 || echo 'Could not get disk info'")
+		if diskResult != nil && diskResult.Stdout != "" {
+			pterm.Info.Println("Disk space (WSL):")
+			pterm.Println(diskResult.Stdout)
+		}
+
+		// Check Docker system resources
+		dockerStatsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"sudo docker stats --no-stream --format 'table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.MemPerc}}' 2>/dev/null | head -10 || echo 'Could not get Docker stats'")
+		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
+			pterm.Info.Println("Docker container resource usage:")
+			pterm.Println(dockerStatsResult.Stdout)
+		}
+
+		// Check Docker system info (total resources)
+		dockerInfoResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"sudo docker info 2>/dev/null | grep -E '(CPUs|Total Memory|Docker Root Dir)' || echo 'Could not get Docker info'")
+		if dockerInfoResult != nil && dockerInfoResult.Stdout != "" {
+			pterm.Info.Println("Docker system info:")
+			pterm.Println(dockerInfoResult.Stdout)
+		}
+
+		// Check for OOM kills
+		oomResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"dmesg 2>/dev/null | grep -i 'out of memory\\|oom\\|killed process' | tail -5 || echo 'No OOM events found (or dmesg not accessible)'")
+		if oomResult != nil && oomResult.Stdout != "" {
+			pterm.Info.Println("Recent OOM events:")
+			pterm.Println(oomResult.Stdout)
+		}
+
+		pterm.Info.Println("\n=== Container Status ===")
+
 		// Check if Docker is running inside WSL
-		dockerResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps --format 'table {{.Names}}\\t{{.Status}}' 2>&1 || echo 'Docker not accessible'")
+		dockerResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Size}}' 2>&1 || echo 'Docker not accessible'")
 		if dockerResult != nil && dockerResult.Stdout != "" {
 			pterm.Info.Println("Docker containers in WSL:")
 			pterm.Println(dockerResult.Stdout)
@@ -1061,8 +1174,48 @@ func (m *Manager) printClusterDiagnostics(ctx context.Context) {
 		// Linux/macOS diagnostics
 		pterm.Info.Println("\n=== Cluster Diagnostics ===")
 
+		// === Resource Checks for Linux/macOS ===
+		pterm.Info.Println("\n=== System Resources ===")
+
+		// Check memory usage
+		memResult, _ := m.executor.Execute(ctx, "bash", "-c", "free -h 2>/dev/null || vm_stat 2>/dev/null | head -10 || echo 'Could not get memory info'")
+		if memResult != nil && memResult.Stdout != "" {
+			pterm.Info.Println("Memory usage:")
+			pterm.Println(memResult.Stdout)
+		}
+
+		// Check disk space
+		diskResult, _ := m.executor.Execute(ctx, "df", "-h", "/", "/tmp", "/var")
+		if diskResult != nil && diskResult.Stdout != "" {
+			pterm.Info.Println("Disk space:")
+			pterm.Println(diskResult.Stdout)
+		}
+
+		// Check Docker system resources
+		dockerStatsResult, _ := m.executor.Execute(ctx, "docker", "stats", "--no-stream", "--format", "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}")
+		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
+			pterm.Info.Println("Docker container resource usage:")
+			pterm.Println(dockerStatsResult.Stdout)
+		}
+
+		// Check Docker system info
+		dockerInfoResult, _ := m.executor.Execute(ctx, "bash", "-c", "docker info 2>/dev/null | grep -E '(CPUs|Total Memory|Docker Root Dir)' || echo 'Could not get Docker info'")
+		if dockerInfoResult != nil && dockerInfoResult.Stdout != "" {
+			pterm.Info.Println("Docker system info:")
+			pterm.Println(dockerInfoResult.Stdout)
+		}
+
+		// Check for OOM kills (Linux only)
+		oomResult, _ := m.executor.Execute(ctx, "bash", "-c", "dmesg 2>/dev/null | grep -i 'out of memory\\|oom\\|killed process' | tail -5 || echo 'No OOM events found'")
+		if oomResult != nil && oomResult.Stdout != "" {
+			pterm.Info.Println("Recent OOM events:")
+			pterm.Println(oomResult.Stdout)
+		}
+
+		pterm.Info.Println("\n=== Container Status ===")
+
 		// Check Docker status
-		dockerResult, _ := m.executor.Execute(ctx, "docker", "ps", "--format", "table {{.Names}}\t{{.Status}}")
+		dockerResult, _ := m.executor.Execute(ctx, "docker", "ps", "-a", "--format", "table {{.Names}}\t{{.Status}}\t{{.Size}}")
 		if dockerResult != nil && dockerResult.Stdout != "" {
 			pterm.Info.Println("Docker containers:")
 			pterm.Println(dockerResult.Stdout)
@@ -1083,5 +1236,106 @@ func (m *Manager) printClusterDiagnostics(ctx context.Context) {
 		}
 	}
 
+	// Try to get Kubernetes node resource status if cluster is still partially accessible
+	pterm.Info.Println("\n=== Kubernetes Node Resources ===")
+	nodeArgs := m.getKubectlArgs("top", "nodes")
+	nodeResult, _ := m.executor.Execute(ctx, "kubectl", nodeArgs...)
+	if nodeResult != nil && nodeResult.Stdout != "" && nodeResult.ExitCode == 0 {
+		pterm.Info.Println("Node resource usage:")
+		pterm.Println(nodeResult.Stdout)
+	} else {
+		pterm.Warning.Println("Could not get node resource usage (cluster may be unreachable)")
+	}
+
+	// Try to get pod resource usage
+	podTopArgs := m.getKubectlArgs("top", "pods", "-A", "--sort-by=memory")
+	podTopResult, _ := m.executor.Execute(ctx, "kubectl", podTopArgs...)
+	if podTopResult != nil && podTopResult.Stdout != "" && podTopResult.ExitCode == 0 {
+		pterm.Info.Println("Top pods by memory usage:")
+		// Only show top 15 pods
+		lines := strings.Split(podTopResult.Stdout, "\n")
+		if len(lines) > 16 {
+			lines = lines[:16]
+		}
+		pterm.Println(strings.Join(lines, "\n"))
+	}
+
 	pterm.Info.Println("\n=== End Diagnostics ===")
+}
+
+// logResourceStatus logs a brief summary of system resources (called periodically during wait)
+func (m *Manager) logResourceStatus(ctx context.Context, verbose bool) {
+	if !verbose {
+		return // Only log in verbose mode to avoid noise
+	}
+
+	pterm.Debug.Println("=== Periodic Resource Check ===")
+
+	if runtime.GOOS == "windows" {
+		// WSL memory check - compact format
+		memResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"free -h 2>/dev/null | grep -E '^Mem:' | awk '{print \"Memory: \" $3 \"/\" $2 \" used\"}' || echo 'Memory info unavailable'")
+		if memResult != nil && memResult.Stdout != "" {
+			pterm.Debug.Println(strings.TrimSpace(memResult.Stdout))
+		}
+
+		// Docker stats - most memory-hungry containers
+		dockerStatsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"sudo docker stats --no-stream --format '{{.Name}}: {{.MemUsage}} ({{.MemPerc}})' 2>/dev/null | sort -t'(' -k2 -rn | head -3 || echo 'Docker stats unavailable'")
+		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
+			pterm.Debug.Println("Top containers by memory:")
+			for _, line := range strings.Split(strings.TrimSpace(dockerStatsResult.Stdout), "\n") {
+				if line != "" {
+					pterm.Debug.Printf("  %s\n", line)
+				}
+			}
+		}
+
+		// Disk space check
+		diskResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"df -h / 2>/dev/null | tail -1 | awk '{print \"Disk: \" $3 \"/\" $2 \" used (\" $5 \")\"}' || echo 'Disk info unavailable'")
+		if diskResult != nil && diskResult.Stdout != "" {
+			pterm.Debug.Println(strings.TrimSpace(diskResult.Stdout))
+		}
+	} else {
+		// Linux/macOS memory check
+		memResult, _ := m.executor.Execute(ctx, "bash", "-c",
+			"free -h 2>/dev/null | grep -E '^Mem:' | awk '{print \"Memory: \" $3 \"/\" $2 \" used\"}' || vm_stat 2>/dev/null | head -3 || echo 'Memory info unavailable'")
+		if memResult != nil && memResult.Stdout != "" {
+			pterm.Debug.Println(strings.TrimSpace(memResult.Stdout))
+		}
+
+		// Docker stats
+		dockerStatsResult, _ := m.executor.Execute(ctx, "bash", "-c",
+			"docker stats --no-stream --format '{{.Name}}: {{.MemUsage}} ({{.MemPerc}})' 2>/dev/null | sort -t'(' -k2 -rn | head -3 || echo 'Docker stats unavailable'")
+		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
+			pterm.Debug.Println("Top containers by memory:")
+			for _, line := range strings.Split(strings.TrimSpace(dockerStatsResult.Stdout), "\n") {
+				if line != "" {
+					pterm.Debug.Printf("  %s\n", line)
+				}
+			}
+		}
+
+		// Disk space check
+		diskResult, _ := m.executor.Execute(ctx, "bash", "-c",
+			"df -h / 2>/dev/null | tail -1 | awk '{print \"Disk: \" $3 \"/\" $2 \" used (\" $5 \")\"}' || echo 'Disk info unavailable'")
+		if diskResult != nil && diskResult.Stdout != "" {
+			pterm.Debug.Println(strings.TrimSpace(diskResult.Stdout))
+		}
+	}
+
+	// Kubernetes node resources (if available)
+	nodeArgs := m.getKubectlArgs("top", "nodes", "--no-headers")
+	nodeResult, _ := m.executor.Execute(ctx, "kubectl", nodeArgs...)
+	if nodeResult != nil && nodeResult.Stdout != "" && nodeResult.ExitCode == 0 {
+		pterm.Debug.Println("K8s node resources:")
+		for _, line := range strings.Split(strings.TrimSpace(nodeResult.Stdout), "\n") {
+			if line != "" {
+				pterm.Debug.Printf("  %s\n", line)
+			}
+		}
+	}
+
+	pterm.Debug.Println("=== End Resource Check ===")
 }

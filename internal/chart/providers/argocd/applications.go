@@ -394,7 +394,21 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 		if verbose {
 			pterm.Warning.Printf("kubectl get applications failed: %v\n", err)
 		}
-		return []Application{}, nil
+		// Return the error so the caller can detect cluster connectivity issues
+		return []Application{}, fmt.Errorf("kubectl execution failed: %w", err)
+	}
+
+	// Check for connection refused or other cluster connectivity errors in output
+	combinedOutput := result.Stdout + result.Stderr
+	if strings.Contains(combinedOutput, "connection refused") ||
+		strings.Contains(combinedOutput, "Unable to connect to the server") ||
+		strings.Contains(combinedOutput, "was refused") ||
+		strings.Contains(combinedOutput, "no such host") {
+		errMsg := "cluster connectivity error"
+		if result.Stderr != "" {
+			errMsg = result.Stderr
+		}
+		return []Application{}, fmt.Errorf("cluster unreachable: %s", errMsg)
 	}
 
 	var appList argoAppList
