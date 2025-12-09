@@ -628,6 +628,26 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		return fmt.Errorf("chart path is required for app-of-apps installation")
 	}
 
+	// On Windows, validate WSL Ubuntu is accessible before proceeding
+	// This provides early, clear error messages instead of cryptic failures later
+	if runtime.GOOS == "windows" {
+		if !executor.IsWSLAvailable() {
+			return fmt.Errorf("WSL is not available on this system. Helm requires WSL2 with Ubuntu to run on Windows.\n" +
+				"Please install WSL2: wsl --install")
+		}
+		if !executor.IsWSLUbuntuAvailable() {
+			return fmt.Errorf("WSL Ubuntu distribution is not accessible.\n" +
+				"This could mean:\n" +
+				"  1. Ubuntu is not installed (run: wsl --install -d Ubuntu)\n" +
+				"  2. Ubuntu is not running (run: wsl -d Ubuntu)\n" +
+				"  3. Ubuntu is still initializing (wait a few seconds and retry)\n" +
+				"Check status with: wsl --list --verbose")
+		}
+		if h.verbose {
+			pterm.Debug.Println("WSL Ubuntu is accessible, proceeding with helm installation")
+		}
+	}
+
 	// Convert Windows paths to WSL paths if needed (for Helm running in WSL2)
 	chartPath := appConfig.ChartPath
 	valuesFilePath := appConfig.ValuesFile
@@ -805,9 +825,26 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 		}
 	}
 
+	// Log WSL errors for debugging
+	if err != nil {
+		// Check if this is a WSL-specific error
+		if wslErr, ok := err.(*executor.WSLError); ok {
+			if h.verbose {
+				pterm.Warning.Printf("WSL error during path conversion: %s\n", wslErr.Error())
+				pterm.Info.Printf("Falling back to manual path conversion\n")
+			}
+		} else if h.verbose {
+			pterm.Debug.Printf("wslpath command failed: %v\n", err)
+		}
+	} else if result != nil && result.ExitCode != 0 {
+		if h.verbose {
+			pterm.Debug.Printf("wslpath returned exit code %d, stderr: %s\n", result.ExitCode, result.Stderr)
+		}
+	}
+
 	// Fallback to manual conversion if wslpath is not available
 	if h.verbose {
-		pterm.Debug.Printf("wslpath unavailable, using manual path conversion for: %s\n", absPath)
+		pterm.Debug.Printf("Using manual path conversion for: %s\n", absPath)
 	}
 
 	// Replace backslashes with forward slashes (use absPath which is already absolute)

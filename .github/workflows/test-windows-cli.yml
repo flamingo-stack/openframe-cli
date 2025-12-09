@@ -69,10 +69,34 @@ jobs:
 
           # Initialize Ubuntu by running a simple command (this triggers first-time setup)
           Write-Host "Initializing Ubuntu (first launch)..."
-          wsl -d Ubuntu -u root bash -c "echo 'Ubuntu initialized'" 2>&1 | Out-Host
 
-          # Wait for Ubuntu to be ready
-          Write-Host "Waiting for Ubuntu to initialize..."
+          # Try multiple times with increasing delays
+          $maxRetries = 5
+          $retryDelay = 10
+          $initialized = $false
+
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            Write-Host "Attempt $i of $maxRetries..."
+            wsl -d Ubuntu -u root bash -c "echo 'Ubuntu initialized'" 2>&1 | Out-Host
+            if ($LASTEXITCODE -eq 0) {
+              $initialized = $true
+              Write-Host "Ubuntu initialized successfully on attempt $i"
+              break
+            }
+            Write-Host "Initialization attempt $i failed (exit code: $LASTEXITCODE), waiting ${retryDelay}s..."
+            Start-Sleep -Seconds $retryDelay
+            $retryDelay = $retryDelay + 5
+          }
+
+          if (-not $initialized) {
+            Write-Host "ERROR: Failed to initialize Ubuntu after $maxRetries attempts"
+            Write-Host "Listing WSL distributions..."
+            wsl --list --verbose
+            exit 1
+          }
+
+          # Additional wait for Ubuntu to fully stabilize
+          Write-Host "Waiting for Ubuntu to stabilize..."
           Start-Sleep -Seconds 10
 
           # Configure Ubuntu with runner user
@@ -97,10 +121,48 @@ jobs:
 
           Write-Host "[OK] WSL2 and Ubuntu configured successfully"
 
+      - name: Verify WSL is ready
+        shell: powershell
+        run: |
+          Write-Host "========================================"
+          Write-Host "Verifying WSL Ubuntu is Ready"
+          Write-Host "========================================"
+
+          # Check WSL distributions
+          Write-Host "WSL Distributions:"
+          wsl --list --verbose
+
+          # Verify Ubuntu is accessible
+          Write-Host ""
+          Write-Host "Testing Ubuntu access..."
+          $testResult = wsl -d Ubuntu -u root echo "Ubuntu is accessible"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: Ubuntu distribution is not accessible (exit code: $LASTEXITCODE)"
+            Write-Host "Attempting to terminate and restart Ubuntu..."
+            wsl --terminate Ubuntu
+            Start-Sleep -Seconds 5
+            wsl -d Ubuntu -u root echo "Ubuntu restarted"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "FATAL: Cannot access Ubuntu distribution"
+              exit 1
+            }
+          }
+          Write-Host "[OK] Ubuntu is accessible"
+
+          # Test wslpath command
+          Write-Host ""
+          Write-Host "Testing wslpath command..."
+          wsl -d Ubuntu wslpath -u "C:/Windows"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "WARNING: wslpath command failed, but this may be acceptable with fallback conversion"
+          } else {
+            Write-Host "[OK] wslpath is working"
+          }
+
       - name: Test bootstrap OSS tenant workflow
         shell: powershell
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 40
         run: |
           Write-Host "========================================"
           Write-Host "Testing Bootstrap OSS Tenant Workflow"

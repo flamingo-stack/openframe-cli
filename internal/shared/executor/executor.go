@@ -7,8 +7,122 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
+
+// WSL error exit codes
+const (
+	// WSLExitCodeDistroNotFound indicates the WSL distribution was not found or not accessible
+	// This is 0xFFFFFFFF (-1 as unsigned 32-bit) which Windows returns when WSL can't reach the distro
+	WSLExitCodeDistroNotFound = 4294967295
+	// WSLExitCodeGenericError is a generic WSL error
+	WSLExitCodeGenericError = 1
+)
+
+// WSLError represents an error specific to WSL operations
+type WSLError struct {
+	Operation   string
+	ExitCode    int
+	Stderr      string
+	Suggestion  string
+}
+
+func (e *WSLError) Error() string {
+	msg := fmt.Sprintf("WSL error during %s (exit code: %d)", e.Operation, e.ExitCode)
+	if e.Stderr != "" {
+		msg += fmt.Sprintf(": %s", e.Stderr)
+	}
+	if e.Suggestion != "" {
+		msg += fmt.Sprintf("\nSuggestion: %s", e.Suggestion)
+	}
+	return msg
+}
+
+// wslAvailabilityCache caches the WSL availability check result
+var (
+	wslAvailable     bool
+	wslChecked       bool
+	wslCheckMutex    sync.Mutex
+	wslUbuntuChecked bool
+	wslUbuntuAvail   bool
+)
+
+// IsWSLAvailable checks if WSL is available on the system
+func IsWSLAvailable() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+
+	wslCheckMutex.Lock()
+	defer wslCheckMutex.Unlock()
+
+	if wslChecked {
+		return wslAvailable
+	}
+
+	// Try to run wsl --status
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wsl", "--status")
+	err := cmd.Run()
+	wslAvailable = err == nil
+	wslChecked = true
+
+	return wslAvailable
+}
+
+// IsWSLUbuntuAvailable checks if the Ubuntu distribution is available and accessible in WSL
+func IsWSLUbuntuAvailable() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+
+	wslCheckMutex.Lock()
+	defer wslCheckMutex.Unlock()
+
+	if wslUbuntuChecked {
+		return wslUbuntuAvail
+	}
+
+	// Try to run a simple command in Ubuntu
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "echo", "ok")
+	output, err := cmd.Output()
+	wslUbuntuAvail = err == nil && strings.TrimSpace(string(output)) == "ok"
+	wslUbuntuChecked = true
+
+	return wslUbuntuAvail
+}
+
+// ResetWSLCache resets the WSL availability cache (useful for testing or after WSL restart)
+func ResetWSLCache() {
+	wslCheckMutex.Lock()
+	defer wslCheckMutex.Unlock()
+	wslChecked = false
+	wslUbuntuChecked = false
+}
+
+// GetWSLErrorSuggestion returns a helpful suggestion based on the WSL error
+func GetWSLErrorSuggestion(exitCode int, command string) string {
+	switch exitCode {
+	case WSLExitCodeDistroNotFound, -1:
+		return "The Ubuntu WSL distribution is not accessible. Try:\n" +
+			"  1. Run 'wsl --list --verbose' to check distribution status\n" +
+			"  2. Run 'wsl --terminate Ubuntu' followed by 'wsl -d Ubuntu' to restart it\n" +
+			"  3. If Ubuntu is not installed, run 'wsl --install -d Ubuntu'"
+	case WSLExitCodeGenericError:
+		if strings.Contains(command, "wslpath") {
+			return "The wslpath command failed. The path may not exist or may not be accessible from WSL."
+		}
+		return "WSL command failed. Check that the Ubuntu distribution is properly configured."
+	default:
+		return "WSL command failed unexpectedly. Check WSL status with 'wsl --status'"
+	}
+}
 
 // CommandExecutor provides an abstraction layer for executing external commands
 // This interface allows for dependency injection and testing without running real commands
@@ -143,7 +257,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		} else {
 			result.ExitCode = -1
 		}
-		
+
 		// Log error in verbose mode
 		if e.verbose {
 			fmt.Printf("Command failed: %s (exit code: %d)\n", fullCommand, result.ExitCode)
@@ -151,7 +265,31 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				fmt.Printf("Stderr: %s\n", result.Stderr)
 			}
 		}
-		
+
+		// Check for WSL-specific errors on Windows
+		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "kubectl" || options.Command == "helm" || options.Command == "k3d") {
+			// Detect WSL distribution not found error
+			if result.ExitCode == WSLExitCodeDistroNotFound || result.ExitCode == -1 {
+				wslErr := &WSLError{
+					Operation:  fmt.Sprintf("executing %s", options.Command),
+					ExitCode:   result.ExitCode,
+					Stderr:     result.Stderr,
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+				}
+				return result, wslErr
+			}
+			// Detect other WSL errors
+			if command == "wsl" && result.ExitCode != 0 {
+				wslErr := &WSLError{
+					Operation:  fmt.Sprintf("executing %s via WSL", options.Command),
+					ExitCode:   result.ExitCode,
+					Stderr:     result.Stderr,
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+				}
+				return result, wslErr
+			}
+		}
+
 		return result, fmt.Errorf("command failed: %s (exit code: %d): %w", fullCommand, result.ExitCode, err)
 	}
 	
