@@ -648,6 +648,12 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		}
 	}
 
+	// Verify cluster connectivity before running helm (important after idle periods)
+	// This helps diagnose issues where WSL networking may have gone stale
+	if err := h.verifyClusterConnectivity(ctx, config); err != nil {
+		return fmt.Errorf("cluster connectivity check failed before app-of-apps installation: %w", err)
+	}
+
 	// Convert Windows paths to WSL paths if needed (for Helm running in WSL2)
 	chartPath := appConfig.ChartPath
 	valuesFilePath := appConfig.ValuesFile
@@ -1569,5 +1575,140 @@ func (h *HelmManager) showArgoCDDiagnostics(ctx context.Context, clusterName str
 	}
 
 	pterm.Warning.Println("=== End of Diagnostics ===")
+}
+
+// verifyClusterConnectivity verifies that the cluster is reachable before running helm commands
+// This is important after idle periods where WSL networking may have gone stale
+// It also logs kubeconfig details to help diagnose connectivity issues
+func (h *HelmManager) verifyClusterConnectivity(ctx context.Context, config config.ChartInstallConfig) error {
+	pterm.Info.Println("Verifying cluster connectivity before app-of-apps installation...")
+
+	// Build kubectl args with explicit context if cluster name is provided
+	kubectlArgs := []string{"cluster-info"}
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		kubectlArgs = []string{"--context", contextName, "cluster-info"}
+	}
+
+	// On Windows/WSL, also dump kubeconfig details for debugging
+	if runtime.GOOS == "windows" {
+		h.debugWSLKubeconfig(ctx, config.Verbose)
+	}
+
+	// Retry kubectl cluster-info a few times (cluster may need a moment after idle)
+	maxRetries := 5
+	retryDelay := 2 * time.Second
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "kubectl",
+			Args:    kubectlArgs,
+		})
+
+		if err == nil && result.ExitCode == 0 {
+			pterm.Success.Println("Cluster is reachable")
+			if config.Verbose {
+				pterm.Info.Println("kubectl cluster-info output:")
+				pterm.Println(result.Stdout)
+			}
+			return nil
+		}
+
+		lastErr = err
+		if config.Verbose {
+			pterm.Warning.Printf("Cluster connectivity check attempt %d/%d failed: %v\n", i+1, maxRetries, err)
+			if result != nil {
+				if result.Stdout != "" {
+					pterm.Println("stdout:", result.Stdout)
+				}
+				if result.Stderr != "" {
+					pterm.Println("stderr:", result.Stderr)
+				}
+			}
+		}
+
+		// Check if context was cancelled
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryDelay):
+			// Continue to next retry
+		}
+	}
+
+	return fmt.Errorf("cluster not reachable after %d attempts: %w", maxRetries, lastErr)
+}
+
+// debugWSLKubeconfig logs kubeconfig details from WSL for debugging connectivity issues
+func (h *HelmManager) debugWSLKubeconfig(ctx context.Context, verbose bool) {
+	if !verbose {
+		return
+	}
+
+	pterm.Info.Println("=== WSL Kubeconfig Debug Info ===")
+
+	// Get the WSL user (same logic as executor)
+	wslUser := os.Getenv("WSL_USER")
+	if wslUser == "" {
+		wslUser = "runner"
+	}
+
+	// Check if kubeconfig exists
+	checkCmd := fmt.Sprintf("ls -la ~/.kube/config 2>&1 || echo 'Kubeconfig not found'")
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", checkCmd},
+	})
+	if err == nil && result != nil {
+		pterm.Info.Println("Kubeconfig file status:")
+		pterm.Println(result.Stdout)
+	}
+
+	// Show the server addresses in kubeconfig (without showing secrets)
+	serverCmd := "grep -A2 'cluster:' ~/.kube/config 2>/dev/null | grep 'server:' || echo 'No server entries found'"
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", serverCmd},
+	})
+	if err == nil && result != nil {
+		pterm.Info.Println("Server addresses in kubeconfig:")
+		pterm.Println(result.Stdout)
+	}
+
+	// Show current context
+	contextCmd := "kubectl config current-context 2>&1 || echo 'No current context'"
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", contextCmd},
+	})
+	if err == nil && result != nil {
+		pterm.Info.Println("Current kubectl context:")
+		pterm.Println(result.Stdout)
+	}
+
+	// Check if the API server port is reachable
+	portCheckCmd := "nc -zv 127.0.0.1 6550 2>&1 || echo 'Port 6550 not reachable'"
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", portCheckCmd},
+	})
+	if err == nil && result != nil {
+		pterm.Info.Println("Port 6550 connectivity check:")
+		pterm.Println(result.Stdout)
+	}
+
+	// Show Docker containers (k3d nodes)
+	dockerCmd := "docker ps --filter 'name=k3d' --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1 || echo 'Docker not available or no k3d containers'"
+	result, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "wsl",
+		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", dockerCmd},
+	})
+	if err == nil && result != nil {
+		pterm.Info.Println("k3d Docker containers:")
+		pterm.Println(result.Stdout)
+	}
+
+	pterm.Info.Println("=== End WSL Kubeconfig Debug ===")
 }
 

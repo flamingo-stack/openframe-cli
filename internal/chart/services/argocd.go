@@ -54,10 +54,8 @@ func (a *ArgoCD) Install(ctx context.Context, cfg config.ChartInstallConfig) err
 		// Don't fail the installation, just warn
 	}
 
-	// Sleep for 10 minutes to allow ArgoCD to fully stabilize
-	if err := a.waitForStabilization(ctx, cfg); err != nil {
-		return err
-	}
+	// Note: Removed 10-minute stabilization wait - ArgoCD is ready after helm --wait completes
+	// The wait was causing issues with WSL networking going stale
 
 	return nil
 }
@@ -122,46 +120,6 @@ func (a *ArgoCD) runKubectlVerificationChecks(ctx context.Context, cfg config.Ch
 	fmt.Println(result.Stdout)
 
 	pterm.Success.Println("Kubectl verification checks completed")
-	return nil
-}
-
-// waitForStabilization waits for 10 minutes to allow ArgoCD to fully stabilize
-func (a *ArgoCD) waitForStabilization(ctx context.Context, _ config.ChartInstallConfig) error {
-	stabilizationTime := 10 * time.Minute
-
-	pterm.Info.Printf("Waiting %v for ArgoCD to stabilize...\n", stabilizationTime)
-
-	// Create a progress bar for the wait
-	progressBar, _ := pterm.DefaultProgressbar.
-		WithTotal(int(stabilizationTime.Seconds())).
-		WithTitle("ArgoCD stabilization").
-		WithRemoveWhenDone(false).
-		Start()
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	elapsed := 0
-	for elapsed < int(stabilizationTime.Seconds()) {
-		select {
-		case <-ctx.Done():
-			if progressBar != nil {
-				progressBar.Stop()
-			}
-			return ctx.Err()
-		case <-ticker.C:
-			elapsed++
-			if progressBar != nil {
-				progressBar.Increment()
-			}
-		}
-	}
-
-	if progressBar != nil {
-		progressBar.Stop()
-	}
-
-	pterm.Success.Println("ArgoCD stabilization complete")
 	return nil
 }
 
