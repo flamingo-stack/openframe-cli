@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -131,20 +132,41 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Ensure spinner is stopped when function exits
 	defer stopSpinner()
 
-	// Bootstrap wait (30 seconds)
+	// Bootstrap wait (30 seconds) with periodic cluster health checks
 	bootstrapEnd := time.Now().Add(30 * time.Second)
+	bootstrapHealthCheckInterval := 5 * time.Second
+	lastBootstrapHealthCheck := time.Now()
+	consecutiveFailures := 0
+	maxConsecutiveFailures := 3
 
 	// Check every 10ms for immediate response
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Bootstrap phase
+	// Bootstrap phase - check cluster health every 5 seconds
 	for time.Now().Before(bootstrapEnd) {
 		select {
 		case <-localCtx.Done():
 			return fmt.Errorf("operation cancelled: %w", localCtx.Err())
 		case <-ticker.C:
-			// Continue waiting
+			// Check cluster health periodically during bootstrap
+			if time.Since(lastBootstrapHealthCheck) >= bootstrapHealthCheckInterval {
+				lastBootstrapHealthCheck = time.Now()
+				if err := m.checkClusterConnectivity(localCtx, config.Verbose); err != nil {
+					consecutiveFailures++
+					if config.Verbose {
+						pterm.Warning.Printf("Cluster connectivity check failed during bootstrap (%d/%d): %v\n",
+							consecutiveFailures, maxConsecutiveFailures, err)
+					}
+					if consecutiveFailures >= maxConsecutiveFailures {
+						stopSpinner()
+						m.printClusterDiagnostics(localCtx)
+						return fmt.Errorf("cluster became unreachable during bootstrap wait: %w", err)
+					}
+				} else {
+					consecutiveFailures = 0
+				}
+			}
 		}
 	}
 
@@ -153,6 +175,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	timeout := 60 * time.Minute
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
+	clusterHealthCheckInterval := 10 * time.Second
+	lastClusterHealthCheck := time.Now()
+	consecutiveFailures = 0 // Reset for main loop
 
 	// Get expected applications count
 	totalAppsExpected := m.getTotalExpectedApplications(localCtx, config)
@@ -182,6 +207,26 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 				spinnerMutex.Unlock()
 				return fmt.Errorf("timeout waiting for ArgoCD applications after %v", timeout)
+			}
+
+			// Periodic cluster health check (every 10 seconds)
+			if time.Since(lastClusterHealthCheck) >= clusterHealthCheckInterval {
+				lastClusterHealthCheck = time.Now()
+				if err := m.checkClusterConnectivity(localCtx, false); err != nil {
+					consecutiveFailures++
+					pterm.Warning.Printf("Cluster connectivity check failed (%d/%d): %v\n",
+						consecutiveFailures, maxConsecutiveFailures, err)
+					if consecutiveFailures >= maxConsecutiveFailures {
+						stopSpinner()
+						m.printClusterDiagnostics(localCtx)
+						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
+					}
+				} else {
+					if consecutiveFailures > 0 {
+						pterm.Success.Println("Cluster connectivity restored")
+					}
+					consecutiveFailures = 0
+				}
 			}
 
 			// Check applications every 2 seconds
@@ -887,4 +932,105 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// checkClusterConnectivity performs a quick health check on the Kubernetes cluster
+func (m *Manager) checkClusterConnectivity(ctx context.Context, verbose bool) error {
+	// Use kubectl cluster-info as a quick connectivity check
+	clusterInfoArgs := m.getKubectlArgs("cluster-info")
+	result, err := m.executor.Execute(ctx, "kubectl", clusterInfoArgs...)
+
+	if err != nil {
+		return fmt.Errorf("kubectl execution failed: %w", err)
+	}
+
+	if result.ExitCode != 0 {
+		errMsg := result.Stderr
+		if errMsg == "" {
+			errMsg = result.Stdout
+		}
+		return fmt.Errorf("cluster unreachable (exit code %d): %s", result.ExitCode, errMsg)
+	}
+
+	if verbose {
+		pterm.Debug.Println("Cluster connectivity check passed")
+	}
+
+	return nil
+}
+
+// printClusterDiagnostics prints diagnostic information when the cluster becomes unreachable
+func (m *Manager) printClusterDiagnostics(ctx context.Context) {
+	pterm.Error.Println("Cluster became unreachable. Collecting diagnostics...")
+
+	// Check if we're on Windows/WSL
+	if runtime.GOOS == "windows" {
+		pterm.Info.Println("\n=== WSL/Docker Diagnostics ===")
+
+		// Check WSL status
+		wslResult, _ := m.executor.Execute(ctx, "wsl", "--list", "--verbose")
+		if wslResult != nil && wslResult.Stdout != "" {
+			pterm.Info.Println("WSL distributions:")
+			pterm.Println(wslResult.Stdout)
+		}
+
+		// Check if Docker is running inside WSL
+		dockerResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps --format 'table {{.Names}}\\t{{.Status}}' 2>&1 || echo 'Docker not accessible'")
+		if dockerResult != nil && dockerResult.Stdout != "" {
+			pterm.Info.Println("Docker containers in WSL:")
+			pterm.Println(dockerResult.Stdout)
+		}
+
+		// Check k3d cluster status
+		k3dResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo -E k3d cluster list 2>&1 || echo 'k3d not accessible'")
+		if k3dResult != nil && k3dResult.Stdout != "" {
+			pterm.Info.Println("k3d clusters:")
+			pterm.Println(k3dResult.Stdout)
+		}
+
+		// Check port connectivity
+		portResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "nc -zv 127.0.0.1 6550 2>&1 || echo 'Port 6550 not reachable'")
+		if portResult != nil {
+			pterm.Info.Println("Port 6550 connectivity:")
+			output := portResult.Stdout
+			if portResult.Stderr != "" {
+				output = portResult.Stderr
+			}
+			pterm.Println(output)
+		}
+
+		// Check Docker logs for k3d server container
+		dockerLogsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
+			"sudo docker logs --tail 50 k3d-"+m.clusterName+"-server-0 2>&1 || echo 'Could not get container logs'")
+		if dockerLogsResult != nil && dockerLogsResult.Stdout != "" {
+			pterm.Info.Println("k3d server container logs (last 50 lines):")
+			pterm.Println(dockerLogsResult.Stdout)
+		}
+	} else {
+		// Linux/macOS diagnostics
+		pterm.Info.Println("\n=== Cluster Diagnostics ===")
+
+		// Check Docker status
+		dockerResult, _ := m.executor.Execute(ctx, "docker", "ps", "--format", "table {{.Names}}\t{{.Status}}")
+		if dockerResult != nil && dockerResult.Stdout != "" {
+			pterm.Info.Println("Docker containers:")
+			pterm.Println(dockerResult.Stdout)
+		}
+
+		// Check k3d cluster status
+		k3dResult, _ := m.executor.Execute(ctx, "k3d", "cluster", "list")
+		if k3dResult != nil && k3dResult.Stdout != "" {
+			pterm.Info.Println("k3d clusters:")
+			pterm.Println(k3dResult.Stdout)
+		}
+
+		// Check Docker logs for k3d server container
+		dockerLogsResult, _ := m.executor.Execute(ctx, "docker", "logs", "--tail", "50", "k3d-"+m.clusterName+"-server-0")
+		if dockerLogsResult != nil && dockerLogsResult.Stdout != "" {
+			pterm.Info.Println("k3d server container logs (last 50 lines):")
+			pterm.Println(dockerLogsResult.Stdout)
+		}
+	}
+
+	pterm.Info.Println("\n=== End Diagnostics ===")
 }
