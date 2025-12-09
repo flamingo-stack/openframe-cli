@@ -400,20 +400,48 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		// This ensures directories exist before helm tries to use them
 		// We use 2>&1 to redirect stderr to stdout so error messages are captured
 		// through the WSL/bash chain (otherwise stderr from helm gets lost)
+		//
+		// CRITICAL FIX: Dynamically rewrite the kubeconfig server address before running helm
+		// The kubeconfig may have 127.0.0.1 or 0.0.0.0 as the server address, but from inside
+		// WSL Ubuntu, we need to use the WSL internal IP (eth0) to reach the k3d cluster
+		// running in Docker Desktop. We do this inline to ensure it's always correct.
+		//
+		// The sed command rewrites server addresses like:
+		//   server: https://127.0.0.1:6550 -> server: https://172.x.x.x:6550
+		//   server: https://0.0.0.0:6550   -> server: https://172.x.x.x:6550
 		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
 			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
 			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
 			"export HELM_DATA_HOME=/tmp/helm/data && " +
+			"export HOME=/home/" + wslUser + " && " +
+			// Get WSL internal IP and rewrite kubeconfig if needed
+			"WSL_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \\K[0-9.]+' | head -1) && " +
+			"if [ -n \"$WSL_IP\" ] && [ -f ~/.kube/config ]; then " +
+			"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WSL_IP:|g; " +
+			"s|server: https://0\\.0\\.0\\.0:|server: https://$WSL_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
+			"fi && " +
 			helmCmd + " 2>&1"
 
 		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
 		return "wsl", newArgs
 	}
 
-	// For kubectl, run directly as user
-	newArgs := make([]string, 0, len(escapedArgs)+5)
-	newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, command)
-	newArgs = append(newArgs, escapedArgs...)
+	// For kubectl, run via bash to ensure kubeconfig has correct WSL IP
+	// Same fix as helm - dynamically rewrite 127.0.0.1/0.0.0.0 to WSL internal IP
+	kubectlCmd := "kubectl"
+	for _, arg := range escapedArgs {
+		kubectlCmd += " " + arg
+	}
 
+	bashScript := "export HOME=/home/" + wslUser + " && " +
+		// Get WSL internal IP and rewrite kubeconfig if needed
+		"WSL_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \\K[0-9.]+' | head -1) && " +
+		"if [ -n \"$WSL_IP\" ] && [ -f ~/.kube/config ]; then " +
+		"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WSL_IP:|g; " +
+		"s|server: https://0\\.0\\.0\\.0:|server: https://$WSL_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
+		"fi && " +
+		kubectlCmd
+
+	newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
 	return "wsl", newArgs
 }
