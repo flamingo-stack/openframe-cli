@@ -380,8 +380,10 @@ image: %s`, config.Name, servers, agents, image)
 	httpPort := defaultHTTPPort
 	httpsPort := defaultHTTPSPort
 
-	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL internal IP
-	// This is necessary because the connectivity check uses the WSL eth0 IP to bypass Windows NAT
+	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL eth0 IP
+	// Docker runs inside WSL2 Ubuntu, and binding to 0.0.0.0 makes the API accessible:
+	// - From within WSL via 127.0.0.1 (for kubectl/helm running in WSL)
+	// - From Windows via WSL's eth0 IP (for the Go client running on Windows)
 	hostIP := "127.0.0.1"
 	if runtime.GOOS == "windows" {
 		hostIP = "0.0.0.0"
@@ -733,21 +735,21 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
 		}
 
-		// CRITICAL FIX: Use WSL internal IP to bypass Windows NAT/Firewall
-		// The Windows NAT layer blocks connections to 127.0.0.1 for ports exposed by WSL2/Docker.
-		// Using the internal WSL IP (e.g., 172.x.x.x) bypasses this restriction entirely.
-		wslInternalIP, err := m.getWSLInternalIP(ctx)
+		// Use WSL's eth0 IP for the Go client running on Windows to reach k3d inside WSL2
+		// Docker runs inside WSL2 Ubuntu, so we need WSL's own IP (not the gateway).
+		// From Windows, we can reach WSL services via WSL's eth0 IP (e.g., 172.x.x.2).
+		wslIP, err := m.getWSLInternalIP(ctx)
 		if err != nil {
 			if m.verbose {
-				fmt.Printf("Warning: Could not get WSL internal IP: %v\n", err)
-				fmt.Println("Falling back to 127.0.0.1 (may fail due to Windows NAT)")
+				fmt.Printf("Warning: Could not get WSL IP: %v\n", err)
+				fmt.Println("Falling back to 127.0.0.1")
 			}
-			wslInternalIP = "127.0.0.1" // Fallback, but likely won't work
+			wslIP = "127.0.0.1" // Fallback
 		} else if m.verbose {
-			fmt.Printf("✓ Retrieved WSL internal IP: %s\n", wslInternalIP)
+			fmt.Printf("✓ Retrieved WSL IP for Go client: %s\n", wslIP)
 		}
 
-		// Replace all server addresses with the WSL internal IP
+		// Replace all server addresses with the WSL IP
 		for clusterName, cluster := range config.Clusters {
 			// Extract the port from the current server URL
 			re := regexp.MustCompile(`:(\d+)`)
@@ -755,7 +757,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 			if len(match) > 1 {
 				oldServer := cluster.Server
-				cluster.Server = fmt.Sprintf("https://%s:%s", wslInternalIP, match[1])
+				cluster.Server = fmt.Sprintf("https://%s:%s", wslIP, match[1])
 				if m.verbose {
 					fmt.Printf("Rewrote KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
 				}
@@ -1224,13 +1226,14 @@ func extractIPFromRouteOutput(output string) string {
 	return ""
 }
 
-// getWSLInternalIP retrieves the Windows host IP as seen from inside WSL2.
-// This is the IP that WSL uses to reach the Windows host where Docker Desktop
-// exposes k3d ports. It is NOT the WSL eth0 interface IP (which is WSL's own IP).
+// getWSLInternalIP retrieves the WSL2 VM's own IP address (eth0 interface).
+// This is the IP that Windows can use to reach services running inside WSL2.
+// Docker runs inside WSL2 Ubuntu, and ports exposed by Docker are accessible
+// via this IP from Windows.
 //
-// The Windows host IP can be obtained from:
-// 1. The default gateway in WSL's routing table (most reliable)
-// 2. The nameserver in /etc/resolv.conf (usually same as gateway)
+// Note: This is different from the Windows host IP (default gateway from WSL's perspective).
+// - WSL eth0 IP (e.g., 172.x.x.2): WSL's own IP, reachable from Windows
+// - Windows host IP (e.g., 172.x.x.1): The gateway, used by WSL to reach Windows
 func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 	// Get the WSL user for running the command
 	username, err := m.getWSLUser(ctx)
@@ -1238,39 +1241,34 @@ func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	// Get the Windows host IP from the default gateway
-	// This is the IP that WSL uses to reach Windows where Docker Desktop runs
-	ipCmd := "ip route | grep default | awk '{print $3}' | head -1"
+	// Get WSL's own IP address (eth0 interface)
+	// This is the IP that Windows can use to reach services in WSL2
+	// The 'hostname -I' command returns all IP addresses, we take the first one (usually eth0)
+	ipCmd := "hostname -I | awk '{print $1}'"
 	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", ipCmd)
 	if err != nil {
-		return "", fmt.Errorf("failed to get Windows host IP from WSL: %w", err)
+		return "", fmt.Errorf("failed to get WSL IP address: %w", err)
 	}
 
 	ip := strings.TrimSpace(result.Stdout)
 
-	// The awk command might return the full line on some systems, so extract the IP
-	// Expected format from "ip route": "default via 172.21.96.1 dev eth0 proto kernel"
-	// We want field 3 (the IP address)
-	ip = extractIPFromRouteOutput(ip)
-
-	// Fallback: try getting from /etc/resolv.conf nameserver
+	// Fallback: try getting eth0 IP directly
 	if ip == "" {
-		ipCmd = "grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}'"
+		ipCmd = "ip addr show eth0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1"
 		result, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", ipCmd)
 		if err != nil {
-			return "", fmt.Errorf("failed to get Windows host IP from resolv.conf: %w", err)
+			return "", fmt.Errorf("failed to get WSL eth0 IP: %w", err)
 		}
 		ip = strings.TrimSpace(result.Stdout)
-		ip = extractIPFromRouteOutput(ip)
 	}
 
 	if ip == "" {
-		return "", fmt.Errorf("Windows host IP is empty - could not determine from gateway or resolv.conf")
+		return "", fmt.Errorf("WSL IP address is empty - could not determine from hostname or eth0")
 	}
 
 	// Validate that it's a proper IPv4 address using net.ParseIP
 	if net.ParseIP(ip) == nil {
-		return "", fmt.Errorf("invalid Windows host IP format: %s", ip)
+		return "", fmt.Errorf("invalid WSL IP format: %s", ip)
 	}
 
 	return ip, nil
@@ -1307,25 +1305,16 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 	return nil
 }
 
-// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use the Windows host IP
-// instead of 0.0.0.0 or 127.0.0.1. This is necessary because:
+// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use 127.0.0.1
+// instead of 0.0.0.0. This is necessary because:
 // - k3d writes 0.0.0.0 as the server address which doesn't work for connections
-// - k3d runs inside Docker Desktop which has its own WSL2 distro (docker-desktop-data)
-// - helm runs inside the Ubuntu WSL distro, which is a separate network namespace
-// - From Ubuntu WSL, 127.0.0.1 refers to Ubuntu's own loopback, NOT Docker/Windows
-// - The Windows host IP (default gateway from WSL) is the correct address to reach k3d
-//   because Docker Desktop exposes ports to the Windows host
+// - Docker runs INSIDE WSL2 Ubuntu (not Docker Desktop), so k3d is in the same network namespace
+// - From Ubuntu WSL, 127.0.0.1 refers to the WSL loopback where Docker/k3d is listening
+// - We only need to rewrite 0.0.0.0 to 127.0.0.1
 func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ string) error {
 	// Only needed on Windows where helm runs inside WSL
 	if runtime.GOOS != "windows" {
 		return nil
-	}
-
-	// Get the Windows host IP - this is how Ubuntu WSL can reach the Windows host
-	// where Docker Desktop exposes the k3d API server port
-	windowsHostIP, err := m.getWSLInternalIP(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get Windows host IP: %w", err)
 	}
 
 	// Get the WSL user
@@ -1334,13 +1323,9 @@ func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ st
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	// Use sed to replace server addresses in the kubeconfig
-	// This replaces any server address like https://0.0.0.0:PORT or https://127.0.0.1:PORT
-	// with https://WINDOWS_HOST_IP:PORT
-	sedCmd := fmt.Sprintf(
-		`sed -i 's|server: https://0\.0\.0\.0:|server: https://%s:|g; s|server: https://127\.0\.0\.1:|server: https://%s:|g' ~/.kube/config`,
-		windowsHostIP, windowsHostIP,
-	)
+	// Use sed to replace 0.0.0.0 with 127.0.0.1
+	// Docker runs inside WSL2 Ubuntu, so localhost (127.0.0.1) is the correct address
+	sedCmd := `sed -i 's|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g' ~/.kube/config`
 
 	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", sedCmd)
 	if err != nil {
@@ -1348,7 +1333,7 @@ func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ st
 	}
 
 	if m.verbose {
-		fmt.Printf("✓ Rewrote kubeconfig server addresses to use Windows host IP: %s\n", windowsHostIP)
+		fmt.Println("✓ Rewrote kubeconfig server addresses to use 127.0.0.1")
 	}
 
 	return nil
