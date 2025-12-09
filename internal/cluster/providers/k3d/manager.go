@@ -78,7 +78,23 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		return nil, models.NewProviderNotFoundError(config.Type)
 	}
 
-	configFile, err := m.createK3dConfigFile(config)
+	// On Windows/WSL2, get the WSL internal IP before creating the cluster
+	// to include it as a TLS SAN in the k3s certificate
+	var wslInternalIP string
+	if runtime.GOOS == "windows" {
+		var err error
+		wslInternalIP, err = m.getWSLInternalIP(ctx)
+		if err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not get WSL internal IP for TLS SAN: %v\n", err)
+			}
+			// Continue without the extra SAN - the insecure TLS config will still work
+		} else if m.verbose {
+			fmt.Printf("✓ Retrieved WSL internal IP for TLS SAN: %s\n", wslInternalIP)
+		}
+	}
+
+	configFile, err := m.createK3dConfigFile(config, wslInternalIP)
 	if err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create config file: %w", err))
 	}
@@ -335,7 +351,8 @@ func (m *K3dManager) validateClusterConfig(config models.ClusterConfig) error {
 }
 
 // createK3dConfigFile creates a k3d config file
-func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig) (string, error) {
+// wslInternalIP is optional - if provided, it will be added as a TLS SAN for the k3s API server certificate
+func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig, wslInternalIP string) (string, error) {
 	image := defaultK3sImage
 	if runtime.GOARCH == "arm64" {
 		image = defaultK3sImage
@@ -370,6 +387,17 @@ image: %s`, config.Name, servers, agents, image)
 		hostIP = "0.0.0.0"
 	}
 
+	// Build TLS SAN argument if WSL internal IP is provided
+	// This ensures the k3s API server certificate includes the WSL internal IP,
+	// allowing kubectl/helm to connect via the WSL network without TLS errors
+	tlsSanArg := ""
+	if wslInternalIP != "" {
+		tlsSanArg = fmt.Sprintf(`
+      - arg: --tls-san=%s
+        nodeFilters:
+          - server:*`, wslInternalIP)
+	}
+
 	configContent += fmt.Sprintf(`
 kubeAPI:
   host: "%s"
@@ -386,14 +414,14 @@ options:
           - all
       - arg: --kubelet-arg=eviction-soft=
         nodeFilters:
-          - all
+          - all%s
 ports:
   - port: %s:80
     nodeFilters:
       - loadbalancer
   - port: %s:443
     nodeFilters:
-      - loadbalancer`, hostIP, hostIP, apiPort, httpPort, httpsPort)
+      - loadbalancer`, hostIP, hostIP, apiPort, tlsSanArg, httpPort, httpsPort)
 
 	tmpFile, err := os.CreateTemp("", "k3d-config-*.yaml")
 	if err != nil {
