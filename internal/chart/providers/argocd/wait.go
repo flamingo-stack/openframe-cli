@@ -395,6 +395,108 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 								if controllerResult != nil && controllerResult.Stdout != "" {
 									pterm.Info.Printf("  ArgoCD Application Controller status:\n%s\n", controllerResult.Stdout)
 								}
+
+								// Show Application spec for unknown apps (source repo, path, etc.)
+								for _, appName := range unknownApps {
+									pterm.Info.Printf("\n  === Diagnosing application: %s ===\n", appName)
+
+									// Get Application source configuration
+									appSpecArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.spec.source.repoURL} {.spec.source.path} {.spec.source.targetRevision}")
+									appSpecResult, _ := m.executor.Execute(localCtx, "kubectl", appSpecArgs...)
+									if appSpecResult != nil && appSpecResult.Stdout != "" {
+										pterm.Info.Printf("  Source: %s\n", appSpecResult.Stdout)
+									}
+
+									// Get Application status conditions
+									appCondArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.status.conditions[*].message}")
+									appCondResult, _ := m.executor.Execute(localCtx, "kubectl", appCondArgs...)
+									if appCondResult != nil && appCondResult.Stdout != "" {
+										pterm.Warning.Printf("  Status conditions: %s\n", appCondResult.Stdout)
+									}
+
+									// Get Application operationState message if any
+									appOpArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.status.operationState.message}")
+									appOpResult, _ := m.executor.Execute(localCtx, "kubectl", appOpArgs...)
+									if appOpResult != nil && appOpResult.Stdout != "" {
+										pterm.Warning.Printf("  Operation message: %s\n", appOpResult.Stdout)
+									}
+								}
+
+								// Check controller logs for errors related to unknown apps
+								pterm.Info.Println("\n  === ArgoCD Controller recent errors ===")
+								logArgs := m.getKubectlArgs("-n", "argocd", "logs", "argocd-application-controller-0", "--tail=50")
+								logResult, _ := m.executor.Execute(localCtx, "kubectl", logArgs...)
+								if logResult != nil && logResult.Stdout != "" {
+									// Filter for error lines or lines mentioning the app
+									lines := strings.Split(logResult.Stdout, "\n")
+									errorLines := []string{}
+									for _, line := range lines {
+										lineLower := strings.ToLower(line)
+										if strings.Contains(lineLower, "error") ||
+											strings.Contains(lineLower, "failed") ||
+											strings.Contains(lineLower, "unable") ||
+											strings.Contains(lineLower, "argocd-apps") {
+											errorLines = append(errorLines, line)
+										}
+									}
+									if len(errorLines) > 0 {
+										pterm.Warning.Printf("  Found %d error/relevant lines:\n", len(errorLines))
+										for _, line := range errorLines {
+											if len(line) > 200 {
+												line = line[:200] + "..."
+											}
+											pterm.Warning.Printf("    %s\n", line)
+										}
+									} else {
+										pterm.Info.Println("  No obvious errors in controller logs")
+									}
+								}
+
+								// Check repo-server logs - it handles Git operations
+								pterm.Info.Println("\n  === ArgoCD Repo Server recent logs ===")
+								repoLogArgs := m.getKubectlArgs("-n", "argocd", "logs", "-l", "app.kubernetes.io/name=argocd-repo-server", "--tail=30")
+								repoLogResult, _ := m.executor.Execute(localCtx, "kubectl", repoLogArgs...)
+								if repoLogResult != nil && repoLogResult.Stdout != "" {
+									lines := strings.Split(repoLogResult.Stdout, "\n")
+									relevantLines := []string{}
+									for _, line := range lines {
+										lineLower := strings.ToLower(line)
+										if strings.Contains(lineLower, "error") ||
+											strings.Contains(lineLower, "failed") ||
+											strings.Contains(lineLower, "unable") ||
+											strings.Contains(lineLower, "timeout") ||
+											strings.Contains(lineLower, "git") ||
+											strings.Contains(lineLower, "clone") ||
+											strings.Contains(lineLower, "fetch") {
+											relevantLines = append(relevantLines, line)
+										}
+									}
+									if len(relevantLines) > 0 {
+										pterm.Warning.Printf("  Found %d relevant lines:\n", len(relevantLines))
+										for _, line := range relevantLines {
+											if len(line) > 200 {
+												line = line[:200] + "..."
+											}
+											pterm.Warning.Printf("    %s\n", line)
+										}
+									} else {
+										pterm.Info.Println("  No Git-related errors in repo-server logs")
+									}
+								}
+
+								// Test network connectivity from cluster to GitHub
+								pterm.Info.Println("\n  === Testing cluster network connectivity ===")
+								netTestArgs := m.getKubectlArgs("run", "net-test-"+fmt.Sprintf("%d", time.Now().Unix()), "--rm", "-it", "--restart=Never", "--image=busybox:latest", "--", "wget", "-q", "-O", "-", "--timeout=10", "https://github.com")
+								netTestResult, netTestErr := m.executor.Execute(localCtx, "kubectl", netTestArgs...)
+								if netTestErr != nil {
+									pterm.Warning.Printf("  Network test failed: %v\n", netTestErr)
+									if netTestResult != nil && netTestResult.Stderr != "" {
+										pterm.Warning.Printf("  Stderr: %s\n", netTestResult.Stderr)
+									}
+									pterm.Warning.Println("  This suggests the k3d cluster cannot reach GitHub!")
+								} else {
+									pterm.Success.Println("  Network connectivity to GitHub is OK")
+								}
 							}
 						}
 
