@@ -639,7 +639,13 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 }
 
 // isPodReady checks if a pod has the Ready condition set to True
+// Completed Job pods (like argocd-redis-secret-init) are considered "ready" since they finished successfully
 func isPodReady(pod *corev1.Pod) bool {
+	// Completed pods (from Jobs) are considered ready - they finished their work successfully
+	if pod.Status.Phase == corev1.PodSucceeded {
+		return true
+	}
+
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
@@ -756,22 +762,67 @@ func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool
 		return fmt.Errorf("timeout waiting for ArgoCD pods to be created (no pods found with label app.kubernetes.io/part-of=argocd)")
 	}
 
-	waitArgs := m.getKubectlArgs("-n", "argocd", "wait",
-		"--for=condition=Ready", "pod",
-		"-l", "app.kubernetes.io/part-of=argocd",
-		"--timeout=300s")
-	result, err := m.executor.Execute(ctx, "kubectl", waitArgs...)
+	// Wait for pods to be ready using a polling approach instead of kubectl wait
+	// This allows us to properly handle completed Job pods (like argocd-redis-secret-init)
+	// which don't have a Ready condition but are considered "done"
+	podReadyTimeout := 5 * time.Minute
+	podReadyStart := time.Now()
 
-	if err != nil || result.ExitCode != 0 {
-		m.printArgoCDPodDiagnostics(ctx)
-		return fmt.Errorf("timeout waiting for ArgoCD pods to be ready: %w", err)
+	for time.Since(podReadyStart) < podReadyTimeout {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Get all ArgoCD pods as JSON
+		podsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
+			"-l", "app.kubernetes.io/part-of=argocd",
+			"-o", "json")
+		podsResult, err := m.executor.Execute(ctx, "kubectl", podsArgs...)
+
+		if err != nil {
+			if verbose {
+				pterm.Warning.Printf("Failed to list pods: %v\n", err)
+			}
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		if podsResult == nil || podsResult.Stdout == "" {
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		var podList corev1.PodList
+		if err := json.Unmarshal([]byte(podsResult.Stdout), &podList); err != nil {
+			if verbose {
+				pterm.Warning.Printf("Failed to parse pod list: %v\n", err)
+			}
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		allReady := true
+		for _, pod := range podList.Items {
+			if !isPodReady(&pod) {
+				allReady = false
+				break
+			}
+		}
+
+		if allReady && len(podList.Items) > 0 {
+			if verbose {
+				pterm.Success.Println("ArgoCD pods are ready")
+			}
+			return nil
+		}
+
+		time.Sleep(retryInterval)
 	}
 
-	if verbose {
-		pterm.Success.Println("ArgoCD pods are ready")
-	}
-
-	return nil
+	m.printArgoCDPodDiagnostics(ctx)
+	return fmt.Errorf("timeout waiting for ArgoCD pods to be ready")
 }
 
 // printArgoCDPodDiagnostics prints diagnostic information about ArgoCD pods when they fail to become ready
