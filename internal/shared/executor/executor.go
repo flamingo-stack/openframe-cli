@@ -403,22 +403,25 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		//
 		// CRITICAL FIX: Dynamically rewrite the kubeconfig server address before running helm
 		// The kubeconfig may have 127.0.0.1 or 0.0.0.0 as the server address, but from inside
-		// WSL Ubuntu, we need to use the WSL internal IP (eth0) to reach the k3d cluster
+		// WSL Ubuntu, we need to use the Windows host IP (default gateway) to reach the k3d cluster
 		// running in Docker Desktop. We do this inline to ensure it's always correct.
 		//
+		// NOTE: We use the default gateway IP (Windows host), NOT the WSL eth0 IP.
+		// The eth0 IP is WSL's own IP, but we need to reach Windows where Docker runs.
+		//
 		// The sed command rewrites server addresses like:
-		//   server: https://127.0.0.1:6550 -> server: https://172.x.x.x:6550
-		//   server: https://0.0.0.0:6550   -> server: https://172.x.x.x:6550
+		//   server: https://127.0.0.1:6550 -> server: https://WINDOWS_HOST_IP:6550
+		//   server: https://0.0.0.0:6550   -> server: https://WINDOWS_HOST_IP:6550
 		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
 			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
 			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
 			"export HELM_DATA_HOME=/tmp/helm/data && " +
 			"export HOME=/home/" + wslUser + " && " +
-			// Get WSL internal IP and rewrite kubeconfig if needed
-			"WSL_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \\K[0-9.]+' | head -1) && " +
-			"if [ -n \"$WSL_IP\" ] && [ -f ~/.kube/config ]; then " +
-			"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WSL_IP:|g; " +
-			"s|server: https://0\\.0\\.0\\.0:|server: https://$WSL_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
+			// Get Windows host IP from default gateway and rewrite kubeconfig if needed
+			"WIN_HOST_IP=$(ip route | grep default | awk '{print $3}' | head -1) && " +
+			"if [ -n \"$WIN_HOST_IP\" ] && [ -f ~/.kube/config ]; then " +
+			"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WIN_HOST_IP:|g; " +
+			"s|server: https://0\\.0\\.0\\.0:|server: https://$WIN_HOST_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
 			"fi && " +
 			helmCmd + " 2>&1"
 
@@ -426,19 +429,19 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		return "wsl", newArgs
 	}
 
-	// For kubectl, run via bash to ensure kubeconfig has correct WSL IP
-	// Same fix as helm - dynamically rewrite 127.0.0.1/0.0.0.0 to WSL internal IP
+	// For kubectl, run via bash to ensure kubeconfig has correct Windows host IP
+	// Same fix as helm - dynamically rewrite 127.0.0.1/0.0.0.0 to Windows host IP (default gateway)
 	kubectlCmd := "kubectl"
 	for _, arg := range escapedArgs {
 		kubectlCmd += " " + arg
 	}
 
 	bashScript := "export HOME=/home/" + wslUser + " && " +
-		// Get WSL internal IP and rewrite kubeconfig if needed
-		"WSL_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \\K[0-9.]+' | head -1) && " +
-		"if [ -n \"$WSL_IP\" ] && [ -f ~/.kube/config ]; then " +
-		"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WSL_IP:|g; " +
-		"s|server: https://0\\.0\\.0\\.0:|server: https://$WSL_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
+		// Get Windows host IP from default gateway and rewrite kubeconfig if needed
+		"WIN_HOST_IP=$(ip route | grep default | awk '{print $3}' | head -1) && " +
+		"if [ -n \"$WIN_HOST_IP\" ] && [ -f ~/.kube/config ]; then " +
+		"sed -i \"s|server: https://127\\.0\\.0\\.1:|server: https://$WIN_HOST_IP:|g; " +
+		"s|server: https://0\\.0\\.0\\.0:|server: https://$WIN_HOST_IP:|g\" ~/.kube/config 2>/dev/null || true; " +
 		"fi && " +
 		kubectlCmd
 
