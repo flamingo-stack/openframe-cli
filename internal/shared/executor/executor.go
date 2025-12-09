@@ -268,12 +268,19 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 		// Check for WSL-specific errors on Windows
 		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "kubectl" || options.Command == "helm" || options.Command == "k3d") {
+			// For WSL commands, stderr is often redirected to stdout via 2>&1
+			// Use stdout as error output if stderr is empty
+			errorOutput := result.Stderr
+			if errorOutput == "" && result.Stdout != "" {
+				errorOutput = result.Stdout
+			}
+
 			// Detect WSL distribution not found error
 			if result.ExitCode == WSLExitCodeDistroNotFound || result.ExitCode == -1 {
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     result.Stderr,
+					Stderr:     errorOutput,
 					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
 				}
 				return result, wslErr
@@ -283,7 +290,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s via WSL", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     result.Stderr,
+					Stderr:     errorOutput,
 					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
 				}
 				return result, wslErr
