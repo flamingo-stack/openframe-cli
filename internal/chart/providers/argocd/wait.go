@@ -195,6 +195,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	resourceCheckInterval := 5 * time.Minute // Check system resources every 5 minutes
 	lastResourceCheck := time.Now()
 	consecutiveFailures = 0 // Reset for main loop
+	// Track if the last failure was from parseApplications (vs checkClusterConnectivity)
+	// This prevents the health check from immediately resetting the failure counter
+	lastParseAppsError := time.Time{}
+	parseAppsErrorCooldown := 5 * time.Second // Wait before retrying after a parse error
 
 	// Get expected applications count
 	totalAppsExpected := m.getTotalExpectedApplications(localCtx, config)
@@ -253,10 +257,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
 				} else {
-					if consecutiveFailures > 0 {
+					// Only reset failures if we haven't had a recent parseApplications error
+					// This prevents the pattern where parseApplications fails but cluster-info succeeds,
+					// which would cause an infinite loop of "query failed" / "restored" messages
+					if consecutiveFailures > 0 && time.Since(lastParseAppsError) > parseAppsErrorCooldown {
 						pterm.Success.Println("Cluster connectivity restored")
+						consecutiveFailures = 0
 					}
-					consecutiveFailures = 0
 				}
 			}
 
@@ -292,15 +299,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					return fmt.Errorf("operation cancelled: %w", localCtx.Err())
 				}
 
-				// Check if this is a cluster connectivity error
+				// Check if this is a cluster connectivity error (including WSL errors)
 				errStr := err.Error()
 				isConnectivityError := strings.Contains(errStr, "connection refused") ||
 					strings.Contains(errStr, "cluster unreachable") ||
 					strings.Contains(errStr, "was refused") ||
-					strings.Contains(errStr, "Unable to connect")
+					strings.Contains(errStr, "Unable to connect") ||
+					strings.Contains(errStr, "WSL error")
 
 				if isConnectivityError {
-					// Trigger immediate health check on connectivity errors
+					// Record the time of this parseApplications error
+					// This prevents checkClusterConnectivity from immediately resetting the counter
+					lastParseAppsError = time.Now()
 					consecutiveFailures++
 					pterm.Warning.Printf("Application query failed - cluster may be unreachable (%d/%d): %v\n",
 						consecutiveFailures, maxConsecutiveFailures, err)
@@ -311,18 +321,26 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
 
-					// Force an immediate cluster health check
-					lastClusterHealthCheck = time.Time{} // Reset to trigger check on next iteration
+					// Wait before retrying to avoid tight loop on persistent errors
+					// This is especially important for WSL errors which may need time to recover
+					select {
+					case <-localCtx.Done():
+						return fmt.Errorf("operation cancelled: %w", localCtx.Err())
+					case <-time.After(parseAppsErrorCooldown):
+						// Continue after cooldown
+					}
 				}
 
-				// Retry on other errors
+				// Retry on other errors (with normal interval via lastCheck)
 				continue
 			}
 
 			// Reset consecutive failures on successful query
+			// Also clear the parseAppsError timestamp
 			if consecutiveFailures > 0 {
 				pterm.Success.Println("Application queries restored")
 				consecutiveFailures = 0
+				lastParseAppsError = time.Time{}
 			}
 
 			totalApps := len(apps)

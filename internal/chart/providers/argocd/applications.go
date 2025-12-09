@@ -409,6 +409,15 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 		if verbose {
 			pterm.Warning.Printf("kubectl get applications failed: %v\n", err)
 		}
+		// Check for WSL-specific errors on Windows - these should be treated as connectivity issues
+		// since they indicate WSL/kubectl infrastructure problems, not application issues
+		errStr := err.Error()
+		if runtime.GOOS == "windows" && (strings.Contains(errStr, "WSL error") ||
+			strings.Contains(errStr, "exit code: 3221225786") || // STATUS_CONTROL_C_EXIT
+			strings.Contains(errStr, "exit code: 4294967295") || // WSL distro not found
+			strings.Contains(errStr, "exit code: -1")) {
+			return []Application{}, fmt.Errorf("cluster unreachable (WSL error): %w", err)
+		}
 		// Return the error so the caller can detect cluster connectivity issues
 		return []Application{}, fmt.Errorf("kubectl execution failed: %w", err)
 	}
