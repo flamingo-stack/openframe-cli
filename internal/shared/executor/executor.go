@@ -391,9 +391,33 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 	// NOTE: Docker runs INSIDE WSL2 Ubuntu (not Docker Desktop), so k3d is accessible
 	// via 127.0.0.1 from within WSL. We only need to rewrite 0.0.0.0 to 127.0.0.1.
 	if command == "helm" {
-		// Build the helm command with all arguments properly quoted
-		helmCmd := "helm"
+		// Filter out --kube-context arguments on Windows/WSL
+		// The kubeconfig's current context is already set correctly by k3d, and the
+		// sed rewrite ensures the server address is correct. Using --kube-context
+		// forces helm to look up the context's server address, which may not match
+		// the rewritten address if the context was stored before the rewrite.
+		// By removing --kube-context, helm uses the current context which works reliably.
+		filteredArgs := make([]string, 0, len(escapedArgs))
+		skipNext := false
 		for _, arg := range escapedArgs {
+			if skipNext {
+				skipNext = false
+				continue
+			}
+			if arg == "--kube-context" {
+				skipNext = true // Skip the next argument (the context name)
+				continue
+			}
+			// Also handle --kube-context=value format
+			if strings.HasPrefix(arg, "--kube-context=") {
+				continue
+			}
+			filteredArgs = append(filteredArgs, arg)
+		}
+
+		// Build the helm command with filtered arguments
+		helmCmd := "helm"
+		for _, arg := range filteredArgs {
 			helmCmd += " " + arg
 		}
 
@@ -422,8 +446,29 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 	// For kubectl, run via bash with proper HOME set
 	// Docker runs INSIDE WSL2 Ubuntu, so k3d is accessible via 127.0.0.1
 	// We only need to rewrite 0.0.0.0 to 127.0.0.1 (not to the gateway IP)
-	kubectlCmd := "kubectl"
+	//
+	// Filter out --context arguments on Windows/WSL for the same reason as helm:
+	// the current context is already correct, and explicit context lookup may use stale server addresses.
+	filteredKubectlArgs := make([]string, 0, len(escapedArgs))
+	skipNextKubectl := false
 	for _, arg := range escapedArgs {
+		if skipNextKubectl {
+			skipNextKubectl = false
+			continue
+		}
+		if arg == "--context" {
+			skipNextKubectl = true // Skip the next argument (the context name)
+			continue
+		}
+		// Also handle --context=value format
+		if strings.HasPrefix(arg, "--context=") {
+			continue
+		}
+		filteredKubectlArgs = append(filteredKubectlArgs, arg)
+	}
+
+	kubectlCmd := "kubectl"
+	for _, arg := range filteredKubectlArgs {
 		kubectlCmd += " " + arg
 	}
 
