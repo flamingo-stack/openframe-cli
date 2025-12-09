@@ -167,8 +167,8 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
-	// On Windows, rewrite the kubeconfig server address to use WSL internal IP
-	// This is necessary for helm (running inside WSL) to reach the k3d cluster
+	// On Windows, rewrite the kubeconfig server address to use 127.0.0.1 instead of 0.0.0.0
+	// This is necessary for helm (running inside WSL) to reach the k3d cluster at localhost
 	if err := m.rewriteWSLKubeconfigServerAddress(ctx, config.Name); err != nil {
 		if m.verbose {
 			fmt.Printf("Warning: Could not rewrite kubeconfig server address: %v\n", err)
@@ -1267,19 +1267,18 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 	return nil
 }
 
-// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use the WSL internal IP
-// instead of 0.0.0.0. This is necessary because helm runs inside WSL and needs to reach the
-// Kubernetes API server via the WSL internal network, not the Windows host's loopback.
+// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use 127.0.0.1
+// instead of 0.0.0.0. This is necessary because:
+// - k3d writes 0.0.0.0 as the server address which doesn't work for connections
+// - helm runs inside WSL (via wsl -d Ubuntu) and can reach the k3d cluster at 127.0.0.1
+// - The Go client running on Windows uses the WSL internal IP (172.x.x.x) separately
+//
+// Note: We do NOT rewrite to the WSL internal IP here because helm runs inside WSL
+// where localhost (127.0.0.1) is the correct address to reach k3d.
 func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ string) error {
 	// Only needed on Windows where helm runs inside WSL
 	if runtime.GOOS != "windows" {
 		return nil
-	}
-
-	// Get the WSL internal IP
-	wslInternalIP, err := m.getWSLInternalIP(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get WSL internal IP: %w", err)
 	}
 
 	// Get the WSL user
@@ -1288,14 +1287,10 @@ func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ st
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	// Use sed to replace server addresses in the kubeconfig
-	// This replaces any server address like https://0.0.0.0:PORT or https://127.0.0.1:PORT
-	// with https://WSL_INTERNAL_IP:PORT
-	// We target the specific context to avoid modifying other cluster configs
-	sedCmd := fmt.Sprintf(
-		`sed -i 's|server: https://0\.0\.0\.0:|server: https://%s:|g; s|server: https://127\.0\.0\.1:|server: https://%s:|g' ~/.kube/config`,
-		wslInternalIP, wslInternalIP,
-	)
+	// Use sed to replace 0.0.0.0 with 127.0.0.1 in the kubeconfig
+	// This is needed because k3d writes 0.0.0.0 which doesn't work for actual connections
+	// Since helm runs inside WSL, 127.0.0.1 is the correct address to reach the k3d cluster
+	sedCmd := `sed -i 's|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g' ~/.kube/config`
 
 	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", sedCmd)
 	if err != nil {
@@ -1303,7 +1298,7 @@ func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ st
 	}
 
 	if m.verbose {
-		fmt.Printf("✓ Rewrote kubeconfig server addresses to use WSL internal IP: %s\n", wslInternalIP)
+		fmt.Println("✓ Rewrote kubeconfig server addresses to use 127.0.0.1 for WSL access")
 	}
 
 	return nil
