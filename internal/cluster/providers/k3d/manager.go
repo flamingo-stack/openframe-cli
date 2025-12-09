@@ -151,6 +151,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
+	// On Windows, rewrite the kubeconfig server address to use WSL internal IP
+	// This is necessary for helm (running inside WSL) to reach the k3d cluster
+	if err := m.rewriteWSLKubeconfigServerAddress(ctx, config.Name); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not rewrite kubeconfig server address: %v\n", err)
+		}
+		// Don't fail - helm might still work if the network is configured correctly
+	}
+
 	// Verify the cluster is reachable and get the rest.Config
 	restConfig, err := m.verifyClusterReachable(ctx, config.Name)
 	if err != nil {
@@ -1225,6 +1234,48 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 
 	if m.verbose {
 		fmt.Println("✓ Cleaned up stale kubeconfig lock files")
+	}
+
+	return nil
+}
+
+// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use the WSL internal IP
+// instead of 0.0.0.0. This is necessary because helm runs inside WSL and needs to reach the
+// Kubernetes API server via the WSL internal network, not the Windows host's loopback.
+func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ string) error {
+	// Only needed on Windows where helm runs inside WSL
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// Get the WSL internal IP
+	wslInternalIP, err := m.getWSLInternalIP(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL internal IP: %w", err)
+	}
+
+	// Get the WSL user
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Use sed to replace server addresses in the kubeconfig
+	// This replaces any server address like https://0.0.0.0:PORT or https://127.0.0.1:PORT
+	// with https://WSL_INTERNAL_IP:PORT
+	// We target the specific context to avoid modifying other cluster configs
+	sedCmd := fmt.Sprintf(
+		`sed -i 's|server: https://0\.0\.0\.0:|server: https://%s:|g; s|server: https://127\.0\.0\.1:|server: https://%s:|g' ~/.kube/config`,
+		wslInternalIP, wslInternalIP,
+	)
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", sedCmd)
+	if err != nil {
+		return fmt.Errorf("failed to rewrite kubeconfig server address: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Printf("✓ Rewrote kubeconfig server addresses to use WSL internal IP: %s\n", wslInternalIP)
 	}
 
 	return nil
