@@ -961,3 +961,64 @@ func TestIsTemporaryError(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractIPFromRouteOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "already valid IP",
+			input:    "172.21.96.1",
+			expected: "172.21.96.1",
+		},
+		{
+			name:     "full ip route output",
+			input:    "default via 172.21.96.1 dev eth0 proto kernel",
+			expected: "172.21.96.1",
+		},
+		{
+			name:     "ip route output with trailing newline",
+			input:    "default via 172.21.96.1 dev eth0 proto kernel\n",
+			expected: "172.21.96.1",
+		},
+		{
+			name:     "ip route output with extra whitespace",
+			input:    "  default via 172.21.96.1 dev eth0 proto kernel  ",
+			expected: "172.21.96.1",
+		},
+		{
+			name:     "resolv.conf nameserver output",
+			input:    "nameserver 172.21.96.1",
+			expected: "172.21.96.1",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "whitespace only",
+			input:    "   ",
+			expected: "",
+		},
+		{
+			name:     "no valid IP in output",
+			input:    "default via gateway dev eth0",
+			expected: "",
+		},
+		{
+			name:     "multiple IPs returns first",
+			input:    "192.168.1.1 172.21.96.1",
+			expected: "192.168.1.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractIPFromRouteOutput(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

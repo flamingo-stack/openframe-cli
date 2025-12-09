@@ -1194,6 +1194,36 @@ func (m *K3dManager) getKubeconfigContentFromWSL(ctx context.Context, clusterNam
 	return result.Stdout, nil
 }
 
+// extractIPFromRouteOutput extracts a valid IPv4 address from route command output.
+// This handles cases where the awk command doesn't properly extract field 3,
+// returning the full line like "default via 172.21.96.1 dev eth0 proto kernel".
+// It scans the output for a valid IPv4 address and returns it.
+func extractIPFromRouteOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+
+	// If it's already a valid IP, return it
+	if net.ParseIP(output) != nil {
+		return output
+	}
+
+	// Otherwise, scan through the fields looking for an IP address
+	// This handles both "ip route" output and other formats
+	fields := strings.Fields(output)
+	for _, field := range fields {
+		if ip := net.ParseIP(field); ip != nil {
+			// Ensure it's an IPv4 address (not IPv6)
+			if ip.To4() != nil {
+				return field
+			}
+		}
+	}
+
+	return ""
+}
+
 // getWSLInternalIP retrieves the Windows host IP as seen from inside WSL2.
 // This is the IP that WSL uses to reach the Windows host where Docker Desktop
 // exposes k3d ports. It is NOT the WSL eth0 interface IP (which is WSL's own IP).
@@ -1218,6 +1248,11 @@ func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 
 	ip := strings.TrimSpace(result.Stdout)
 
+	// The awk command might return the full line on some systems, so extract the IP
+	// Expected format from "ip route": "default via 172.21.96.1 dev eth0 proto kernel"
+	// We want field 3 (the IP address)
+	ip = extractIPFromRouteOutput(ip)
+
 	// Fallback: try getting from /etc/resolv.conf nameserver
 	if ip == "" {
 		ipCmd = "grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}'"
@@ -1226,14 +1261,15 @@ func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("failed to get Windows host IP from resolv.conf: %w", err)
 		}
 		ip = strings.TrimSpace(result.Stdout)
+		ip = extractIPFromRouteOutput(ip)
 	}
 
 	if ip == "" {
 		return "", fmt.Errorf("Windows host IP is empty - could not determine from gateway or resolv.conf")
 	}
 
-	// Validate that the IP looks like an IPv4 address
-	if !strings.Contains(ip, ".") {
+	// Validate that it's a proper IPv4 address using net.ParseIP
+	if net.ParseIP(ip) == nil {
 		return "", fmt.Errorf("invalid Windows host IP format: %s", ip)
 	}
 
