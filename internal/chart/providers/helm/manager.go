@@ -715,6 +715,12 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		}
 	}
 
+	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
+	if config.ClusterName != "" {
+		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		args = append(args, "--kube-context", contextName)
+	}
+
 	if config.DryRun {
 		args = append(args, "--dry-run")
 	}

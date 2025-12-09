@@ -89,6 +89,30 @@ func TestHelmManager_InstallAppOfAppsFromLocal(t *testing.T) {
 				mockExec.SetResult(command, result)
 			},
 		},
+		{
+			name: "installation with cluster name adds kube-context",
+			config: config.ChartInstallConfig{
+				ClusterName: "openframe-test",
+				AppOfApps: &models.AppOfAppsConfig{
+					ChartPath:  "/tmp/chart/manifests/app-of-apps",
+					ValuesFile: "/path/to/values.yaml",
+					Namespace:  "argocd",
+					Timeout:    "60m",
+				},
+			},
+			certFile:    "/path/to/cert.pem",
+			keyFile:     "/path/to/key.pem",
+			expectError: false,
+			setupMock: func(mockExec *MockExecutor) {
+				// Command should include --kube-context k3d-openframe-test
+				command := "helm upgrade --install app-of-apps /tmp/chart/manifests/app-of-apps --namespace argocd --wait --timeout 60m -f /path/to/values.yaml --set-file deployment.oss.ingress.localhost.tls.cert=/path/to/cert.pem --set-file deployment.oss.ingress.localhost.tls.key=/path/to/key.pem --set-file deployment.saas.ingress.localhost.tls.cert=/path/to/cert.pem --set-file deployment.saas.ingress.localhost.tls.key=/path/to/key.pem --kube-context k3d-openframe-test"
+				result := &executor.CommandResult{
+					ExitCode: 0,
+					Stdout:   "Release \"app-of-apps\" has been installed. Happy Helming!",
+				}
+				mockExec.SetResult(command, result)
+			},
+		},
 	}
 
 	for _, tt := range tests {
