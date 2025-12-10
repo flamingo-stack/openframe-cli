@@ -106,6 +106,69 @@ func ResetWSLCache() {
 	wslUbuntuChecked = false
 }
 
+// WakeUpWSL sends a simple command to WSL to ensure it's responsive
+// This is useful before critical operations as WSL can become unresponsive when idle
+// Returns nil if WSL is responsive, error otherwise
+func WakeUpWSL() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// Quick ping to WSL - just echo something
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "echo", "ping")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("WSL wake-up failed: %w", err)
+	}
+
+	if strings.TrimSpace(string(output)) != "ping" {
+		return fmt.Errorf("WSL wake-up returned unexpected output: %s", string(output))
+	}
+
+	return nil
+}
+
+// TryRecoverWSL attempts to recover WSL connectivity by terminating and restarting the distribution
+// This is a last-resort operation when WSL becomes completely unresponsive
+// Returns nil if recovery was successful, error otherwise
+func TryRecoverWSL() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// First, try to terminate the Ubuntu distribution
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	terminateCmd := exec.CommandContext(ctx, "wsl", "--terminate", "Ubuntu")
+	_ = terminateCmd.Run() // Ignore error - distribution might not be running
+
+	// Wait a moment for WSL to fully terminate
+	time.Sleep(2 * time.Second)
+
+	// Now try to start Ubuntu with a simple command
+	startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer startCancel()
+
+	startCmd := exec.CommandContext(startCtx, "wsl", "-d", "Ubuntu", "echo", "recovered")
+	output, err := startCmd.Output()
+	if err != nil {
+		return fmt.Errorf("WSL recovery failed - could not restart Ubuntu: %w", err)
+	}
+
+	if strings.TrimSpace(string(output)) != "recovered" {
+		return fmt.Errorf("WSL recovery returned unexpected output: %s", string(output))
+	}
+
+	// Reset the cache since we just restarted WSL
+	ResetWSLCache()
+
+	return nil
+}
+
 // GetWSLErrorSuggestion returns a helpful suggestion based on the WSL error
 func GetWSLErrorSuggestion(exitCode int, command string) string {
 	switch exitCode {

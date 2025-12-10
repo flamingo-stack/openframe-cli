@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -258,11 +260,37 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					consecutiveFailures++
 					pterm.Warning.Printf("Cluster connectivity check failed (%d/%d): %v\n",
 						consecutiveFailures, maxConsecutiveFailures, err)
+
+					// On Windows, try WSL recovery before giving up
+					if runtime.GOOS == "windows" && consecutiveFailures >= maxConsecutiveFailures-1 {
+						pterm.Info.Println("Attempting WSL recovery...")
+						if wslErr := executor.TryRecoverWSL(); wslErr != nil {
+							pterm.Warning.Printf("WSL recovery failed: %v\n", wslErr)
+						} else {
+							pterm.Success.Println("WSL recovery successful, retrying connectivity check...")
+							// Give WSL a moment to stabilize
+							time.Sleep(3 * time.Second)
+							// Retry the connectivity check
+							if retryErr := m.checkClusterConnectivity(localCtx, false); retryErr == nil {
+								pterm.Success.Println("Cluster connectivity restored after WSL recovery")
+								consecutiveFailures = 0
+								continue
+							}
+						}
+					}
+
 					if consecutiveFailures >= maxConsecutiveFailures {
 						stopSpinner()
 						m.printClusterDiagnostics(localCtx)
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
+
+					// Add exponential backoff delay between failures to avoid hammering WSL
+					backoffDelay := time.Duration(consecutiveFailures) * 2 * time.Second
+					if backoffDelay > 10*time.Second {
+						backoffDelay = 10 * time.Second
+					}
+					time.Sleep(backoffDelay)
 				} else {
 					if consecutiveFailures > 0 {
 						pterm.Success.Println("Cluster connectivity restored")
@@ -316,11 +344,30 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					pterm.Warning.Printf("Application query failed - cluster may be unreachable (%d/%d): %v\n",
 						consecutiveFailures, maxConsecutiveFailures, err)
 
+					// On Windows, try WSL recovery before giving up
+					if runtime.GOOS == "windows" && consecutiveFailures >= maxConsecutiveFailures-1 {
+						pterm.Info.Println("Attempting WSL recovery before giving up...")
+						if wslErr := executor.TryRecoverWSL(); wslErr != nil {
+							pterm.Warning.Printf("WSL recovery failed: %v\n", wslErr)
+						} else {
+							pterm.Success.Println("WSL recovery successful")
+							// Give WSL a moment to stabilize
+							time.Sleep(3 * time.Second)
+						}
+					}
+
 					if consecutiveFailures >= maxConsecutiveFailures {
 						stopSpinner()
 						m.printClusterDiagnostics(localCtx)
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
+
+					// Add backoff delay between failures
+					backoffDelay := time.Duration(consecutiveFailures) * 2 * time.Second
+					if backoffDelay > 10*time.Second {
+						backoffDelay = 10 * time.Second
+					}
+					time.Sleep(backoffDelay)
 				}
 
 				// Retry on other errors (with normal interval via lastCheck)
@@ -656,16 +703,51 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									allPodsResult, _ := m.executor.Execute(localCtx, "kubectl", allPodsArgs...)
 
 									problemPods := make(map[string]bool)
+									allPods := make(map[string]string) // podName -> status summary
 
 									// Parse pods from JSON and identify problematic ones
+									var podList corev1.PodList
 									if allPodsResult != nil && allPodsResult.Stdout != "" {
-										var podList corev1.PodList
 										if err := json.Unmarshal([]byte(allPodsResult.Stdout), &podList); err == nil {
 											for _, pod := range podList.Items {
+												// Build status summary for all pods
+												statusSummary := string(pod.Status.Phase)
+												if len(pod.Status.ContainerStatuses) > 0 {
+													var containerStates []string
+													for _, cs := range pod.Status.ContainerStatuses {
+														if cs.State.Waiting != nil {
+															containerStates = append(containerStates, cs.State.Waiting.Reason)
+														} else if cs.State.Terminated != nil {
+															containerStates = append(containerStates, cs.State.Terminated.Reason)
+														} else if cs.Ready {
+															containerStates = append(containerStates, "Ready")
+														}
+													}
+													if len(containerStates) > 0 {
+														statusSummary += "/" + strings.Join(containerStates, ",")
+													}
+												}
+												// Check init container status
+												for _, ics := range pod.Status.InitContainerStatuses {
+													if ics.State.Waiting != nil {
+														statusSummary += " (init:" + ics.State.Waiting.Reason + ")"
+													} else if ics.State.Running != nil {
+														statusSummary += " (init:Running)"
+													}
+												}
+												allPods[pod.Name] = statusSummary
+
 												// Non-running pods are problematic
 												if pod.Status.Phase != corev1.PodRunning {
 													problemPods[pod.Name] = true
 													continue
+												}
+												// Pods stuck in init containers are problematic
+												for _, ics := range pod.Status.InitContainerStatuses {
+													if ics.State.Waiting != nil || ics.State.Running != nil {
+														problemPods[pod.Name] = true
+														break
+													}
 												}
 												// Check for restarts in running pods
 												for _, cs := range pod.Status.ContainerStatuses {
@@ -678,7 +760,166 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 										}
 									}
 
-									if len(problemPods) == 0 {
+									// Get StatefulSets to identify missing pods
+									stsArgs := m.getKubectlArgs("-n", ns, "get", "statefulsets", "-o", "json")
+									stsResult, _ := m.executor.Execute(localCtx, "kubectl", stsArgs...)
+									missingPods := []string{}
+									if stsResult != nil && stsResult.Stdout != "" {
+										var stsList appsv1.StatefulSetList
+										if err := json.Unmarshal([]byte(stsResult.Stdout), &stsList); err == nil {
+											for _, sts := range stsList.Items {
+												expectedReplicas := int32(1)
+												if sts.Spec.Replicas != nil {
+													expectedReplicas = *sts.Spec.Replicas
+												}
+												for i := int32(0); i < expectedReplicas; i++ {
+													expectedPodName := fmt.Sprintf("%s-%d", sts.Name, i)
+													if _, exists := allPods[expectedPodName]; !exists {
+														missingPods = append(missingPods, expectedPodName)
+													}
+												}
+											}
+										}
+									}
+
+									// Get Deployments to identify missing pods
+									deployArgs := m.getKubectlArgs("-n", ns, "get", "deployments", "-o", "json")
+									deployResult, _ := m.executor.Execute(localCtx, "kubectl", deployArgs...)
+									if deployResult != nil && deployResult.Stdout != "" {
+										var deployList appsv1.DeploymentList
+										if err := json.Unmarshal([]byte(deployResult.Stdout), &deployList); err == nil {
+											for _, deploy := range deployList.Items {
+												expectedReplicas := int32(1)
+												if deploy.Spec.Replicas != nil {
+													expectedReplicas = *deploy.Spec.Replicas
+												}
+												// Count pods matching this deployment
+												matchingPods := 0
+												for podName := range allPods {
+													if strings.HasPrefix(podName, deploy.Name+"-") {
+														matchingPods++
+													}
+												}
+												if int32(matchingPods) < expectedReplicas {
+													missingPods = append(missingPods, fmt.Sprintf("%s (want %d, have %d)", deploy.Name, expectedReplicas, matchingPods))
+												}
+											}
+										}
+									}
+
+									// Show namespace summary first
+									pterm.Info.Printf("  Namespace %s summary:\n", ns)
+									if len(allPods) == 0 {
+										pterm.Warning.Println("    No pods found in namespace!")
+									} else {
+										// Group pods by status
+										readyPods := []string{}
+										pendingPods := []string{}
+										otherPods := []string{}
+										for podName, status := range allPods {
+											if strings.Contains(status, "Running") && strings.Contains(status, "Ready") && !strings.Contains(status, "init:") {
+												readyPods = append(readyPods, podName)
+											} else if strings.Contains(status, "Pending") || strings.Contains(status, "init:") {
+												pendingPods = append(pendingPods, fmt.Sprintf("%s (%s)", podName, status))
+											} else {
+												otherPods = append(otherPods, fmt.Sprintf("%s (%s)", podName, status))
+											}
+										}
+										pterm.Info.Printf("    Ready: %d, Pending/Init: %d, Other: %d\n", len(readyPods), len(pendingPods), len(otherPods))
+										if len(pendingPods) > 0 {
+											pterm.Info.Printf("    Pending/Init pods: %v\n", pendingPods)
+										}
+										if len(otherPods) > 0 {
+											pterm.Info.Printf("    Other pods: %v\n", otherPods)
+										}
+									}
+
+									// Show missing pods (expected but not created)
+									if len(missingPods) > 0 {
+										pterm.Warning.Printf("    Missing pods (expected but not created): %v\n", missingPods)
+
+										// For missing StatefulSet pods, check the StatefulSet events and PVC status
+										for _, missingPod := range missingPods {
+											// Skip deployment-style missing pods (they have different format)
+											if strings.Contains(missingPod, "(want") {
+												continue
+											}
+											// Extract StatefulSet name from pod name (e.g., "tactical-backend-0" -> "tactical-backend")
+											parts := strings.Split(missingPod, "-")
+											if len(parts) >= 2 {
+												stsName := strings.Join(parts[:len(parts)-1], "-")
+
+												pterm.Info.Printf("\n    Checking StatefulSet %s:\n", stsName)
+
+												// Get StatefulSet status
+												stsStatusArgs := m.getKubectlArgs("-n", ns, "get", "statefulset", stsName, "-o", "json")
+												stsStatusResult, _ := m.executor.Execute(localCtx, "kubectl", stsStatusArgs...)
+												if stsStatusResult != nil && stsStatusResult.Stdout != "" {
+													var sts appsv1.StatefulSet
+													if err := json.Unmarshal([]byte(stsStatusResult.Stdout), &sts); err == nil {
+														pterm.Info.Printf("      Replicas: %d desired, %d ready, %d current\n",
+															func() int32 { if sts.Spec.Replicas != nil { return *sts.Spec.Replicas }; return 1 }(),
+															sts.Status.ReadyReplicas, sts.Status.CurrentReplicas)
+														if len(sts.Status.Conditions) > 0 {
+															for _, cond := range sts.Status.Conditions {
+																if cond.Status != "True" || cond.Type == "Available" {
+																	pterm.Info.Printf("      Condition: %s=%s (%s)\n", cond.Type, cond.Status, cond.Message)
+																}
+															}
+														}
+													}
+												}
+
+												// Get events for the StatefulSet
+												stsEventsArgs := m.getKubectlArgs("-n", ns, "get", "events", "--field-selector", "involvedObject.name="+stsName, "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message", "--no-headers")
+												stsEventsResult, _ := m.executor.Execute(localCtx, "kubectl", stsEventsArgs...)
+												if stsEventsResult != nil && strings.TrimSpace(stsEventsResult.Stdout) != "" {
+													eventLines := strings.Split(strings.TrimSpace(stsEventsResult.Stdout), "\n")
+													if len(eventLines) > 3 {
+														eventLines = eventLines[len(eventLines)-3:]
+													}
+													pterm.Info.Println("      Recent Events:")
+													for _, event := range eventLines {
+														if event != "" {
+															pterm.Info.Printf("        %s\n", event)
+														}
+													}
+												}
+
+												// Check PVC status for this StatefulSet
+												pvcName := stsName // Common pattern: PVC name matches StatefulSet name
+												pvcArgs := m.getKubectlArgs("-n", ns, "get", "pvc", pvcName, "-o", "json")
+												pvcResult, _ := m.executor.Execute(localCtx, "kubectl", pvcArgs...)
+												if pvcResult != nil && pvcResult.Stdout != "" {
+													var pvc corev1.PersistentVolumeClaim
+													if err := json.Unmarshal([]byte(pvcResult.Stdout), &pvc); err == nil {
+														pterm.Info.Printf("      PVC %s: Phase=%s", pvcName, pvc.Status.Phase)
+														if pvc.Status.Phase != corev1.ClaimBound {
+															pterm.Warning.Printf(" (not bound!)")
+														}
+														pterm.Println()
+													}
+												} else {
+													// Try volumeClaimTemplate pattern: data-{stsname}-0
+													pvcName = "data-" + stsName + "-0"
+													pvcArgs = m.getKubectlArgs("-n", ns, "get", "pvc", pvcName, "-o", "json")
+													pvcResult, _ = m.executor.Execute(localCtx, "kubectl", pvcArgs...)
+													if pvcResult != nil && pvcResult.Stdout != "" {
+														var pvc corev1.PersistentVolumeClaim
+														if err := json.Unmarshal([]byte(pvcResult.Stdout), &pvc); err == nil {
+															pterm.Info.Printf("      PVC %s: Phase=%s", pvcName, pvc.Status.Phase)
+															if pvc.Status.Phase != corev1.ClaimBound {
+																pterm.Warning.Printf(" (not bound!)")
+															}
+															pterm.Println()
+														}
+													}
+												}
+											}
+										}
+									}
+
+									if len(problemPods) == 0 && len(missingPods) == 0 {
 										pterm.Info.Println("  No problematic pods found (may be an ArgoCD sync issue)")
 										continue
 									}
