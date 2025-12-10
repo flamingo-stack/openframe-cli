@@ -162,7 +162,7 @@ jobs:
       - name: Test bootstrap OSS tenant workflow
         shell: powershell
         continue-on-error: true
-        timeout-minutes: 40
+        timeout-minutes: 70
         run: |
           Write-Host "========================================"
           Write-Host "Testing Bootstrap OSS Tenant Workflow"
