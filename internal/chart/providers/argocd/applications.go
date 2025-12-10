@@ -189,10 +189,19 @@ func (m *Manager) getKubectlArgs(args ...string) []string {
 
 // Application represents an ArgoCD application status
 type Application struct {
-	Name      string
-	Health    string
-	Sync      string
-	Condition string // Status condition message (e.g., error messages from repo-server)
+	Name             string
+	Health           string
+	HealthMessage    string // Detailed health message
+	Sync             string
+	SyncRevision     string // Git revision being synced
+	Condition        string // Status condition message (e.g., error messages from repo-server)
+	ConditionType    string // Type of condition (e.g., "ComparisonError", "InvalidSpecError")
+	OperationPhase   string // Operation phase (e.g., "Running", "Failed", "Succeeded")
+	OperationMessage string // Operation error message
+	RepoURL          string // Source repository URL
+	Path             string // Path in repository
+	TargetRevision   string // Target revision (branch/tag)
+	ReconciledAt     string // Last reconciliation time
 }
 
 // argoAppList is used for JSON parsing of ArgoCD applications from kubectl output
@@ -207,16 +216,30 @@ type argoApp struct {
 	} `json:"metadata"`
 	Status struct {
 		Health struct {
-			Status string `json:"status"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
 		} `json:"health"`
 		Sync struct {
-			Status string `json:"status"`
+			Status   string `json:"status"`
+			Revision string `json:"revision"`
 		} `json:"sync"`
 		Conditions []struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
 		} `json:"conditions"`
+		OperationState struct {
+			Phase   string `json:"phase"`
+			Message string `json:"message"`
+		} `json:"operationState"`
+		ReconciledAt string `json:"reconciledAt"`
 	} `json:"status"`
+	Spec struct {
+		Source struct {
+			RepoURL        string `json:"repoURL"`
+			Path           string `json:"path"`
+			TargetRevision string `json:"targetRevision"`
+		} `json:"source"`
+	} `json:"spec"`
 }
 
 // getTotalExpectedApplications tries to determine the total number of applications that will be created
@@ -370,6 +393,7 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 		health := "Unknown"
 		sync := "Unknown"
 		condition := ""
+		conditionType := ""
 
 		// Safely extract Health and Sync status from the Go struct
 		if argoApp.Status.Health.Status != "" {
@@ -383,15 +407,49 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 		for _, cond := range argoApp.Status.Conditions {
 			if cond.Message != "" {
 				condition = cond.Message
+				conditionType = cond.Type
 				break // Take the first condition message
 			}
 		}
 
+		// Extract operation state
+		operationPhase := ""
+		operationMessage := ""
+		if argoApp.Status.OperationState != nil {
+			operationPhase = string(argoApp.Status.OperationState.Phase)
+			operationMessage = argoApp.Status.OperationState.Message
+		}
+
+		// Extract source info
+		repoURL := ""
+		path := ""
+		targetRevision := ""
+		if argoApp.Spec.Source != nil {
+			repoURL = argoApp.Spec.Source.RepoURL
+			path = argoApp.Spec.Source.Path
+			targetRevision = argoApp.Spec.Source.TargetRevision
+		}
+
+		// Extract reconciliation time
+		reconciledAt := ""
+		if argoApp.Status.ReconciledAt != nil {
+			reconciledAt = argoApp.Status.ReconciledAt.String()
+		}
+
 		app := Application{
-			Name:      argoApp.Name,
-			Health:    health,
-			Sync:      sync,
-			Condition: condition,
+			Name:             argoApp.Name,
+			Health:           health,
+			HealthMessage:    argoApp.Status.Health.Message,
+			Sync:             sync,
+			SyncRevision:     argoApp.Status.Sync.Revision,
+			Condition:        condition,
+			ConditionType:    conditionType,
+			OperationPhase:   operationPhase,
+			OperationMessage: operationMessage,
+			RepoURL:          repoURL,
+			Path:             path,
+			TargetRevision:   targetRevision,
+			ReconciledAt:     reconciledAt,
 		}
 		apps = append(apps, app)
 	}
@@ -422,24 +480,31 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 		return []Application{}, fmt.Errorf("kubectl execution failed: %w", err)
 	}
 
-	// Check for connection refused or other cluster connectivity errors in output
-	combinedOutput := result.Stdout + result.Stderr
-	if strings.Contains(combinedOutput, "connection refused") ||
-		strings.Contains(combinedOutput, "Unable to connect to the server") ||
-		strings.Contains(combinedOutput, "was refused") ||
-		strings.Contains(combinedOutput, "no such host") {
-		errMsg := "cluster connectivity error"
-		if result.Stderr != "" {
-			errMsg = result.Stderr
-		}
-		return []Application{}, fmt.Errorf("cluster unreachable: %s", errMsg)
-	}
-
+	// Try to parse JSON first - if successful, we have valid data regardless of
+	// what text strings appear in application condition messages
 	var appList argoAppList
 	if err := json.Unmarshal([]byte(result.Stdout), &appList); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to parse applications JSON: %v\n", err)
 		}
+
+		// JSON parsing failed - now check if it's a connectivity issue
+		// Only check for connectivity errors when we couldn't parse valid JSON,
+		// since valid JSON output means the command succeeded even if application
+		// conditions contain error-like strings
+		combinedOutput := result.Stdout + result.Stderr
+		if strings.Contains(combinedOutput, "connection refused") ||
+			strings.Contains(combinedOutput, "Unable to connect to the server") ||
+			strings.Contains(combinedOutput, "was refused") ||
+			strings.Contains(combinedOutput, "no such host") {
+			errMsg := "cluster connectivity error"
+			if result.Stderr != "" {
+				errMsg = result.Stderr
+			}
+			return []Application{}, fmt.Errorf("cluster unreachable: %s", errMsg)
+		}
+
+		// JSON parse failed but not a connectivity issue - return empty list
 		return []Application{}, nil
 	}
 
@@ -448,6 +513,7 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 		health := item.Status.Health.Status
 		sync := item.Status.Sync.Status
 		condition := ""
+		conditionType := ""
 
 		if health == "" {
 			health = "Unknown"
@@ -460,15 +526,25 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 		for _, cond := range item.Status.Conditions {
 			if cond.Message != "" {
 				condition = cond.Message
+				conditionType = cond.Type
 				break // Take the first condition message
 			}
 		}
 
 		apps = append(apps, Application{
-			Name:      item.Metadata.Name,
-			Health:    health,
-			Sync:      sync,
-			Condition: condition,
+			Name:             item.Metadata.Name,
+			Health:           health,
+			HealthMessage:    item.Status.Health.Message,
+			Sync:             sync,
+			SyncRevision:     item.Status.Sync.Revision,
+			Condition:        condition,
+			ConditionType:    conditionType,
+			OperationPhase:   item.Status.OperationState.Phase,
+			OperationMessage: item.Status.OperationState.Message,
+			RepoURL:          item.Spec.Source.RepoURL,
+			Path:             item.Spec.Source.Path,
+			TargetRevision:   item.Spec.Source.TargetRevision,
+			ReconciledAt:     item.Status.ReconciledAt,
 		})
 	}
 

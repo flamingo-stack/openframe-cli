@@ -429,11 +429,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						}
 
 						// Check for applications stuck in "Unknown" status or with repo-server issues
-						unknownApps := []string{}
+						unknownApps := []Application{}
 						appsWithConditionErrors := []Application{}
 						for _, app := range apps {
 							if app.Health == "Unknown" || app.Sync == "Unknown" {
-								unknownApps = append(unknownApps, app.Name)
+								unknownApps = append(unknownApps, app)
 							}
 							// Check for repo-server communication errors in condition messages
 							if app.Condition != "" && (strings.Contains(app.Condition, "EOF") ||
@@ -501,9 +501,55 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 						// After 2 minutes, warn about Unknown status as it may indicate ArgoCD controller issues
 						if len(unknownApps) > 0 && elapsed > 2*time.Minute {
-							pterm.Warning.Printf("  Applications with 'Unknown' status: %v\n", unknownApps)
-							pterm.Warning.Println("  This may indicate the ArgoCD Application Controller is not processing applications.")
-							pterm.Warning.Println("  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
+							// Show detailed info for each unknown app using data we already have
+							pterm.Warning.Printf("  Applications with 'Unknown' status (%d):\n", len(unknownApps))
+							for _, app := range unknownApps {
+								pterm.Warning.Printf("\n  --- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
+
+								// Show source info
+								if app.RepoURL != "" {
+									pterm.Info.Printf("    Source: %s", app.RepoURL)
+									if app.Path != "" {
+										pterm.Printf(" path=%s", app.Path)
+									}
+									if app.TargetRevision != "" {
+										pterm.Printf(" revision=%s", app.TargetRevision)
+									}
+									pterm.Println()
+								}
+
+								// Show condition error (this is usually the most important info)
+								if app.Condition != "" {
+									condType := app.ConditionType
+									if condType == "" {
+										condType = "Error"
+									}
+									pterm.Warning.Printf("    %s: %s\n", condType, app.Condition)
+								}
+
+								// Show operation state if present
+								if app.OperationPhase != "" {
+									pterm.Info.Printf("    Operation: %s", app.OperationPhase)
+									if app.OperationMessage != "" {
+										pterm.Printf(" - %s", app.OperationMessage)
+									}
+									pterm.Println()
+								}
+
+								// Show health message if present
+								if app.HealthMessage != "" {
+									pterm.Info.Printf("    Health details: %s\n", app.HealthMessage)
+								}
+
+								// Show last reconciliation time
+								if app.ReconciledAt != "" {
+									pterm.Info.Printf("    Last reconciled: %s\n", app.ReconciledAt)
+								} else {
+									pterm.Warning.Println("    Not yet reconciled (ArgoCD hasn't processed this app)")
+								}
+							}
+
+							pterm.Warning.Println("\n  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
 
 							// Check ArgoCD controller pod status every 2 minutes when apps are stuck in Unknown
 							if int(elapsed.Seconds())%120 == 0 {
@@ -511,32 +557,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 								controllerResult, _ := m.executor.Execute(localCtx, "kubectl", controllerArgs...)
 								if controllerResult != nil && controllerResult.Stdout != "" {
 									pterm.Info.Printf("  ArgoCD Application Controller status:\n%s\n", controllerResult.Stdout)
-								}
-
-								// Show Application spec for unknown apps (source repo, path, etc.)
-								for _, appName := range unknownApps {
-									pterm.Info.Printf("\n  === Diagnosing application: %s ===\n", appName)
-
-									// Get Application source configuration
-									appSpecArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.spec.source.repoURL} {.spec.source.path} {.spec.source.targetRevision}")
-									appSpecResult, _ := m.executor.Execute(localCtx, "kubectl", appSpecArgs...)
-									if appSpecResult != nil && appSpecResult.Stdout != "" {
-										pterm.Info.Printf("  Source: %s\n", appSpecResult.Stdout)
-									}
-
-									// Get Application status conditions
-									appCondArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.status.conditions[*].message}")
-									appCondResult, _ := m.executor.Execute(localCtx, "kubectl", appCondArgs...)
-									if appCondResult != nil && appCondResult.Stdout != "" {
-										pterm.Warning.Printf("  Status conditions: %s\n", appCondResult.Stdout)
-									}
-
-									// Get Application operationState message if any
-									appOpArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.status.operationState.message}")
-									appOpResult, _ := m.executor.Execute(localCtx, "kubectl", appOpArgs...)
-									if appOpResult != nil && appOpResult.Stdout != "" {
-										pterm.Warning.Printf("  Operation message: %s\n", appOpResult.Stdout)
-									}
 								}
 
 								// Check controller logs for errors related to unknown apps
