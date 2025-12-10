@@ -38,11 +38,16 @@ applicationSet:
 controller:
   resources:
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "1"
+      memory: 1Gi
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 512Mi
+  env:
+    - name: ARGOCD_RECONCILIATION_TIMEOUT
+      value: "300s"
+    - name: ARGOCD_REPO_SERVER_TIMEOUT_SECONDS
+      value: "300"
 
 server:
   resources:
@@ -54,16 +59,28 @@ server:
       memory: 128Mi
 
 repoServer:
+  replicas: 1
   resources:
     limits:
-      cpu: 200m
-      memory: 256Mi
+      cpu: "1"
+      memory: 512Mi
     requests:
-      cpu: 50m
-      memory: 128Mi
+      cpu: 100m
+      memory: 256Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
-      value: "180s"
+      value: "300s"
+    - name: ARGOCD_GIT_ATTEMPTS_COUNT
+      value: "5"
+    - name: ARGOCD_GIT_RETRY_MAX_DURATION
+      value: "30s"
+  initContainers:
+    - name: wait-for-dns
+      image: busybox:1.36
+      command: ['sh', '-c', 'until nslookup github.com; do echo waiting for DNS; sleep 2; done']
+  # Increase parallelism limits to handle manifest generation
+  extraArgs:
+    - --parallelismlimit=2
 
 redis:
   resources:
