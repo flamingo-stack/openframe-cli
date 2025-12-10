@@ -90,14 +90,25 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return fmt.Errorf("ArgoCD not ready: %w", err)
 	}
 
-	// Initial repo-server health check - catch issues early
-	if config.Verbose {
-		if issue := m.checkRepoServerHealth(localCtx, true); issue != nil {
-			pterm.Warning.Printf("Initial repo-server health check: %s\n", issue.Message)
-		} else {
-			pterm.Success.Println("Repo-server health check passed")
+	// Initial repo-server health check - catch issues early (always run, not just in verbose)
+	initialIssue := m.checkRepoServerHealth(localCtx, true)
+	if initialIssue != nil {
+		if config.Verbose {
+			pterm.Warning.Printf("Initial repo-server health check: %s\n", initialIssue.Message)
 		}
-		// Show initial resource usage
+		// If repo-server has already restarted, proactively restart it to clear any stuck state
+		// This helps CI environments where the pod may have OOM'd during initial setup
+		if initialIssue.Type == "resource" && initialIssue.Recoverable {
+			if config.Verbose {
+				pterm.Info.Println("Proactively restarting repo-server to clear potential stuck state...")
+			}
+			m.triggerRepoServerRecovery(localCtx, "")
+		}
+	} else if config.Verbose {
+		pterm.Success.Println("Repo-server health check passed")
+	}
+	// Show initial resource usage in verbose mode
+	if config.Verbose {
 		memory, cpu, err := m.checkRepoServerResources(localCtx)
 		if err == nil {
 			pterm.Info.Printf("Repo-server resource usage: CPU=%s, Memory=%s\n", cpu, memory)
@@ -211,12 +222,12 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Repo-server issue tracking for recovery logic
 	repoServerRecoveryAttempts := 0
-	maxRepoServerRecoveryAttempts := 2
+	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
 	lastRepoServerDiagnostic := time.Time{}
-	repoServerDiagnosticInterval := 3 * time.Minute
+	repoServerDiagnosticInterval := 2 * time.Minute // Reduced from 3 min for faster CI recovery
 	appsWithRepoServerIssues := make(map[string]int) // Track consecutive failures per app
 	lastRepoServerResourceCheck := time.Now()
-	repoServerResourceCheckInterval := 1 * time.Minute // Check every minute when issues detected
+	repoServerResourceCheckInterval := 30 * time.Second // Reduced from 1 min for faster issue detection
 
 	// Main loop
 	for {
@@ -446,8 +457,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 							for _, app := range appsWithConditionErrors {
 								consecutiveIssues := appsWithRepoServerIssues[app.Name]
 
-								// After 3 consecutive checks with repo-server issues, run diagnostics
-								if consecutiveIssues >= 3 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
+								// After 2 consecutive checks with repo-server issues, run diagnostics (reduced from 3 for faster CI recovery)
+								if consecutiveIssues >= 2 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
 									lastRepoServerDiagnostic = time.Now()
 									pterm.Warning.Printf("\n  Application '%s' has persistent repo-server communication issues\n", app.Name)
 									m.diagnoseRepoServerIssues(localCtx, app.Name, app.Condition)

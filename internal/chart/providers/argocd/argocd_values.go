@@ -63,10 +63,10 @@ repoServer:
   resources:
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 768Mi
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 384Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "300s"
