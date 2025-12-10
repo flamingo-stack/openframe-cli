@@ -151,7 +151,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	bootstrapHealthCheckInterval := 5 * time.Second
 	lastBootstrapHealthCheck := time.Now()
 	consecutiveFailures := 0
-	maxConsecutiveFailures := 3
+	maxConsecutiveFailures := 5 // Increased from 3 for better WSL resilience in CI environments
 
 	// Check every 10ms for immediate response
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -198,7 +198,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Track if the last failure was from parseApplications (vs checkClusterConnectivity)
 	// This prevents the health check from immediately resetting the failure counter
 	lastParseAppsError := time.Time{}
-	parseAppsErrorCooldown := 5 * time.Second // Wait before retrying after a parse error
+	parseAppsErrorCooldown := 5 * time.Second      // Wait before retrying after a parse error
+	wslErrorCooldown := 10 * time.Second           // Longer cooldown for WSL-specific errors
+	currentBackoff := parseAppsErrorCooldown       // Current backoff duration (increases with failures)
 
 	// Get expected applications count
 	totalAppsExpected := m.getTotalExpectedApplications(localCtx, config)
@@ -312,8 +314,26 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					// This prevents checkClusterConnectivity from immediately resetting the counter
 					lastParseAppsError = time.Now()
 					consecutiveFailures++
+
+					// Use longer cooldown for WSL-specific errors
+					isWSLError := strings.Contains(errStr, "WSL error") || strings.Contains(errStr, "Wsl/Service")
+					if isWSLError {
+						currentBackoff = wslErrorCooldown
+					}
+
+					// Apply exponential backoff for consecutive failures (max 30s)
+					if consecutiveFailures > 1 {
+						currentBackoff = time.Duration(float64(currentBackoff) * 1.5)
+						if currentBackoff > 30*time.Second {
+							currentBackoff = 30 * time.Second
+						}
+					}
+
 					pterm.Warning.Printf("Application query failed - cluster may be unreachable (%d/%d): %v\n",
 						consecutiveFailures, maxConsecutiveFailures, err)
+					if isWSLError && consecutiveFailures < maxConsecutiveFailures {
+						pterm.Info.Printf("WSL error detected, waiting %v before retry...\n", currentBackoff.Round(time.Second))
+					}
 
 					if consecutiveFailures >= maxConsecutiveFailures {
 						stopSpinner()
@@ -326,7 +346,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					select {
 					case <-localCtx.Done():
 						return fmt.Errorf("operation cancelled: %w", localCtx.Err())
-					case <-time.After(parseAppsErrorCooldown):
+					case <-time.After(currentBackoff):
 						// Continue after cooldown
 					}
 				}
@@ -336,11 +356,12 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			}
 
 			// Reset consecutive failures on successful query
-			// Also clear the parseAppsError timestamp
+			// Also clear the parseAppsError timestamp and reset backoff
 			if consecutiveFailures > 0 {
 				pterm.Success.Println("Application queries restored")
 				consecutiveFailures = 0
 				lastParseAppsError = time.Time{}
+				currentBackoff = parseAppsErrorCooldown // Reset backoff to default
 			}
 
 			totalApps := len(apps)
