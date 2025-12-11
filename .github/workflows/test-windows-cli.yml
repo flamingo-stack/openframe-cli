@@ -12,6 +12,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/test-windows-cli.yml'
   workflow_dispatch:
 
 jobs:
@@ -165,28 +166,26 @@ jobs:
           Write-Host "Creating helm-values.yaml to reduce resource usage in CI..."
 
           # Create helm-values.yaml that disables microservices to reduce resource usage
-          $helmValues = @"
-# CI testing configuration - disable microservices to reduce resource usage
-apps:
-  namespace-microservices:
-    enabled: false
-  openframe-config:
-    enabled: false
-  openframe-management:
-    enabled: false
-  openframe-api:
-    enabled: false
-  openframe-gateway:
-    enabled: false
-  openframe-client:
-    enabled: false
-  openframe-stream:
-    enabled: false
-  openframe-frontend:
-    enabled: false
-"@
+          $helmContent = "# CI testing configuration - disable microservices to reduce resource usage`n"
+          $helmContent += "apps:`n"
+          $helmContent += "  namespace-microservices:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-config:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-management:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-api:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-gateway:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-client:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-stream:`n"
+          $helmContent += "    enabled: false`n"
+          $helmContent += "  openframe-frontend:`n"
+          $helmContent += "    enabled: false`n"
 
-          $helmValues | Out-File -FilePath "helm-values.yaml" -Encoding utf8
+          $helmContent | Out-File -FilePath "helm-values.yaml" -Encoding utf8 -NoNewline
           Write-Host "[OK] Created helm-values.yaml - disabled microservices namespace"
 
       - name: Test bootstrap OSS tenant workflow
