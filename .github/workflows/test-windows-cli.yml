@@ -18,7 +18,7 @@ jobs:
   test-windows-cli-bootstrap:
     name: Test Bootstrap on Windows
     runs-on: Windows-x64
-    timeout-minutes: 60
+    timeout-minutes: 50
 
     steps:
       - name: Checkout code
