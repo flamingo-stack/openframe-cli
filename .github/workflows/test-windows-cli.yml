@@ -160,38 +160,6 @@ jobs:
             Write-Host "[OK] wslpath is working"
           }
 
-      - name: Create helm-values.yaml for CI testing
-        shell: powershell
-        run: |
-          Write-Host "Creating helm-values.yaml to reduce resource usage in CI..."
-
-          # Create helm-values.yaml that disables microservices to reduce resource usage
-          $helmContent = "# CI testing configuration - disable microservices to reduce resource usage`n"
-          $helmContent += "apps:`n"
-          $helmContent += "  namespace-microservices:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-config:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-management:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-api:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-authorization-server:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-external-api:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-gateway:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-client:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-stream:`n"
-          $helmContent += "    enabled: false`n"
-          $helmContent += "  openframe-frontend:`n"
-          $helmContent += "    enabled: false`n"
-
-          $helmContent | Out-File -FilePath "helm-values.yaml" -Encoding utf8 -NoNewline
-          Write-Host "[OK] Created helm-values.yaml - disabled microservices namespace"
-
       - name: Test bootstrap OSS tenant workflow
         shell: powershell
         continue-on-error: true
@@ -227,13 +195,13 @@ jobs:
             wsl.exe -d Ubuntu -u runner kubectl get pods -n argocd 2>&1 | Out-Host
 
             Write-Host ""
-            Write-Host "Installing ArgoCD CRDs..."
-            wsl.exe -d Ubuntu -u runner kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds.yaml 2>&1 | Out-Host
+            Write-Host "Verifying ArgoCD CRDs (already installed by CLI)..."
+            wsl.exe -d Ubuntu -u runner kubectl get crd applications.argoproj.io 2>&1 | Out-Host
 
             if ($LASTEXITCODE -eq 0) {
-              Write-Host "[OK] ArgoCD CRDs installed successfully"
+              Write-Host "[OK] ArgoCD CRDs verified successfully"
             } else {
-              Write-Host "[WARNING] ArgoCD CRDs installation returned exit code: $LASTEXITCODE"
+              Write-Host "[WARNING] ArgoCD CRDs verification returned exit code: $LASTEXITCODE"
             }
 
             Write-Host ""
