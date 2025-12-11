@@ -33,287 +33,96 @@ jobs:
 
       - name: Build CLI
         shell: bash
-        run: |
-          go build -o openframe.exe .
+        run: go build -o openframe.exe .
 
-      - name: Install WSL2 and configure
+      - name: Install and configure WSL2
         shell: powershell
         run: |
-          # Set error action to continue
           $ErrorActionPreference = 'Continue'
 
-          # Install WSL2 with Ubuntu (non-interactive)
-          Write-Host "Installing WSL2 with Ubuntu..."
+          # Install WSL2 with Ubuntu
           echo Y | wsl --install -d Ubuntu --no-launch
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Warning: WSL installation returned exit code $LASTEXITCODE"
-            Write-Host "This may be expected on some systems. Continuing..."
-          }
-
-          # Wait for installation
-          Write-Host "Waiting for installation to complete..."
           Start-Sleep -Seconds 20
 
-          # Set WSL2 as default
-          Write-Host "Setting WSL2 as default version..."
           wsl --set-default-version 2
-
-          # Verify installation
-          Write-Host "Verifying WSL installation..."
           wsl --list --verbose
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: WSL verification failed"
-            exit 1
-          }
-
-          # Initialize Ubuntu by running a simple command (this triggers first-time setup)
-          Write-Host "Initializing Ubuntu (first launch)..."
-
-          # Try multiple times with increasing delays
+          # Initialize Ubuntu with retries
           $maxRetries = 5
           $retryDelay = 10
-          $initialized = $false
 
           for ($i = 1; $i -le $maxRetries; $i++) {
-            Write-Host "Attempt $i of $maxRetries..."
-            wsl -d Ubuntu -u root bash -c "echo 'Ubuntu initialized'" 2>&1 | Out-Host
-            if ($LASTEXITCODE -eq 0) {
-              $initialized = $true
-              Write-Host "Ubuntu initialized successfully on attempt $i"
-              break
-            }
-            Write-Host "Initialization attempt $i failed (exit code: $LASTEXITCODE), waiting ${retryDelay}s..."
+            wsl -d Ubuntu -u root bash -c "echo 'init'" 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
             Start-Sleep -Seconds $retryDelay
-            $retryDelay = $retryDelay + 5
+            $retryDelay += 5
           }
-
-          if (-not $initialized) {
-            Write-Host "ERROR: Failed to initialize Ubuntu after $maxRetries attempts"
-            Write-Host "Listing WSL distributions..."
-            wsl --list --verbose
-            exit 1
-          }
-
-          # Additional wait for Ubuntu to fully stabilize
-          Write-Host "Waiting for Ubuntu to stabilize..."
-          Start-Sleep -Seconds 10
-
-          # Configure Ubuntu with runner user
-          Write-Host "Configuring Ubuntu user..."
-          wsl -d Ubuntu -u root bash -c "id runner 2>/dev/null || (useradd -m -s /bin/bash runner && echo 'runner:runner' | chpasswd && usermod -aG sudo runner)"
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: Failed to create user"
+            Write-Host "Failed to initialize Ubuntu"
             exit 1
           }
+
+          Start-Sleep -Seconds 10
+
+          # Create runner user with sudo access
+          wsl -d Ubuntu -u root bash -c "id runner 2>/dev/null || (useradd -m -s /bin/bash runner && echo 'runner:runner' | chpasswd && usermod -aG sudo runner)"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           wsl -d Ubuntu -u root bash -c "grep -q '%sudo ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers"
 
-          # Verify user was created
-          Write-Host "Verifying user creation..."
-          wsl -d Ubuntu -u runner bash -c "whoami"
+          wsl -d Ubuntu -u runner bash -c "whoami" | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: User verification failed"
-            exit 1
-          }
-
-          Write-Host "[OK] WSL2 and Ubuntu configured successfully"
+          Write-Host "WSL2 configured successfully"
 
       - name: Verify WSL is ready
         shell: powershell
         run: |
-          Write-Host "========================================"
-          Write-Host "Verifying WSL Ubuntu is Ready"
-          Write-Host "========================================"
-
-          # Check WSL distributions
-          Write-Host "WSL Distributions:"
-          wsl --list --verbose
-
-          # Verify Ubuntu is accessible
-          Write-Host ""
-          Write-Host "Testing Ubuntu access..."
-          $testResult = wsl -d Ubuntu -u root echo "Ubuntu is accessible"
+          wsl -d Ubuntu -u root echo "ready" | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Ubuntu distribution is not accessible (exit code: $LASTEXITCODE)"
-            Write-Host "Attempting to terminate and restart Ubuntu..."
             wsl --terminate Ubuntu
             Start-Sleep -Seconds 5
-            wsl -d Ubuntu -u root echo "Ubuntu restarted"
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "FATAL: Cannot access Ubuntu distribution"
-              exit 1
-            }
-          }
-          Write-Host "[OK] Ubuntu is accessible"
-
-          # Test wslpath command
-          Write-Host ""
-          Write-Host "Testing wslpath command..."
-          wsl -d Ubuntu wslpath -u "C:/Windows"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: wslpath command failed, but this may be acceptable with fallback conversion"
-          } else {
-            Write-Host "[OK] wslpath is working"
+            wsl -d Ubuntu -u root echo "ready" | Out-Null
+            if ($LASTEXITCODE -ne 0) { exit 1 }
           }
 
-      - name: Test bootstrap OSS tenant workflow
+      - name: Run bootstrap test
         shell: powershell
-        continue-on-error: true
-        timeout-minutes: 70
+        timeout-minutes: 60
         run: |
-          Write-Host "========================================"
-          Write-Host "Testing Bootstrap OSS Tenant Workflow"
-          Write-Host "========================================"
-
-
-          Write-Host ""
-          Write-Host "Note: Docker, kubectl, k3d, and helm will be automatically installed by the CLI during bootstrap"
-          Write-Host "Note: Using helm-values.yaml with microservices disabled to reduce resource usage"
-
-          Write-Host "Testing bootstrap command..."
-          Write-Host ""
-
-          # Run bootstrap - CLI will install all required tools (Docker, kubectl, k3d, helm) and create cluster
-          # The helm-values.yaml created in previous step will be used automatically
           .\openframe.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host ""
-            Write-Host "[OK] Bootstrap completed successfully"
-
-            Write-Host ""
-            Write-Host "Verifying cluster in WSL2..."
-            wsl.exe -d Ubuntu -u runner kubectl get nodes
-            wsl.exe -d Ubuntu -u runner kubectl get namespaces
-
-            Write-Host ""
-            Write-Host "Checking ArgoCD installation..."
-            wsl.exe -d Ubuntu -u runner kubectl get pods -n argocd 2>&1 | Out-Host
-
-            Write-Host ""
-            Write-Host "Verifying ArgoCD CRDs (already installed by CLI)..."
-            wsl.exe -d Ubuntu -u runner kubectl get crd applications.argoproj.io 2>&1 | Out-Host
-
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "[OK] ArgoCD CRDs verified successfully"
-            } else {
-              Write-Host "[WARNING] ArgoCD CRDs verification returned exit code: $LASTEXITCODE"
-            }
-
-            Write-Host ""
-            Write-Host "Waiting for ArgoCD applications to be created (30 seconds)..."
-            Start-Sleep -Seconds 30
-
-            Write-Host ""
-            Write-Host "Checking ArgoCD applications..."
-            $argoApps = wsl.exe -d Ubuntu -u runner kubectl get applications -n argocd -o json | ConvertFrom-Json
-
-            if ($argoApps.items) {
-              $appCount = $argoApps.items.Count
-              Write-Host "Found $appCount ArgoCD application(s):"
-
-              foreach ($app in $argoApps.items) {
-                $appName = $app.metadata.name
-                $appHealth = $app.status.health.status
-                $appSync = $app.status.sync.status
-                Write-Host "  - $appName (Health: $appHealth, Sync: $appSync)"
-              }
-
-              if ($appCount -ge 2) {
-                Write-Host "[OK] Successfully verified $appCount applications installed (expected at least 2)"
-              } else {
-                Write-Host "[WARNING] Only $appCount application(s) found, expected at least 2"
-                Write-Host "This may indicate an issue with app-of-apps installation"
-              }
-            } else {
-              Write-Host "[WARNING] No ArgoCD applications found"
-              Write-Host "This may indicate an issue with app-of-apps installation"
-            }
-
-            Write-Host ""
-            Write-Host "Cleaning up bootstrap test cluster..."
-            .\openframe.exe cluster delete openframe-test 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "Cleanup via CLI failed, trying k3d directly..."
-              wsl.exe -d Ubuntu -u runner bash -c "sudo -E k3d cluster delete openframe-test"
-            }
-
-            Write-Host "[OK] Bootstrap test completed successfully"
-          } else {
-            Write-Host "[WARNING] Bootstrap test failed (exit code: $LASTEXITCODE)"
-            Write-Host "This is acceptable in CI environment"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Bootstrap failed with exit code: $LASTEXITCODE"
+            exit 1
           }
 
-      - name: Bootstrap test summary
+          # Verify cluster
+          wsl.exe -d Ubuntu -u runner kubectl get nodes
+          wsl.exe -d Ubuntu -u runner kubectl get pods -n argocd
+
+          # Wait for ArgoCD applications
+          Start-Sleep -Seconds 30
+
+          $argoApps = wsl.exe -d Ubuntu -u runner kubectl get applications -n argocd -o json | ConvertFrom-Json
+          if ($argoApps.items) {
+            $appCount = $argoApps.items.Count
+            Write-Host "Found $appCount ArgoCD application(s)"
+            foreach ($app in $argoApps.items) {
+              Write-Host "  - $($app.metadata.name): Health=$($app.status.health.status), Sync=$($app.status.sync.status)"
+            }
+            if ($appCount -lt 2) {
+              Write-Host "Warning: Expected at least 2 applications"
+            }
+          }
+
+      - name: Cleanup
         if: always()
         shell: powershell
         run: |
-          Write-Host "========================================"
-          Write-Host "Bootstrap Test Results"
-          Write-Host "========================================"
-
-          # Check if Ubuntu distribution exists
-          wsl.exe --list --verbose 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host ""
-            Write-Host "Environment Setup:"
-            Write-Host "=================="
-            Write-Host "[OK] WSL2 and Ubuntu configured"
-
-            Write-Host ""
-            Write-Host "Tool Versions (all installed by CLI):"
-            Write-Host "======================================"
-
-            # Check Docker (installed by CLI during bootstrap)
-            $docker_version = wsl.exe -d Ubuntu -u runner bash -c 'sudo docker --version 2>/dev/null'
-            if ($LASTEXITCODE -ne 0) { $docker_version = "Installed by CLI during bootstrap" }
-            Write-Host "Docker: $docker_version"
-
-            # Check kubectl (installed by CLI during bootstrap)
-            $kubectl_version = wsl.exe -d Ubuntu -u runner bash -c 'kubectl version --client 2>/dev/null | head -n1'
-            if ($LASTEXITCODE -ne 0) { $kubectl_version = "Installed by CLI during bootstrap" }
-            Write-Host "kubectl: $kubectl_version"
-
-            # Check k3d (installed by CLI during bootstrap)
-            $k3d_version = wsl.exe -d Ubuntu -u runner bash -c 'k3d version 2>/dev/null'
-            if ($LASTEXITCODE -ne 0) { $k3d_version = "Installed by CLI during bootstrap" }
-            Write-Host "k3d: $k3d_version"
-
-            # Check Helm (installed by CLI during bootstrap)
-            $helm_version = wsl.exe -d Ubuntu -u runner bash -c 'helm version --short 2>/dev/null'
-            if ($LASTEXITCODE -ne 0) { $helm_version = "Installed by CLI during bootstrap" }
-            Write-Host "Helm: $helm_version"
-
-            Write-Host ""
-            Write-Host "Bootstrap Command:"
-            Write-Host "=================="
-            Write-Host "Command: openframe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive"
-            Write-Host "Expected: Install tools (Docker, kubectl, k3d, helm) + Create k3d cluster + Install ArgoCD + Install OpenFrame charts"
-            Write-Host ""
-            Write-Host "ArgoCD Applications:"
-            Write-Host "===================="
-            $argoAppsCheck = wsl.exe -d Ubuntu -u runner bash -c 'kubectl get applications -n argocd --no-headers 2>/dev/null | wc -l'
-            if ($LASTEXITCODE -eq 0 -and $argoAppsCheck) {
-              Write-Host "Total applications: $argoAppsCheck"
-              if ([int]$argoAppsCheck -ge 2) {
-                Write-Host "[OK] App-of-apps successfully created $argoAppsCheck applications"
-              } else {
-                Write-Host "[WARNING] Expected at least 2 applications, found: $argoAppsCheck"
-              }
-            } else {
-              Write-Host "Unable to verify applications (cluster may have been cleaned up)"
-            }
-
-            Write-Host ""
-            Write-Host "========================================"
-            Write-Host "[OK] Bootstrap test completed"
-            Write-Host "========================================"
-          } else {
-            Write-Host "ERROR: WSL distribution not found"
-            Write-Host "All tools (Docker, kubectl, k3d, helm) would be installed by CLI during bootstrap"
-            exit 1
+          .\openframe.exe cluster delete openframe-test 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            wsl.exe -d Ubuntu -u runner bash -c "sudo -E k3d cluster delete openframe-test" 2>&1 | Out-Null
           }
