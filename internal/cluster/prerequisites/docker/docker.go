@@ -619,15 +619,67 @@ func startDockerLinux() error {
 }
 
 func startDockerWindows() error {
-	// Try to start Docker Desktop on Windows
+	// First, try to start Docker CE in WSL2 (our preferred setup)
+	if err := startDockerInWSL(); err == nil {
+		return nil
+	}
+
+	// Fallback: Try to start Docker Desktop on Windows
 	cmd := exec.Command("cmd", "/c", "start", "", "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe")
 	if err := cmd.Run(); err != nil {
 		// Try alternative path
 		cmd = exec.Command("powershell", "-Command", "Start-Process", "'Docker Desktop'")
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to start Docker Desktop: %w", err)
+			return fmt.Errorf("failed to start Docker (tried WSL2 Docker CE and Docker Desktop): %w", err)
 		}
 	}
+	return nil
+}
+
+// startDockerInWSL starts Docker CE daemon inside WSL2 Ubuntu
+func startDockerInWSL() error {
+	// Check if Ubuntu WSL distribution exists
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "ok")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Ubuntu WSL distribution not available: %w", err)
+	}
+
+	// Start Docker daemon using the start-docker.sh script or directly
+	startScript := `
+if [ -x /usr/local/bin/start-docker.sh ]; then
+    sudo /usr/local/bin/start-docker.sh
+else
+    if ! pgrep -x dockerd > /dev/null; then
+        sudo dockerd > /dev/null 2>&1 &
+    fi
+fi
+
+# Wait for Docker to be ready (up to 30 seconds)
+for i in $(seq 1 30); do
+    if sudo docker ps > /dev/null 2>&1; then
+        echo "docker_ready"
+        exit 0
+    fi
+    sleep 1
+done
+echo "docker_timeout"
+exit 1
+`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	cmd = exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", startScript)
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to start Docker in WSL: %w", err)
+	}
+
+	result := strings.TrimSpace(string(output))
+	if result == "docker_timeout" {
+		return fmt.Errorf("timeout waiting for Docker to start in WSL")
+	}
+
 	return nil
 }
 

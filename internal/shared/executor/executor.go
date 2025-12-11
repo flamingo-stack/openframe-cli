@@ -166,6 +166,61 @@ func TryRecoverWSL() error {
 	// Reset the cache since we just restarted WSL
 	ResetWSLCache()
 
+	// After WSL restart, Docker daemon needs to be restarted too
+	// Docker CE runs as a background process in WSL, not as a systemd service
+	if err := RestartDockerInWSL(); err != nil {
+		// Log warning but don't fail - Docker might already be running or not installed
+		return fmt.Errorf("WSL recovered but Docker restart failed: %w", err)
+	}
+
+	return nil
+}
+
+// RestartDockerInWSL starts the Docker daemon inside WSL2 Ubuntu
+// This is needed after WSL restart since Docker CE runs as a background process
+func RestartDockerInWSL() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// Start Docker daemon in WSL using the start-docker.sh script we created during installation
+	// If the script doesn't exist, fall back to starting dockerd directly
+	startScript := `
+if [ -x /usr/local/bin/start-docker.sh ]; then
+    sudo /usr/local/bin/start-docker.sh
+else
+    # Fallback: start dockerd directly if script doesn't exist
+    if ! pgrep -x dockerd > /dev/null; then
+        sudo dockerd > /dev/null 2>&1 &
+    fi
+fi
+
+# Wait for Docker to be ready (up to 30 seconds)
+for i in $(seq 1 30); do
+    if sudo docker ps > /dev/null 2>&1; then
+        echo "docker_ready"
+        exit 0
+    fi
+    sleep 1
+done
+echo "docker_timeout"
+exit 1
+`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", startScript)
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to start Docker in WSL: %w", err)
+	}
+
+	result := strings.TrimSpace(string(output))
+	if result == "docker_timeout" {
+		return fmt.Errorf("timeout waiting for Docker to start in WSL")
+	}
+
 	return nil
 }
 
