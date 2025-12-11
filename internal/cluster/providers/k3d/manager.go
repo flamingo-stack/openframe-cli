@@ -78,6 +78,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		return nil, models.NewProviderNotFoundError(config.Type)
 	}
 
+	// Increase inotify limits for applications like MeshCentral that use many file watchers
+	// This must be done before cluster creation as it affects the Docker/WSL host
+	if err := m.increaseInotifyLimits(ctx); err != nil {
+		if m.verbose {
+			fmt.Printf("Warning: Could not increase inotify limits: %v\n", err)
+		}
+		// Don't fail - cluster might still work if limits are already sufficient
+	}
+
 	// On Windows/WSL2, get the WSL internal IP before creating the cluster
 	// to include it as a TLS SAN in the k3s certificate
 	var wslInternalIP string
@@ -1353,4 +1362,55 @@ func CreateClusterManagerWithExecutor(exec executor.CommandExecutor) *K3dManager
 // Deprecated: Use CreateClusterManagerWithExecutor instead with a proper executor.
 func CreateDefaultClusterManager() *K3dManager {
 	panic("CreateDefaultClusterManager is deprecated - use CreateClusterManagerWithExecutor with proper executor")
+}
+
+// increaseInotifyLimits increases the inotify limits on the host system
+// This is critical for applications like MeshCentral that use many file watchers
+// and can hit the default limits, causing EMFILE errors.
+//
+// The limits are set via sysctl:
+// - fs.inotify.max_user_watches: max number of file watches per user (default: 8192)
+// - fs.inotify.max_user_instances: max number of inotify instances per user (default: 128)
+func (m *K3dManager) increaseInotifyLimits(ctx context.Context) error {
+	// Desired limits - these are common recommended values for development environments
+	const maxUserWatches = "524288"
+	const maxUserInstances = "512"
+
+	if runtime.GOOS == "windows" {
+		// On Windows, the limits need to be set inside WSL2 where Docker runs
+		// We need root privileges to modify sysctl settings
+		sysctlCmd := fmt.Sprintf(
+			"sudo sysctl -w fs.inotify.max_user_watches=%s fs.inotify.max_user_instances=%s 2>/dev/null || true",
+			maxUserWatches, maxUserInstances,
+		)
+
+		_, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", sysctlCmd)
+		if err != nil {
+			return fmt.Errorf("failed to set inotify limits in WSL: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Printf("✓ Increased inotify limits in WSL (max_user_watches=%s, max_user_instances=%s)\n",
+				maxUserWatches, maxUserInstances)
+		}
+	} else {
+		// On Linux/macOS, set the limits directly
+		// Note: macOS doesn't use inotify (uses FSEvents), so this only applies to Linux
+		sysctlCmd := fmt.Sprintf(
+			"sudo sysctl -w fs.inotify.max_user_watches=%s fs.inotify.max_user_instances=%s 2>/dev/null || true",
+			maxUserWatches, maxUserInstances,
+		)
+
+		_, err := m.executor.Execute(ctx, "bash", "-c", sysctlCmd)
+		if err != nil {
+			return fmt.Errorf("failed to set inotify limits: %w", err)
+		}
+
+		if m.verbose {
+			fmt.Printf("✓ Increased inotify limits (max_user_watches=%s, max_user_instances=%s)\n",
+				maxUserWatches, maxUserInstances)
+		}
+	}
+
+	return nil
 }
