@@ -159,6 +159,36 @@ jobs:
             Write-Host "[OK] wslpath is working"
           }
 
+      - name: Create helm-values.yaml for CI testing
+        shell: powershell
+        run: |
+          Write-Host "Creating helm-values.yaml to reduce resource usage in CI..."
+
+          # Create helm-values.yaml that disables microservices to reduce resource usage
+          $helmValues = @"
+# CI testing configuration - disable microservices to reduce resource usage
+apps:
+  namespace-microservices:
+    enabled: false
+  openframe-config:
+    enabled: false
+  openframe-management:
+    enabled: false
+  openframe-api:
+    enabled: false
+  openframe-gateway:
+    enabled: false
+  openframe-client:
+    enabled: false
+  openframe-stream:
+    enabled: false
+  openframe-frontend:
+    enabled: false
+"@
+
+          $helmValues | Out-File -FilePath "helm-values.yaml" -Encoding utf8
+          Write-Host "[OK] Created helm-values.yaml - disabled microservices namespace"
+
       - name: Test bootstrap OSS tenant workflow
         shell: powershell
         continue-on-error: true
@@ -171,11 +201,13 @@ jobs:
 
           Write-Host ""
           Write-Host "Note: Docker, kubectl, k3d, and helm will be automatically installed by the CLI during bootstrap"
+          Write-Host "Note: Using helm-values.yaml with microservices disabled to reduce resource usage"
 
           Write-Host "Testing bootstrap command..."
           Write-Host ""
 
           # Run bootstrap - CLI will install all required tools (Docker, kubectl, k3d, helm) and create cluster
+          # The helm-values.yaml created in previous step will be used automatically
           .\openframe.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 
           if ($LASTEXITCODE -eq 0) {
