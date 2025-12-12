@@ -230,9 +230,84 @@ func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType
 		Timeout: 2 * time.Minute,
 	}
 
-	if _, err := m.executor.ExecuteWithOptions(ctx, options); err != nil {
+	_, err := m.executor.ExecuteWithOptions(ctx, options)
+	if err != nil {
+		// On Windows/WSL or when force is set, fall back to direct Docker cleanup
+		// This handles WSL networking issues that can cause k3d to hang or fail
+		if runtime.GOOS == "windows" || force {
+			if m.verbose {
+				fmt.Printf("k3d delete failed, attempting direct Docker cleanup for cluster %s: %v\n", name, err)
+			}
+			if cleanupErr := m.forceCleanupDockerContainers(ctx, name); cleanupErr != nil {
+				// Return original error if cleanup also fails
+				return models.NewClusterOperationError("delete", name, fmt.Errorf("failed to delete cluster %s (cleanup also failed: %v): %w", name, cleanupErr, err))
+			}
+			// Cleanup succeeded, cluster is removed
+			if m.verbose {
+				fmt.Printf("✓ Cluster %s removed via direct Docker cleanup\n", name)
+			}
+			return nil
+		}
 		return models.NewClusterOperationError("delete", name, fmt.Errorf("failed to delete cluster %s: %w", name, err))
 	}
+
+	return nil
+}
+
+// forceCleanupDockerContainers removes all Docker containers associated with a k3d cluster
+// This is a fallback mechanism when k3d cluster delete fails (e.g., due to WSL networking issues)
+func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterName string) error {
+	if runtime.GOOS == "windows" {
+		return m.forceCleanupDockerContainersWSL(ctx, clusterName)
+	}
+	return m.forceCleanupDockerContainersDirect(ctx, clusterName)
+}
+
+// forceCleanupDockerContainersWSL removes k3d containers via WSL on Windows
+func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, clusterName string) error {
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		username = "runner" // fallback to runner
+	}
+
+	// Remove containers matching k3d-<clustername> pattern
+	cleanupCmd := fmt.Sprintf(
+		"sudo docker ps -aq --filter 'name=k3d-%s' | xargs -r sudo docker rm -f 2>/dev/null || true",
+		clusterName,
+	)
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup containers via WSL: %w", err)
+	}
+
+	// Also remove the network
+	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s 2>/dev/null || true", clusterName)
+	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd)
+
+	return nil
+}
+
+// forceCleanupDockerContainersDirect removes k3d containers directly (non-Windows)
+func (m *K3dManager) forceCleanupDockerContainersDirect(ctx context.Context, clusterName string) error {
+	// List containers matching k3d-<clustername> pattern
+	result, err := m.executor.Execute(ctx, "docker", "ps", "-aq", "--filter", fmt.Sprintf("name=k3d-%s", clusterName))
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	containerIDs := strings.TrimSpace(result.Stdout)
+	if containerIDs != "" {
+		// Remove each container
+		for _, id := range strings.Split(containerIDs, "\n") {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				_, _ = m.executor.Execute(ctx, "docker", "rm", "-f", id)
+			}
+		}
+	}
+
+	// Also remove the network
+	_, _ = m.executor.Execute(ctx, "docker", "network", "rm", fmt.Sprintf("k3d-%s", clusterName))
 
 	return nil
 }
