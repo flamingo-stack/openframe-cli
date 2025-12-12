@@ -1031,6 +1031,15 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 // waitForArgoCDReady waits for ArgoCD CRD and pods to be ready using native Go clients
 // This reduces reliance on external kubectl binary
 func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs bool) error {
+	// On Windows/WSL2, always use kubectl because native Go client can't reliably
+	// reach the cluster running inside WSL due to networking bridge issues
+	if runtime.GOOS == "windows" {
+		if verbose {
+			pterm.Info.Println("Using kubectl for ArgoCD readiness check (Windows/WSL2 mode)")
+		}
+		return m.waitForArgoCDReadyViaKubectl(ctx, verbose, skipCRDs)
+	}
+
 	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
 	retryInterval := 3 * time.Second
 

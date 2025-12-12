@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -48,78 +47,9 @@ func (a *ArgoCD) Install(ctx context.Context, cfg config.ChartInstallConfig) err
 
 	pterm.Success.Println("ArgoCD installed")
 
-	// Run kubectl verification checks
-	if err := a.runKubectlVerificationChecks(ctx, cfg); err != nil {
-		pterm.Warning.Printf("Kubectl verification checks failed: %v\n", err)
-		// Don't fail the installation, just warn
-	}
+	// Note: Removed kubectl verification checks - they were informational only
+	// and caused issues with WSL networking on Windows CI
 
-	// Note: Removed 10-minute stabilization wait - ArgoCD is ready after helm --wait completes
-	// The wait was causing issues with WSL networking going stale
-
-	return nil
-}
-
-// runKubectlVerificationChecks runs kubectl commands to verify the cluster state after ArgoCD installation
-func (a *ArgoCD) runKubectlVerificationChecks(ctx context.Context, cfg config.ChartInstallConfig) error {
-	pterm.Info.Println("Running kubectl verification checks...")
-
-	// Build base kubectl args with explicit context if cluster name is provided
-	baseArgs := []string{}
-	if cfg.ClusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", cfg.ClusterName)
-		baseArgs = append(baseArgs, "--context", contextName)
-	}
-
-	// Check 1: kubectl get ns
-	pterm.Info.Println("kubectl get ns")
-	nsArgs := append(baseArgs, "get", "ns")
-	result, err := a.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    nsArgs,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get namespaces: %w", err)
-	}
-	fmt.Println(result.Stdout)
-
-	// Check 2: kubectl get pods -n argocd
-	pterm.Info.Println("kubectl get pods -n argocd")
-	podsArgs := append(baseArgs, "get", "pods", "-n", "argocd")
-	result, err = a.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    podsArgs,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get ArgoCD pods: %w", err)
-	}
-	fmt.Println(result.Stdout)
-
-	// Check 3: kubectl get deployments -n argocd
-	pterm.Info.Println("kubectl get deployments -n argocd")
-	deplArgs := append(baseArgs, "get", "deployments", "-n", "argocd")
-	result, err = a.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    deplArgs,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get ArgoCD deployments: %w", err)
-	}
-	fmt.Println(result.Stdout)
-
-	// Check 4: kubectl get svc -n argocd
-	pterm.Info.Println("kubectl get svc -n argocd")
-	svcArgs := append(baseArgs, "get", "svc", "-n", "argocd")
-	result, err = a.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "kubectl",
-		Args:    svcArgs,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get ArgoCD services: %w", err)
-	}
-	fmt.Println(result.Stdout)
-
-	pterm.Success.Println("Kubectl verification checks completed")
 	return nil
 }
 
