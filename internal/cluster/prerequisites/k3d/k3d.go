@@ -135,8 +135,50 @@ func (k *K3dInstaller) installArch() error {
 }
 
 func (k *K3dInstaller) installScript() error {
-	// Use the official k3d install script
-	installCmd := "curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash"
+	// Use the official k3d install script with retry logic and fallback version
+	// The official install script can fail with 504 errors from GitHub
+	installCmd := `
+FALLBACK_VERSION="v5.7.5"
+
+install_k3d() {
+    local max_retries=3
+    local retry_delay=5
+
+    for i in $(seq 1 $max_retries); do
+        # Try the official install script first
+        if curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash 2>/dev/null; then
+            return 0
+        fi
+
+        # Try direct binary download with specific version as fallback
+        local version
+        version=$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/k3d-io/k3d/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+
+        if [ -z "$version" ]; then
+            version="$FALLBACK_VERSION"
+        fi
+
+        local arch="amd64"
+        if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+            arch="arm64"
+        fi
+
+        local download_url="https://github.com/k3d-io/k3d/releases/download/${version}/k3d-linux-${arch}"
+        if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/k3d "$download_url" && chmod +x /tmp/k3d && sudo mv /tmp/k3d /usr/local/bin/k3d; then
+            return 0
+        fi
+
+        if [ $i -lt $max_retries ]; then
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+    done
+
+    return 1
+}
+
+install_k3d
+`
 
 	if err := k.runShellCommand(installCmd); err != nil {
 		return fmt.Errorf("failed to install k3d via script: %w", err)
@@ -177,7 +219,8 @@ func (k *K3dInstaller) installBinary() error {
 func (k *K3dInstaller) installWindows() error {
 	fmt.Println("Installing k3d inside WSL2...")
 
-	// Install k3d inside WSL2 Ubuntu using the official install script
+	// Install k3d inside WSL2 Ubuntu using a script with retry logic and fallback version
+	// The official install script can fail with 504 errors from GitHub
 	installScript := `#!/bin/bash
 set -e
 
@@ -189,10 +232,61 @@ fi
 
 echo "Installing k3d..."
 
-# Use the official k3d install script (redirect stderr to suppress progress output)
-curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash 2>/dev/null || curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+# Fallback version if we can't fetch latest from GitHub
+FALLBACK_VERSION="v5.7.5"
 
-echo "k3d installed successfully"
+# Function to install k3d with retries
+install_k3d() {
+    local max_retries=3
+    local retry_delay=5
+
+    for i in $(seq 1 $max_retries); do
+        echo "Attempt $i of $max_retries..."
+
+        # Try the official install script first
+        if curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash 2>/dev/null; then
+            return 0
+        fi
+
+        echo "Official install script failed, trying direct binary download..."
+
+        # Try direct binary download with specific version as fallback
+        local version
+        version=$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/k3d-io/k3d/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+
+        if [ -z "$version" ]; then
+            echo "Could not fetch latest version, using fallback: $FALLBACK_VERSION"
+            version="$FALLBACK_VERSION"
+        fi
+
+        local arch="amd64"
+        if [ "$(uname -m)" = "aarch64" ]; then
+            arch="arm64"
+        fi
+
+        local download_url="https://github.com/k3d-io/k3d/releases/download/${version}/k3d-linux-${arch}"
+        echo "Downloading k3d ${version} for ${arch}..."
+
+        if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/k3d "$download_url" && chmod +x /tmp/k3d && sudo mv /tmp/k3d /usr/local/bin/k3d; then
+            return 0
+        fi
+
+        if [ $i -lt $max_retries ]; then
+            echo "Retrying in ${retry_delay} seconds..."
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+    done
+
+    return 1
+}
+
+if install_k3d; then
+    echo "k3d installed successfully"
+else
+    echo "Failed to install k3d after multiple attempts"
+    exit 1
+fi
 `
 
 	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
