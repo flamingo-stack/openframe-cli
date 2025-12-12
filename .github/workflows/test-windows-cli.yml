@@ -99,10 +99,11 @@ jobs:
 
       - name: Cleanup
         if: always()
+        timeout-minutes: 5
         shell: powershell
         run: |
-          # Try CLI deletion first
-          .\openframe.exe cluster delete openframe-test 2>&1 | Out-Null
+          # Try CLI deletion first (--force to skip confirmation prompt)
+          .\openframe.exe cluster delete openframe-test --force 2>&1 | Out-Null
 
           # Always run k3d deletion directly as fallback (handles WSL networking issues)
           wsl.exe -d Ubuntu -u runner bash -c "sudo -E k3d cluster delete openframe-test 2>/dev/null || true"

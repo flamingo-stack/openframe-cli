@@ -109,14 +109,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	} else if config.Verbose {
 		pterm.Success.Println("Repo-server health check passed")
 	}
-	// Show initial resource usage in verbose mode
-	if config.Verbose {
-		memory, cpu, err := m.checkRepoServerResources(localCtx)
-		if err == nil {
-			pterm.Info.Printf("Repo-server resource usage: CPU=%s, Memory=%s\n", cpu, memory)
-		}
-	}
-
 	// Show initial verbose info if enabled
 	if config.Verbose {
 		pterm.Info.Println("Starting ArgoCD application synchronization...")
@@ -1860,13 +1852,7 @@ func (m *Manager) diagnoseRepoServerIssues(ctx context.Context, appName string, 
 		}
 	}
 
-	// 2. Check repo-server resource usage
-	memory, cpu, err := m.checkRepoServerResources(ctx)
-	if err == nil {
-		pterm.Info.Printf("Repo-server resource usage: CPU=%s, Memory=%s\n", cpu, memory)
-	}
-
-	// 3. Get repo-server logs looking for specific errors
+	// 2. Get repo-server logs looking for specific errors
 	pterm.Info.Println("\n--- Repo-Server Recent Logs ---")
 	logsArgs := m.getKubectlArgs("-n", "argocd", "logs", "-l", "app.kubernetes.io/name=argocd-repo-server", "--tail=30", "--timestamps")
 	logsResult, _ := m.executor.Execute(ctx, "kubectl", logsArgs...)
