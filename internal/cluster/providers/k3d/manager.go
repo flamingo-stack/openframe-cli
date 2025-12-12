@@ -223,7 +223,14 @@ func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType
 		args = append(args, "--verbose")
 	}
 
-	if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
+	// Use a 2-minute timeout to prevent hanging on WSL networking issues
+	options := executor.ExecuteOptions{
+		Command: "k3d",
+		Args:    args,
+		Timeout: 2 * time.Minute,
+	}
+
+	if _, err := m.executor.ExecuteWithOptions(ctx, options); err != nil {
 		return models.NewClusterOperationError("delete", name, fmt.Errorf("failed to delete cluster %s: %w", name, err))
 	}
 
@@ -256,7 +263,14 @@ func (m *K3dManager) StartCluster(ctx context.Context, name string, clusterType 
 func (m *K3dManager) ListClusters(ctx context.Context) ([]models.ClusterInfo, error) {
 	args := []string{"cluster", "list", "--output", "json"}
 
-	result, err := m.executor.Execute(ctx, "k3d", args...)
+	// Use a 30-second timeout to prevent hanging on WSL networking issues
+	options := executor.ExecuteOptions{
+		Command: "k3d",
+		Args:    args,
+		Timeout: 30 * time.Second,
+	}
+
+	result, err := m.executor.ExecuteWithOptions(ctx, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list clusters: %w", err)
 	}
@@ -323,7 +337,15 @@ func (m *K3dManager) DetectClusterType(ctx context.Context, name string) (models
 	}
 
 	args := []string{"cluster", "get", name}
-	if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
+
+	// Use a 30-second timeout to prevent hanging on WSL networking issues
+	options := executor.ExecuteOptions{
+		Command: "k3d",
+		Args:    args,
+		Timeout: 30 * time.Second,
+	}
+
+	if _, err := m.executor.ExecuteWithOptions(ctx, options); err != nil {
 		return "", models.NewClusterNotFoundError(name)
 	}
 

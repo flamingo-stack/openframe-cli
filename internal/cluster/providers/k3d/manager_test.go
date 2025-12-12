@@ -280,7 +280,9 @@ func TestK3dManager_DeleteCluster(t *testing.T) {
 			clusterType: models.ClusterTypeK3d,
 			force:       false,
 			setupMock: func(m *MockExecutor) {
-				m.On("Execute", mock.Anything, "k3d", []string{"cluster", "delete", "test-cluster"}).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
+				m.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+					return opts.Command == "k3d" && len(opts.Args) >= 3 && opts.Args[0] == "cluster" && opts.Args[1] == "delete"
+				})).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
 			},
 		},
 		{
@@ -300,7 +302,9 @@ func TestK3dManager_DeleteCluster(t *testing.T) {
 			clusterName: "test-cluster",
 			clusterType: models.ClusterTypeK3d,
 			setupMock: func(m *MockExecutor) {
-				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error"))
+				m.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+					return opts.Command == "k3d"
+				})).Return(nil, errors.New("k3d error"))
 			},
 			expectedError: "failed to delete cluster test-cluster",
 		},
@@ -411,7 +415,9 @@ func TestK3dManager_ListClusters(t *testing.T) {
 			}
 		]`
 
-		executor.On("Execute", mock.Anything, "k3d", []string{"cluster", "list", "--output", "json"}).Return(&execPkg.CommandResult{Stdout: jsonOutput}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d" && len(opts.Args) >= 2 && opts.Args[0] == "cluster" && opts.Args[1] == "list"
+		})).Return(&execPkg.CommandResult{Stdout: jsonOutput}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusters, err := manager.ListClusters(context.Background())
@@ -434,7 +440,9 @@ func TestK3dManager_ListClusters(t *testing.T) {
 
 	t.Run("k3d command fails", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error"))
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d"
+		})).Return(nil, errors.New("k3d error"))
 
 		manager := NewK3dManager(executor, false)
 		clusters, err := manager.ListClusters(context.Background())
@@ -448,7 +456,9 @@ func TestK3dManager_ListClusters(t *testing.T) {
 
 	t.Run("invalid JSON response", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "invalid json"}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d"
+		})).Return(&execPkg.CommandResult{Stdout: "invalid json"}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusters, err := manager.ListClusters(context.Background())
@@ -464,7 +474,9 @@ func TestK3dManager_ListClusters(t *testing.T) {
 func TestK3dManager_ListAllClusters(t *testing.T) {
 	t.Run("calls ListClusters", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", []string{"cluster", "list", "--output", "json"}).Return(&execPkg.CommandResult{Stdout: "[]"}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d" && len(opts.Args) >= 2 && opts.Args[0] == "cluster" && opts.Args[1] == "list"
+		})).Return(&execPkg.CommandResult{Stdout: "[]"}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusters, err := manager.ListAllClusters(context.Background())
@@ -490,7 +502,9 @@ func TestK3dManager_GetClusterStatus(t *testing.T) {
 			}
 		]`
 
-		executor.On("Execute", mock.Anything, "k3d", []string{"cluster", "list", "--output", "json"}).Return(&execPkg.CommandResult{Stdout: jsonOutput}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d" && len(opts.Args) >= 2 && opts.Args[0] == "cluster" && opts.Args[1] == "list"
+		})).Return(&execPkg.CommandResult{Stdout: jsonOutput}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusterInfo, err := manager.GetClusterStatus(context.Background(), "test-cluster")
@@ -516,7 +530,9 @@ func TestK3dManager_GetClusterStatus(t *testing.T) {
 
 	t.Run("cluster not found", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", []string{"cluster", "list", "--output", "json"}).Return(&execPkg.CommandResult{Stdout: "[]"}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d" && len(opts.Args) >= 2 && opts.Args[0] == "cluster" && opts.Args[1] == "list"
+		})).Return(&execPkg.CommandResult{Stdout: "[]"}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusterInfo, err := manager.GetClusterStatus(context.Background(), "non-existent")
@@ -532,7 +548,9 @@ func TestK3dManager_GetClusterStatus(t *testing.T) {
 func TestK3dManager_DetectClusterType(t *testing.T) {
 	t.Run("successful cluster detection", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", []string{"cluster", "get", "test-cluster"}).Return(&execPkg.CommandResult{Stdout: "cluster info"}, nil)
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d" && len(opts.Args) >= 2 && opts.Args[0] == "cluster" && opts.Args[1] == "get"
+		})).Return(&execPkg.CommandResult{Stdout: "cluster info"}, nil)
 
 		manager := NewK3dManager(executor, false)
 		clusterType, err := manager.DetectClusterType(context.Background(), "test-cluster")
@@ -556,7 +574,9 @@ func TestK3dManager_DetectClusterType(t *testing.T) {
 
 	t.Run("cluster not found", func(t *testing.T) {
 		executor := &MockExecutor{}
-		executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("cluster not found"))
+		executor.On("ExecuteWithOptions", mock.Anything, mock.MatchedBy(func(opts execPkg.ExecuteOptions) bool {
+			return opts.Command == "k3d"
+		})).Return(nil, errors.New("cluster not found"))
 
 		manager := NewK3dManager(executor, false)
 		clusterType, err := manager.DetectClusterType(context.Background(), "non-existent")
