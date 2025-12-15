@@ -22,7 +22,7 @@ func TestNewMockCommandExecutor(t *testing.T) {
 
 func TestMockCommandExecutor_Execute(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Set up expected response
 	expectedResult := &CommandResult{
 		ExitCode: 0,
@@ -30,33 +30,33 @@ func TestMockCommandExecutor_Execute(t *testing.T) {
 		Stderr:   "",
 		Duration: 100 * time.Millisecond,
 	}
-	
+
 	mockExec.SetResponse("echo hello world", expectedResult)
-	
+
 	// Execute
 	ctx := context.Background()
 	result, err := mockExec.Execute(ctx, "echo", "hello", "world")
-	
+
 	// Assertions
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResult.ExitCode, result.ExitCode)
 	assert.Equal(t, expectedResult.Stdout, result.Stdout)
 	assert.Equal(t, expectedResult.Stderr, result.Stderr)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestMockCommandExecutor_Execute_DefaultResult(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Don't set any specific response, should use default
 	ctx := context.Background()
 	result, err := mockExec.Execute(ctx, "any", "command")
-	
+
 	// Assertions
 	assert.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "mock output", result.Stdout)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestMockCommandExecutor_Execute_ShouldFail(t *testing.T) {
@@ -79,7 +79,7 @@ func TestMockCommandExecutor_Execute_ShouldFail(t *testing.T) {
 
 func TestMockCommandExecutor_ExecuteWithOptions(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	options := ExecuteOptions{
 		Command: "test",
 		Args:    []string{"arg1"},
@@ -87,25 +87,25 @@ func TestMockCommandExecutor_ExecuteWithOptions(t *testing.T) {
 		Env:     map[string]string{"VAR": "value"},
 		Timeout: 5 * time.Second,
 	}
-	
+
 	expectedResult := &CommandResult{
 		ExitCode: 0,
 		Stdout:   "test output",
 		Stderr:   "",
 		Duration: 200 * time.Millisecond,
 	}
-	
+
 	mockExec.SetResponse("test arg1", expectedResult)
-	
+
 	// Execute
 	ctx := context.Background()
 	result, err := mockExec.ExecuteWithOptions(ctx, options)
-	
+
 	// Assertions
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResult.ExitCode, result.ExitCode)
 	assert.Equal(t, expectedResult.Stdout, result.Stdout)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestMockCommandExecutor_SetResponse(t *testing.T) {

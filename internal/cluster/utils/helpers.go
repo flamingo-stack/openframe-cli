@@ -39,7 +39,7 @@ func ParseClusterType(typeStr string) models.ClusterType {
 // GetNodeCount returns validated node count with default
 func GetNodeCount(nodeCount int) int {
 	if nodeCount <= 0 {
-		return 4 // Default to 4 nodes
+		return 3 // Default to 3 nodes
 	}
 	return nodeCount
 }

@@ -3,7 +3,6 @@ package ui
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,7 +91,9 @@ func TestSkaffoldUI_findSkaffoldYamlFiles(t *testing.T) {
 	for _, file := range files {
 		assert.NotEmpty(t, file.ServiceName)
 		assert.NotEmpty(t, file.FilePath)
-		assert.True(t, strings.Contains(file.FilePath, "skaffold.yaml") || strings.Contains(file.FilePath, "skaffold.yml"))
+		// Use filepath.Base for platform-independent checking
+		baseName := filepath.Base(file.FilePath)
+		assert.True(t, baseName == "skaffold.yaml" || baseName == "skaffold.yml", "Expected skaffold.yaml or skaffold.yml, got %s", baseName)
 	}
 
 	// Check service names are extracted correctly

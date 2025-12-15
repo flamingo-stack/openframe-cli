@@ -35,7 +35,7 @@ func (f *FlagContainer) GetExecutor() executor.CommandExecutor {
 func NewFlagContainer() *FlagContainer {
 	return &FlagContainer{
 		Global:  &models.GlobalFlags{},
-		Create:  &models.CreateFlags{ClusterType: "k3d", NodeCount: 4, K8sVersion: "v1.31.5-k3s1"},
+		Create:  &models.CreateFlags{ClusterType: "k3d", NodeCount: 3, K8sVersion: "v1.31.5-k3s1"},
 		List:    &models.ListFlags{},
 		Status:  &models.StatusFlags{},
 		Delete:  &models.DeleteFlags{},

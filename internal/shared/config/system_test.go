@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -106,19 +107,28 @@ func TestSystemService_GetLogDirectory(t *testing.T) {
 
 func TestSystemService_InitializeErrorHandling(t *testing.T) {
 	// Test with invalid directory path (should fail gracefully)
-	invalidPath := "/invalid/readonly/path/that/cannot/be/created"
-	if os.Getuid() == 0 {
-		// Skip this test when running as root since root can create directories anywhere
-		t.Skip("Skipping permission test when running as root")
+	// Use a path with invalid characters that will fail on all platforms
+	var invalidPath string
+	if runtime.GOOS == "windows" {
+		// On Windows, use a path with invalid characters (CON is a reserved device name)
+		invalidPath = "C:\\CON\\invalid\\path"
+	} else {
+		invalidPath = "/invalid/readonly/path/that/cannot/be/created"
+		if os.Getuid() == 0 {
+			// Skip this test when running as root since root can create directories anywhere
+			t.Skip("Skipping permission test when running as root")
+		}
 	}
-	
+
 	service := NewSystemServiceWithOptions(invalidPath)
 	err := service.Initialize()
-	
+
 	if err == nil {
+		// Clean up if somehow the directory was created (shouldn't happen)
+		os.RemoveAll(invalidPath)
 		t.Error("expected error when creating directory in invalid path")
 	}
-	
+
 	// Error should contain meaningful message
 	if err != nil && err.Error() == "" {
 		t.Error("error message should not be empty")
