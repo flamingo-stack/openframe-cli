@@ -39,7 +39,8 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 					Stdout: "",
 				})
 				// Return JSON format for -o json for the general applications query
-				m.SetResponse("-o json", &executor.CommandResult{
+				// Use "argoproj.io -o json" to avoid matching "-o jsonpath" commands (since "jsonpath" contains "json")
+				m.SetResponse("argoproj.io -o json", &executor.CommandResult{
 					Stdout: `{"items":[{"metadata":{"name":"app1"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app2"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app3"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app4"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}},{"metadata":{"name":"app5"},"status":{"health":{"status":"Healthy"},"sync":{"status":"Synced"}}}]}`,
 				})
 			},
@@ -63,7 +64,8 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 					Stdout: "",
 				})
 				// General query returns empty items
-				m.SetResponse("-o json", &executor.CommandResult{
+				// Use "argoproj.io -o json" to avoid matching "-o jsonpath" commands (since "jsonpath" contains "json")
+				m.SetResponse("argoproj.io -o json", &executor.CommandResult{
 					Stdout: `{"items":[]}`,
 				})
 			},
