@@ -11,6 +11,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/wsl"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
@@ -40,6 +41,12 @@ func (i *Installer) InstallMissingPrerequisites() error {
 		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(missing), tool))
 
 		if err := i.installTool(tool); err != nil {
+			// Check if this is a restart required error (WSL installation)
+			if wsl.IsRestartRequired(err) {
+				spinner.Warning(fmt.Sprintf("%s installed - restart required", tool))
+				// Exit with special message - user must restart
+				os.Exit(0)
+			}
 			spinner.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
 			return fmt.Errorf("failed to install %s: %w", tool, err)
 		}
@@ -66,6 +73,12 @@ func (i *Installer) installSpecificTools(tools []string) error {
 		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
 
 		if err := i.installTool(tool); err != nil {
+			// Check if this is a restart required error (WSL installation)
+			if wsl.IsRestartRequired(err) {
+				spinner.Warning(fmt.Sprintf("%s installed - restart required", tool))
+				// Exit with special message - user must restart
+				os.Exit(0)
+			}
 			spinner.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
 			return fmt.Errorf("failed to install %s: %w", tool, err)
 		}
@@ -77,6 +90,10 @@ func (i *Installer) installSpecificTools(tools []string) error {
 	var stillMissing []string
 	for _, tool := range tools {
 		switch strings.ToLower(tool) {
+		case "wsl2", "wsl":
+			if !wsl.NewWSLInstaller().IsInstalled() {
+				stillMissing = append(stillMissing, "WSL2")
+			}
 		case "docker":
 			if !docker.NewDockerInstaller().IsInstalled() {
 				stillMissing = append(stillMissing, "Docker")
@@ -107,6 +124,9 @@ func (i *Installer) installSpecificTools(tools []string) error {
 
 func (i *Installer) installTool(tool string) error {
 	switch strings.ToLower(tool) {
+	case "wsl2", "wsl":
+		installer := wsl.NewWSLInstaller()
+		return installer.Install()
 	case "docker":
 		installer := docker.NewDockerInstaller()
 		return installer.Install()
@@ -265,12 +285,20 @@ func (i *Installer) showManualInstructions() {
 	pterm.Info.Println("Installation skipped. Here are manual installation instructions:")
 
 	// Get instructions for all prerequisites
-	allInstructions := []string{
+	allInstructions := []string{}
+
+	// Add WSL instructions on Windows
+	wslInstaller := wsl.NewWSLInstaller()
+	if wslInstaller.IsApplicable() {
+		allInstructions = append(allInstructions, wslInstaller.GetInstallHelp())
+	}
+
+	allInstructions = append(allInstructions,
 		docker.NewDockerInstaller().GetInstallHelp(),
 		kubectl.NewKubectlInstaller().GetInstallHelp(),
 		k3d.NewK3dInstaller().GetInstallHelp(),
 		helm.NewHelmInstaller().GetInstallHelp(),
-	}
+	)
 
 	tableData := pterm.TableData{{"Tool", "Installation Instructions"}}
 	for _, instruction := range allInstructions {

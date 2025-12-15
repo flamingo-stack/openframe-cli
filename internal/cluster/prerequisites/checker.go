@@ -2,12 +2,14 @@ package prerequisites
 
 import (
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/wsl"
 )
 
 type PrerequisiteChecker struct {
@@ -22,39 +24,61 @@ type Requirement struct {
 }
 
 func NewPrerequisiteChecker() *PrerequisiteChecker {
-	return &PrerequisiteChecker{
-		requirements: []Requirement{
-			{
-				Name:        "Docker",
-				Command:     "docker",
-				IsInstalled: func() bool { return docker.IsDockerRunning() },
-				InstallHelp: func() string {
-					if !docker.NewDockerInstaller().IsInstalled() {
-						return docker.NewDockerInstaller().GetInstallHelp()
-					}
-					return "Docker is installed but not running. Please start Docker Desktop or the Docker daemon."
-				},
-			},
-			{
-				Name:        "kubectl",
-				Command:     "kubectl",
-				IsInstalled: func() bool { return kubectl.NewKubectlInstaller().IsInstalled() },
-				InstallHelp: func() string { return kubectl.NewKubectlInstaller().GetInstallHelp() },
-			},
-			{
-				Name:        "k3d",
-				Command:     "k3d",
-				IsInstalled: func() bool { return k3d.NewK3dInstaller().IsInstalled() },
-				InstallHelp: func() string { return k3d.NewK3dInstaller().GetInstallHelp() },
-			},
-			{
-				Name:        "helm",
-				Command:     "helm",
-				IsInstalled: func() bool { return helm.NewHelmInstaller().IsInstalled() },
-				InstallHelp: func() string { return helm.NewHelmInstaller().GetInstallHelp() },
+	requirements := []Requirement{}
+
+	// On native Windows (not inside WSL), check for WSL first
+	// since all other tools depend on it
+	wslInstaller := wsl.NewWSLInstaller()
+	if wslInstaller.IsApplicable() {
+		requirements = append(requirements, Requirement{
+			Name:        "WSL2",
+			Command:     "wsl",
+			IsInstalled: func() bool { return wslInstaller.IsInstalled() },
+			InstallHelp: func() string { return wslInstaller.GetInstallHelp() },
+		})
+	}
+
+	// Add common requirements
+	requirements = append(requirements,
+		Requirement{
+			Name:        "Docker",
+			Command:     "docker",
+			IsInstalled: func() bool { return docker.IsDockerRunning() },
+			InstallHelp: func() string {
+				if !docker.NewDockerInstaller().IsInstalled() {
+					return docker.NewDockerInstaller().GetInstallHelp()
+				}
+				return "Docker is installed but not running. Please start Docker Desktop or the Docker daemon."
 			},
 		},
+		Requirement{
+			Name:        "kubectl",
+			Command:     "kubectl",
+			IsInstalled: func() bool { return kubectl.NewKubectlInstaller().IsInstalled() },
+			InstallHelp: func() string { return kubectl.NewKubectlInstaller().GetInstallHelp() },
+		},
+		Requirement{
+			Name:        "k3d",
+			Command:     "k3d",
+			IsInstalled: func() bool { return k3d.NewK3dInstaller().IsInstalled() },
+			InstallHelp: func() string { return k3d.NewK3dInstaller().GetInstallHelp() },
+		},
+		Requirement{
+			Name:        "helm",
+			Command:     "helm",
+			IsInstalled: func() bool { return helm.NewHelmInstaller().IsInstalled() },
+			InstallHelp: func() string { return helm.NewHelmInstaller().GetInstallHelp() },
+		},
+	)
+
+	return &PrerequisiteChecker{
+		requirements: requirements,
 	}
+}
+
+// IsWindowsNative returns true if running on native Windows (not inside WSL)
+func IsWindowsNative() bool {
+	return runtime.GOOS == "windows" && !wsl.IsRunningInWSL()
 }
 
 func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
