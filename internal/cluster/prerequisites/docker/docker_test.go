@@ -51,11 +51,27 @@ func TestDockerInstaller_Install(t *testing.T) {
 		}
 	}
 	
-	// On Windows, should suggest manual installation
+	// On Windows, should suggest manual installation or fail with WSL error
 	if runtime.GOOS == "windows" {
-		expectedSubstring := "Please install Docker Desktop"
-		if err == nil || !containsSubstring(err.Error(), expectedSubstring) {
-			t.Errorf("Expected error containing '%s', got: %v", expectedSubstring, err)
+		// On Windows, the installer attempts to install via WSL first.
+		// In CI environments without WSL/Ubuntu, it may fail with WSL-related errors.
+		validErrors := []string{
+			"Please install Docker Desktop",
+			"failed to install Ubuntu in WSL2",
+			"failed to install Docker",
+			"WSL",
+		}
+		hasValidError := false
+		if err != nil {
+			for _, validError := range validErrors {
+				if containsSubstring(err.Error(), validError) {
+					hasValidError = true
+					break
+				}
+			}
+		}
+		if err == nil || !hasValidError {
+			t.Errorf("Expected error containing one of %v, got: %v", validErrors, err)
 		}
 	}
 	

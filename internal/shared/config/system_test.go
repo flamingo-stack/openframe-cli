@@ -110,8 +110,10 @@ func TestSystemService_InitializeErrorHandling(t *testing.T) {
 	// Use a path with invalid characters that will fail on all platforms
 	var invalidPath string
 	if runtime.GOOS == "windows" {
-		// On Windows, use a path with invalid characters (CON is a reserved device name)
-		invalidPath = "C:\\CON\\invalid\\path"
+		// On Windows, use a path with wildcard characters (* or ?) which are
+		// always invalid in file paths. Reserved device names like CON may
+		// work inconsistently across Windows versions/configurations.
+		invalidPath = "C:\\invalid*path\\with?wildcards"
 	} else {
 		invalidPath = "/invalid/readonly/path/that/cannot/be/created"
 		if os.Getuid() == 0 {

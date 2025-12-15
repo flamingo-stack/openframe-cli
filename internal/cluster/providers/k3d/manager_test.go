@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -127,6 +128,12 @@ func TestCreateDefaultClusterManager(t *testing.T) {
 }
 
 func TestK3dManager_CreateCluster(t *testing.T) {
+	// Skip on Windows because the code uses WSL-specific commands
+	// (e.g., wsl -d Ubuntu bash -c ...) and the mocks are configured for Linux
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - test mocks are configured for Linux-style commands")
+	}
+
 	tests := []struct {
 		name           string
 		config         models.ClusterConfig
@@ -241,6 +248,12 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 }
 
 func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
+	// Skip on Windows because the code uses WSL-specific commands
+	// (e.g., wsl -d Ubuntu bash -c ...) and the mocks are configured for Linux
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - test mocks are configured for Linux-style commands")
+	}
+
 	// Setup kubeconfig for the test
 	cleanup := setupTestKubeconfig(t, "test-cluster")
 	defer cleanup()

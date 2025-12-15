@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -11,6 +12,12 @@ import (
 )
 
 func TestHelmManager_InstallAppOfAppsFromLocal(t *testing.T) {
+	// Skip on Windows because the code uses WSL-specific path conversion
+	// that requires actual WSL environment
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - test requires WSL environment for path conversion")
+	}
+
 	tests := []struct {
 		name        string
 		config      config.ChartInstallConfig

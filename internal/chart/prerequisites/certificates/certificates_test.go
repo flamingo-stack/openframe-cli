@@ -96,6 +96,7 @@ func TestInstallMkcert(t *testing.T) {
 			"failed to install mkcert",
 			"failed to download mkcert",
 			"automatic mkcert installation not supported",
+			"automatic mkcert installation on Windows not supported",
 			"exit status",
 			"executable file not found",
 		}
