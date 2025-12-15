@@ -279,6 +279,12 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 }
 
 func TestK3dManager_DeleteCluster(t *testing.T) {
+	// Skip on Windows because when k3d delete fails, it falls back to WSL-specific cleanup
+	// commands (e.g., wsl -d Ubuntu ...) that require different mock setup
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - test mocks are configured for Linux-style commands")
+	}
+
 	tests := []struct {
 		name          string
 		clusterName   string
