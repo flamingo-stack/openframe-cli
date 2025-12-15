@@ -22,8 +22,11 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Test
+        run: make test-unit
+
       - name: Build
-        run: go build -v -o openframe .
+        run: make build
 
       - name: Test binary
-        run: ./openframe --version
+        run: ./openframe-linux-amd64 --version

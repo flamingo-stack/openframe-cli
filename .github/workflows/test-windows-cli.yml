@@ -31,62 +31,13 @@ jobs:
           go-version: '1.24'
           cache-dependency-path: go.sum
 
+      - name: Test
+        shell: bash
+        run: make test-unit
+
       - name: Build CLI
         shell: bash
-        run: go build -o openframe.exe .
-
-      - name: Install and configure WSL2
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-
-          # Install WSL2 with Ubuntu
-          echo Y | wsl --install -d Ubuntu --no-launch
-          Start-Sleep -Seconds 20
-
-          wsl --set-default-version 2
-          wsl --list --verbose
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-
-          # Initialize Ubuntu with retries
-          $maxRetries = 5
-          $retryDelay = 10
-
-          for ($i = 1; $i -le $maxRetries; $i++) {
-            wsl -d Ubuntu -u root bash -c "echo 'init'" 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { break }
-            Start-Sleep -Seconds $retryDelay
-            $retryDelay += 5
-          }
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Failed to initialize Ubuntu"
-            exit 1
-          }
-
-          Start-Sleep -Seconds 10
-
-          # Create runner user with sudo access
-          wsl -d Ubuntu -u root bash -c "id runner 2>/dev/null || (useradd -m -s /bin/bash runner && echo 'runner:runner' | chpasswd && usermod -aG sudo runner)"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-
-          wsl -d Ubuntu -u root bash -c "grep -q '%sudo ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers"
-
-          wsl -d Ubuntu -u runner bash -c "whoami" | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-
-          Write-Host "WSL2 configured successfully"
-
-      - name: Verify WSL is ready
-        shell: powershell
-        run: |
-          wsl -d Ubuntu -u root echo "ready" | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            wsl --terminate Ubuntu
-            Start-Sleep -Seconds 5
-            wsl -d Ubuntu -u root echo "ready" | Out-Null
-            if ($LASTEXITCODE -ne 0) { exit 1 }
-          }
+        run: make build
 
       - name: Run bootstrap
         shell: powershell
@@ -94,8 +45,13 @@ jobs:
         run: |
           # Run bootstrap - ignore exit code as transient WSL2 networking issues can cause
           # false failures even when ArgoCD sync completed successfully
-          .\openframe.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+          .\openframe-windows-amd64.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
           exit 0
+
+      - name: Verify namespaces
+        shell: powershell
+        run: |
+          wsl.exe -d Ubuntu -u runner bash -c "kubectl get ns"
 
       - name: Cleanup
         if: always()
@@ -103,7 +59,7 @@ jobs:
         shell: powershell
         run: |
           # Try CLI deletion first (--force to skip confirmation prompt)
-          .\openframe.exe cluster delete openframe-test --force 2>&1 | Out-Null
+          .\openframe-windows-amd64.exe cluster delete openframe-test --force 2>&1 | Out-Null
 
           # Always run k3d deletion directly as fallback (handles WSL networking issues)
           wsl.exe -d Ubuntu -u runner bash -c "sudo -E k3d cluster delete openframe-test 2>/dev/null || true"
