@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
@@ -18,6 +19,12 @@ func TestNewManager(t *testing.T) {
 }
 
 func TestGetTotalExpectedApplications(t *testing.T) {
+	// Force kubectl fallback by setting KUBECONFIG to non-existent path
+	// This prevents native Kubernetes clients from connecting to a real cluster
+	originalKubeconfig := os.Getenv("KUBECONFIG")
+	os.Setenv("KUBECONFIG", "/tmp/nonexistent-kubeconfig")
+	defer os.Setenv("KUBECONFIG", originalKubeconfig)
+
 	tests := []struct {
 		name          string
 		setupMock     func(*executor.MockCommandExecutor)
@@ -25,10 +32,10 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 		verbose       bool
 	}{
 		{
-			name: "successfully counts all applications",
+			name: "successfully counts applications via kubectl fallback",
 			setupMock: func(m *executor.MockCommandExecutor) {
-				// app-of-apps specific call returns empty
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io app-of-apps", &executor.CommandResult{
+				// app-of-apps specific call returns empty (no resources found)
+				m.SetResponse("app-of-apps -o jsonpath", &executor.CommandResult{
 					Stdout: "",
 				})
 				// Return JSON format for -o json for the general applications query
@@ -39,71 +46,31 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 			expectedCount: 5,
 		},
 		{
-			name: "falls back to helm values counting",
+			name: "counts resources from app-of-apps status",
 			setupMock: func(m *executor.MockCommandExecutor) {
-				// App-of-apps specific calls return empty
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io app-of-apps", &executor.CommandResult{
-					Stdout: "",
-				})
-
-				// ArgoCD server pod call returns empty (no server pod found)
-				m.SetResponse("kubectl -n argocd get pod -l app.kubernetes.io/name=argocd-server", &executor.CommandResult{
-					Stdout: "",
-				})
-
-				// General kubectl call returns empty JSON (use -o json pattern)
-				m.SetResponse("-o json", &executor.CommandResult{
-					Stdout: `{"items":[]}`,
-				})
-
-				// Helm values call returns applications
-				m.SetResponse("helm get values app-of-apps", &executor.CommandResult{
-					Stdout: `applications:
-  - name: app1
-    repoURL: https://github.com/example/repo1
-    targetRevision: main
-  - name: app2
-    repoURL: https://github.com/example/repo2
-    targetRevision: main
-  - name: app3
-    repoURL: https://github.com/example/repo3
-    targetRevision: main`,
+				// app-of-apps returns resource names via jsonpath
+				m.SetResponse("app-of-apps -o jsonpath", &executor.CommandResult{
+					Stdout: "app1 app2 app3",
 				})
 			},
 			expectedCount: 3,
 		},
 		{
-			name: "estimates from ApplicationSets",
+			name: "returns 0 when no applications found",
 			setupMock: func(m *executor.MockCommandExecutor) {
-				// App-of-apps specific calls return empty
-				m.SetResponse("kubectl -n argocd get applications.argoproj.io app-of-apps", &executor.CommandResult{
+				// app-of-apps returns empty
+				m.SetResponse("app-of-apps -o jsonpath", &executor.CommandResult{
 					Stdout: "",
 				})
-
-				// ArgoCD server pod call returns empty
-				m.SetResponse("kubectl -n argocd get pod", &executor.CommandResult{
-					Stdout: "",
-				})
-
-				// General kubectl call returns empty JSON (use -o json pattern)
+				// General query returns empty items
 				m.SetResponse("-o json", &executor.CommandResult{
 					Stdout: `{"items":[]}`,
 				})
-
-				// Helm values call returns empty
-				m.SetResponse("helm get values", &executor.CommandResult{
-					Stdout: "",
-				})
-
-				// ApplicationSets call
-				m.SetResponse("applicationsets.argoproj.io", &executor.CommandResult{
-					Stdout: "appset1\nappset2\n",
-				})
 			},
-			expectedCount: 14, // 2 appsets * 7 estimated apps each
+			expectedCount: 0,
 		},
 		{
-			name: "returns 0 when no method succeeds",
+			name: "returns 0 when kubectl commands fail",
 			setupMock: func(m *executor.MockCommandExecutor) {
 				m.SetDefaultResult(&executor.CommandResult{
 					Stdout: "",
@@ -130,6 +97,12 @@ func TestGetTotalExpectedApplications(t *testing.T) {
 }
 
 func TestParseApplications(t *testing.T) {
+	// Force kubectl fallback by setting KUBECONFIG to non-existent path
+	// This prevents native Kubernetes clients from connecting to a real cluster
+	originalKubeconfig := os.Getenv("KUBECONFIG")
+	os.Setenv("KUBECONFIG", "/tmp/nonexistent-kubeconfig")
+	defer os.Setenv("KUBECONFIG", originalKubeconfig)
+
 	tests := []struct {
 		name         string
 		setupMock    func(*executor.MockCommandExecutor)
@@ -165,11 +138,12 @@ func TestParseApplications(t *testing.T) {
 			},
 		},
 		{
-			name: "returns empty list on kubectl error",
+			name: "returns empty list and error on kubectl error",
 			setupMock: func(m *executor.MockCommandExecutor) {
 				m.SetShouldFail(true, "kubectl error")
 			},
 			expectedApps: []Application{},
+			expectError:  true,
 		},
 	}
 

@@ -53,15 +53,21 @@ Examples:
 func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	service := utils.GetCommandService()
 	operationsUI := ui.NewOperationsUI()
+	globalFlags := utils.GetGlobalFlags()
 
 	// Get all available clusters
 	clusters, err := service.ListClusters()
 	if err != nil {
-		return fmt.Errorf("failed to list clusters: %w", err)
+		// When force flag is set with explicit cluster name, proceed anyway
+		// This allows fallback cleanup when k3d list fails (e.g., Docker not accessible)
+		if globalFlags.Delete.Force && len(args) > 0 {
+			clusters = []models.ClusterInfo{} // Empty list, validation will be skipped
+		} else {
+			return fmt.Errorf("failed to list clusters: %w", err)
+		}
 	}
 
 	// Handle cluster selection with friendly UI (including confirmation)
-	globalFlags := utils.GetGlobalFlags()
 	clusterName, err := operationsUI.SelectClusterForDelete(clusters, args, globalFlags.Delete.Force)
 	if err != nil {
 		return sharedErrors.HandleGlobalError(err, globalFlags.Global.Verbose)
@@ -75,11 +81,16 @@ func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	// Show friendly start message
 	operationsUI.ShowOperationStart("delete", clusterName)
 
-	// Detect cluster type
+	// Detect cluster type (default to k3d when force is set and detection fails)
 	clusterType, err := service.DetectClusterType(clusterName)
 	if err != nil {
-		operationsUI.ShowOperationError("delete", clusterName, err)
-		return fmt.Errorf("failed to detect cluster type: %w", err)
+		if globalFlags.Delete.Force {
+			// Assume k3d when force deleting and detection fails
+			clusterType = models.ClusterTypeK3d
+		} else {
+			operationsUI.ShowOperationError("delete", clusterName, err)
+			return fmt.Errorf("failed to detect cluster type: %w", err)
+		}
 	}
 
 	// Execute cluster deletion through service layer
