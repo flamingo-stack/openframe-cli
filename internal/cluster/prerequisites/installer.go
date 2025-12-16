@@ -230,35 +230,30 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 		if nonInteractive {
 			// In non-interactive mode, try to start Docker automatically
 			pterm.Warning.Println("Docker is not running.")
-			pterm.Info.Println("Attempting to start Docker automatically (non-interactive mode)...")
 
-			if err := docker.StartDocker(); err != nil {
-				pterm.Warning.Printf("Could not start Docker automatically: %v\n", err)
-
-				// On Windows, if starting fails, try to install Docker CE in WSL2
-				// This handles the case where Docker Desktop is detected but not working
-				if runtime.GOOS == "windows" {
-					pterm.Info.Println("Attempting to install Docker CE in WSL2...")
-					if installErr := i.installSpecificTools([]string{"Docker"}); installErr != nil {
-						pterm.Warning.Printf("Failed to install Docker: %v\n", installErr)
-						pterm.Info.Println("Docker must be installed/started manually. Continuing anyway...")
-						return nil
-					}
-					// Try to start Docker again after installation
-					if startErr := docker.StartDocker(); startErr != nil {
-						pterm.Warning.Printf("Docker installed but could not start: %v\n", startErr)
-						return nil
-					}
-					// Wait for Docker to be ready
-					spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
-					if waitErr := docker.WaitForDocker(); waitErr != nil {
-						spinner.Warning("Docker failed to start after installation")
-						return nil
-					}
-					spinner.Success("Docker installed and started successfully")
+			// On Windows, always try to install Docker CE in WSL2 first
+			// This is more reliable than trying to start Docker Desktop which may not exist
+			if runtime.GOOS == "windows" {
+				pterm.Info.Println("Installing/configuring Docker CE in WSL2 (non-interactive mode)...")
+				if installErr := i.installSpecificTools([]string{"Docker"}); installErr != nil {
+					pterm.Warning.Printf("Failed to install Docker: %v\n", installErr)
+					pterm.Info.Println("Docker must be installed/started manually. Continuing anyway...")
 					return nil
 				}
+				// Wait for Docker to be ready after installation
+				spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
+				if waitErr := docker.WaitForDocker(); waitErr != nil {
+					spinner.Warning("Docker failed to start after installation")
+					pterm.Info.Println("Continuing anyway (non-interactive mode)...")
+					return nil
+				}
+				spinner.Success("Docker installed and started successfully in WSL2")
+				return nil
+			}
 
+			pterm.Info.Println("Attempting to start Docker automatically (non-interactive mode)...")
+			if err := docker.StartDocker(); err != nil {
+				pterm.Warning.Printf("Could not start Docker automatically: %v\n", err)
 				pterm.Info.Println("Docker must be started manually. Continuing anyway...")
 				// Don't exit in non-interactive mode, let it fail later if needed
 				return nil
@@ -267,25 +262,6 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
 			if err := docker.WaitForDocker(); err != nil {
 				spinner.Warning("Docker failed to start automatically")
-
-				// On Windows, if waiting for Docker fails, try installing Docker CE in WSL2
-				if runtime.GOOS == "windows" {
-					pterm.Info.Println("Attempting to install Docker CE in WSL2...")
-					if installErr := i.installSpecificTools([]string{"Docker"}); installErr != nil {
-						pterm.Warning.Printf("Failed to install Docker: %v\n", installErr)
-						pterm.Info.Println("Please ensure Docker is running before cluster operations.")
-						return nil
-					}
-					// Wait for Docker to be ready after installation
-					spinner2, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
-					if waitErr := docker.WaitForDocker(); waitErr != nil {
-						spinner2.Warning("Docker failed to start after installation")
-						return nil
-					}
-					spinner2.Success("Docker installed and started successfully")
-					return nil
-				}
-
 				pterm.Info.Println("Please ensure Docker is running before cluster operations.")
 				// Don't exit in non-interactive mode
 				return nil
@@ -294,29 +270,60 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 		} else {
 			// Interactive mode - prompt user
 			pterm.Warning.Println("Docker is not running.")
-			confirmed, err := ui.ConfirmActionInteractive("Would you like me to start Docker for you?", true)
-			if errors.HandleConfirmationError(err) {
-				return nil // Won't be reached due to os.Exit in handler
-			}
-			if err != nil {
-				return fmt.Errorf("failed to get Docker start confirmation: %w", err)
-			}
-			if confirmed {
-				if err := docker.StartDocker(); err != nil {
-					pterm.Error.Printf("Failed to start Docker: %v\n", err)
-					pterm.Info.Println("Please start Docker Desktop manually and try again.")
+
+			// On Windows, offer to install Docker CE in WSL2
+			if runtime.GOOS == "windows" {
+				confirmed, err := ui.ConfirmActionInteractive("Would you like me to install/configure Docker in WSL2?", true)
+				if errors.HandleConfirmationError(err) {
+					return nil // Won't be reached due to os.Exit in handler
+				}
+				if err != nil {
+					return fmt.Errorf("failed to get Docker installation confirmation: %w", err)
+				}
+				if confirmed {
+					pterm.Info.Println("Installing/configuring Docker CE in WSL2...")
+					if installErr := i.installSpecificTools([]string{"Docker"}); installErr != nil {
+						pterm.Error.Printf("Failed to install Docker: %v\n", installErr)
+						pterm.Info.Println("Please install Docker manually and try again.")
+						os.Exit(1)
+					}
+					spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
+					if err := docker.WaitForDocker(); err != nil {
+						spinner.Fail("Docker failed to start")
+						pterm.Info.Println("Please ensure Docker is running in WSL2 and try again.")
+						os.Exit(1)
+					}
+					spinner.Success("Docker installed and started successfully in WSL2")
+				} else {
+					i.showDockerStartInstructions()
 					os.Exit(1)
 				}
-				spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
-				if err := docker.WaitForDocker(); err != nil {
-					spinner.Fail("Docker failed to start")
-					pterm.Info.Println("Please start Docker Desktop manually and try again.")
-					os.Exit(1)
-				}
-				spinner.Success("Docker started successfully")
 			} else {
-				i.showDockerStartInstructions()
-				os.Exit(1)
+				// Non-Windows: try to start existing Docker
+				confirmed, err := ui.ConfirmActionInteractive("Would you like me to start Docker for you?", true)
+				if errors.HandleConfirmationError(err) {
+					return nil // Won't be reached due to os.Exit in handler
+				}
+				if err != nil {
+					return fmt.Errorf("failed to get Docker start confirmation: %w", err)
+				}
+				if confirmed {
+					if err := docker.StartDocker(); err != nil {
+						pterm.Error.Printf("Failed to start Docker: %v\n", err)
+						pterm.Info.Println("Please start Docker Desktop manually and try again.")
+						os.Exit(1)
+					}
+					spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
+					if err := docker.WaitForDocker(); err != nil {
+						spinner.Fail("Docker failed to start")
+						pterm.Info.Println("Please start Docker Desktop manually and try again.")
+						os.Exit(1)
+					}
+					spinner.Success("Docker started successfully")
+				} else {
+					i.showDockerStartInstructions()
+					os.Exit(1)
+				}
 			}
 		}
 	}
