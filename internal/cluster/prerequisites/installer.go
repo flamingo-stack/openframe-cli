@@ -68,6 +68,31 @@ func (i *Installer) InstallMissingPrerequisites() error {
 func (i *Installer) installSpecificTools(tools []string) error {
 	pterm.Info.Printf("Starting installation of %d tool(s): %s\n", len(tools), strings.Join(tools, ", "))
 
+	// On Windows, configure DNS before installing tools that need network access
+	// This is critical when Docker is already installed but kubectl/k3d/helm are not
+	// DNS configuration normally happens during Docker installation, but if Docker
+	// was already present, we need to ensure DNS is configured before other tool installs
+	if runtime.GOOS == "windows" {
+		needsDNS := false
+		hasDocker := false
+		for _, tool := range tools {
+			switch strings.ToLower(tool) {
+			case "kubectl", "k3d", "helm":
+				needsDNS = true
+			case "docker":
+				hasDocker = true
+			}
+		}
+		// Only configure DNS if we need network tools but Docker is not in the install list
+		// (Docker handles its own DNS configuration during installation)
+		if needsDNS && !hasDocker {
+			if err := docker.ConfigureWSLDNS(); err != nil {
+				pterm.Warning.Printf("Could not configure WSL DNS: %v\n", err)
+				// Don't fail - DNS might already be working
+			}
+		}
+	}
+
 	for idx, tool := range tools {
 		// Create a spinner for the installation process
 		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
@@ -164,9 +189,10 @@ func (i *Installer) CheckAndInstall() error {
 
 // CheckAndInstallNonInteractive checks and installs prerequisites with optional non-interactive mode
 func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
-	// NOTE: WSL DNS configuration is now done in docker.go's ensureUbuntuWSL()
-	// immediately after Ubuntu is installed/initialized. This ensures DNS is
-	// configured BEFORE any tool installation that requires network access.
+	// NOTE: WSL DNS configuration happens in two places:
+	// 1. In docker.go's ensureUbuntuWSL() - when Docker is being installed fresh
+	// 2. In installSpecificTools() - when only kubectl/k3d/helm need installation
+	//    but Docker is already installed (DNS config would otherwise be skipped)
 
 	// PHASE 1: Check what's actually missing vs what's not running
 	allPresent, missing := i.checker.CheckAll()

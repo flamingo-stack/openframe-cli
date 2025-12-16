@@ -458,6 +458,18 @@ exit 0
 	return cmd.Run()
 }
 
+// ConfigureWSLDNS is an exported function to configure DNS in WSL2 Ubuntu.
+// This should be called BEFORE any tool installation that requires network access
+// (kubectl, k3d, helm) when Docker is already installed and we're only installing
+// other tools that need network access.
+func ConfigureWSLDNS() error {
+	if runtime.GOOS != "windows" {
+		return nil // Only needed on Windows
+	}
+	d := &DockerInstaller{}
+	return d.configureWSLDNS()
+}
+
 // decodeWSLOutput handles UTF-16 LE with BOM encoding that WSL sometimes uses on Windows
 func (d *DockerInstaller) decodeWSLOutput(data []byte) string {
 	// Check for UTF-16 LE BOM
