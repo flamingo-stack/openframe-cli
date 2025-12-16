@@ -185,6 +185,8 @@ func RestartDockerInWSL() error {
 
 	// Start Docker daemon in WSL using the start-docker.sh script we created during installation
 	// If the script doesn't exist, fall back to starting dockerd directly
+	// Note: We run as the default user and use sudo for elevated commands,
+	// as `-u root` may not work on all WSL configurations (e.g., GitHub Actions)
 	startScript := `
 if [ -x /usr/local/bin/start-docker.sh ]; then
     sudo /usr/local/bin/start-docker.sh
@@ -210,7 +212,9 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", startScript)
+	// Run as default user with sudo inside the script, not as root
+	// Using `-u root` fails on some WSL configurations (e.g., GitHub Actions runners)
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", startScript)
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to start Docker in WSL: %w", err)
