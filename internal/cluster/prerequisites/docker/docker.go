@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -411,14 +412,14 @@ func (d *DockerInstaller) ensureUbuntuWSL() error {
 func (d *DockerInstaller) configureWSLDNS() error {
 	fmt.Println("Configuring WSL DNS for reliable networking...")
 
-	dnsConfigScript := `
+	dnsConfigScript := `#!/bin/bash
 # Check if resolv.conf is a symlink (WSL auto-generated) and remove it
 if [ -L /etc/resolv.conf ]; then
     sudo rm /etc/resolv.conf
 fi
 
 # Configure reliable DNS servers
-sudo tee /etc/resolv.conf > /dev/null <<EOF
+sudo tee /etc/resolv.conf >/dev/null <<EOF
 # DNS configured by openframe-cli for reliable networking
 nameserver 8.8.8.8
 nameserver 1.1.1.1
@@ -427,7 +428,7 @@ EOF
 
 # Prevent WSL from overwriting resolv.conf on restart
 if [ ! -f /etc/wsl.conf ] || ! grep -q "generateResolvConf" /etc/wsl.conf 2>/dev/null; then
-    sudo tee -a /etc/wsl.conf > /dev/null <<EOF
+    sudo tee -a /etc/wsl.conf >/dev/null <<EOF
 
 [network]
 generateResolvConf = false
@@ -436,7 +437,7 @@ fi
 
 # Verify DNS is working
 for i in 1 2 3; do
-    if nslookup google.com > /dev/null 2>&1; then
+    if nslookup google.com >/dev/null 2>&1; then
         echo "DNS configured successfully"
         exit 0
     fi
@@ -446,7 +447,12 @@ echo "DNS verification failed but continuing"
 exit 0
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", dnsConfigScript)
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(dnsConfigScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -479,11 +485,13 @@ func (d *DockerInstaller) installDockerInWSL() error {
 	fmt.Println("Installing Docker CE inside WSL2 Ubuntu...")
 
 	// Create installation script that matches our Linux installation
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues.
 	installScript := `#!/bin/bash
 set -e
 
 # Check if docker is already installed
-if command -v docker &> /dev/null; then
+if command -v docker >/dev/null 2>&1; then
     echo "Docker already installed in WSL2"
     exit 0
 fi
@@ -502,7 +510,7 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --y
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
 # Add Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 
 # Install Docker CE
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
@@ -514,8 +522,13 @@ sudo usermod -aG docker $USER
 echo "Docker CE installed successfully"
 `
 
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(installScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
 	// Execute installation script in WSL2
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -532,12 +545,15 @@ func (d *DockerInstaller) configureDockerWSL() error {
 	// 1. Docker daemon startup can fail transiently in WSL2 due to networking issues
 	// 2. DNS verification is best-effort and should not block configuration
 	// 3. We want the script to complete and report status rather than exit early
+	//
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues.
 	configScript := `#!/bin/bash
 
 # Configure Docker to listen on both unix socket and tcp (for Windows access)
 # Also configure DNS servers for reliable image pulling (critical for k3d)
 sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<EOF
+sudo tee /etc/docker/daemon.json >/dev/null <<EOF
 {
   "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"],
   "iptables": false,
@@ -546,10 +562,10 @@ sudo tee /etc/docker/daemon.json > /dev/null <<EOF
 EOF
 
 # Create a script to start Docker daemon
-sudo tee /usr/local/bin/start-docker.sh > /dev/null <<'SCRIPT'
+sudo tee /usr/local/bin/start-docker.sh >/dev/null <<'SCRIPT'
 #!/bin/bash
-if ! pgrep -x dockerd > /dev/null; then
-    sudo dockerd > /dev/null 2>&1 &
+if ! pgrep -x dockerd >/dev/null; then
+    sudo dockerd >/dev/null 2>&1 &
 fi
 SCRIPT
 
@@ -572,7 +588,7 @@ sudo /usr/local/bin/start-docker.sh || true
 # Wait for Docker to be ready (use seq instead of brace expansion for better compatibility)
 DOCKER_READY=0
 for i in $(seq 1 30); do
-    if sudo docker ps > /dev/null 2>&1; then
+    if sudo docker ps >/dev/null 2>&1; then
         echo "Docker is running"
         DOCKER_READY=1
         break
@@ -596,20 +612,20 @@ echo "Verifying DNS works inside Docker containers..."
 DNS_OK=0
 for i in $(seq 1 5); do
     # Skip DNS verification if Docker isn't running
-    if ! sudo docker ps > /dev/null 2>&1; then
+    if ! sudo docker ps >/dev/null 2>&1; then
         echo "Docker not running, skipping container DNS verification"
         break
     fi
     # First pull alpine if not present (using daemon DNS)
-    if ! sudo docker image inspect alpine:latest > /dev/null 2>&1; then
-        if ! sudo docker pull alpine:latest > /dev/null 2>&1; then
+    if ! sudo docker image inspect alpine:latest >/dev/null 2>&1; then
+        if ! sudo docker pull alpine:latest >/dev/null 2>&1; then
             echo "Failed to pull alpine image, attempt $i/5..."
             sleep 5
             continue
         fi
     fi
     # Test DNS from inside a container
-    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io > /dev/null 2>&1; then
+    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io >/dev/null 2>&1; then
         echo "Container DNS verification passed"
         DNS_OK=1
         break
@@ -627,7 +643,12 @@ echo "Docker configured successfully"
 exit 0
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", configScript)
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(configScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -163,11 +164,15 @@ func (h *HelmInstaller) installWindows() error {
 	fmt.Println("Installing Helm inside WSL2...")
 
 	// Install Helm inside WSL2 Ubuntu using the official install script
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues. When passing multi-line scripts
+	// via 'wsl bash -c <script>', special characters like >, &, | can be
+	// interpreted by Windows command line parsing before reaching bash.
 	installScript := `#!/bin/bash
 set -e
 
 # Check if helm is already installed
-if command -v helm &> /dev/null; then
+if command -v helm >/dev/null 2>&1; then
     echo "Helm already installed in WSL2"
     exit 0
 fi
@@ -180,7 +185,12 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 echo "Helm installed successfully"
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(installScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -228,8 +238,8 @@ done
 exec helm "${args[@]}"
 `
 
-	// Write the helper script to WSL2 (write to temp location first, then move with sudo)
-	writeCmd := fmt.Sprintf(`
+	// Write the helper script to WSL2 using base64 encoding to avoid shell escaping issues
+	writeScript := fmt.Sprintf(`#!/bin/bash
 cat > /tmp/helm-wrapper.sh << 'EOFSCRIPT'
 %s
 EOFSCRIPT
@@ -237,7 +247,11 @@ sudo mv /tmp/helm-wrapper.sh /usr/local/bin/helm-wrapper.sh
 sudo chmod +x /usr/local/bin/helm-wrapper.sh
 `, helperScript)
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd)
+	// Base64-encode the script to avoid shell character interpretation issues
+	encoded := base64.StdEncoding.EncodeToString([]byte(writeScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

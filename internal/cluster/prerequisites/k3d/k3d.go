@@ -2,6 +2,7 @@ package k3d
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -222,10 +223,15 @@ func (k *K3dInstaller) installWindows() error {
 	// Install k3d inside WSL2 Ubuntu using a script with retry logic and fallback version
 	// The official install script can fail with 504 errors from GitHub
 	// NOTE: We do NOT use 'set -e' here because WSL2 DNS can be unreliable
+	//
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues. When passing multi-line scripts
+	// via 'wsl bash -c <script>', special characters like >, &, | can be
+	// interpreted by Windows command line parsing before reaching bash.
 	installScript := `#!/bin/bash
 
 # Check if k3d is already installed
-if command -v k3d &> /dev/null; then
+if command -v k3d >/dev/null 2>&1; then
     echo "k3d already installed in WSL2"
     exit 0
 fi
@@ -236,7 +242,7 @@ echo "Installing k3d..."
 echo "Waiting for DNS to be available..."
 DNS_READY=0
 for i in $(seq 1 30); do
-    if nslookup github.com > /dev/null 2>&1; then
+    if nslookup github.com >/dev/null 2>&1; then
         echo "DNS is ready"
         DNS_READY=1
         break
@@ -309,7 +315,12 @@ else
 fi
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(installScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

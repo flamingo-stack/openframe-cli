@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -261,19 +262,22 @@ func RestartDockerInWSL() error {
 	// If the script doesn't exist, fall back to starting dockerd directly
 	// Note: We run as the default user and use sudo for elevated commands,
 	// as `-u root` may not work on all WSL configurations (e.g., GitHub Actions)
-	startScript := `
+	//
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues.
+	startScript := `#!/bin/bash
 if [ -x /usr/local/bin/start-docker.sh ]; then
     sudo /usr/local/bin/start-docker.sh
 else
     # Fallback: start dockerd directly if script doesn't exist
-    if ! pgrep -x dockerd > /dev/null; then
-        sudo dockerd > /dev/null 2>&1 &
+    if ! pgrep -x dockerd >/dev/null; then
+        sudo dockerd >/dev/null 2>&1 &
     fi
 fi
 
 # Wait for Docker to be ready (up to 30 seconds)
 for i in $(seq 1 30); do
-    if sudo docker ps > /dev/null 2>&1; then
+    if sudo docker ps >/dev/null 2>&1; then
         echo "docker_ready"
         exit 0
     fi
@@ -286,9 +290,14 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(startScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
 	// Run as default user with sudo inside the script, not as root
 	// Using `-u root` fails on some WSL configurations (e.g., GitHub Actions runners)
-	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", startScript)
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to start Docker in WSL: %w", err)

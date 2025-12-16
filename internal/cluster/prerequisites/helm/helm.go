@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -115,10 +116,15 @@ func (h *HelmInstaller) installWindows() error {
 	// Install helm inside WSL2 Ubuntu
 	// NOTE: We do NOT use 'set -e' here because WSL2 DNS can be unreliable
 	// and we want to retry downloads with proper error handling
+	//
+	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
+	// shell character interpretation issues. When passing multi-line scripts
+	// via 'wsl bash -c <script>', special characters like >, &, | can be
+	// interpreted by Windows command line parsing before reaching bash.
 	installScript := `#!/bin/bash
 
 # Check if helm is already installed
-if command -v helm &> /dev/null; then
+if command -v helm >/dev/null 2>&1; then
     echo "helm already installed in WSL2"
     exit 0
 fi
@@ -129,7 +135,7 @@ echo "Installing helm..."
 echo "Waiting for DNS to be available..."
 DNS_READY=0
 for i in $(seq 1 30); do
-    if nslookup raw.githubusercontent.com > /dev/null 2>&1; then
+    if nslookup raw.githubusercontent.com >/dev/null 2>&1; then
         echo "DNS is ready"
         DNS_READY=1
         break
@@ -166,7 +172,12 @@ fi
 echo "helm installed successfully"
 `
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
+	// Base64-encode the script to avoid shell character interpretation issues
+	// when passing through Windows -> WSL -> bash argument chain
+	encoded := base64.StdEncoding.EncodeToString([]byte(installScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -216,8 +227,8 @@ done
 exec helm "${args[@]}"
 `
 
-	// Write the helper script to WSL2 (write to temp location first, then move with sudo)
-	writeCmd := fmt.Sprintf(`
+	// Write the helper script to WSL2 using base64 encoding to avoid shell escaping issues
+	writeScript := fmt.Sprintf(`#!/bin/bash
 cat > /tmp/helm-wrapper.sh << 'EOFSCRIPT'
 %s
 EOFSCRIPT
@@ -225,7 +236,11 @@ sudo mv /tmp/helm-wrapper.sh /usr/local/bin/helm-wrapper.sh
 sudo chmod +x /usr/local/bin/helm-wrapper.sh
 `, helperScript)
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd)
+	// Base64-encode the script to avoid shell character interpretation issues
+	encoded := base64.StdEncoding.EncodeToString([]byte(writeScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
