@@ -613,6 +613,13 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 			helmCmd += " " + arg
 		}
 
+		// Determine correct HOME directory: /root for root user, /home/<user> otherwise
+		// This is critical because k3d writes kubeconfig to the user's home directory
+		homeDir := "/home/" + wslUser
+		if wslUser == "root" {
+			homeDir = "/root"
+		}
+
 		// Create directories and run helm in a single bash command
 		// This ensures directories exist before helm tries to use them
 		// We use 2>&1 to redirect stderr to stdout so error messages are captured
@@ -624,7 +631,7 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
 			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
 			"export HELM_DATA_HOME=/tmp/helm/data && " +
-			"export HOME=/home/" + wslUser + " && " +
+			"export HOME=" + homeDir + " && " +
 			// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
 			"if [ -f ~/.kube/config ]; then " +
 			"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
@@ -664,7 +671,14 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		kubectlCmd += " " + arg
 	}
 
-	bashScript := "export HOME=/home/" + wslUser + " && " +
+	// Determine correct HOME directory: /root for root user, /home/<user> otherwise
+	// This is critical because k3d writes kubeconfig to the user's home directory
+	kubectlHomeDir := "/home/" + wslUser
+	if wslUser == "root" {
+		kubectlHomeDir = "/root"
+	}
+
+	bashScript := "export HOME=" + kubectlHomeDir + " && " +
 		// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
 		"if [ -f ~/.kube/config ]; then " +
 		"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
