@@ -8,18 +8,27 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/wsl"
 )
 
 func TestNewPrerequisiteChecker(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	if len(checker.requirements) != 4 {
-		t.Errorf("Expected 4 requirements, got %d", len(checker.requirements))
+	// On native Windows, WSL2 is added as the first requirement
+	wslInstaller := wsl.NewWSLInstaller()
+	var expectedNames []string
+	if wslInstaller.IsApplicable() {
+		expectedNames = []string{"WSL2", "Docker", "kubectl", "k3d", "helm"}
+	} else {
+		expectedNames = []string{"Docker", "kubectl", "k3d", "helm"}
 	}
 
-	expectedNames := []string{"Docker", "kubectl", "k3d", "helm"}
+	if len(checker.requirements) != len(expectedNames) {
+		t.Errorf("Expected %d requirements, got %d", len(expectedNames), len(checker.requirements))
+	}
+
 	for i, req := range checker.requirements {
-		if req.Name != expectedNames[i] {
+		if i < len(expectedNames) && req.Name != expectedNames[i] {
 			t.Errorf("Expected requirement %d to be %s, got %s", i, expectedNames[i], req.Name)
 		}
 	}
@@ -86,11 +95,40 @@ func containsAny(str string, substrings []string) bool {
 func TestCheckAllWithMissingTools(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	// Mock all 4 requirements: Docker (missing), kubectl (installed), k3d (missing), helm (installed)
-	checker.requirements[0].IsInstalled = func() bool { return false } // Docker - missing
-	checker.requirements[1].IsInstalled = func() bool { return true }  // kubectl - installed
-	checker.requirements[2].IsInstalled = func() bool { return false } // k3d - missing
-	checker.requirements[3].IsInstalled = func() bool { return true }  // helm - installed
+	// Find indices of requirements by name to handle platform differences
+	// On Windows, WSL2 is prepended as the first requirement
+	findIndex := func(name string) int {
+		for i, req := range checker.requirements {
+			if req.Name == name {
+				return i
+			}
+		}
+		return -1
+	}
+
+	dockerIdx := findIndex("Docker")
+	kubectlIdx := findIndex("kubectl")
+	k3dIdx := findIndex("k3d")
+	helmIdx := findIndex("helm")
+
+	// Set all as installed first
+	for i := range checker.requirements {
+		checker.requirements[i].IsInstalled = func() bool { return true }
+	}
+
+	// Mock specific requirements: Docker (missing), kubectl (installed), k3d (missing), helm (installed)
+	if dockerIdx >= 0 {
+		checker.requirements[dockerIdx].IsInstalled = func() bool { return false }
+	}
+	if kubectlIdx >= 0 {
+		checker.requirements[kubectlIdx].IsInstalled = func() bool { return true }
+	}
+	if k3dIdx >= 0 {
+		checker.requirements[k3dIdx].IsInstalled = func() bool { return false }
+	}
+	if helmIdx >= 0 {
+		checker.requirements[helmIdx].IsInstalled = func() bool { return true }
+	}
 
 	allPresent, missing := checker.CheckAll()
 
