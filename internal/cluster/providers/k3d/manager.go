@@ -96,6 +96,16 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 			}
 			// Don't fail - cluster might still work with existing DNS configuration
 		}
+
+		// Configure Docker daemon with DNS settings
+		// This is critical because Docker containers (k3d nodes) get their DNS from
+		// the Docker daemon, not from WSL2's /etc/resolv.conf
+		if err := m.configureDockerDaemonDNS(ctx); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not configure Docker daemon DNS: %v\n", err)
+			}
+			// Don't fail - cluster might still work with existing Docker DNS configuration
+		}
 	}
 
 	// On Windows/WSL2, get the WSL internal IP before creating the cluster
@@ -1560,6 +1570,118 @@ exit 0
 
 	if m.verbose {
 		fmt.Println("✓ Configured reliable DNS servers in WSL (8.8.8.8, 1.1.1.1, 8.8.4.4)")
+	}
+
+	return nil
+}
+
+// configureDockerDaemonDNS configures the Docker daemon with DNS settings in WSL2.
+// This is critical because Docker containers (k3d nodes) get their DNS configuration
+// from the Docker daemon, NOT from WSL2's /etc/resolv.conf.
+//
+// Without this, k3d container nodes fail to pull images with errors like:
+// "dial tcp ...:443: i/o timeout" when trying to reach docker.io registry.
+//
+// The function updates /etc/docker/daemon.json to include DNS settings and
+// restarts the Docker daemon to apply the changes.
+func (m *K3dManager) configureDockerDaemonDNS(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil // Only needed on Windows/WSL2
+	}
+
+	// Get the WSL user
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Configure Docker daemon DNS settings
+	// This script:
+	// 1. Reads existing daemon.json if it exists
+	// 2. Adds/updates DNS settings while preserving other settings
+	// 3. Restarts Docker daemon to apply changes
+	dockerDNSScript := `
+#!/bin/bash
+set -e
+
+DAEMON_JSON="/etc/docker/daemon.json"
+
+# Create docker config directory if it doesn't exist
+sudo mkdir -p /etc/docker
+
+# Check if daemon.json exists and has content
+if [ -f "$DAEMON_JSON" ] && [ -s "$DAEMON_JSON" ]; then
+    # Check if DNS is already configured
+    if grep -q '"dns"' "$DAEMON_JSON"; then
+        echo "Docker daemon DNS already configured"
+        exit 0
+    fi
+
+    # Add DNS to existing config (insert before the last closing brace)
+    # Use a temp file to avoid issues with in-place editing
+    sudo cp "$DAEMON_JSON" "$DAEMON_JSON.bak"
+
+    # Remove trailing whitespace and the last closing brace, add DNS, then re-add brace
+    sudo python3 -c "
+import json
+with open('$DAEMON_JSON', 'r') as f:
+    config = json.load(f)
+config['dns'] = ['8.8.8.8', '1.1.1.1', '8.8.4.4']
+with open('$DAEMON_JSON', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null || {
+        # Fallback if python3 is not available - create new config
+        sudo tee "$DAEMON_JSON" > /dev/null <<EOF
+{
+  "hosts": ["unix:///var/run/docker.sock"],
+  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+}
+EOF
+    }
+else
+    # Create new daemon.json with DNS settings
+    sudo tee "$DAEMON_JSON" > /dev/null <<EOF
+{
+  "hosts": ["unix:///var/run/docker.sock"],
+  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+}
+EOF
+fi
+
+echo "Docker daemon DNS configured"
+
+# Restart Docker daemon to apply changes
+echo "Restarting Docker daemon..."
+sudo pkill -f dockerd || true
+sleep 2
+
+# Start Docker daemon
+if [ -x /usr/local/bin/start-docker.sh ]; then
+    sudo /usr/local/bin/start-docker.sh
+else
+    sudo dockerd > /dev/null 2>&1 &
+fi
+
+# Wait for Docker to be ready
+for i in $(seq 1 30); do
+    if sudo docker ps > /dev/null 2>&1; then
+        echo "Docker daemon restarted successfully"
+        exit 0
+    fi
+    sleep 1
+done
+
+echo "Warning: Docker daemon may not have restarted properly"
+exit 0
+`
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", dockerDNSScript)
+	if err != nil {
+		return fmt.Errorf("failed to configure Docker daemon DNS: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Configured Docker daemon with DNS servers (8.8.8.8, 1.1.1.1, 8.8.4.4)")
 	}
 
 	return nil

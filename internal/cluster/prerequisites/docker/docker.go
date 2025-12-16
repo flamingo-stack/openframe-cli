@@ -464,11 +464,13 @@ set -e
 # Note: WSL2 uses its own init system
 
 # Configure Docker to listen on both unix socket and tcp (for Windows access)
+# Also configure DNS servers for reliable image pulling (critical for k3d)
 sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json > /dev/null <<EOF
 {
   "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"],
-  "iptables": false
+  "iptables": false,
+  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
 }
 EOF
 
