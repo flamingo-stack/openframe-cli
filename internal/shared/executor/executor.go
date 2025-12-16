@@ -46,6 +46,8 @@ var (
 	wslCheckMutex    sync.Mutex
 	wslUbuntuChecked bool
 	wslUbuntuAvail   bool
+	wslUserCached    string
+	wslUserChecked   bool
 )
 
 // IsWSLAvailable checks if WSL is available on the system
@@ -104,6 +106,78 @@ func ResetWSLCache() {
 	defer wslCheckMutex.Unlock()
 	wslChecked = false
 	wslUbuntuChecked = false
+	wslUserChecked = false
+	wslUserCached = ""
+}
+
+// GetWSLUser detects and returns the appropriate WSL user to run commands as.
+// It caches the result for subsequent calls.
+// Detection order:
+// 1. WSL_USER environment variable (if set)
+// 2. Default WSL user via 'wsl whoami' (if not root)
+// 3. First non-root user with a home directory
+// 4. Falls back to "root" if no other user found
+func GetWSLUser() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+
+	wslCheckMutex.Lock()
+	defer wslCheckMutex.Unlock()
+
+	if wslUserChecked {
+		return wslUserCached
+	}
+
+	// First check environment variable
+	if envUser := os.Getenv("WSL_USER"); envUser != "" {
+		wslUserCached = envUser
+		wslUserChecked = true
+		return wslUserCached
+	}
+
+	// Try to detect the default WSL user
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get the default WSL user (without specifying -u flag)
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "whoami")
+	output, err := cmd.Output()
+	if err == nil {
+		defaultUser := strings.TrimSpace(string(output))
+		// If default user is not root, use it
+		if defaultUser != "" && defaultUser != "root" {
+			wslUserCached = defaultUser
+			wslUserChecked = true
+			return wslUserCached
+		}
+	}
+
+	// If default user is root or detection failed, try to find a non-root user with a home directory
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	cmd = exec.CommandContext(ctx2, "wsl", "-d", "Ubuntu", "bash", "-c", "getent passwd | grep '/home/' | head -1 | cut -d: -f1")
+	output, err = cmd.Output()
+	if err == nil && strings.TrimSpace(string(output)) != "" {
+		username := strings.TrimSpace(string(output))
+		// Verify this user exists
+		ctx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel3()
+
+		verifyCmd := exec.CommandContext(ctx3, "wsl", "-d", "Ubuntu", "bash", "-c", fmt.Sprintf("id -u %s 2>/dev/null && echo %s", username, username))
+		verifyOutput, verifyErr := verifyCmd.Output()
+		if verifyErr == nil && strings.Contains(string(verifyOutput), username) {
+			wslUserCached = username
+			wslUserChecked = true
+			return wslUserCached
+		}
+	}
+
+	// Fall back to root - all commands use sudo anyway
+	wslUserCached = "root"
+	wslUserChecked = true
+	return wslUserCached
 }
 
 // WakeUpWSL sends a simple command to WSL to ensure it's responsive
@@ -481,12 +555,8 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		return command, args
 	}
 
-	// Determine WSL user - try to detect from environment or use default
-	wslUser := os.Getenv("WSL_USER")
-	if wslUser == "" {
-		// Default to "runner" for CI environments, but could be configured
-		wslUser = "runner"
-	}
+	// Dynamically detect WSL user (cached after first detection)
+	wslUser := GetWSLUser()
 
 	// Escape arguments that contain special characters for shell interpretation
 	escapedArgs := make([]string, len(args))
