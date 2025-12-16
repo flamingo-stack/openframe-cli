@@ -499,6 +499,23 @@ for i in {1..30}; do
     sleep 1
 done
 
+# Wait for WSL2 networking to stabilize before testing connectivity
+echo "Waiting for networking to stabilize..."
+sleep 15
+
+# Test outbound network connectivity by pulling a small image
+# This ensures WSL2 networking is fully working before k3d cluster creation
+echo "Verifying network connectivity..."
+for i in {1..5}; do
+    if sudo docker pull hello-world > /dev/null 2>&1; then
+        echo "Network connectivity verified"
+        sudo docker rmi hello-world > /dev/null 2>&1 || true
+        break
+    fi
+    echo "Network test attempt $i failed, retrying in 10s..."
+    sleep 10
+done
+
 echo "Docker configured successfully"
 `
 

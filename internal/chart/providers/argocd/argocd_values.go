@@ -36,6 +36,8 @@ applicationSet:
 
 # Resource constraints to prevent k3d/CI cluster overload
 controller:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   resources:
     limits:
       cpu: "1"
@@ -50,6 +52,8 @@ controller:
       value: "300"
 
 server:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   resources:
     limits:
       cpu: 200m
@@ -59,6 +63,8 @@ server:
       memory: 128Mi
 
 repoServer:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   replicas: 1
   resources:
     limits:
