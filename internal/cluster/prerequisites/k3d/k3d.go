@@ -221,8 +221,8 @@ func (k *K3dInstaller) installWindows() error {
 
 	// Install k3d inside WSL2 Ubuntu using a script with retry logic and fallback version
 	// The official install script can fail with 504 errors from GitHub
+	// NOTE: We do NOT use 'set -e' here because WSL2 DNS can be unreliable
 	installScript := `#!/bin/bash
-set -e
 
 # Check if k3d is already installed
 if command -v k3d &> /dev/null; then
@@ -231,6 +231,26 @@ if command -v k3d &> /dev/null; then
 fi
 
 echo "Installing k3d..."
+
+# Wait for DNS to be available (WSL2 networking can take time to stabilize)
+echo "Waiting for DNS to be available..."
+DNS_READY=0
+for i in $(seq 1 30); do
+    if nslookup github.com > /dev/null 2>&1; then
+        echo "DNS is ready"
+        DNS_READY=1
+        break
+    fi
+    echo "DNS not ready, waiting... (attempt $i/30)"
+    sleep 2
+done
+
+if [ "$DNS_READY" = "0" ]; then
+    echo "ERROR: DNS resolution failed after 60 seconds"
+    echo "WSL2 networking may not be properly configured"
+    echo "Try running: wsl --shutdown and then restart WSL"
+    exit 6
+fi
 
 # Fallback version if we can't fetch latest from GitHub
 FALLBACK_VERSION="v5.7.5"

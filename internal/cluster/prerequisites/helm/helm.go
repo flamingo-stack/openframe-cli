@@ -113,8 +113,9 @@ func (h *HelmInstaller) installWindows() error {
 	fmt.Println("Installing helm inside WSL2...")
 
 	// Install helm inside WSL2 Ubuntu
+	// NOTE: We do NOT use 'set -e' here because WSL2 DNS can be unreliable
+	// and we want to retry downloads with proper error handling
 	installScript := `#!/bin/bash
-set -e
 
 # Check if helm is already installed
 if command -v helm &> /dev/null; then
@@ -124,8 +125,43 @@ fi
 
 echo "Installing helm..."
 
-# Download and run official install script
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# Wait for DNS to be available (WSL2 networking can take time to stabilize)
+echo "Waiting for DNS to be available..."
+DNS_READY=0
+for i in $(seq 1 30); do
+    if nslookup raw.githubusercontent.com > /dev/null 2>&1; then
+        echo "DNS is ready"
+        DNS_READY=1
+        break
+    fi
+    echo "DNS not ready, waiting... (attempt $i/30)"
+    sleep 2
+done
+
+if [ "$DNS_READY" = "0" ]; then
+    echo "ERROR: DNS resolution failed after 60 seconds"
+    echo "WSL2 networking may not be properly configured"
+    echo "Try running: wsl --shutdown and then restart WSL"
+    exit 6
+fi
+
+# Download and run official install script with retries
+INSTALL_OK=0
+for i in $(seq 1 5); do
+    echo "Installing helm (attempt $i/5)..."
+    if curl -fsSL --retry 3 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash; then
+        INSTALL_OK=1
+        break
+    fi
+    echo "Installation failed, retrying in 5 seconds..."
+    sleep 5
+done
+
+if [ "$INSTALL_OK" = "0" ]; then
+    echo "ERROR: Failed to install helm after 5 attempts"
+    echo "Network connectivity issues detected"
+    exit 6
+fi
 
 echo "helm installed successfully"
 `
