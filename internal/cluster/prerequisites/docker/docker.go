@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
 type DockerInstaller struct{}
@@ -343,6 +345,8 @@ func (d *DockerInstaller) ensureWSL2() error {
 }
 
 func (d *DockerInstaller) ensureUbuntuWSL() error {
+	needsInit := false
+
 	// Check if Ubuntu is already installed using multiple methods
 	// Method 1: Check using wsl -l -v (more reliable, includes version info)
 	cmd := exec.Command("wsl", "-l", "-v")
@@ -353,31 +357,43 @@ func (d *DockerInstaller) ensureUbuntuWSL() error {
 
 	if err == nil && (strings.Contains(outputStr, "Ubuntu") || strings.Contains(outputStr, "ubuntu")) {
 		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Method 2: Try to run a command in Ubuntu distribution
-	cmd = exec.Command("wsl", "-d", "Ubuntu", "echo", "test")
-	if err := cmd.Run(); err == nil {
-		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Ubuntu not found, install it
-	fmt.Println("Installing Ubuntu in WSL2...")
-	cmd = exec.Command("wsl", "--install", "-d", "Ubuntu", "--no-launch")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// Check if error is because distribution already exists
-		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "ERROR_ALREADY_EXISTS") {
-			fmt.Println("✓ Ubuntu already exists in WSL2")
-			return nil
+		// Still need to ensure it's properly initialized
+		needsInit = true
+	} else {
+		// Method 2: Try to run a command in Ubuntu distribution
+		cmd = exec.Command("wsl", "-d", "Ubuntu", "echo", "test")
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ Ubuntu already installed in WSL2")
+			needsInit = true
+		} else {
+			// Ubuntu not found, install it
+			fmt.Println("Installing Ubuntu in WSL2...")
+			cmd = exec.Command("wsl", "--install", "-d", "Ubuntu", "--no-launch")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				// Check if error is because distribution already exists
+				if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "ERROR_ALREADY_EXISTS") {
+					fmt.Println("✓ Ubuntu already exists in WSL2")
+					needsInit = true
+				} else {
+					return fmt.Errorf("failed to install Ubuntu: %w", err)
+				}
+			} else {
+				fmt.Println("✓ Ubuntu installed successfully")
+				needsInit = true
+			}
 		}
-		return fmt.Errorf("failed to install Ubuntu: %w", err)
 	}
 
-	fmt.Println("✓ Ubuntu installed successfully")
+	// Always run initialization to ensure Ubuntu is properly set up
+	// This handles fresh installs and ensures passwordless sudo is configured
+	if needsInit {
+		if err := executor.InitializeWSLUbuntu(); err != nil {
+			return fmt.Errorf("failed to initialize Ubuntu: %w", err)
+		}
+	}
+
 	return nil
 }
 

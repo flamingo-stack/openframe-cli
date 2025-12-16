@@ -1600,52 +1600,50 @@ func (m *K3dManager) configureDockerDaemonDNS(ctx context.Context) error {
 	// 1. Reads existing daemon.json if it exists
 	// 2. Adds/updates DNS settings while preserving other settings
 	// 3. Restarts Docker daemon to apply changes
+	//
+	// NOTE: We inline the path /etc/docker/daemon.json directly instead of using
+	// a shell variable because when this script is passed through 'wsl bash -c',
+	// variable expansion can fail, resulting in 'tee: '': No such file or directory'.
 	dockerDNSScript := `
 #!/bin/bash
 set -e
-
-DAEMON_JSON="/etc/docker/daemon.json"
 
 # Create docker config directory if it doesn't exist
 sudo mkdir -p /etc/docker
 
 # Check if daemon.json exists and has content
-if [ -f "$DAEMON_JSON" ] && [ -s "$DAEMON_JSON" ]; then
+if [ -f /etc/docker/daemon.json ] && [ -s /etc/docker/daemon.json ]; then
     # Check if DNS is already configured
-    if grep -q '"dns"' "$DAEMON_JSON"; then
+    if grep -q '"dns"' /etc/docker/daemon.json; then
         echo "Docker daemon DNS already configured"
         exit 0
     fi
 
-    # Add DNS to existing config (insert before the last closing brace)
+    # Add DNS to existing config
     # Use a temp file to avoid issues with in-place editing
-    sudo cp "$DAEMON_JSON" "$DAEMON_JSON.bak"
+    sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
 
-    # Remove trailing whitespace and the last closing brace, add DNS, then re-add brace
+    # Try to update existing config using python3
     sudo python3 -c "
 import json
-with open('$DAEMON_JSON', 'r') as f:
+with open('/etc/docker/daemon.json', 'r') as f:
     config = json.load(f)
 config['dns'] = ['8.8.8.8', '1.1.1.1', '8.8.4.4']
-with open('$DAEMON_JSON', 'w') as f:
+with open('/etc/docker/daemon.json', 'w') as f:
     json.dump(config, f, indent=2)
 " 2>/dev/null || {
         # Fallback if python3 is not available - create new config
-        sudo tee "$DAEMON_JSON" > /dev/null <<EOF
-{
+        echo '{
   "hosts": ["unix:///var/run/docker.sock"],
   "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
-}
-EOF
+}' | sudo tee /etc/docker/daemon.json > /dev/null
     }
 else
     # Create new daemon.json with DNS settings
-    sudo tee "$DAEMON_JSON" > /dev/null <<EOF
-{
+    echo '{
   "hosts": ["unix:///var/run/docker.sock"],
   "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
-}
-EOF
+}' | sudo tee /etc/docker/daemon.json > /dev/null
 fi
 
 echo "Docker daemon DNS configured"

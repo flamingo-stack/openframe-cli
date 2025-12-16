@@ -302,6 +302,90 @@ exit 1
 	return nil
 }
 
+// InitializeWSLUbuntu performs a full initialization of WSL2 Ubuntu distribution.
+// This is critical for fresh Windows environments (like CI runners) where Ubuntu
+// may be installed but not properly initialized.
+//
+// The function:
+// 1. Initializes Ubuntu with retries (the distro may need time to start)
+// 2. Creates a user with sudo access if needed
+// 3. Configures passwordless sudo for the sudo group
+// 4. Verifies the setup works
+//
+// This mirrors the initialization done in working GitHub Actions workflows.
+func InitializeWSLUbuntu() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	fmt.Println("Initializing WSL2 Ubuntu distribution...")
+
+	// Step 1: Initialize Ubuntu with retries
+	// Fresh installs may need time to fully initialize
+	maxRetries := 5
+	retryDelay := 10 * time.Second
+	var lastErr error
+
+	for i := 1; i <= maxRetries; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", "echo 'init'")
+		_, err := cmd.Output()
+		cancel()
+
+		if err == nil {
+			break
+		}
+
+		lastErr = err
+		if i < maxRetries {
+			fmt.Printf("  Waiting for Ubuntu to initialize (attempt %d/%d)...\n", i, maxRetries)
+			time.Sleep(retryDelay)
+			retryDelay += 5 * time.Second // Increase delay with each retry
+		}
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to initialize Ubuntu after %d attempts: %w", maxRetries, lastErr)
+	}
+
+	// Give Ubuntu a moment to fully stabilize
+	time.Sleep(5 * time.Second)
+
+	// Step 2: Configure passwordless sudo for the sudo group
+	// This is critical for non-interactive operation
+	fmt.Println("  Configuring passwordless sudo...")
+	sudoersScript := `grep -q '%sudo ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", sudoersScript)
+	if _, err := cmd.Output(); err != nil {
+		return fmt.Errorf("failed to configure passwordless sudo: %w", err)
+	}
+
+	// Step 3: Verify the setup works
+	fmt.Println("  Verifying WSL2 Ubuntu is ready...")
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer verifyCancel()
+
+	verifyCmd := exec.CommandContext(verifyCtx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", "whoami && echo ready")
+	output, err := verifyCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to verify WSL Ubuntu setup: %w", err)
+	}
+
+	if !strings.Contains(string(output), "ready") {
+		return fmt.Errorf("WSL Ubuntu verification failed: unexpected output: %s", string(output))
+	}
+
+	// Reset the WSL cache since we just initialized
+	ResetWSLCache()
+
+	fmt.Println("✓ WSL2 Ubuntu initialized successfully")
+	return nil
+}
+
 // GetWSLErrorSuggestion returns a helpful suggestion based on the WSL error
 func GetWSLErrorSuggestion(exitCode int, command string) string {
 	switch exitCode {
