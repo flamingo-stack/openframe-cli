@@ -64,6 +64,7 @@ func TestDockerInstaller_Install(t *testing.T) {
 			"Please install Docker Desktop",
 			"failed to install Ubuntu in WSL2",
 			"failed to install Docker",
+			"failed to configure Docker",
 			"WSL",
 		}
 		hasValidError := false
