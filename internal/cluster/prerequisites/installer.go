@@ -164,6 +164,10 @@ func (i *Installer) CheckAndInstall() error {
 
 // CheckAndInstallNonInteractive checks and installs prerequisites with optional non-interactive mode
 func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
+	// NOTE: WSL DNS configuration is now done in docker.go's ensureUbuntuWSL()
+	// immediately after Ubuntu is installed/initialized. This ensures DNS is
+	// configured BEFORE any tool installation that requires network access.
+
 	// PHASE 1: Check what's actually missing vs what's not running
 	allPresent, missing := i.checker.CheckAll()
 	if allPresent {

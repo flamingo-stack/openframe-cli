@@ -394,7 +394,62 @@ func (d *DockerInstaller) ensureUbuntuWSL() error {
 		}
 	}
 
+	// CRITICAL: Configure DNS immediately after Ubuntu is ready
+	// This must happen BEFORE any tool installation (Docker, kubectl, helm)
+	// because those installations require network access to download packages
+	if err := d.configureWSLDNS(); err != nil {
+		fmt.Printf("Warning: Could not configure WSL DNS: %v\n", err)
+		// Don't fail - DNS might already be working
+	}
+
 	return nil
+}
+
+// configureWSLDNS configures reliable DNS servers in WSL2 Ubuntu.
+// This is called immediately after Ubuntu is installed/initialized,
+// BEFORE any tool installation that requires network access.
+func (d *DockerInstaller) configureWSLDNS() error {
+	fmt.Println("Configuring WSL DNS for reliable networking...")
+
+	dnsConfigScript := `
+# Check if resolv.conf is a symlink (WSL auto-generated) and remove it
+if [ -L /etc/resolv.conf ]; then
+    sudo rm /etc/resolv.conf
+fi
+
+# Configure reliable DNS servers
+sudo tee /etc/resolv.conf > /dev/null <<EOF
+# DNS configured by openframe-cli for reliable networking
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+EOF
+
+# Prevent WSL from overwriting resolv.conf on restart
+if [ ! -f /etc/wsl.conf ] || ! grep -q "generateResolvConf" /etc/wsl.conf 2>/dev/null; then
+    sudo tee -a /etc/wsl.conf > /dev/null <<EOF
+
+[network]
+generateResolvConf = false
+EOF
+fi
+
+# Verify DNS is working
+for i in 1 2 3; do
+    if nslookup google.com > /dev/null 2>&1; then
+        echo "DNS configured successfully"
+        exit 0
+    fi
+    sleep 2
+done
+echo "DNS verification failed but continuing"
+exit 0
+`
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", dnsConfigScript)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // decodeWSLOutput handles UTF-16 LE with BOM encoding that WSL sometimes uses on Windows
@@ -505,12 +560,18 @@ if ! grep -q "start-docker.sh" ~/.bashrc; then
     echo "/usr/local/bin/start-docker.sh" >> ~/.bashrc
 fi
 
-# Start Docker now
+# CRITICAL: Stop and restart Docker to ensure daemon.json DNS settings are applied
+# Simply starting Docker won't apply new daemon.json settings if Docker was already running
+echo "Restarting Docker to apply DNS configuration..."
+sudo pkill -f dockerd 2>/dev/null || true
+sleep 3
+
+# Start Docker daemon fresh
 sudo /usr/local/bin/start-docker.sh
 
 # Wait for Docker to be ready
 for i in {1..30}; do
-    if docker ps > /dev/null 2>&1; then
+    if sudo docker ps > /dev/null 2>&1; then
         echo "Docker is running"
         break
     fi
@@ -521,18 +582,33 @@ done
 echo "Waiting for networking to stabilize..."
 sleep 15
 
-# Test outbound network connectivity by pulling a small image
-# This ensures WSL2 networking is fully working before k3d cluster creation
-echo "Verifying network connectivity..."
+# Verify DNS is working from inside a Docker container (not just from WSL host)
+# This is critical because k3d nodes are Docker containers that need DNS
+echo "Verifying DNS works inside Docker containers..."
+DNS_OK=0
 for i in {1..5}; do
-    if sudo docker pull hello-world > /dev/null 2>&1; then
-        echo "Network connectivity verified"
-        sudo docker rmi hello-world > /dev/null 2>&1 || true
+    # First pull alpine if not present (using daemon DNS)
+    if ! sudo docker image inspect alpine:latest > /dev/null 2>&1; then
+        if ! sudo docker pull alpine:latest > /dev/null 2>&1; then
+            echo "Failed to pull alpine image, attempt $i/5..."
+            sleep 5
+            continue
+        fi
+    fi
+    # Test DNS from inside a container
+    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io > /dev/null 2>&1; then
+        echo "Container DNS verification passed"
+        DNS_OK=1
         break
     fi
-    echo "Network test attempt $i failed, retrying in 10s..."
-    sleep 10
+    echo "Container DNS test attempt $i failed, retrying..."
+    sleep 5
 done
+
+if [ "$DNS_OK" = "0" ]; then
+    echo "WARNING: Container DNS verification failed, but continuing..."
+    echo "k3d cluster creation may fail if containers cannot resolve DNS"
+fi
 
 echo "Docker configured successfully"
 `

@@ -87,24 +87,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - cluster might still work if limits are already sufficient
 	}
 
-	// On Windows/WSL2, configure reliable DNS servers before creating the cluster
-	// This prevents k3d container nodes from failing to pull images due to DNS issues
+	// On Windows/WSL2, configure reliable DNS servers in /etc/resolv.conf before creating the cluster
+	// Note: Docker daemon DNS is now configured during Docker installation (see docker/docker.go)
+	// This WSL DNS configuration is a backup to ensure the WSL host can resolve DNS
 	if runtime.GOOS == "windows" {
 		if err := m.configureWSLDNS(ctx); err != nil {
 			if m.verbose {
 				fmt.Printf("Warning: Could not configure WSL DNS: %v\n", err)
 			}
 			// Don't fail - cluster might still work with existing DNS configuration
-		}
-
-		// Configure Docker daemon with DNS settings
-		// This is critical because Docker containers (k3d nodes) get their DNS from
-		// the Docker daemon, not from WSL2's /etc/resolv.conf
-		if err := m.configureDockerDaemonDNS(ctx); err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Could not configure Docker daemon DNS: %v\n", err)
-			}
-			// Don't fail - cluster might still work with existing Docker DNS configuration
 		}
 	}
 
@@ -1587,178 +1578,10 @@ exit 0
 	return nil
 }
 
-// configureDockerDaemonDNS configures the Docker daemon with DNS settings in WSL2.
-// This is critical because Docker containers (k3d nodes) get their DNS configuration
-// from the Docker daemon, NOT from WSL2's /etc/resolv.conf.
-//
-// Without this, k3d container nodes fail to pull images with errors like:
-// "dial tcp ...:443: i/o timeout" when trying to reach docker.io registry.
-//
-// The function updates /etc/docker/daemon.json to include DNS settings and
-// restarts the Docker daemon to apply the changes.
-//
-// IMPORTANT: This function now verifies DNS works from INSIDE a Docker container,
-// not just that the config file exists. This catches cases where Docker wasn't
-// restarted after DNS was configured.
-func (m *K3dManager) configureDockerDaemonDNS(ctx context.Context) error {
-	if runtime.GOOS != "windows" {
-		return nil // Only needed on Windows/WSL2
-	}
-
-	// Get the WSL user
-	username, err := m.getWSLUser(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get WSL user: %w", err)
-	}
-
-	// Configure Docker daemon DNS settings and verify DNS works from inside containers
-	// This script:
-	// 1. Verifies DNS works from inside a Docker container first
-	// 2. If DNS works, we're done (no need to restart)
-	// 3. If DNS doesn't work, configure daemon.json and restart Docker
-	// 4. Re-verify DNS works after restart
-	//
-	// NOTE: We inline the path /etc/docker/daemon.json directly instead of using
-	// a shell variable because when this script is passed through 'wsl bash -c',
-	// variable expansion can fail, resulting in 'tee: '': No such file or directory'.
-	dockerDNSScript := `
-#!/bin/bash
-set -e
-
-NEED_RESTART=0
-DNS_MARKER="/tmp/.docker_dns_configured_$(date +%Y%m%d)"
-
-# Function to test DNS from inside a Docker container (requires image to be cached)
-test_docker_dns() {
-    # Only test if we have an alpine image cached
-    if ! sudo docker image inspect alpine:latest > /dev/null 2>&1; then
-        return 1  # Can't test without image
-    fi
-    # Use alpine with nslookup to test DNS resolution from inside a container
-    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io > /dev/null 2>&1; then
-        return 0
-    fi
-    return 1
-}
-
-# Create docker config directory if it doesn't exist
-sudo mkdir -p /etc/docker
-
-# Ensure DNS is in daemon.json
-if [ -f /etc/docker/daemon.json ] && [ -s /etc/docker/daemon.json ]; then
-    if ! grep -q '"dns"' /etc/docker/daemon.json; then
-        echo "Adding DNS to existing daemon.json..."
-        sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
-        # Try to update existing config using python3
-        sudo python3 -c "
-import json
-with open('/etc/docker/daemon.json', 'r') as f:
-    config = json.load(f)
-config['dns'] = ['8.8.8.8', '1.1.1.1', '8.8.4.4']
-with open('/etc/docker/daemon.json', 'w') as f:
-    json.dump(config, f, indent=2)
-" 2>/dev/null || {
-            echo '{
-  "hosts": ["unix:///var/run/docker.sock"],
-  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
-}' | sudo tee /etc/docker/daemon.json > /dev/null
-        }
-        NEED_RESTART=1
-        echo "Added DNS to daemon.json"
-    else
-        echo "DNS already configured in daemon.json"
-        # Check if we've already restarted Docker today with this DNS config
-        if [ ! -f "$DNS_MARKER" ]; then
-            echo "DNS configured but marker not found - will restart Docker to ensure settings are applied"
-            NEED_RESTART=1
-        fi
-    fi
-else
-    echo "Creating daemon.json with DNS settings..."
-    echo '{
-  "hosts": ["unix:///var/run/docker.sock"],
-  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
-}' | sudo tee /etc/docker/daemon.json > /dev/null
-    NEED_RESTART=1
-fi
-
-# If DNS is configured and marker exists, do a quick test
-if [ "$NEED_RESTART" = "0" ]; then
-    echo "Testing if Docker container DNS is working..."
-    if test_docker_dns; then
-        echo "Docker container DNS is working correctly"
-        exit 0
-    fi
-    echo "DNS test failed - will restart Docker"
-    NEED_RESTART=1
-fi
-
-# Restart Docker daemon to apply DNS changes
-if [ "$NEED_RESTART" = "1" ]; then
-    echo "Restarting Docker daemon to apply DNS settings..."
-    sudo pkill -f dockerd || true
-    sleep 3
-
-    # Start Docker daemon
-    if [ -x /usr/local/bin/start-docker.sh ]; then
-        sudo /usr/local/bin/start-docker.sh
-    else
-        sudo dockerd > /dev/null 2>&1 &
-    fi
-
-    # Wait for Docker to be ready
-    echo "Waiting for Docker daemon to be ready..."
-    for i in $(seq 1 30); do
-        if sudo docker ps > /dev/null 2>&1; then
-            echo "Docker daemon is ready"
-            break
-        fi
-        sleep 1
-    done
-
-    # Mark that we've configured DNS today
-    touch "$DNS_MARKER"
-fi
-
-# Pull alpine image for DNS testing (using explicit DNS as fallback)
-if ! sudo docker image inspect alpine:latest > /dev/null 2>&1; then
-    echo "Pulling alpine image for DNS verification..."
-    # Try normal pull first
-    if ! sudo docker pull --quiet alpine:latest 2>/dev/null; then
-        # If normal pull fails, try running with explicit DNS to pull
-        echo "Normal pull failed, trying with explicit DNS..."
-        sudo docker run --rm --dns 8.8.8.8 --dns 1.1.1.1 alpine:latest echo "Image pulled" 2>/dev/null || true
-    fi
-fi
-
-# Verify DNS works from inside a container
-echo "Verifying DNS from inside Docker container..."
-for i in $(seq 1 5); do
-    if test_docker_dns; then
-        echo "Docker container DNS verified working"
-        exit 0
-    fi
-    echo "DNS verification attempt $i/5 failed, waiting..."
-    sleep 3
-done
-
-# Even if verification fails, we've done our best - let k3d try
-echo "Warning: Docker container DNS verification did not succeed, but continuing..."
-echo "DNS settings are configured in daemon.json - k3d may still work"
-exit 0
-`
-
-	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", dockerDNSScript)
-	if err != nil {
-		return fmt.Errorf("failed to configure Docker daemon DNS: %w", err)
-	}
-
-	if m.verbose {
-		fmt.Println("✓ Configured Docker daemon with DNS servers (8.8.8.8, 1.1.1.1, 8.8.4.4)")
-	}
-
-	return nil
-}
+// NOTE: configureDockerDaemonDNS has been removed.
+// Docker daemon DNS is now configured during Docker installation in docker/docker.go.
+// This avoids duplicate configuration and the bash script syntax issues that occurred
+// when passing complex scripts through 'wsl bash -c'.
 
 // increaseInotifyLimits increases the inotify limits on the host system
 // This is critical for applications like MeshCentral that use many file watchers

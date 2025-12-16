@@ -191,3 +191,7 @@ func IsRestartRequired(err error) bool {
 	_, ok := err.(*RestartRequiredError)
 	return ok
 }
+
+// NOTE: WSL DNS configuration is now done in docker.go's ensureUbuntuWSL()
+// immediately after Ubuntu is installed/initialized. This ensures DNS is
+// configured BEFORE any tool installation that requires network access.
