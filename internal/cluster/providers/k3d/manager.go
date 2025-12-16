@@ -87,6 +87,17 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - cluster might still work if limits are already sufficient
 	}
 
+	// On Windows/WSL2, configure reliable DNS servers before creating the cluster
+	// This prevents k3d container nodes from failing to pull images due to DNS issues
+	if runtime.GOOS == "windows" {
+		if err := m.configureWSLDNS(ctx); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not configure WSL DNS: %v\n", err)
+			}
+			// Don't fail - cluster might still work with existing DNS configuration
+		}
+	}
+
 	// On Windows/WSL2, get the WSL internal IP before creating the cluster
 	// to include it as a TLS SAN in the k3s certificate
 	var wslInternalIP string
@@ -1473,6 +1484,85 @@ func CreateClusterManagerWithExecutor(exec executor.CommandExecutor) *K3dManager
 // Deprecated: Use CreateClusterManagerWithExecutor instead with a proper executor.
 func CreateDefaultClusterManager() *K3dManager {
 	panic("CreateDefaultClusterManager is deprecated - use CreateClusterManagerWithExecutor with proper executor")
+}
+
+// configureWSLDNS configures reliable DNS servers in WSL2 before k3d cluster creation.
+// This is critical because k3d nodes (containers inside Docker inside WSL2) can have
+// intermittent DNS resolution failures when using WSL2's default DNS configuration.
+//
+// WSL2's default DNS resolution can be flaky, especially on GitHub Actions runners,
+// causing k3d container nodes to fail pulling images like "rancher/mirrored-pause:3.6"
+// with "dial tcp ...:443: i/o timeout" errors.
+//
+// By configuring /etc/resolv.conf with Google DNS (8.8.8.8) and Cloudflare DNS (1.1.1.1),
+// we ensure reliable DNS resolution for all containers in the k3d cluster.
+func (m *K3dManager) configureWSLDNS(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil // Only needed on Windows/WSL2
+	}
+
+	// Get the WSL user
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Configure DNS in /etc/resolv.conf with reliable public DNS servers
+	// We use a combination of Google DNS and Cloudflare DNS for redundancy
+	// The script:
+	// 1. Disables WSL's automatic resolv.conf generation (if not already disabled)
+	// 2. Writes reliable DNS servers to /etc/resolv.conf
+	dnsConfigScript := `
+# Check if resolv.conf is a symlink (WSL auto-generated) and remove it
+if [ -L /etc/resolv.conf ]; then
+    sudo rm /etc/resolv.conf
+fi
+
+# Configure reliable DNS servers
+sudo tee /etc/resolv.conf > /dev/null <<EOF
+# DNS configured by openframe-cli for reliable k3d networking
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+EOF
+
+# Prevent WSL from overwriting resolv.conf on restart (if wsl.conf doesn't exist or doesn't have the setting)
+if [ ! -f /etc/wsl.conf ] || ! grep -q "generateResolvConf" /etc/wsl.conf 2>/dev/null; then
+    sudo tee -a /etc/wsl.conf > /dev/null <<EOF
+
+[network]
+generateResolvConf = false
+EOF
+fi
+
+echo "DNS configured successfully"
+`
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", dnsConfigScript)
+	if err != nil {
+		return fmt.Errorf("failed to configure DNS in WSL: %w", err)
+	}
+
+	// Verify DNS is working by testing connectivity
+	verifyScript := `
+for i in 1 2 3; do
+    if nslookup registry-1.docker.io > /dev/null 2>&1; then
+        echo "DNS verification passed"
+        exit 0
+    fi
+    sleep 2
+done
+echo "DNS verification failed but continuing"
+exit 0
+`
+
+	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", verifyScript)
+
+	if m.verbose {
+		fmt.Println("✓ Configured reliable DNS servers in WSL (8.8.8.8, 1.1.1.1, 8.8.4.4)")
+	}
+
+	return nil
 }
 
 // increaseInotifyLimits increases the inotify limits on the host system
