@@ -719,27 +719,41 @@ type PortMapping struct {
 // getWSLUser determines the correct WSL user to use for kubeconfig operations
 // It tries to detect the non-root user that k3d/kubectl will run as
 func (m *K3dManager) getWSLUser(ctx context.Context) (string, error) {
-	// First, try to get the user specified for the runner user (standard in GitHub Actions)
-	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", "runner", "whoami")
-	if err == nil && strings.TrimSpace(result.Stdout) == "runner" {
-		return "runner", nil
+	// First, check what the default WSL user is (without specifying -u flag)
+	// This works even if no named user exists (will return root)
+	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "whoami")
+	if err == nil {
+		defaultUser := strings.TrimSpace(result.Stdout)
+		// If default user is not root, use it
+		if defaultUser != "" && defaultUser != "root" {
+			if m.verbose {
+				fmt.Printf("Using default WSL user: %s\n", defaultUser)
+			}
+			return defaultUser, nil
+		}
 	}
 
-	// If runner doesn't exist, try to find the first non-root user with a home directory
+	// If default user is root or detection failed, try to find a non-root user with a home directory
 	result, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "getent passwd | grep '/home/' | head -1 | cut -d: -f1")
 	if err == nil && strings.TrimSpace(result.Stdout) != "" {
 		username := strings.TrimSpace(result.Stdout)
-		// Verify this user exists and has a home directory
-		if verifyResult, verifyErr := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "whoami"); verifyErr == nil {
-			if strings.TrimSpace(verifyResult.Stdout) == username {
+		// Verify this user exists by checking whoami (run without -u to avoid circular failure)
+		if verifyResult, verifyErr := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", fmt.Sprintf("id -u %s 2>/dev/null && echo %s", username, username)); verifyErr == nil {
+			if strings.Contains(verifyResult.Stdout, username) {
+				if m.verbose {
+					fmt.Printf("Using detected WSL user: %s\n", username)
+				}
 				return username, nil
 			}
 		}
 	}
 
-	// If we can't detect a proper user, default to "runner" (common in CI environments)
-	// This is safer than using root, which causes permission issues
-	return "runner", nil
+	// Fall back to root - all commands use sudo anyway, so this is safer than
+	// assuming a non-existent user like "runner"
+	if m.verbose {
+		fmt.Println("No non-root WSL user found, using root")
+	}
+	return "root", nil
 }
 
 // prepareKubeconfigDirectory ensures ~/.kube directory exists with proper permissions on Windows/WSL and Linux
