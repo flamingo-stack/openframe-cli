@@ -2,7 +2,6 @@ package kubectl
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -237,85 +236,30 @@ func (k *KubectlInstaller) installWindows() error {
 	fmt.Println("Installing kubectl inside WSL2...")
 
 	// Install kubectl inside WSL2 Ubuntu
-	// NOTE: We do NOT use 'set -e' here because WSL2 DNS can be unreliable
-	// and we want to retry downloads with proper error handling
-	//
-	// IMPORTANT: The script is base64-encoded before passing to WSL to avoid
-	// shell character interpretation issues. When passing multi-line scripts
-	// via 'wsl bash -c <script>', special characters like >, &, | can be
-	// interpreted by Windows command line parsing before reaching bash.
 	installScript := `#!/bin/bash
+set -e
 
 # Check if kubectl is already installed
-if command -v kubectl >/dev/null 2>&1; then
+if command -v kubectl &> /dev/null; then
     echo "kubectl already installed in WSL2"
     exit 0
 fi
 
 echo "Installing kubectl..."
 
-# Wait for DNS to be available (WSL2 networking can take time to stabilize)
-echo "Waiting for DNS to be available..."
-DNS_READY=0
-for i in $(seq 1 30); do
-    if nslookup dl.k8s.io >/dev/null 2>&1; then
-        echo "DNS is ready"
-        DNS_READY=1
-        break
-    fi
-    echo "DNS not ready, waiting... (attempt $i/30)"
-    sleep 2
-done
-
-if [ "$DNS_READY" = "0" ]; then
-    echo "ERROR: DNS resolution failed after 60 seconds"
-    echo "WSL2 networking may not be properly configured"
-    echo "Try running: wsl --shutdown and then restart WSL"
-    exit 6
-fi
-
-# Download kubectl with retries
-DOWNLOAD_OK=0
-for i in $(seq 1 5); do
-    echo "Downloading kubectl (attempt $i/5)..."
-    # First get the stable version
-    KUBECTL_VERSION=$(curl -fsSL --retry 3 --retry-delay 5 https://dl.k8s.io/release/stable.txt 2>/dev/null)
-    if [ -z "$KUBECTL_VERSION" ]; then
-        echo "Failed to get kubectl version, retrying..."
-        sleep 5
-        continue
-    fi
-
-    # Download the binary
-    if curl -fsSL --retry 3 --retry-delay 5 -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; then
-        DOWNLOAD_OK=1
-        break
-    fi
-    echo "Download failed, retrying in 5 seconds..."
-    sleep 5
-done
-
-if [ "$DOWNLOAD_OK" = "0" ]; then
-    echo "ERROR: Failed to download kubectl after 5 attempts"
-    echo "Network connectivity issues detected"
-    exit 6
-fi
+# Download the latest stable kubectl binary (silent mode to avoid progress output)
+curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 
 # Install kubectl
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 # Clean up
-rm -f kubectl
+rm kubectl
 
 echo "kubectl installed successfully"
 `
 
-	// Base64-encode the script to avoid shell character interpretation issues
-	// when passing through Windows -> WSL -> bash argument chain
-	encoded := base64.StdEncoding.EncodeToString([]byte(installScript))
-	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
-
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -354,8 +298,8 @@ done
 exec kubectl "${args[@]}"
 `
 
-	// Write the helper script to WSL2 using base64 encoding to avoid shell escaping issues
-	writeScript := fmt.Sprintf(`#!/bin/bash
+	// Write the helper script to WSL2 (write to temp location first, then move with sudo)
+	writeCmd := fmt.Sprintf(`
 cat > /tmp/kubectl-wrapper.sh << 'EOFSCRIPT'
 %s
 EOFSCRIPT
@@ -363,11 +307,7 @@ sudo mv /tmp/kubectl-wrapper.sh /usr/local/bin/kubectl-wrapper.sh
 sudo chmod +x /usr/local/bin/kubectl-wrapper.sh
 `, helperScript)
 
-	// Base64-encode the script to avoid shell character interpretation issues
-	encoded := base64.StdEncoding.EncodeToString([]byte(writeScript))
-	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
-
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

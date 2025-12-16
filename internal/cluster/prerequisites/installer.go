@@ -239,8 +239,26 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 
 		if confirmed {
 			if err := i.installSpecificTools(missingTools); err != nil {
-				// In non-interactive mode, log error but continue
+				// In non-interactive mode, we must fail if k3d couldn't be installed
+				// since k3d is required for cluster creation
 				if nonInteractive {
+					// Check if k3d is in the missing tools list and still not installed
+					k3dRequired := false
+					for _, tool := range missingTools {
+						if strings.ToLower(tool) == "k3d" {
+							k3dRequired = true
+							break
+						}
+					}
+
+					if k3dRequired && !k3d.NewK3dInstaller().IsInstalled() {
+						pterm.Error.Printf("Failed to install k3d: %v\n", err)
+						pterm.Error.Println("k3d is required for cluster creation and could not be installed.")
+						pterm.Info.Println("This is likely due to DNS/network issues in WSL2.")
+						pterm.Info.Println("Try running: wsl --shutdown and then restart WSL")
+						return fmt.Errorf("k3d installation failed: %w", err)
+					}
+
 					pterm.Warning.Printf("Failed to install some prerequisites: %v\n", err)
 					pterm.Info.Println("Continuing anyway (non-interactive mode)...")
 				} else {

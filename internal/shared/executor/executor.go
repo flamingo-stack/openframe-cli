@@ -175,8 +175,11 @@ func GetWSLUser() string {
 		}
 	}
 
-	// Fall back to root - all commands use sudo anyway
-	wslUserCached = "root"
+	// Fall back to "runner" which is the default user in CI environments (GitHub Actions)
+	// Using "runner" instead of "root" works better because:
+	// 1. GitHub Actions Windows runners create a "runner" user in WSL
+	// 2. Running as root can cause permission issues with kubeconfig files
+	wslUserCached = "runner"
 	wslUserChecked = true
 	return wslUserCached
 }
@@ -649,6 +652,7 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 	}
 
 	// Dynamically detect WSL user (cached after first detection)
+	// Falls back to "runner" if no user can be detected (works in CI environments)
 	wslUser := GetWSLUser()
 
 	// Escape arguments that contain special characters for shell interpretation
@@ -765,7 +769,6 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 	}
 
 	// Determine correct HOME directory: /root for root user, /home/<user> otherwise
-	// This is critical because k3d writes kubeconfig to the user's home directory
 	kubectlHomeDir := "/home/" + wslUser
 	if wslUser == "root" {
 		kubectlHomeDir = "/root"

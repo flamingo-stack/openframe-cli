@@ -466,8 +466,9 @@ func ConfigureWSLDNS() error {
 	if runtime.GOOS != "windows" {
 		return nil // Only needed on Windows
 	}
-	d := &DockerInstaller{}
-	return d.configureWSLDNS()
+
+	installer := NewDockerInstaller()
+	return installer.configureWSLDNS()
 }
 
 // decodeWSLOutput handles UTF-16 LE with BOM encoding that WSL sometimes uses on Windows
