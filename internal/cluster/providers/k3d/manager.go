@@ -1894,28 +1894,23 @@ func (m *K3dManager) fixDockerNetworkRouting(ctx context.Context) error {
 
 	fmt.Println("Fixing Docker network routing...")
 
-	// Enable IP forwarding and set up NAT masquerading for Docker bridge networks
+	// Only enable IP forwarding - don't touch iptables FORWARD chain
+	// Docker manages its own iptables rules for internal networking
 	fixRoutingScript := `
-# Enable IP forwarding
+# Enable IP forwarding (required for Docker networking)
 echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 
-# Get the main network interface (usually eth0 in WSL2)
-MAIN_IF=$(ip route | grep default | awk '{print $5}' | head -1)
-echo "Main interface: $MAIN_IF"
+# Restart Docker to ensure it sets up iptables rules correctly
+sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
 
-# Set up NAT masquerading for Docker networks
-# This ensures packets from Docker containers can reach the internet
-sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o $MAIN_IF -j MASQUERADE 2>/dev/null || true
-sudo iptables -t nat -A POSTROUTING -s 10.0.0.0/8 -o $MAIN_IF -j MASQUERADE 2>/dev/null || true
-
-# Allow forwarding between interfaces
-sudo iptables -A FORWARD -i docker0 -o $MAIN_IF -j ACCEPT 2>/dev/null || true
-sudo iptables -A FORWARD -i $MAIN_IF -o docker0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-
-# Also for k3d network (br-* interfaces)
-for BR in $(ip link show | grep 'br-' | awk -F: '{print $2}' | tr -d ' '); do
-    sudo iptables -A FORWARD -i $BR -o $MAIN_IF -j ACCEPT 2>/dev/null || true
-    sudo iptables -A FORWARD -i $MAIN_IF -o $BR -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+# Wait for Docker to be ready
+for i in $(seq 1 10); do
+    if sudo docker info >/dev/null 2>&1; then
+        echo "Docker restarted successfully"
+        break
+    fi
+    sleep 1
 done
 
 echo "Network routing configured"
