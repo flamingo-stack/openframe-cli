@@ -107,6 +107,16 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 			}
 			// Don't fail - might still work if Docker was configured during installation
 		}
+
+		// Pre-pull critical k3s images to avoid DNS issues during cluster creation
+		// This is critical because k3d container nodes may fail to pull images
+		// if Docker Hub DNS resolution is flaky
+		if err := m.prePullK3sImages(ctx); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not pre-pull k3s images: %v\n", err)
+			}
+			// Don't fail - cluster creation might still succeed
+		}
 	}
 
 	// On Windows/WSL2, get the WSL internal IP before creating the cluster
@@ -177,12 +187,24 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		"--kubeconfig-update-default", // Update default kubeconfig with new cluster context
 		"--kubeconfig-switch-context", // Automatically switch to new cluster context
 	}
+
 	if m.verbose {
 		args = append(args, "--verbose")
 	}
 
 	if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create cluster %s: %w", config.Name, err))
+	}
+
+	// On Windows/WSL2, import critical images into the k3d cluster
+	// This helps avoid DNS resolution issues when pods try to pull images
+	if runtime.GOOS == "windows" {
+		if err := m.importK3sImages(ctx, config.Name); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not import k3s images: %v\n", err)
+			}
+			// Don't fail - pods might still be able to pull images
+		}
 	}
 
 	// Fix kubeconfig permissions if k3d ran with sudo (Windows/WSL and Linux CI)
@@ -1683,6 +1705,99 @@ exit 0
 
 	if m.verbose {
 		fmt.Println("✓ Docker daemon DNS configuration verified")
+	}
+
+	return nil
+}
+
+// prePullK3sImages pre-pulls critical k3s images to Docker cache.
+// This is called BEFORE cluster creation to cache images locally.
+// Note: This doesn't directly help k3d nodes, but it can speed up k3d image import.
+func (m *K3dManager) prePullK3sImages(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Critical images that k3s needs - pre-pull them to Docker cache
+	// The pause image is the most critical one that causes pod sandbox creation failures
+	images := []string{
+		"rancher/mirrored-pause:3.6",
+	}
+
+	if m.verbose {
+		fmt.Println("Pre-pulling critical k3s images to Docker cache...")
+	}
+
+	// Script to pull images with retries
+	pullScript := `#!/bin/bash
+IMAGES="$@"
+for IMAGE in $IMAGES; do
+    echo "Pulling $IMAGE..."
+    for i in 1 2 3; do
+        if sudo docker pull "$IMAGE" 2>/dev/null; then
+            echo "Successfully pulled $IMAGE"
+            break
+        fi
+        echo "Retry $i/3 for $IMAGE..."
+        sleep 5
+    done
+done
+echo "Image pre-pull complete"
+`
+
+	// Base64 encode the script
+	encoded := base64.StdEncoding.EncodeToString([]byte(pullScript))
+	imageList := strings.Join(images, " ")
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash -s %s", encoded, imageList)
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", wrapperCmd)
+	if err != nil {
+		return fmt.Errorf("failed to pre-pull images: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Critical k3s images pre-pulled to Docker cache")
+	}
+
+	return nil
+}
+
+// importK3sImages imports critical images into the k3d cluster after creation.
+// This bypasses DNS resolution issues by loading images directly from Docker cache.
+func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// Images to import - the pause image is critical for pod sandbox creation
+	images := []string{
+		"rancher/mirrored-pause:3.6",
+	}
+
+	if m.verbose {
+		fmt.Println("Importing critical images into k3d cluster...")
+	}
+
+	// Import each image using k3d image import
+	for _, image := range images {
+		args := []string{"image", "import", image, "-c", clusterName}
+		if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Failed to import image %s: %v\n", image, err)
+			}
+			// Continue with other images
+		} else if m.verbose {
+			fmt.Printf("✓ Imported image: %s\n", image)
+		}
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Image import complete")
 	}
 
 	return nil
