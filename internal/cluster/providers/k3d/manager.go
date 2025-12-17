@@ -163,6 +163,11 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		if m.verbose {
 			fmt.Printf("DEBUG: Converted Windows path '%s' to WSL path '%s'\n", configFile, configFilePath)
 		}
+
+		// Final Docker readiness check right before k3d - Docker can become unavailable on WSL2
+		if err := m.verifyDockerReady(ctx); err != nil {
+			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("Docker is not ready: %w", err))
+		}
 	}
 
 	args := []string{
@@ -1590,10 +1595,9 @@ exit 0
 	return nil
 }
 
-// ensureDockerDNS ensures Docker daemon has DNS configuration applied and restarts it if needed.
+// ensureDockerDNS ensures Docker daemon has DNS configuration applied.
 // This is critical for k3d containers to resolve external registries like registry-1.docker.io.
-// Even though Docker DNS is configured during installation, we need to verify it's applied
-// and restart Docker if necessary before creating k3d clusters.
+// We only restart Docker if DNS config was missing - otherwise we just verify Docker is running.
 func (m *K3dManager) ensureDockerDNS(ctx context.Context) error {
 	if runtime.GOOS != "windows" {
 		return nil // Only needed on Windows/WSL2
@@ -1604,27 +1608,30 @@ func (m *K3dManager) ensureDockerDNS(ctx context.Context) error {
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	// Script to ensure Docker daemon.json has DNS config and restart Docker
+	// Script to ensure Docker daemon.json has DNS config
+	// Only restart Docker if the config was missing/changed
 	// Base64 encoding avoids shell interpretation issues when passing through Windows -> WSL
 	ensureDNSScript := `#!/bin/bash
-set -e
 
 # Ensure /etc/docker directory exists
 sudo mkdir -p /etc/docker
 
 # Check if daemon.json exists and has DNS configuration
 DAEMON_JSON="/etc/docker/daemon.json"
-DNS_CONFIGURED=0
+NEEDS_RESTART=0
 
 if [ -f "$DAEMON_JSON" ]; then
     if grep -q '"dns"' "$DAEMON_JSON" 2>/dev/null; then
-        DNS_CONFIGURED=1
         echo "Docker daemon.json already has DNS configuration"
+    else
+        NEEDS_RESTART=1
     fi
+else
+    NEEDS_RESTART=1
 fi
 
-# If DNS not configured, create/update daemon.json
-if [ "$DNS_CONFIGURED" = "0" ]; then
+# If DNS not configured, create daemon.json and restart
+if [ "$NEEDS_RESTART" = "1" ]; then
     echo "Configuring Docker daemon DNS..."
     # Create a simple daemon.json with DNS servers
     sudo tee "$DAEMON_JSON" > /dev/null <<'DAEMONJSON'
@@ -1633,43 +1640,31 @@ if [ "$DNS_CONFIGURED" = "0" ]; then
 }
 DAEMONJSON
     echo "Docker daemon.json configured with DNS servers"
+
+    echo "Restarting Docker daemon to apply DNS configuration..."
+    sudo systemctl restart docker || sudo service docker restart || true
+
+    # Wait for Docker to be ready after restart
+    echo "Waiting for Docker to be ready..."
+    for i in $(seq 1 30); do
+        if sudo docker info >/dev/null 2>&1; then
+            echo "Docker is ready"
+            exit 0
+        fi
+        echo "Waiting for Docker... (attempt $i/30)"
+        sleep 2
+    done
+    echo "WARNING: Docker may not be fully ready"
+else
+    # Just verify Docker is running without restarting
+    if ! sudo docker info >/dev/null 2>&1; then
+        echo "Docker is not running, starting it..."
+        sudo systemctl start docker || sudo service docker start || true
+        sleep 5
+    fi
+    echo "Docker is running with DNS configuration"
 fi
 
-# Always restart Docker to ensure DNS config is applied
-# This is critical because the daemon might have started before DNS was configured
-echo "Restarting Docker daemon to apply DNS configuration..."
-sudo systemctl restart docker || sudo service docker restart || true
-
-# Wait for Docker to be ready
-echo "Waiting for Docker to be ready..."
-for i in $(seq 1 30); do
-    if sudo docker info >/dev/null 2>&1; then
-        echo "Docker is ready"
-        break
-    fi
-    echo "Waiting for Docker... (attempt $i/30)"
-    sleep 2
-done
-
-# Verify Docker containers can resolve DNS by running a quick test
-echo "Verifying Docker container DNS resolution..."
-for i in $(seq 1 5); do
-    # Use a minimal image that's likely cached or quick to pull
-    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io >/dev/null 2>&1; then
-        echo "Docker container DNS resolution verified"
-        exit 0
-    fi
-    # If alpine isn't available, try with busybox
-    if sudo docker run --rm busybox:latest nslookup registry-1.docker.io >/dev/null 2>&1; then
-        echo "Docker container DNS resolution verified"
-        exit 0
-    fi
-    echo "DNS resolution test attempt $i/5 failed, retrying..."
-    sleep 3
-done
-
-# If verification failed, log but don't fail - k3d might still work
-echo "WARNING: Docker container DNS verification failed, but continuing..."
 exit 0
 `
 
@@ -1687,7 +1682,62 @@ exit 0
 	}
 
 	if m.verbose {
-		fmt.Println("✓ Docker daemon DNS configuration verified and applied")
+		fmt.Println("✓ Docker daemon DNS configuration verified")
+	}
+
+	return nil
+}
+
+// verifyDockerReady checks if Docker is running and starts it if not.
+// This is called right before k3d cluster create to ensure Docker is available.
+func (m *K3dManager) verifyDockerReady(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Check if Docker is running, start it if not
+	checkScript := `
+if sudo docker info >/dev/null 2>&1; then
+    echo "Docker is running"
+    exit 0
+fi
+
+echo "Docker is not running, starting it..."
+sudo systemctl start docker || sudo service docker start || true
+
+# Wait for Docker to be ready
+for i in $(seq 1 15); do
+    if sudo docker info >/dev/null 2>&1; then
+        echo "Docker started successfully"
+        exit 0
+    fi
+    echo "Waiting for Docker... (attempt $i/15)"
+    sleep 2
+done
+
+echo "ERROR: Docker failed to start"
+exit 1
+`
+
+	encoded := base64.StdEncoding.EncodeToString([]byte(checkScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	if m.verbose {
+		fmt.Println("Verifying Docker is ready before cluster creation...")
+	}
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", wrapperCmd)
+	if err != nil {
+		return fmt.Errorf("Docker is not available: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Docker is ready")
 	}
 
 	return nil
