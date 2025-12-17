@@ -435,15 +435,28 @@ generateResolvConf = false
 EOF
 fi
 
-# Verify DNS is working
-for i in 1 2 3; do
-    if nslookup google.com >/dev/null 2>&1; then
-        echo "DNS configured successfully"
-        exit 0
+# Wait for DNS to stabilize - WSL2 networking can take time after configuration
+# This is especially important in CI environments like GitHub Actions
+echo "Waiting for DNS to stabilize..."
+sleep 5
+
+# Verify DNS is working with multiple domains
+# We check multiple domains because some may resolve before others
+DNS_OK=0
+for i in $(seq 1 15); do
+    # Try multiple domains that tool installations will need
+    if nslookup google.com >/dev/null 2>&1 && nslookup raw.githubusercontent.com >/dev/null 2>&1; then
+        echo "DNS configured and verified successfully"
+        DNS_OK=1
+        break
     fi
+    echo "DNS not ready yet, waiting... (attempt $i/15)"
     sleep 2
 done
-echo "DNS verification failed but continuing"
+
+if [ "$DNS_OK" = "0" ]; then
+    echo "DNS verification incomplete but continuing"
+fi
 exit 0
 `
 
