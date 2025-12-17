@@ -491,12 +491,13 @@ fi
 echo "Waiting for DNS to stabilize..."
 sleep 5
 
-# Verify DNS is working with multiple domains
-# We check multiple domains because some may resolve before others
+# Verify network is working by actually trying to reach URLs
+# Use curl instead of nslookup - it's more reliable as it uses the system resolver
+# nslookup can fail even when curl would succeed
 DNS_OK=0
 for i in $(seq 1 15); do
-    # Try multiple domains that tool installations will need
-    if nslookup google.com >/dev/null 2>&1 && nslookup raw.githubusercontent.com >/dev/null 2>&1; then
+    # Use curl with short timeouts to test actual connectivity
+    if curl -fsSL --connect-timeout 5 --max-time 10 -o /dev/null https://google.com 2>/dev/null; then
         echo "DNS configured and verified successfully"
         DNS_OK=1
         break

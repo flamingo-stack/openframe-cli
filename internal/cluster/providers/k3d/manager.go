@@ -1556,10 +1556,11 @@ echo "DNS configured successfully"
 		return fmt.Errorf("failed to configure DNS in WSL: %w", err)
 	}
 
-	// Verify DNS is working by testing connectivity
+	// Verify network is working by testing connectivity
+	// Use curl instead of nslookup - it's more reliable as it uses the system resolver
 	verifyScript := `
 for i in 1 2 3; do
-    if nslookup registry-1.docker.io > /dev/null 2>&1; then
+    if curl -fsSL --connect-timeout 5 --max-time 10 -o /dev/null https://registry-1.docker.io/v2/ 2>/dev/null; then
         echo "DNS verification passed"
         exit 0
     fi

@@ -131,24 +131,24 @@ fi
 
 echo "Installing helm..."
 
-# Wait for DNS to be available (WSL2 networking can take time to stabilize)
-echo "Waiting for DNS to be available..."
-DNS_READY=0
+# Wait for network to be available (WSL2 networking can take time to stabilize)
+# Use curl instead of nslookup because curl uses the system resolver which is more reliable
+# nslookup can fail even when curl would succeed
+echo "Waiting for network to be available..."
+NET_READY=0
 for i in $(seq 1 30); do
-    if nslookup raw.githubusercontent.com >/dev/null 2>&1; then
-        echo "DNS is ready"
-        DNS_READY=1
+    # Use curl with a short timeout to test connectivity - more reliable than nslookup
+    if curl -fsSL --connect-timeout 5 --max-time 10 -o /dev/null https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 2>/dev/null; then
+        echo "Network is ready"
+        NET_READY=1
         break
     fi
-    echo "DNS not ready, waiting... (attempt $i/30)"
+    echo "Network not ready, waiting... (attempt $i/30)"
     sleep 2
 done
 
-if [ "$DNS_READY" = "0" ]; then
-    echo "ERROR: DNS resolution failed after 60 seconds"
-    echo "WSL2 networking may not be properly configured"
-    echo "Try running: wsl --shutdown and then restart WSL"
-    exit 6
+if [ "$NET_READY" = "0" ]; then
+    echo "WARNING: Network check timed out, attempting installation anyway..."
 fi
 
 # Download and run official install script with retries
