@@ -412,6 +412,57 @@ func (d *DockerInstaller) ensureUbuntuWSL() error {
 func (d *DockerInstaller) configureWSLDNS() error {
 	fmt.Println("Configuring WSL DNS for reliable networking...")
 
+	// Try DNS configuration, and if it fails completely, restart WSL and try again
+	dnsOK, err := d.tryConfigureDNS()
+	if err != nil {
+		return err
+	}
+
+	if !dnsOK {
+		// DNS failed completely - try restarting WSL
+		fmt.Println("DNS configuration failed, attempting WSL restart to reset networking...")
+
+		// Log network diagnostics before restart
+		d.logNetworkDiagnostics()
+
+		// Shutdown WSL completely
+		fmt.Println("Shutting down WSL...")
+		shutdownCmd := exec.Command("wsl", "--shutdown")
+		shutdownCmd.Run() // Ignore errors
+
+		// Wait for WSL to fully shutdown
+		time.Sleep(3 * time.Second)
+
+		// Restart WSL by running a simple command
+		fmt.Println("Restarting WSL...")
+		restartCmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "WSL restarted")
+		restartCmd.Run() // Ignore errors
+
+		// Wait for networking to initialize after restart
+		time.Sleep(5 * time.Second)
+
+		// Try DNS configuration again
+		fmt.Println("Retrying DNS configuration after WSL restart...")
+		dnsOK, err = d.tryConfigureDNS()
+		if err != nil {
+			return err
+		}
+
+		if !dnsOK {
+			// Still failing - log diagnostics and continue with warning
+			fmt.Println("WARNING: DNS still not working after WSL restart")
+			d.logNetworkDiagnostics()
+			fmt.Println("Continuing anyway - some installations may fail")
+		}
+	}
+
+	return nil
+}
+
+// tryConfigureDNS attempts to configure DNS and verify it's working.
+// Returns (true, nil) if DNS is working, (false, nil) if DNS verification failed,
+// or (false, error) if there was an error running the configuration.
+func (d *DockerInstaller) tryConfigureDNS() (bool, error) {
 	dnsConfigScript := `#!/bin/bash
 # Check if resolv.conf is a symlink (WSL auto-generated) and remove it
 if [ -L /etc/resolv.conf ]; then
@@ -455,7 +506,8 @@ for i in $(seq 1 15); do
 done
 
 if [ "$DNS_OK" = "0" ]; then
-    echo "DNS verification incomplete but continuing"
+    echo "DNS_VERIFICATION_FAILED"
+    exit 1
 fi
 exit 0
 `
@@ -468,7 +520,45 @@ exit 0
 	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	err := cmd.Run()
+
+	if err != nil {
+		// Check if it's a DNS verification failure (exit code 1) vs other error
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil // DNS verification failed, but no error
+		}
+		return false, err // Other error occurred
+	}
+
+	return true, nil // DNS is working
+}
+
+// logNetworkDiagnostics logs network interface and routing information for debugging
+func (d *DockerInstaller) logNetworkDiagnostics() {
+	fmt.Println("=== Network Diagnostics ===")
+
+	diagnosticScript := `#!/bin/bash
+echo "--- Network Interfaces ---"
+ip addr 2>/dev/null || ifconfig 2>/dev/null || echo "Cannot get interface info"
+echo ""
+echo "--- Routing Table ---"
+ip route 2>/dev/null || route -n 2>/dev/null || echo "Cannot get routing info"
+echo ""
+echo "--- DNS Configuration ---"
+cat /etc/resolv.conf 2>/dev/null || echo "Cannot read resolv.conf"
+echo ""
+echo "--- Ping Test (8.8.8.8) ---"
+ping -c 1 -W 2 8.8.8.8 2>&1 || echo "Ping to 8.8.8.8 failed"
+echo "==========================="
+`
+
+	encoded := base64.StdEncoding.EncodeToString([]byte(diagnosticScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", wrapperCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run() // Ignore errors - this is just for diagnostics
 }
 
 // ConfigureWSLDNS is an exported function to configure DNS in WSL2 Ubuntu.
