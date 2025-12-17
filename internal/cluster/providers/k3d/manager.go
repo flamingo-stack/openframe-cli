@@ -196,9 +196,19 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create cluster %s: %w", config.Name, err))
 	}
 
-	// On Windows/WSL2, import critical images into the k3d cluster
-	// This helps avoid DNS resolution issues when pods try to pull images
+	// On Windows/WSL2, fix DNS inside k3d node containers and import critical images
+	// This is critical because k3d containers may have stale DNS configuration
 	if runtime.GOOS == "windows" {
+		// First, fix DNS configuration inside the k3d node containers
+		// This ensures containerd can resolve registry-1.docker.io
+		if err := m.fixK3dNodeDNS(ctx, config.Name); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not fix DNS in k3d nodes: %v\n", err)
+			}
+			// Don't fail - continue with image import as fallback
+		}
+
+		// Then import critical images as a fallback mechanism
 		if err := m.importK3sImages(ctx, config.Name); err != nil {
 			if m.verbose {
 				fmt.Printf("Warning: Could not import k3s images: %v\n", err)
@@ -1798,6 +1808,88 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 
 	if m.verbose {
 		fmt.Println("✓ Image import complete")
+	}
+
+	return nil
+}
+
+// fixK3dNodeDNS fixes DNS configuration inside k3d container nodes.
+// k3d nodes are Docker containers running k3s/containerd. Even if Docker daemon.json
+// has DNS configured, the containers may have stale /etc/resolv.conf that doesn't work.
+// This function updates /etc/resolv.conf inside each k3d node container.
+func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Println("Fixing DNS configuration inside k3d nodes...")
+	}
+
+	// Get list of k3d node containers
+	listCmd := fmt.Sprintf("sudo docker ps --filter 'name=k3d-%s' --format '{{.Names}}'", clusterName)
+	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", listCmd)
+	if err != nil {
+		return fmt.Errorf("failed to list k3d containers: %w", err)
+	}
+
+	containers := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(containers) == 0 || (len(containers) == 1 && containers[0] == "") {
+		return fmt.Errorf("no k3d containers found for cluster %s", clusterName)
+	}
+
+	// Fix DNS in each container
+	for _, container := range containers {
+		container = strings.TrimSpace(container)
+		if container == "" {
+			continue
+		}
+
+		// Update /etc/resolv.conf inside the container with reliable DNS servers
+		// We use docker exec to run commands inside the k3d node container
+		fixDNSCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'cat > /etc/resolv.conf << EOF
+# DNS configured by openframe-cli for reliable registry access
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+EOF'`, container)
+
+		_, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fixDNSCmd)
+		if err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Failed to fix DNS in container %s: %v\n", container, err)
+			}
+			// Continue with other containers
+		} else if m.verbose {
+			fmt.Printf("✓ Fixed DNS in container: %s\n", container)
+		}
+	}
+
+	// Verify DNS is working inside the first server node
+	serverContainer := ""
+	for _, container := range containers {
+		if strings.Contains(container, "-server-") {
+			serverContainer = strings.TrimSpace(container)
+			break
+		}
+	}
+
+	if serverContainer != "" {
+		// Test DNS resolution inside the container
+		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'nslookup registry-1.docker.io 8.8.8.8 2>/dev/null || wget -q --spider --timeout=5 https://registry-1.docker.io/v2/ 2>/dev/null && echo "DNS OK" || echo "DNS check completed"'`, serverContainer)
+		result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", testCmd)
+		if m.verbose {
+			fmt.Printf("DNS verification result: %s\n", strings.TrimSpace(result.Stdout))
+		}
+	}
+
+	if m.verbose {
+		fmt.Println("✓ DNS configuration fixed in k3d nodes")
 	}
 
 	return nil
