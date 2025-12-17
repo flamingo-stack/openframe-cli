@@ -74,7 +74,49 @@ func (eh *ErrorHandler) HandleError(err error) {
 	case *BranchNotFoundError:
 		eh.handleBranchNotFoundError(e)
 	default:
+		// Check for registry DNS errors by pattern matching on the error message
+		// This handles cases where the error type isn't directly accessible
+		if eh.isRegistryDNSError(err) {
+			eh.handleRegistryDNSError(err)
+			return
+		}
 		eh.handleGenericError(err)
+	}
+}
+
+// isRegistryDNSError checks if an error is related to registry DNS issues
+func (eh *ErrorHandler) isRegistryDNSError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+
+	// Check for registry DNS patterns
+	hasRegistryDNS := strings.Contains(msg, "lookup registry-1.docker.io") ||
+		strings.Contains(msg, "registry DNS resolution failed") ||
+		(strings.Contains(msg, "failed to pull image") && strings.Contains(msg, "registry"))
+
+	return hasRegistryDNS
+}
+
+// handleRegistryDNSError displays a user-friendly error for registry DNS issues
+func (eh *ErrorHandler) handleRegistryDNSError(err error) {
+	pterm.Error.Println("Registry DNS resolution failed")
+	fmt.Println()
+	pterm.Info.Println("Pods are stuck because the node cannot pull images from Docker Hub.")
+	pterm.Info.Println("DNS lookup for registry-1.docker.io is failing.")
+	fmt.Println()
+	pterm.Info.Println("This is a known issue with WSL2/Docker networking on Windows.")
+	fmt.Println()
+	pterm.Info.Println("Troubleshooting steps:")
+	pterm.Printf("  • Check WSL2 DNS config: cat /etc/resolv.conf\n")
+	pterm.Printf("  • Test registry connectivity: curl -I https://registry-1.docker.io/v2/\n")
+	pterm.Printf("  • Restart Docker: sudo systemctl restart docker\n")
+	pterm.Printf("  • Retry: openframe bootstrap (or openframe chart install)\n")
+
+	if eh.verbose {
+		fmt.Println()
+		pterm.Printf("  Details: %v\n", err)
 	}
 }
 

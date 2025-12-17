@@ -2,6 +2,7 @@ package k3d
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -96,6 +97,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 				fmt.Printf("Warning: Could not configure WSL DNS: %v\n", err)
 			}
 			// Don't fail - cluster might still work with existing DNS configuration
+		}
+
+		// Ensure Docker daemon has DNS configuration applied
+		// This is critical for k3d containers to resolve external registries
+		if err := m.ensureDockerDNS(ctx); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not configure Docker DNS: %v\n", err)
+			}
+			// Don't fail - might still work if Docker was configured during installation
 		}
 	}
 
@@ -520,6 +530,7 @@ image: %s`, config.Name, servers, agents, image)
 
 	// On Windows/WSL2, add explicit DNS servers as runtime options
 	// This ensures k3d containers get reliable DNS even if Docker daemon settings aren't applied
+	// Critical for pod image pulling (rancher/mirrored-pause, etc.)
 	runtimeOptions := ""
 	if runtime.GOOS == "windows" {
 		runtimeOptions = `
@@ -1579,10 +1590,108 @@ exit 0
 	return nil
 }
 
-// NOTE: configureDockerDaemonDNS has been removed.
-// Docker daemon DNS is now configured during Docker installation in docker/docker.go.
-// This avoids duplicate configuration and the bash script syntax issues that occurred
-// when passing complex scripts through 'wsl bash -c'.
+// ensureDockerDNS ensures Docker daemon has DNS configuration applied and restarts it if needed.
+// This is critical for k3d containers to resolve external registries like registry-1.docker.io.
+// Even though Docker DNS is configured during installation, we need to verify it's applied
+// and restart Docker if necessary before creating k3d clusters.
+func (m *K3dManager) ensureDockerDNS(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil // Only needed on Windows/WSL2
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	// Script to ensure Docker daemon.json has DNS config and restart Docker
+	// Base64 encoding avoids shell interpretation issues when passing through Windows -> WSL
+	ensureDNSScript := `#!/bin/bash
+set -e
+
+# Ensure /etc/docker directory exists
+sudo mkdir -p /etc/docker
+
+# Check if daemon.json exists and has DNS configuration
+DAEMON_JSON="/etc/docker/daemon.json"
+DNS_CONFIGURED=0
+
+if [ -f "$DAEMON_JSON" ]; then
+    if grep -q '"dns"' "$DAEMON_JSON" 2>/dev/null; then
+        DNS_CONFIGURED=1
+        echo "Docker daemon.json already has DNS configuration"
+    fi
+fi
+
+# If DNS not configured, create/update daemon.json
+if [ "$DNS_CONFIGURED" = "0" ]; then
+    echo "Configuring Docker daemon DNS..."
+    # Create a simple daemon.json with DNS servers
+    sudo tee "$DAEMON_JSON" > /dev/null <<'DAEMONJSON'
+{
+    "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+}
+DAEMONJSON
+    echo "Docker daemon.json configured with DNS servers"
+fi
+
+# Always restart Docker to ensure DNS config is applied
+# This is critical because the daemon might have started before DNS was configured
+echo "Restarting Docker daemon to apply DNS configuration..."
+sudo systemctl restart docker || sudo service docker restart || true
+
+# Wait for Docker to be ready
+echo "Waiting for Docker to be ready..."
+for i in $(seq 1 30); do
+    if sudo docker info >/dev/null 2>&1; then
+        echo "Docker is ready"
+        break
+    fi
+    echo "Waiting for Docker... (attempt $i/30)"
+    sleep 2
+done
+
+# Verify Docker containers can resolve DNS by running a quick test
+echo "Verifying Docker container DNS resolution..."
+for i in $(seq 1 5); do
+    # Use a minimal image that's likely cached or quick to pull
+    if sudo docker run --rm alpine:latest nslookup registry-1.docker.io >/dev/null 2>&1; then
+        echo "Docker container DNS resolution verified"
+        exit 0
+    fi
+    # If alpine isn't available, try with busybox
+    if sudo docker run --rm busybox:latest nslookup registry-1.docker.io >/dev/null 2>&1; then
+        echo "Docker container DNS resolution verified"
+        exit 0
+    fi
+    echo "DNS resolution test attempt $i/5 failed, retrying..."
+    sleep 3
+done
+
+# If verification failed, log but don't fail - k3d might still work
+echo "WARNING: Docker container DNS verification failed, but continuing..."
+exit 0
+`
+
+	// Base64-encode the script to avoid shell character interpretation issues
+	encoded := base64.StdEncoding.EncodeToString([]byte(ensureDNSScript))
+	wrapperCmd := fmt.Sprintf("echo %s | base64 -d | bash", encoded)
+
+	if m.verbose {
+		fmt.Println("Ensuring Docker daemon has DNS configuration...")
+	}
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", wrapperCmd)
+	if err != nil {
+		return fmt.Errorf("failed to ensure Docker DNS configuration: %w", err)
+	}
+
+	if m.verbose {
+		fmt.Println("✓ Docker daemon DNS configuration verified and applied")
+	}
+
+	return nil
+}
 
 // increaseInotifyLimits increases the inotify limits on the host system
 // This is critical for applications like MeshCentral that use many file watchers

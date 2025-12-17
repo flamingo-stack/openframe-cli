@@ -250,3 +250,77 @@ func TestCombineErrors(t *testing.T) {
 	assert.Contains(t, result.Error(), "error 1")
 	assert.Contains(t, result.Error(), "error 2")
 }
+
+func TestNewRegistryDNSError(t *testing.T) {
+	cause := errors.New("lookup registry-1.docker.io: Try again")
+	regErr := NewRegistryDNSError("ArgoCD", "registry-1.docker.io", cause)
+
+	assert.NotNil(t, regErr)
+	assert.Equal(t, "registry-1.docker.io", regErr.Registry)
+	assert.True(t, regErr.ChartError.Recoverable)
+	assert.Equal(t, 2*time.Minute, regErr.ChartError.RetryAfter)
+	assert.NotEmpty(t, regErr.Suggestions)
+	assert.Contains(t, regErr.Error(), "registry DNS resolution failed")
+	assert.Contains(t, regErr.Error(), "registry-1.docker.io")
+}
+
+func TestIsRegistryDNSError(t *testing.T) {
+	regErr := NewRegistryDNSError("ArgoCD", "registry-1.docker.io", errors.New("dns failed"))
+	chartErr := NewChartError("installation", "helm", errors.New("normal error"))
+
+	assert.True(t, IsRegistryDNSError(regErr))
+	assert.False(t, IsRegistryDNSError(chartErr))
+	assert.False(t, IsRegistryDNSError(errors.New("regular error")))
+	assert.False(t, IsRegistryDNSError(nil))
+}
+
+func TestIsHelmTimeoutWithRegistryDNS(t *testing.T) {
+	// Test case: Helm timeout with registry DNS error (should match)
+	helmTimeoutDNSErr := errors.New(`failed pre-install: 1 error occurred:
+		* timed out waiting for the condition
+		failed to pull image "rancher/mirrored-pause:3.6": lookup registry-1.docker.io: Try again`)
+	assert.True(t, IsHelmTimeoutWithRegistryDNS(helmTimeoutDNSErr))
+
+	// Test case: Registry DNS error without Helm timeout (should NOT match)
+	dnsOnlyErr := errors.New("lookup registry-1.docker.io: Try again")
+	assert.False(t, IsHelmTimeoutWithRegistryDNS(dnsOnlyErr))
+
+	// Test case: Helm timeout without DNS error (should NOT match)
+	timeoutOnlyErr := errors.New("failed pre-install: timed out waiting for the condition")
+	assert.False(t, IsHelmTimeoutWithRegistryDNS(timeoutOnlyErr))
+
+	// Test case: Normal error (should NOT match)
+	normalErr := errors.New("some other error")
+	assert.False(t, IsHelmTimeoutWithRegistryDNS(normalErr))
+
+	// Test case: nil error
+	assert.False(t, IsHelmTimeoutWithRegistryDNS(nil))
+
+	// Test case: ImagePullBackOff with Helm timeout
+	imagePullErr := errors.New(`failed pre-install: timed out waiting for the condition
+		ImagePullBackOff: failed to pull image`)
+	assert.True(t, IsHelmTimeoutWithRegistryDNS(imagePullErr))
+}
+
+func TestClassifyInstallError(t *testing.T) {
+	// Test case: nil error
+	assert.Nil(t, ClassifyInstallError("ArgoCD", "test-cluster", nil))
+
+	// Test case: Helm timeout with registry DNS -> should return RegistryDNSError
+	helmTimeoutDNSErr := errors.New(`failed pre-install: timed out waiting for the condition
+		lookup registry-1.docker.io: Try again`)
+	classified := ClassifyInstallError("ArgoCD", "test-cluster", helmTimeoutDNSErr)
+	assert.True(t, IsRegistryDNSError(classified))
+	regErr := classified.(*RegistryDNSError)
+	assert.Equal(t, "test-cluster", regErr.ChartError.ClusterName)
+	assert.True(t, regErr.ChartError.Recoverable)
+
+	// Test case: Normal error -> should return ChartError
+	normalErr := errors.New("some installation error")
+	classified = ClassifyInstallError("ArgoCD", "test-cluster", normalErr)
+	assert.False(t, IsRegistryDNSError(classified))
+	assert.IsType(t, &ChartError{}, classified)
+	chartErr := classified.(*ChartError)
+	assert.Equal(t, "test-cluster", chartErr.ClusterName)
+	assert.Equal(t, "ArgoCD", chartErr.Component)
+}

@@ -42,7 +42,9 @@ func (a *ArgoCD) Install(ctx context.Context, cfg config.ChartInstallConfig) err
 	// Install ArgoCD with progress indication
 	err := a.helmManager.InstallArgoCDWithProgress(ctx, cfg)
 	if err != nil {
-		return errors.WrapAsChartError("installation", "ArgoCD", err).WithCluster(cfg.ClusterName)
+		// Use error classification to detect recoverable infrastructure issues
+		// (e.g., registry DNS failures on Windows/WSL2)
+		return errors.ClassifyInstallError("ArgoCD", cfg.ClusterName, err)
 	}
 
 	pterm.Success.Println("ArgoCD installed")

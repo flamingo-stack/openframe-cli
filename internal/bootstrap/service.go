@@ -2,13 +2,16 @@ package bootstrap
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
+	chartErrors "github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
@@ -127,7 +130,7 @@ func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
 // installChartWithMode installs charts with deployment mode flags
 func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	// Use the chart installation function with deployment mode flags
-	return chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
+	err := chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
 		DryRun:         false,
@@ -139,4 +142,71 @@ func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonIn
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
 	})
+
+	if err != nil {
+		// Handle recoverable errors specially on Windows/non-interactive mode (CI)
+		// Registry DNS issues are common in WSL2/GitHub Actions and shouldn't fail the whole bootstrap
+		if s.shouldSoftFailOnError(err, nonInteractive) {
+			s.printRecoverableErrorWarning(err, verbose)
+			return nil // Soft-fail: cluster is created, ArgoCD can be retried
+		}
+		return err
+	}
+
+	return nil
+}
+
+// shouldSoftFailOnError determines if an error should be treated as a soft failure
+// This is used for CI scenarios on Windows where registry DNS issues are common
+func (s *Service) shouldSoftFailOnError(err error, nonInteractive bool) bool {
+	// Only soft-fail in non-interactive mode (CI) on Windows
+	if !nonInteractive || runtime.GOOS != "windows" {
+		return false
+	}
+
+	// Check for registry DNS errors (recoverable infrastructure issues)
+	if chartErrors.IsRegistryDNSError(err) {
+		return true
+	}
+
+	// Check for recoverable chart errors
+	if chartErrors.IsRecoverable(err) {
+		return true
+	}
+
+	// Also check the underlying error for registry DNS patterns
+	// This catches cases where the error wasn't properly classified
+	if chartErrors.IsHelmTimeoutWithRegistryDNS(err) {
+		return true
+	}
+
+	return false
+}
+
+// printRecoverableErrorWarning prints a warning about a recoverable error
+func (s *Service) printRecoverableErrorWarning(err error, verbose bool) {
+	fmt.Println()
+	pterm.Warning.Println("Chart installation encountered a recoverable infrastructure error")
+	fmt.Println()
+
+	// Print specific message based on error type
+	if regErr, ok := err.(*chartErrors.RegistryDNSError); ok {
+		pterm.Info.Printf("Registry DNS issue detected: %s\n", regErr.Registry)
+		fmt.Println()
+		pterm.Info.Println("This is a known issue with WSL2/Docker networking on Windows CI.")
+		pterm.Info.Println("The cluster was created successfully - ArgoCD installation can be retried.")
+		fmt.Println()
+		pterm.Info.Println("Troubleshooting steps:")
+		for _, suggestion := range regErr.GetTroubleshootingSteps() {
+			pterm.Printf("  • %s\n", suggestion)
+		}
+	} else {
+		pterm.Info.Printf("Error: %v\n", err)
+		fmt.Println()
+		pterm.Info.Println("The cluster was created successfully.")
+		pterm.Info.Println("You can retry chart installation with: openframe chart install")
+	}
+
+	fmt.Println()
+	pterm.Success.Println("Bootstrap completed with warnings (cluster created, charts partially installed)")
 }

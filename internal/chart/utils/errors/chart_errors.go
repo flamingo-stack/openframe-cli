@@ -2,6 +2,7 @@ package errors
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -272,4 +273,82 @@ func CombineErrors(errors []error) error {
 func IsSkippedInstallation(err error) bool {
 	_, ok := err.(*SkippedInstallationError)
 	return ok
+}
+
+// RegistryDNSError represents errors where container registry DNS resolution fails
+// This is common on Windows/WSL2 where Docker Hub DNS can be flaky
+type RegistryDNSError struct {
+	*InstallationError
+	Registry string
+}
+
+// Error implements error interface
+func (e *RegistryDNSError) Error() string {
+	return fmt.Sprintf("registry DNS resolution failed for %s: %s", e.Registry, e.ChartError.Error())
+}
+
+// NewRegistryDNSError creates a new registry DNS error (always recoverable)
+func NewRegistryDNSError(component, registry string, cause error) *RegistryDNSError {
+	instErr := NewInstallationError(component, "helm-install", cause)
+	instErr.ChartError.Recoverable = true
+	instErr.ChartError.RetryAfter = 2 * time.Minute
+	instErr.Suggestions = []string{
+		"Check WSL2 DNS configuration in /etc/resolv.conf",
+		"Ensure registry-1.docker.io is reachable from WSL: curl -I https://registry-1.docker.io/v2/",
+		"Restart Docker daemon: sudo systemctl restart docker",
+		"Retry 'openframe bootstrap' after the network stabilizes",
+	}
+	return &RegistryDNSError{
+		InstallationError: instErr,
+		Registry:          registry,
+	}
+}
+
+// IsRegistryDNSError checks if an error is a registry DNS error
+func IsRegistryDNSError(err error) bool {
+	_, ok := err.(*RegistryDNSError)
+	return ok
+}
+
+// IsHelmTimeoutWithRegistryDNS checks if an error indicates Helm timed out due to registry DNS issues
+// This pattern is common on Windows/WSL2 where Docker Hub DNS can be flaky
+func IsHelmTimeoutWithRegistryDNS(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+
+	// Check for Helm timeout patterns
+	isHelmTimeout := (strings.Contains(msg, "failed pre-install") ||
+		strings.Contains(msg, "failed post-install") ||
+		strings.Contains(msg, "timed out waiting")) &&
+		strings.Contains(msg, "timed out waiting for the condition")
+
+	// Check for registry/DNS patterns
+	isRegistryDNS := strings.Contains(msg, "lookup registry-1.docker.io") ||
+		strings.Contains(msg, "failed to pull image") ||
+		strings.Contains(msg, "failed to resolve reference") ||
+		strings.Contains(msg, "ErrImagePull") ||
+		strings.Contains(msg, "ImagePullBackOff") ||
+		(strings.Contains(msg, "dial tcp") && strings.Contains(msg, "i/o timeout"))
+
+	return isHelmTimeout && isRegistryDNS
+}
+
+// ClassifyInstallError examines an error and returns a more specific error type if possible
+// This is useful for detecting infrastructure issues that should be treated as recoverable
+func ClassifyInstallError(component, clusterName string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for registry DNS issues (common on Windows/WSL2)
+	if IsHelmTimeoutWithRegistryDNS(err) {
+		regErr := NewRegistryDNSError(component, "registry-1.docker.io", err)
+		regErr.ChartError.ClusterName = clusterName
+		return regErr
+	}
+
+	// Default: return as a standard chart error
+	return WrapAsChartError("installation", component, err).WithCluster(clusterName)
 }
