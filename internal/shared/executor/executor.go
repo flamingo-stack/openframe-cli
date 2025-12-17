@@ -208,6 +208,77 @@ func WakeUpWSL() error {
 	return nil
 }
 
+// waitForWSLNetworkConnectivity waits for WSL2 network connectivity to be established.
+// WSL2's NAT networking can take time to initialize after the VM starts,
+// especially in CI environments. This function pings external IP addresses
+// to verify Layer 3 connectivity before DNS operations.
+func waitForWSLNetworkConnectivity() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	fmt.Println("  Checking network connectivity...")
+
+	// Try to ping external IPs to verify network connectivity
+	// We check IPs directly (not DNS names) to isolate Layer 3 connectivity
+	maxAttempts := 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Ping Google DNS - using -c 1 for single ping, -W 2 for 2 second timeout
+		cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c",
+			"ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 && echo 'ok'")
+		output, err := cmd.Output()
+		cancel()
+
+		if err == nil && strings.TrimSpace(string(output)) == "ok" {
+			fmt.Println("  ✓ Network connectivity verified")
+			return nil
+		}
+
+		if attempt < maxAttempts {
+			fmt.Printf("  Network not ready, waiting... (attempt %d/%d)\n", attempt, maxAttempts)
+			time.Sleep(3 * time.Second)
+		}
+	}
+
+	return fmt.Errorf("network connectivity not established after %d attempts", maxAttempts)
+}
+
+// restartWSLForNetwork performs a WSL restart specifically to reset networking.
+// This is called when network connectivity check fails and may help reset
+// the WSL2 NAT layer.
+func restartWSLForNetwork() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	// Shutdown WSL completely
+	fmt.Println("  Shutting down WSL...")
+	shutdownCmd := exec.Command("wsl", "--shutdown")
+	if err := shutdownCmd.Run(); err != nil {
+		return fmt.Errorf("failed to shutdown WSL: %w", err)
+	}
+
+	// Wait for WSL to fully shutdown
+	time.Sleep(5 * time.Second)
+
+	// Restart WSL by running a simple command
+	fmt.Println("  Restarting WSL...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	restartCmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "echo", "restarted")
+	if _, err := restartCmd.Output(); err != nil {
+		return fmt.Errorf("failed to restart WSL: %w", err)
+	}
+
+	// Wait for networking to reinitialize after restart
+	fmt.Println("  Waiting for network to reinitialize (20s)...")
+	time.Sleep(20 * time.Second)
+
+	return nil
+}
+
 // TryRecoverWSL attempts to recover WSL connectivity by terminating and restarting the distribution
 // This is a last-resort operation when WSL becomes completely unresponsive
 // Returns nil if recovery was successful, error otherwise
@@ -359,8 +430,29 @@ func InitializeWSLUbuntu() error {
 		return fmt.Errorf("failed to initialize Ubuntu after %d attempts: %w", maxRetries, lastErr)
 	}
 
-	// Give Ubuntu a moment to fully stabilize
-	time.Sleep(5 * time.Second)
+	// Give Ubuntu time to fully stabilize, including its network layer
+	// WSL2's NAT networking needs time to initialize after the VM starts
+	// This is especially important in CI environments like GitHub Actions
+	fmt.Println("  Waiting for WSL2 to stabilize (15s)...")
+	time.Sleep(15 * time.Second)
+
+	// Wait for network connectivity before proceeding
+	// This ensures the WSL2 network layer is fully operational
+	if err := waitForWSLNetworkConnectivity(); err != nil {
+		fmt.Printf("  Warning: Network connectivity check failed: %v\n", err)
+		fmt.Println("  Attempting WSL restart to reset networking...")
+
+		// Try restarting WSL to reset the network
+		if restartErr := restartWSLForNetwork(); restartErr != nil {
+			fmt.Printf("  Warning: WSL restart failed: %v\n", restartErr)
+		} else {
+			// Try connectivity check again after restart
+			if err := waitForWSLNetworkConnectivity(); err != nil {
+				fmt.Printf("  Warning: Network still not available after restart: %v\n", err)
+				fmt.Println("  Continuing anyway - some operations may fail...")
+			}
+		}
+	}
 
 	// Step 2: Configure passwordless sudo for the sudo group
 	// This is critical for non-interactive operation
