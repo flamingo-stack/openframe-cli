@@ -117,6 +117,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 			}
 			// Don't fail - cluster creation might still succeed
 		}
+
+		// Fix Docker network routing BEFORE creating the cluster
+		// This ensures IP forwarding and NAT masquerading are set up correctly
+		if err := m.fixDockerNetworkRouting(ctx); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not fix Docker network routing: %v\n", err)
+			}
+			// Don't fail - might still work
+		}
 	}
 
 	// On Windows/WSL2, get the WSL internal IP before creating the cluster
@@ -1870,11 +1879,61 @@ ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image fou
 	return nil
 }
 
+// fixDockerNetworkRouting fixes Docker bridge network routing issues on WSL2.
+// On WSL2/GitHub Actions, the Docker bridge network sometimes can't route to the internet.
+// This function ensures IP forwarding is enabled and NAT masquerading is set up correctly.
+func (m *K3dManager) fixDockerNetworkRouting(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	fmt.Println("Fixing Docker network routing...")
+
+	// Enable IP forwarding and set up NAT masquerading for Docker bridge networks
+	fixRoutingScript := `
+# Enable IP forwarding
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+
+# Get the main network interface (usually eth0 in WSL2)
+MAIN_IF=$(ip route | grep default | awk '{print $5}' | head -1)
+echo "Main interface: $MAIN_IF"
+
+# Set up NAT masquerading for Docker networks
+# This ensures packets from Docker containers can reach the internet
+sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o $MAIN_IF -j MASQUERADE 2>/dev/null || true
+sudo iptables -t nat -A POSTROUTING -s 10.0.0.0/8 -o $MAIN_IF -j MASQUERADE 2>/dev/null || true
+
+# Allow forwarding between interfaces
+sudo iptables -A FORWARD -i docker0 -o $MAIN_IF -j ACCEPT 2>/dev/null || true
+sudo iptables -A FORWARD -i $MAIN_IF -o docker0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+
+# Also for k3d network (br-* interfaces)
+for BR in $(ip link show | grep 'br-' | awk -F: '{print $2}' | tr -d ' '); do
+    sudo iptables -A FORWARD -i $BR -o $MAIN_IF -j ACCEPT 2>/dev/null || true
+    sudo iptables -A FORWARD -i $MAIN_IF -o $BR -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+done
+
+echo "Network routing configured"
+`
+
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fixRoutingScript)
+	if err != nil {
+		return fmt.Errorf("failed to fix Docker network routing: %w", err)
+	}
+
+	fmt.Println("✓ Docker network routing configured")
+	return nil
+}
+
 // fixK3dNodeDNS fixes DNS configuration inside k3d container nodes.
 // k3d nodes are Docker containers running k3s/containerd. Even if Docker daemon.json
 // has DNS configured, the containers may have stale /etc/resolv.conf that doesn't work.
-// This function updates /etc/resolv.conf inside each k3d node container and restarts
-// containerd to pick up the new DNS configuration.
+// This function updates /etc/resolv.conf inside each k3d node container.
 func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) error {
 	if runtime.GOOS != "windows" {
 		return nil
