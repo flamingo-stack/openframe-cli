@@ -1881,7 +1881,7 @@ ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image fou
 
 // fixDockerNetworkRouting fixes Docker bridge network routing issues on WSL2.
 // On WSL2/GitHub Actions, the Docker bridge network sometimes can't route to the internet.
-// This function ensures IP forwarding is enabled and NAT masquerading is set up correctly.
+// This function ensures IP forwarding is enabled.
 func (m *K3dManager) fixDockerNetworkRouting(ctx context.Context) error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -1892,36 +1892,25 @@ func (m *K3dManager) fixDockerNetworkRouting(ctx context.Context) error {
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	fmt.Println("Fixing Docker network routing...")
+	fmt.Println("Enabling IP forwarding for Docker networking...")
 
-	// Only enable IP forwarding - don't touch iptables FORWARD chain
+	// Only enable IP forwarding - don't restart Docker as that can destabilize it
 	// Docker manages its own iptables rules for internal networking
-	fixRoutingScript := `
-# Enable IP forwarding (required for Docker networking)
-echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
-sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+	// Base64 encoded script to avoid shell escaping issues:
+	// #!/bin/bash
+	// echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+	// sudo sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+	// echo "IP forwarding enabled"
+	script := "IyEvYmluL2Jhc2gKZWNobyAxIHwgc3VkbyB0ZWUgL3Byb2Mvc3lzL25ldC9pcHY0L2lwX2ZvcndhcmQgPiAvZGV2L251bGwKc3VkbyBzeXNjdGwgLXcgbmV0LmlwdjQuaXBfZm9yd2FyZD0xIDI+L2Rldi9udWxsIHx8IHRydWUKZWNobyAiSVAgZm9yd2FyZGluZyBlbmFibGVkIgo="
 
-# Restart Docker to ensure it sets up iptables rules correctly
-sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
-
-# Wait for Docker to be ready
-for i in $(seq 1 10); do
-    if sudo docker info >/dev/null 2>&1; then
-        echo "Docker restarted successfully"
-        break
-    fi
-    sleep 1
-done
-
-echo "Network routing configured"
-`
-
-	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fixRoutingScript)
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fmt.Sprintf("echo %s | base64 -d | bash", script))
 	if err != nil {
-		return fmt.Errorf("failed to fix Docker network routing: %w", err)
+		// Non-fatal - just log and continue, IP forwarding might already be enabled
+		fmt.Printf("Warning: failed to enable IP forwarding: %v\n", err)
+		return nil
 	}
 
-	fmt.Println("✓ Docker network routing configured")
+	fmt.Println("✓ IP forwarding enabled")
 	return nil
 }
 
