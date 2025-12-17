@@ -178,6 +178,15 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		if err := m.verifyDockerReady(ctx); err != nil {
 			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("Docker is not ready: %w", err))
 		}
+
+		// Create a Docker network with DNS servers configured BEFORE k3d creates the cluster
+		// This ensures all k3d containers get proper DNS resolution
+		if err := m.createK3dNetworkWithDNS(ctx, config.Name); err != nil {
+			if m.verbose {
+				fmt.Printf("Warning: Could not create k3d network with DNS: %v\n", err)
+			}
+			// Don't fail - k3d will create its own network, but DNS might not work
+		}
 	}
 
 	args := []string{
@@ -339,8 +348,8 @@ func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, cluste
 		return fmt.Errorf("failed to cleanup containers via WSL: %w", err)
 	}
 
-	// Also remove the network
-	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s 2>/dev/null || true", clusterName)
+	// Also remove the networks (both the default k3d network and our custom DNS network)
+	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s k3d-%s-net 2>/dev/null || true", clusterName, clusterName)
 	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd)
 
 	return nil
@@ -565,17 +574,37 @@ image: %s`, config.Name, servers, agents, image)
           - server:*`, wslInternalIP)
 	}
 
-	// On Windows/WSL2, add explicit DNS servers as runtime options
-	// This ensures k3d containers get reliable DNS even if Docker daemon settings aren't applied
-	// Critical for pod image pulling (rancher/mirrored-pause, etc.)
+	// On Windows/WSL2, add runtime options for k3d containers
 	runtimeOptions := ""
 	if runtime.GOOS == "windows" {
+		// Set ulimits for file descriptors
 		runtimeOptions = `
   runtime:
     ulimits:
       - name: nofile
         soft: 65536
         hard: 65536`
+	}
+
+	// On Windows/WSL2, configure k3s registries to help with image pulling
+	// This creates a registries.yaml inside k3d nodes that k3s/containerd will use
+	registriesConfig := ""
+	if runtime.GOOS == "windows" {
+		registriesConfig = `
+registries:
+  config: |
+    mirrors:
+      "docker.io":
+        endpoint:
+          - "https://registry-1.docker.io"`
+	}
+
+	// On Windows/WSL2, use a custom network with DNS configured
+	// This network should be pre-created by createK3dNetworkWithDNS
+	networkConfig := ""
+	if runtime.GOOS == "windows" {
+		networkConfig = fmt.Sprintf(`
+network: k3d-%s-net`, config.Name)
 	}
 
 	configContent += fmt.Sprintf(`
@@ -601,7 +630,7 @@ ports:
       - loadbalancer
   - port: %s:443
     nodeFilters:
-      - loadbalancer`, hostIP, hostIP, apiPort, tlsSanArg, runtimeOptions, httpPort, httpsPort)
+      - loadbalancer%s%s`, hostIP, hostIP, apiPort, tlsSanArg, runtimeOptions, httpPort, httpsPort, registriesConfig, networkConfig)
 
 	tmpFile, err := os.CreateTemp("", "k3d-config-*.yaml")
 	if err != nil {
@@ -1794,24 +1823,21 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 		"rancher/mirrored-pause:3.6",
 	}
 
-	if m.verbose {
-		fmt.Println("Importing critical images into k3d cluster...")
-	}
+	fmt.Println("Importing critical images into k3d cluster...")
 
 	// Import each image using k3d image import
 	for _, image := range images {
 		args := []string{"image", "import", image, "-c", clusterName}
 		if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Failed to import image %s: %v\n", image, err)
-			}
+			fmt.Printf("Warning: Failed to import image %s: %v\n", image, err)
 			// Continue with other images
-		} else if m.verbose {
+		} else {
 			fmt.Printf("✓ Imported image: %s\n", image)
 		}
 	}
 
 	// Verify images are actually in containerd's store
+	// Always print for CI debugging
 	serverContainer := fmt.Sprintf("k3d-%s-server-0", clusterName)
 	verifyCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
 echo "=== Images in containerd (crictl) ==="
@@ -1821,13 +1847,10 @@ echo "=== Images in containerd (ctr) ==="
 ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image found in ctr"
 '`, serverContainer)
 	result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", verifyCmd)
-	if m.verbose {
-		fmt.Printf("Image verification:\n%s\n", strings.TrimSpace(result.Stdout))
-	}
+	// Always print for CI debugging
+	fmt.Printf("Image verification after k3d import:\n%s\n", strings.TrimSpace(result.Stdout))
 
-	if m.verbose {
-		fmt.Println("✓ Image import complete")
-	}
+	fmt.Println("✓ Image import complete")
 
 	return nil
 }
@@ -1847,9 +1870,7 @@ func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) erro
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	if m.verbose {
-		fmt.Println("Fixing DNS configuration inside k3d nodes...")
-	}
+	fmt.Println("Fixing DNS configuration inside k3d nodes...")
 
 	// Get list of k3d node containers
 	listCmd := fmt.Sprintf("sudo docker ps --filter 'name=k3d-%s' --format '{{.Names}}'", clusterName)
@@ -1886,11 +1907,9 @@ EOF'`, container)
 
 		_, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", fixDNSCmd)
 		if err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Failed to fix DNS in container %s: %v\n", container, err)
-			}
+			fmt.Printf("Warning: Failed to fix DNS in container %s: %v\n", container, err)
 			// Continue with other containers
-		} else if m.verbose {
+		} else {
 			fmt.Printf("✓ Fixed DNS in container: %s\n", container)
 		}
 
@@ -1899,15 +1918,11 @@ EOF'`, container)
 		// We use pkill to gracefully restart containerd
 		restartCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'pkill -HUP containerd 2>/dev/null || pkill containerd 2>/dev/null || true'`, container)
 		_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", restartCmd)
-		if m.verbose {
-			fmt.Printf("✓ Restarted containerd in container: %s\n", container)
-		}
+		fmt.Printf("✓ Restarted containerd in container: %s\n", container)
 	}
 
 	// Wait for containerd to restart and stabilize
-	if m.verbose {
-		fmt.Println("Waiting for containerd to restart (10s)...")
-	}
+	fmt.Println("Waiting for containerd to restart (10s)...")
 	time.Sleep(10 * time.Second)
 
 	// Verify DNS is working inside the first server node
@@ -1921,6 +1936,7 @@ EOF'`, container)
 
 	if serverContainer != "" {
 		// Test network and DNS inside the container
+		// Always print diagnostics on Windows for CI visibility
 		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
 echo "=== /etc/resolv.conf ==="
 cat /etc/resolv.conf
@@ -1938,13 +1954,53 @@ echo "=== Checking crictl images ==="
 crictl images 2>&1 | grep -E "(pause|IMAGE)" || echo "crictl not available or no pause image"
 '`, serverContainer)
 		result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", testCmd)
-		if m.verbose {
-			fmt.Printf("k3d node diagnostics:\n%s\n", strings.TrimSpace(result.Stdout))
-		}
+		// Always print diagnostics on Windows for CI debugging
+		fmt.Printf("k3d node network diagnostics:\n%s\n", strings.TrimSpace(result.Stdout))
 	}
 
-	if m.verbose {
-		fmt.Println("✓ DNS configuration fixed in k3d nodes")
+	fmt.Println("✓ DNS configuration fixed in k3d nodes")
+
+	return nil
+}
+
+// createK3dNetworkWithDNS creates a Docker network with explicit DNS servers configured.
+// This is critical for k3d containers on Windows/WSL2 where the default Docker DNS can fail.
+// By creating the network with --dns flags, all containers on this network inherit the DNS settings.
+func (m *K3dManager) createK3dNetworkWithDNS(ctx context.Context, clusterName string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
+	networkName := fmt.Sprintf("k3d-%s-net", clusterName)
+
+	// First, remove any existing network with this name (from failed previous attempts)
+	removeCmd := fmt.Sprintf("sudo docker network rm %s 2>/dev/null || true", networkName)
+	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", removeCmd)
+
+	// Create the network with DNS servers configured
+	// The --dns flag sets DNS servers for all containers that join this network
+	createCmd := fmt.Sprintf(
+		"sudo docker network create --driver bridge --dns 8.8.8.8 --dns 1.1.1.1 --dns 8.8.4.4 %s",
+		networkName,
+	)
+
+	fmt.Printf("Creating Docker network %s with DNS servers...\n", networkName)
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", createCmd)
+	if err != nil {
+		return fmt.Errorf("failed to create k3d network with DNS: %w", err)
+	}
+
+	// Verify the network was created with DNS settings
+	inspectCmd := fmt.Sprintf("sudo docker network inspect %s --format '{{json .IPAM.Config}}'", networkName)
+	result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", inspectCmd)
+	fmt.Printf("✓ Created Docker network %s with DNS servers (8.8.8.8, 1.1.1.1, 8.8.4.4)\n", networkName)
+	if m.verbose && result.Stdout != "" {
+		fmt.Printf("Network IPAM config: %s\n", strings.TrimSpace(result.Stdout))
 	}
 
 	return nil
