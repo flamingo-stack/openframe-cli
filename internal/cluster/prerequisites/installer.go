@@ -13,6 +13,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/wsl"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 )
@@ -68,24 +69,31 @@ func (i *Installer) InstallMissingPrerequisites() error {
 func (i *Installer) installSpecificTools(tools []string) error {
 	pterm.Info.Printf("Starting installation of %d tool(s): %s\n", len(tools), strings.Join(tools, ", "))
 
-	// On Windows, configure DNS before installing tools that need network access
+	// On Windows, ensure WSL Ubuntu is properly initialized before installing tools
 	// This is critical when Docker is already installed but kubectl/k3d/helm are not
-	// DNS configuration normally happens during Docker installation, but if Docker
-	// was already present, we need to ensure DNS is configured before other tool installs
+	// Ubuntu initialization normally happens during Docker installation, but if Docker
+	// was already present, we need to ensure Ubuntu is initialized (user setup, passwordless sudo)
+	// before other tool installs - otherwise WSL user mapping fails with "getpwnam failed"
 	if runtime.GOOS == "windows" {
-		needsDNS := false
+		needsWSL := false
 		hasDocker := false
 		for _, tool := range tools {
 			switch strings.ToLower(tool) {
 			case "kubectl", "k3d", "helm":
-				needsDNS = true
+				needsWSL = true
 			case "docker":
 				hasDocker = true
 			}
 		}
-		// Only configure DNS if we need network tools but Docker is not in the install list
-		// (Docker handles its own DNS configuration during installation)
-		if needsDNS && !hasDocker {
+		// Only initialize WSL if we need WSL-based tools but Docker is not in the install list
+		// (Docker handles its own Ubuntu initialization during installation)
+		if needsWSL && !hasDocker {
+			// First ensure Ubuntu is properly initialized (user setup, passwordless sudo)
+			if err := executor.InitializeWSLUbuntu(); err != nil {
+				pterm.Warning.Printf("Could not initialize WSL Ubuntu: %v\n", err)
+				// Don't fail - might already be initialized
+			}
+			// Then configure DNS for network access
 			if err := docker.ConfigureWSLDNS(); err != nil {
 				pterm.Warning.Printf("Could not configure WSL DNS: %v\n", err)
 				// Don't fail - DNS might already be working
