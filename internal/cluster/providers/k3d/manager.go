@@ -1790,8 +1790,10 @@ echo "Image pre-pull complete"
 	return nil
 }
 
-// importK3sImages imports critical images into the k3d cluster after creation.
-// This bypasses DNS resolution issues by loading images directly from Docker cache.
+// importK3sImages imports critical images directly into containerd inside k3d nodes.
+// This bypasses DNS resolution issues by:
+// 1. Saving the image from Docker to a tar file
+// 2. Copying into k3d container and importing via ctr
 func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -1802,37 +1804,66 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	// Images to import - the pause image is critical for pod sandbox creation
-	images := []string{
-		"rancher/mirrored-pause:3.6",
+	// The pause image is critical for pod sandbox creation
+	image := "rancher/mirrored-pause:3.6"
+	tarFile := "/tmp/pause-image.tar"
+
+	fmt.Println("Importing critical images directly into containerd...")
+
+	// Step 1: Save image from Docker to tar file
+	saveCmd := fmt.Sprintf("sudo docker save -o %s %s", tarFile, image)
+	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", saveCmd)
+	if err != nil {
+		return fmt.Errorf("failed to save image to tar: %w", err)
+	}
+	fmt.Printf("✓ Saved %s to %s\n", image, tarFile)
+
+	// Step 2: Get list of k3d node containers (excluding serverlb)
+	listCmd := fmt.Sprintf("sudo docker ps --filter 'name=k3d-%s' --format '{{.Names}}' | grep -v serverlb", clusterName)
+	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", listCmd)
+	if err != nil {
+		return fmt.Errorf("failed to list k3d containers: %w", err)
 	}
 
-	fmt.Println("Importing critical images into k3d cluster...")
+	containers := strings.Split(strings.TrimSpace(result.Stdout), "\n")
 
-	// Import each image using k3d image import
-	for _, image := range images {
-		args := []string{"image", "import", image, "-c", clusterName}
-		if _, err := m.executor.Execute(ctx, "k3d", args...); err != nil {
-			fmt.Printf("Warning: Failed to import image %s: %v\n", image, err)
-			// Continue with other images
-		} else {
-			fmt.Printf("✓ Imported image: %s\n", image)
+	// Step 3: Import image into containerd in each node
+	for _, container := range containers {
+		container = strings.TrimSpace(container)
+		if container == "" {
+			continue
 		}
+
+		// Copy tar file into the container
+		copyCmd := fmt.Sprintf("sudo docker cp %s %s:/tmp/pause-image.tar", tarFile, container)
+		_, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", copyCmd)
+		if err != nil {
+			fmt.Printf("Warning: Failed to copy tar to %s: %v\n", container, err)
+			continue
+		}
+
+		// Import using ctr into k8s.io namespace (where k3s/containerd looks for images)
+		importCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'ctr -n k8s.io images import /tmp/pause-image.tar && rm /tmp/pause-image.tar'`, container)
+		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", importCmd)
+		if err != nil {
+			fmt.Printf("Warning: Failed to import image in %s: %v\n", container, err)
+			continue
+		}
+		fmt.Printf("✓ Imported pause image into %s\n", container)
 	}
 
-	// Verify images are actually in containerd's store
-	// Always print for CI debugging
+	// Cleanup tar file
+	cleanupCmd := fmt.Sprintf("rm -f %s", tarFile)
+	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
+
+	// Verify images are in containerd
 	serverContainer := fmt.Sprintf("k3d-%s-server-0", clusterName)
 	verifyCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
-echo "=== Images in containerd (crictl) ==="
-crictl images 2>&1 | grep -E "(pause|IMAGE)" || echo "No pause image found in crictl"
-echo ""
-echo "=== Images in containerd (ctr) ==="
-ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image found in ctr"
+echo "=== Images in containerd (ctr k8s.io namespace) ==="
+ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image found"
 '`, serverContainer)
-	result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", verifyCmd)
-	// Always print for CI debugging
-	fmt.Printf("Image verification after k3d import:\n%s\n", strings.TrimSpace(result.Stdout))
+	result, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", verifyCmd)
+	fmt.Printf("Image verification:\n%s\n", strings.TrimSpace(result.Stdout))
 
 	fmt.Println("✓ Image import complete")
 
