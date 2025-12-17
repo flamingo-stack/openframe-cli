@@ -221,7 +221,8 @@ func waitForWSLNetworkConnectivity() error {
 
 	// Try to ping external IPs to verify network connectivity
 	// We check IPs directly (not DNS names) to isolate Layer 3 connectivity
-	maxAttempts := 10
+	// WSL2 networking can take 60+ seconds to initialize in CI environments
+	maxAttempts := 20
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		// Ping Google DNS - using -c 1 for single ping, -W 2 for 2 second timeout
@@ -237,7 +238,7 @@ func waitForWSLNetworkConnectivity() error {
 
 		if attempt < maxAttempts {
 			fmt.Printf("  Network not ready, waiting... (attempt %d/%d)\n", attempt, maxAttempts)
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 
@@ -273,8 +274,9 @@ func restartWSLForNetwork() error {
 	}
 
 	// Wait for networking to reinitialize after restart
-	fmt.Println("  Waiting for network to reinitialize (20s)...")
-	time.Sleep(20 * time.Second)
+	// WSL2's NAT layer needs significant time to fully initialize
+	fmt.Println("  Waiting for network to reinitialize (45s)...")
+	time.Sleep(45 * time.Second)
 
 	return nil
 }
@@ -431,10 +433,11 @@ func InitializeWSLUbuntu() error {
 	}
 
 	// Give Ubuntu time to fully stabilize, including its network layer
-	// WSL2's NAT networking needs time to initialize after the VM starts
+	// WSL2's NAT networking needs significant time to initialize after the VM starts
 	// This is especially important in CI environments like GitHub Actions
-	fmt.Println("  Waiting for WSL2 to stabilize (15s)...")
-	time.Sleep(15 * time.Second)
+	// Testing shows network needs 30-60 seconds to stabilize in some cases
+	fmt.Println("  Waiting for WSL2 to stabilize (30s)...")
+	time.Sleep(30 * time.Second)
 
 	// Wait for network connectivity before proceeding
 	// This ensures the WSL2 network layer is fully operational
