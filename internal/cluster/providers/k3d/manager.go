@@ -178,15 +178,6 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		if err := m.verifyDockerReady(ctx); err != nil {
 			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("Docker is not ready: %w", err))
 		}
-
-		// Create a Docker network with DNS servers configured BEFORE k3d creates the cluster
-		// This ensures all k3d containers get proper DNS resolution
-		if err := m.createK3dNetworkWithDNS(ctx, config.Name); err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Could not create k3d network with DNS: %v\n", err)
-			}
-			// Don't fail - k3d will create its own network, but DNS might not work
-		}
 	}
 
 	args := []string{
@@ -348,8 +339,8 @@ func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, cluste
 		return fmt.Errorf("failed to cleanup containers via WSL: %w", err)
 	}
 
-	// Also remove the networks (both the default k3d network and our custom DNS network)
-	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s k3d-%s-net 2>/dev/null || true", clusterName, clusterName)
+	// Also remove the network
+	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s 2>/dev/null || true", clusterName)
 	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd)
 
 	return nil
@@ -599,13 +590,6 @@ registries:
           - "https://registry-1.docker.io"`
 	}
 
-	// On Windows/WSL2, use a custom network with DNS configured
-	// This network should be pre-created by createK3dNetworkWithDNS
-	networkConfig := ""
-	if runtime.GOOS == "windows" {
-		networkConfig = fmt.Sprintf(`
-network: k3d-%s-net`, config.Name)
-	}
 
 	configContent += fmt.Sprintf(`
 kubeAPI:
@@ -630,7 +614,7 @@ ports:
       - loadbalancer
   - port: %s:443
     nodeFilters:
-      - loadbalancer%s%s`, hostIP, hostIP, apiPort, tlsSanArg, runtimeOptions, httpPort, httpsPort, registriesConfig, networkConfig)
+      - loadbalancer%s`, hostIP, hostIP, apiPort, tlsSanArg, runtimeOptions, httpPort, httpsPort, registriesConfig)
 
 	tmpFile, err := os.CreateTemp("", "k3d-config-*.yaml")
 	if err != nil {
@@ -1870,7 +1854,7 @@ func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) erro
 		return fmt.Errorf("failed to get WSL user: %w", err)
 	}
 
-	fmt.Println("Fixing DNS configuration inside k3d nodes...")
+	fmt.Println("Checking network connectivity inside k3d nodes...")
 
 	// Get list of k3d node containers
 	listCmd := fmt.Sprintf("sudo docker ps --filter 'name=k3d-%s' --format '{{.Names}}'", clusterName)
@@ -1884,7 +1868,30 @@ func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) erro
 		return fmt.Errorf("no k3d containers found for cluster %s", clusterName)
 	}
 
-	// Fix DNS in each container and restart containerd
+	// Find server container for diagnostics
+	serverContainer := ""
+	for _, container := range containers {
+		if strings.Contains(container, "-server-") && !strings.Contains(container, "-serverlb") {
+			serverContainer = strings.TrimSpace(container)
+			break
+		}
+	}
+
+	// Test network connectivity BEFORE making any changes
+	if serverContainer != "" {
+		fmt.Println("Testing network BEFORE DNS changes...")
+		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
+echo "=== Current /etc/resolv.conf ==="
+cat /etc/resolv.conf
+echo ""
+echo "=== Testing ping to 8.8.8.8 ==="
+ping -c 1 -W 3 8.8.8.8 2>&1 || echo "ping failed"
+'`, serverContainer)
+		result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", testCmd)
+		fmt.Printf("BEFORE DNS fix:\n%s\n", strings.TrimSpace(result.Stdout))
+	}
+
+	// Fix DNS in each container (do NOT restart containerd - it breaks networking)
 	for _, container := range containers {
 		container = strings.TrimSpace(container)
 		if container == "" {
@@ -1898,6 +1905,7 @@ func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) erro
 
 		// Update /etc/resolv.conf inside the container with reliable DNS servers
 		// We use docker exec to run commands inside the k3d node container
+		// NOTE: We do NOT restart containerd - that breaks networking!
 		fixDNSCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'cat > /etc/resolv.conf << EOF
 # DNS configured by openframe-cli for reliable registry access
 nameserver 8.8.8.8
@@ -1912,31 +1920,14 @@ EOF'`, container)
 		} else {
 			fmt.Printf("✓ Fixed DNS in container: %s\n", container)
 		}
-
-		// Restart containerd inside the container to pick up new DNS
-		// In k3s, containerd runs as part of k3s. Killing containerd causes k3s to restart it.
-		// We use pkill to gracefully restart containerd
-		restartCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'pkill -HUP containerd 2>/dev/null || pkill containerd 2>/dev/null || true'`, container)
-		_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", restartCmd)
-		fmt.Printf("✓ Restarted containerd in container: %s\n", container)
 	}
 
-	// Wait for containerd to restart and stabilize
-	fmt.Println("Waiting for containerd to restart (10s)...")
-	time.Sleep(10 * time.Second)
+	// Brief pause to let DNS changes take effect
+	time.Sleep(2 * time.Second)
 
-	// Verify DNS is working inside the first server node
-	serverContainer := ""
-	for _, container := range containers {
-		if strings.Contains(container, "-server-") && !strings.Contains(container, "-serverlb") {
-			serverContainer = strings.TrimSpace(container)
-			break
-		}
-	}
-
+	// Test network connectivity AFTER DNS changes
 	if serverContainer != "" {
-		// Test network and DNS inside the container
-		// Always print diagnostics on Windows for CI visibility
+		fmt.Println("Testing network AFTER DNS changes...")
 		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
 echo "=== /etc/resolv.conf ==="
 cat /etc/resolv.conf
@@ -1959,49 +1950,6 @@ crictl images 2>&1 | grep -E "(pause|IMAGE)" || echo "crictl not available or no
 	}
 
 	fmt.Println("✓ DNS configuration fixed in k3d nodes")
-
-	return nil
-}
-
-// createK3dNetworkWithDNS creates a Docker network with explicit DNS servers configured.
-// This is critical for k3d containers on Windows/WSL2 where the default Docker DNS can fail.
-// By creating the network with --dns flags, all containers on this network inherit the DNS settings.
-func (m *K3dManager) createK3dNetworkWithDNS(ctx context.Context, clusterName string) error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-
-	username, err := m.getWSLUser(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get WSL user: %w", err)
-	}
-
-	networkName := fmt.Sprintf("k3d-%s-net", clusterName)
-
-	// First, remove any existing network with this name (from failed previous attempts)
-	removeCmd := fmt.Sprintf("sudo docker network rm %s 2>/dev/null || true", networkName)
-	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", removeCmd)
-
-	// Create the network with DNS servers configured
-	// The --dns flag sets DNS servers for all containers that join this network
-	createCmd := fmt.Sprintf(
-		"sudo docker network create --driver bridge --dns 8.8.8.8 --dns 1.1.1.1 --dns 8.8.4.4 %s",
-		networkName,
-	)
-
-	fmt.Printf("Creating Docker network %s with DNS servers...\n", networkName)
-	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", createCmd)
-	if err != nil {
-		return fmt.Errorf("failed to create k3d network with DNS: %w", err)
-	}
-
-	// Verify the network was created with DNS settings
-	inspectCmd := fmt.Sprintf("sudo docker network inspect %s --format '{{json .IPAM.Config}}'", networkName)
-	result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", inspectCmd)
-	fmt.Printf("✓ Created Docker network %s with DNS servers (8.8.8.8, 1.1.1.1, 8.8.4.4)\n", networkName)
-	if m.verbose && result.Stdout != "" {
-		fmt.Printf("Network IPAM config: %s\n", strings.TrimSpace(result.Stdout))
-	}
 
 	return nil
 }
