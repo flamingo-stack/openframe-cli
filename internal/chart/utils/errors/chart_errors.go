@@ -324,7 +324,7 @@ func IsHelmTimeoutWithRegistryDNS(err error) bool {
 		strings.Contains(msg, "timed out waiting")) &&
 		strings.Contains(msg, "timed out waiting for the condition")
 
-	// Check for registry/DNS patterns
+	// Check for registry/DNS patterns in the error message
 	isRegistryDNS := strings.Contains(msg, "lookup registry-1.docker.io") ||
 		strings.Contains(msg, "failed to pull image") ||
 		strings.Contains(msg, "failed to resolve reference") ||
@@ -333,6 +333,21 @@ func IsHelmTimeoutWithRegistryDNS(err error) bool {
 		(strings.Contains(msg, "dial tcp") && strings.Contains(msg, "i/o timeout"))
 
 	return isHelmTimeout && isRegistryDNS
+}
+
+// IsHelmPreInstallTimeout checks if an error indicates Helm timed out during pre-install
+// This is a broader check than IsHelmTimeoutWithRegistryDNS - it catches any pre-install timeout
+// On Windows/WSL2, these timeouts are almost always caused by registry DNS issues
+func IsHelmPreInstallTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+
+	// Check for Helm pre-install timeout pattern
+	// This catches cases where helm returns just the timeout without DNS details
+	return strings.Contains(msg, "failed pre-install") &&
+		strings.Contains(msg, "timed out waiting for the condition")
 }
 
 // ClassifyInstallError examines an error and returns a more specific error type if possible

@@ -174,9 +174,14 @@ func (s *Service) shouldSoftFailOnError(err error, nonInteractive bool) bool {
 		return true
 	}
 
-	// Also check the underlying error for registry DNS patterns
-	// This catches cases where the error wasn't properly classified
+	// Check for registry DNS patterns in the error message
 	if chartErrors.IsHelmTimeoutWithRegistryDNS(err) {
+		return true
+	}
+
+	// On Windows/WSL2, any Helm pre-install timeout is likely caused by registry DNS issues
+	// The actual DNS error is in kubectl events, not in the helm error message
+	if chartErrors.IsHelmPreInstallTimeout(err) {
 		return true
 	}
 
@@ -200,6 +205,21 @@ func (s *Service) printRecoverableErrorWarning(err error, verbose bool) {
 		for _, suggestion := range regErr.GetTroubleshootingSteps() {
 			pterm.Printf("  • %s\n", suggestion)
 		}
+	} else if chartErrors.IsHelmPreInstallTimeout(err) {
+		// Helm pre-install timeout on Windows - likely registry DNS issue
+		pterm.Info.Println("Helm pre-install timed out waiting for pods to start.")
+		fmt.Println()
+		pterm.Info.Println("This is typically caused by pods failing to pull container images")
+		pterm.Info.Println("due to WSL2/Docker networking issues (registry DNS resolution).")
+		fmt.Println()
+		pterm.Info.Println("The cluster was created successfully - ArgoCD installation can be retried.")
+		fmt.Println()
+		pterm.Info.Println("Troubleshooting steps:")
+		pterm.Printf("  • Check kubectl events: kubectl get events -n argocd\n")
+		pterm.Printf("  • Check WSL2 DNS: wsl cat /etc/resolv.conf\n")
+		pterm.Printf("  • Test registry connectivity: wsl curl -I https://registry-1.docker.io/v2/\n")
+		pterm.Printf("  • Restart Docker: wsl sudo systemctl restart docker\n")
+		pterm.Printf("  • Retry: openframe chart install\n")
 	} else {
 		pterm.Info.Printf("Error: %v\n", err)
 		fmt.Println()

@@ -302,6 +302,34 @@ func TestIsHelmTimeoutWithRegistryDNS(t *testing.T) {
 	assert.True(t, IsHelmTimeoutWithRegistryDNS(imagePullErr))
 }
 
+func TestIsHelmPreInstallTimeout(t *testing.T) {
+	// Test case: Helm pre-install timeout (should match)
+	preInstallErr := errors.New(`failed pre-install: 1 error occurred:
+		* timed out waiting for the condition`)
+	assert.True(t, IsHelmPreInstallTimeout(preInstallErr))
+
+	// Test case: Simple pre-install timeout (should match)
+	simpleErr := errors.New("failed pre-install: timed out waiting for the condition")
+	assert.True(t, IsHelmPreInstallTimeout(simpleErr))
+
+	// Test case: Post-install timeout (should NOT match - different phase)
+	postInstallErr := errors.New("failed post-install: timed out waiting for the condition")
+	assert.False(t, IsHelmPreInstallTimeout(postInstallErr))
+
+	// Test case: Normal error (should NOT match)
+	normalErr := errors.New("some other error")
+	assert.False(t, IsHelmPreInstallTimeout(normalErr))
+
+	// Test case: nil error
+	assert.False(t, IsHelmPreInstallTimeout(nil))
+
+	// Test case: Real helm error from CI log
+	realErr := errors.New(`chart installation failed for ArgoCD on cluster openframe-test: failed to install ArgoCD: WSL error during executing helm via WSL (exit code: 1): Release "argo-cd" does not exist. Installing it now.
+Error: failed pre-install: 1 error occurred:
+	* timed out waiting for the condition`)
+	assert.True(t, IsHelmPreInstallTimeout(realErr))
+}
+
 func TestClassifyInstallError(t *testing.T) {
 	// Test case: nil error
 	assert.Nil(t, ClassifyInstallError("ArgoCD", "test-cluster", nil))
