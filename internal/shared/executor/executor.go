@@ -175,11 +175,10 @@ func GetWSLUser() string {
 		}
 	}
 
-	// Fall back to "runner" which is the default user in CI environments (GitHub Actions)
-	// Using "runner" instead of "root" works better because:
-	// 1. GitHub Actions Windows runners create a "runner" user in WSL
-	// 2. Running as root can cause permission issues with kubeconfig files
-	wslUserCached = "runner"
+	// Fall back to "root" as the safest default - all Linux distributions have root
+	// The "runner" user may not exist inside WSL Ubuntu (it's a Windows/CI username, not a WSL user)
+	// Using root with sudo inside scripts is reliable across all WSL configurations
+	wslUserCached = "root"
 	wslUserChecked = true
 	return wslUserCached
 }

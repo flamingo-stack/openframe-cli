@@ -279,7 +279,7 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, clusterName string) error {
 	username, err := m.getWSLUser(ctx)
 	if err != nil {
-		username = "runner" // fallback to runner
+		username = "root" // fallback to root - all Linux distributions have root
 	}
 
 	// Remove containers matching k3d-<clustername> pattern
