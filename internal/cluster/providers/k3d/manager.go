@@ -1784,6 +1784,11 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 		return nil
 	}
 
+	username, err := m.getWSLUser(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get WSL user: %w", err)
+	}
+
 	// Images to import - the pause image is critical for pod sandbox creation
 	images := []string{
 		"rancher/mirrored-pause:3.6",
@@ -1806,6 +1811,20 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 		}
 	}
 
+	// Verify images are actually in containerd's store
+	serverContainer := fmt.Sprintf("k3d-%s-server-0", clusterName)
+	verifyCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
+echo "=== Images in containerd (crictl) ==="
+crictl images 2>&1 | grep -E "(pause|IMAGE)" || echo "No pause image found in crictl"
+echo ""
+echo "=== Images in containerd (ctr) ==="
+ctr -n k8s.io images ls 2>&1 | grep -E "(pause|REF)" || echo "No pause image found in ctr"
+'`, serverContainer)
+	result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", verifyCmd)
+	if m.verbose {
+		fmt.Printf("Image verification:\n%s\n", strings.TrimSpace(result.Stdout))
+	}
+
 	if m.verbose {
 		fmt.Println("✓ Image import complete")
 	}
@@ -1816,7 +1835,8 @@ func (m *K3dManager) importK3sImages(ctx context.Context, clusterName string) er
 // fixK3dNodeDNS fixes DNS configuration inside k3d container nodes.
 // k3d nodes are Docker containers running k3s/containerd. Even if Docker daemon.json
 // has DNS configured, the containers may have stale /etc/resolv.conf that doesn't work.
-// This function updates /etc/resolv.conf inside each k3d node container.
+// This function updates /etc/resolv.conf inside each k3d node container and restarts
+// containerd to pick up the new DNS configuration.
 func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -1843,10 +1863,15 @@ func (m *K3dManager) fixK3dNodeDNS(ctx context.Context, clusterName string) erro
 		return fmt.Errorf("no k3d containers found for cluster %s", clusterName)
 	}
 
-	// Fix DNS in each container
+	// Fix DNS in each container and restart containerd
 	for _, container := range containers {
 		container = strings.TrimSpace(container)
 		if container == "" {
+			continue
+		}
+
+		// Skip the load balancer - it doesn't run containerd
+		if strings.Contains(container, "-serverlb") {
 			continue
 		}
 
@@ -1868,23 +1893,53 @@ EOF'`, container)
 		} else if m.verbose {
 			fmt.Printf("✓ Fixed DNS in container: %s\n", container)
 		}
+
+		// Restart containerd inside the container to pick up new DNS
+		// In k3s, containerd runs as part of k3s. Killing containerd causes k3s to restart it.
+		// We use pkill to gracefully restart containerd
+		restartCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'pkill -HUP containerd 2>/dev/null || pkill containerd 2>/dev/null || true'`, container)
+		_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", restartCmd)
+		if m.verbose {
+			fmt.Printf("✓ Restarted containerd in container: %s\n", container)
+		}
 	}
+
+	// Wait for containerd to restart and stabilize
+	if m.verbose {
+		fmt.Println("Waiting for containerd to restart (10s)...")
+	}
+	time.Sleep(10 * time.Second)
 
 	// Verify DNS is working inside the first server node
 	serverContainer := ""
 	for _, container := range containers {
-		if strings.Contains(container, "-server-") {
+		if strings.Contains(container, "-server-") && !strings.Contains(container, "-serverlb") {
 			serverContainer = strings.TrimSpace(container)
 			break
 		}
 	}
 
 	if serverContainer != "" {
-		// Test DNS resolution inside the container
-		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c 'nslookup registry-1.docker.io 8.8.8.8 2>/dev/null || wget -q --spider --timeout=5 https://registry-1.docker.io/v2/ 2>/dev/null && echo "DNS OK" || echo "DNS check completed"'`, serverContainer)
+		// Test network and DNS inside the container
+		testCmd := fmt.Sprintf(`sudo docker exec %s sh -c '
+echo "=== /etc/resolv.conf ==="
+cat /etc/resolv.conf
+echo ""
+echo "=== Testing network connectivity to DNS servers ==="
+ping -c 1 -W 2 8.8.8.8 2>&1 || echo "ping to 8.8.8.8 failed"
+echo ""
+echo "=== Testing DNS resolution ==="
+nslookup registry-1.docker.io 8.8.8.8 2>&1 || echo "nslookup failed"
+echo ""
+echo "=== Testing HTTPS connectivity ==="
+wget -q --spider --timeout=10 https://registry-1.docker.io/v2/ 2>&1 && echo "Registry reachable" || echo "Registry not reachable"
+echo ""
+echo "=== Checking crictl images ==="
+crictl images 2>&1 | grep -E "(pause|IMAGE)" || echo "crictl not available or no pause image"
+'`, serverContainer)
 		result, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", testCmd)
 		if m.verbose {
-			fmt.Printf("DNS verification result: %s\n", strings.TrimSpace(result.Stdout))
+			fmt.Printf("k3d node diagnostics:\n%s\n", strings.TrimSpace(result.Stdout))
 		}
 	}
 
