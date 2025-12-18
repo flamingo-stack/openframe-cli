@@ -28,14 +28,10 @@ jobs:
             arch: amd64
             runner: Windows-x64
             binary: openframe-windows-amd64.exe
-          - os: darwin
-            arch: amd64
-            runner: macos-15-intel
-            binary: openframe-darwin-amd64
-          - os: darwin
-            arch: arm64
-            runner: macos-15
-            binary: openframe-darwin-arm64
+          # - os: darwin
+          #   arch: arm64
+          #   runner: macos-15
+          #   binary: openframe-darwin-arm64
 
     steps:
       - name: Checkout code

@@ -24,7 +24,6 @@ all: build
 build-all:
 	@echo "Building $(BINARY_NAME) for all platforms..."
 	@GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BINARY_NAME)-linux-amd64 .
-	@GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o $(BINARY_NAME)-darwin-amd64 .
 	@GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o $(BINARY_NAME)-darwin-arm64 .
 	@GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o $(BINARY_NAME)-windows-amd64.exe .
 	@echo "Built all platform binaries"
