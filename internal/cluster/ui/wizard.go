@@ -28,7 +28,7 @@ func NewConfigWizard() *ConfigWizard {
 		config: ClusterConfig{
 			Name:       "openframe-dev",
 			Type:       models.ClusterTypeK3d,
-			NodeCount:  4,
+			NodeCount:  3,
 			K8sVersion: "latest",
 		},
 	}
@@ -197,7 +197,7 @@ func (h *ConfigurationHandler) getQuickConfig(clusterName string) models.Cluster
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "latest",
-		NodeCount:  4,
+		NodeCount:  3,
 	}
 }
 
