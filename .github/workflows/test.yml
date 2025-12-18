@@ -65,4 +65,4 @@ jobs:
       - name: Run bootstrap
         timeout-minutes: 60
         run: |
-          ./openframe-cli_linux_amd64 bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+          ./openframe-linux-amd64 bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose

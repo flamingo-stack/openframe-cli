@@ -86,9 +86,11 @@ func containsAny(str string, substrings []string) bool {
 func TestCheckAllWithMissingTools(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	checker.requirements[0].IsInstalled = func() bool { return false }
-	checker.requirements[1].IsInstalled = func() bool { return true }
-	checker.requirements[2].IsInstalled = func() bool { return false }
+	// Set all 4 requirements explicitly to ensure test consistency
+	checker.requirements[0].IsInstalled = func() bool { return false } // Docker - missing
+	checker.requirements[1].IsInstalled = func() bool { return true }  // kubectl - installed
+	checker.requirements[2].IsInstalled = func() bool { return false } // k3d - missing
+	checker.requirements[3].IsInstalled = func() bool { return true }  // helm - installed
 
 	allPresent, missing := checker.CheckAll()
 

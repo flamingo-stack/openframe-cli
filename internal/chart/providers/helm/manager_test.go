@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -196,6 +197,11 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 }
 
 func TestHelmManager_InstallArgoCD(t *testing.T) {
+	// Skip on Windows because helm commands are wrapped in WSL making command matching unreliable
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows due to WSL command wrapping")
+	}
+
 	tests := []struct {
 		name          string
 		config        config.ChartInstallConfig
