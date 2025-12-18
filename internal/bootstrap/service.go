@@ -85,7 +85,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 // bootstrap executes cluster create followed by chart install
 func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
 	// Normalize cluster name (use default if empty)
-	config := s.buildClusterConfig(clusterName)
+	config := s.buildClusterConfig(clusterName, nonInteractive)
 	actualClusterName := config.Name
 
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
@@ -114,16 +114,23 @@ func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonI
 }
 
 // buildClusterConfig builds a cluster configuration from the cluster name
-func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
+func (s *Service) buildClusterConfig(clusterName string, nonInteractive bool) models.ClusterConfig {
 	if clusterName == "" {
 		clusterName = "openframe-dev" // default name
+	}
+
+	// Use fewer nodes in CI/non-interactive mode to reduce resource pressure
+	// CI runners have limited resources, and 4 nodes can cause agent registration timeouts
+	nodeCount := 4
+	if nonInteractive {
+		nodeCount = 2 // 1 server + 1 agent is enough for CI testing
 	}
 
 	return models.ClusterConfig{
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  4,
+		NodeCount:  nodeCount,
 	}
 }
 
