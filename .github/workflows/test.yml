@@ -1,29 +1,72 @@
-name: Build
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+name: Test Windows CLI
 
 permissions:
   contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/test-windows-cli.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/test-windows-cli.yml'
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
+  test-windows-cli-bootstrap:
+    name: Test Bootstrap on Windows
+    runs-on: Windows-x64
+    timeout-minutes: 70
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          go-version: '1.24'
+          cache-dependency-path: go.sum
 
-      - name: Build
-        run: go build -v -o openframe .
+      - name: Test
+        shell: bash
+        run: make test-unit
 
-      - name: Test binary
-        run: ./openframe --version
+      - name: Build CLI
+        shell: bash
+        run: make build
+
+      - name: Run bootstrap
+        shell: powershell
+        timeout-minutes: 60
+        run: |
+          .\openframe-windows-amd64.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+
+  test-linux-cli-bootstrap:
+    name: Test Bootstrap on Linux
+    runs-on: Linux-x64
+    timeout-minutes: 70
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: go.sum
+
+      - name: Test
+        run: make test-unit
+
+      - name: Build CLI
+        run: make build
+
+      - name: Run bootstrap
+        timeout-minutes: 60
+        run: |
+          ./openframe-cli_linux_amd64 bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
