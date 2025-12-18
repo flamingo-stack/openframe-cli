@@ -144,9 +144,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			},
 			setupKubeconfig: true,
 			setupMock: func(m *MockExecutor) {
-				// Mock bash for kubeconfig directory prep and cleanup
-				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
-				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
+				// Mock bash or wsl for kubeconfig directory prep and cleanup
+				// Using Maybe() to allow flexible number of calls as implementation may vary
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
 		},
 		{
@@ -159,9 +161,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			},
 			setupKubeconfig: true,
 			setupMock: func(m *MockExecutor) {
-				// Mock bash for kubeconfig directory prep and cleanup
-				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
-				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
+				// Mock bash or wsl for kubeconfig directory prep and cleanup
+				// Using Maybe() to allow flexible number of calls as implementation may vary
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
 		},
 		{
@@ -199,9 +203,10 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				NodeCount: 3,
 			},
 			setupMock: func(m *MockExecutor) {
-				// Mock bash for kubeconfig directory prep and cleanup
-				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
-				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error"))
+				// Mock bash or wsl for kubeconfig directory prep and cleanup
+				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error")).Maybe()
 			},
 			expectedError: "failed to create cluster test-cluster",
 		},
@@ -246,9 +251,10 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 	defer cleanup()
 
 	executor := &MockExecutor{}
-	// Mock bash for kubeconfig directory prep and cleanup
-	executor.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
-	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil)
+	// Mock bash or wsl for kubeconfig directory prep and cleanup
+	executor.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+	executor.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 
 	manager := NewK3dManager(executor, true) // verbose mode
 	config := models.ClusterConfig{

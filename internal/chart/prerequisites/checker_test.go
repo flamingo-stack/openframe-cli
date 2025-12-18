@@ -49,10 +49,10 @@ func TestCheckAllWithMissingTools(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
 	// Mock some requirements as missing
-	checker.requirements[0].IsInstalled = func() bool { return false }
-	checker.requirements[1].IsInstalled = func() bool { return true }
-	checker.requirements[2].IsInstalled = func() bool { return false }
-	checker.requirements[3].IsInstalled = func() bool { return true }
+	checker.requirements[0].IsInstalled = func() bool { return false } // Git
+	checker.requirements[1].IsInstalled = func() bool { return true }  // Helm
+	checker.requirements[2].IsInstalled = func() bool { return false } // Memory
+	checker.requirements[3].IsInstalled = func() bool { return true }  // Certificates
 
 	allPresent, missing := checker.CheckAll()
 
@@ -61,14 +61,34 @@ func TestCheckAllWithMissingTools(t *testing.T) {
 	}
 
 	if len(missing) != 2 {
-		t.Errorf("Expected 2 missing tools, got %d", len(missing))
+		t.Errorf("Expected 2 missing tools, got %d: %v", len(missing), missing)
 	}
 
-	expectedMissing := []string{"Git", "Memory"}
-	for i, tool := range missing {
-		if tool != expectedMissing[i] {
-			t.Errorf("Expected missing tool %d to be %s, got %s", i, expectedMissing[i], tool)
+	// Check that the missing tools are Git and Memory
+	expectedMissing := map[string]bool{
+		"Git":    true,
+		"Memory": true,
+	}
+
+	for _, tool := range missing {
+		if !expectedMissing[tool] {
+			t.Errorf("Unexpected missing tool: %s", tool)
 		}
+	}
+
+	// Verify Git and Memory are in the list
+	hasGit := false
+	hasMemory := false
+	for _, tool := range missing {
+		if tool == "Git" {
+			hasGit = true
+		}
+		if tool == "Memory" {
+			hasMemory = true
+		}
+	}
+	if !hasGit || !hasMemory {
+		t.Errorf("Expected Git and Memory to be missing, got: %v", missing)
 	}
 }
 

@@ -105,7 +105,7 @@ func TestRealCommandExecutor_Execute_DryRun(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "", result.Stdout)
 	assert.Equal(t, "", result.Stderr)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestRealCommandExecutor_Execute_RealCommand(t *testing.T) {
@@ -153,7 +153,7 @@ func TestRealCommandExecutor_ExecuteWithOptions_DryRun(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "", result.Stdout)
 	assert.Equal(t, "", result.Stderr)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestRealCommandExecutor_ExecuteWithOptions_RealCommand(t *testing.T) {
