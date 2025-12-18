@@ -2,7 +2,6 @@ name: Test
 
 permissions:
   contents: read
-  pull-requests: write
 
 on:
   pull_request:
@@ -12,39 +11,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-windows-cli-bootstrap:
-    name: Test Bootstrap on Windows
-    runs-on: Windows-x64
+  test-cli-bootstrap:
+    name: Test Bootstrap on ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 70
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-          cache-dependency-path: go.sum
-
-      # - name: Test
-      #   shell: bash
-      #   run: make test-unit
-
-      - name: Build CLI
-        shell: bash
-        run: make build
-
-      - name: Run bootstrap
-        shell: powershell
-        timeout-minutes: 60
-        run: |
-          .\openframe-windows-amd64.exe bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
-
-  test-linux-cli-bootstrap:
-    name: Test Bootstrap on Linux
-    runs-on: Linux-x64
-    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: Linux-x64
+            binary: openframe-linux-amd64
+          - os: windows
+            arch: amd64
+            runner: Windows-x64
+            binary: openframe-windows-amd64.exe
+          - os: darwin
+            arch: amd64
+            runner: macos-15-intel
+            binary: openframe-darwin-amd64
+          - os: darwin
+            arch: arm64
+            runner: macos-15
+            binary: openframe-darwin-arm64
 
     steps:
       - name: Checkout code
@@ -57,12 +48,12 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Test
+        if: matrix.os == 'linux'
         run: make test-unit
 
-      - name: Build CLI
-        run: make build
-
-      - name: Run bootstrap
+      - name: Build CLI and run bootstrap
+        shell: bash
         timeout-minutes: 60
         run: |
-          ./openframe-linux-amd64 bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+          make build
+          ./${{ matrix.binary }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
