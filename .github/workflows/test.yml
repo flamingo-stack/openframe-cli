@@ -11,6 +11,38 @@ on:
   workflow_dispatch:
 
 jobs:
+  unit-tests:
+    name: Unit Tests on ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: Linux-x64
+          - os: windows
+            arch: amd64
+            runner: Windows-x64
+          # - os: darwin
+          #   arch: arm64
+          #   runner: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run unit tests
+        run: make test-unit
+
   test-cli-bootstrap:
     name: Test Bootstrap on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -23,15 +55,12 @@ jobs:
           - os: linux
             arch: amd64
             runner: Linux-x64
-            binary: openframe-linux-amd64
           - os: windows
             arch: amd64
             runner: Windows-x64
-            binary: openframe-windows-amd64.exe
           # - os: darwin
           #   arch: arm64
           #   runner: macos-15
-          #   binary: openframe-darwin-arm64
 
     steps:
       - name: Checkout code
@@ -40,16 +69,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
-          cache-dependency-path: go.sum
-
-      - name: Test
-        if: matrix.os == 'linux'
-        run: make test-unit
+          go-version-file: 'go.mod'
+          cache: true
 
       - name: Build CLI and run bootstrap
         shell: bash
         timeout-minutes: 60
-        run: |
-          make build
-          ./${{ matrix.binary }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+        run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
