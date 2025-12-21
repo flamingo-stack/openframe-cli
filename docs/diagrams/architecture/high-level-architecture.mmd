@@ -1,0 +1,26 @@
+flowchart TB
+    CLI[CLI Layer - Cobra Commands] --> Bootstrap[Bootstrap Service]
+    CLI --> Cluster[Cluster Management]
+    CLI --> Chart[Chart Management]
+    CLI --> Dev[Development Tools]
+    
+    Bootstrap --> ClusterSvc[Cluster Service]
+    Bootstrap --> ChartSvc[Chart Service]
+    
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc[Development Service]
+    
+    ClusterSvc --> K3d[K3d Provider]
+    ClusterSvc --> UI[Operations UI]
+    
+    ChartSvc --> Helm[Helm Integration]
+    ChartSvc --> ArgoCD[ArgoCD Management]
+    
+    DevSvc --> Telepresence[Telepresence]
+    DevSvc --> Skaffold[Skaffold Integration]
+    
+    UI --> Prerequisites[Prerequisites Check]
+    Prerequisites --> Docker[Docker]
+    Prerequisites --> Kubectl[kubectl]
+    Prerequisites --> HelmCLI[Helm CLI]

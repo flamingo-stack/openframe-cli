@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant User
+    participant BootstrapCmd
+    participant BootstrapSvc
+    participant ClusterSvc
+    participant ChartSvc
+    participant K3d
+    participant Helm
+    
+    User->>BootstrapCmd: openframe bootstrap [cluster-name]
+    BootstrapCmd->>BootstrapSvc: Execute(args, flags)
+    
+    BootstrapSvc->>ClusterSvc: CreateCluster(config)
+    ClusterSvc->>K3d: cluster create
+    K3d-->>ClusterSvc: cluster ready
+    ClusterSvc-->>BootstrapSvc: cluster created
+    
+    BootstrapSvc->>ChartSvc: InstallCharts(config)
+    ChartSvc->>Helm: install argocd
+    Helm-->>ChartSvc: argocd installed
+    ChartSvc->>Helm: install app-of-apps
+    Helm-->>ChartSvc: apps deployed
+    ChartSvc-->>BootstrapSvc: charts installed
+    
+    BootstrapSvc-->>BootstrapCmd: environment ready
+    BootstrapCmd-->>User: success message

@@ -1,0 +1,50 @@
+flowchart LR
+    subgraph Commands
+        BootstrapCmd[bootstrap]
+        ClusterCmd[cluster/*]
+        ChartCmd[chart/*]
+        DevCmd[dev/*]
+    end
+    
+    subgraph Internals
+        BootstrapSvc[bootstrap service]
+        ClusterSvc[cluster services]
+        ChartSvc[chart services]  
+        DevSvc[dev services]
+        SharedUI[shared/ui]
+        SharedErrors[shared/errors]
+    end
+    
+    subgraph External
+        Cobra[github.com/spf13/cobra]
+        K3d[k3d]
+        Helm[helm]
+        Kubectl[kubectl]
+        Telepresence[telepresence]
+    end
+    
+    BootstrapCmd --> BootstrapSvc
+    BootstrapCmd --> SharedUI
+    
+    ClusterCmd --> ClusterSvc
+    ClusterCmd --> SharedUI
+    ClusterCmd --> SharedErrors
+    
+    ChartCmd --> ChartSvc
+    ChartCmd --> SharedErrors
+    
+    DevCmd --> DevSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> K3d
+    ClusterSvc --> Kubectl
+    
+    ChartSvc --> Helm
+    ChartSvc --> Kubectl
+    
+    DevSvc --> Telepresence
+    DevSvc --> Kubectl
+    
+    Commands --> Cobra
