@@ -1,13 +1,35 @@
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-dark-bg.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png">
+    <img alt="OpenFrame Logo" src="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png" width="400">
+  </picture>
+</div>
+
+<p align="center">
+  <a href="LICENSE.md"><img alt="License" src="https://img.shields.io/badge/LICENSE-FLAMINGO%20AI%20Unified%20v1.0-%23FFC109?style=for-the-badge&labelColor=white"></a>
+</p>
+
 # OpenFrame CLI
 
-A modern CLI tool for managing OpenFrame Kubernetes clusters and development workflows.
+A modern command-line tool for managing OpenFrame Kubernetes clusters and development workflows. OpenFrame CLI provides cluster lifecycle management, chart installation with ArgoCD, and development tools for local workflows using Telepresence and Skaffold.
 
-## Installation
+## Features
 
-### From Release
+- 🎯 **Interactive Cluster Creation** - Guided wizard for K3d cluster setup
+- ⚡ **Smart K3d Management** - Local Kubernetes development clusters
+- 📊 **Real-time Monitoring** - Cluster status and health monitoring  
+- 🔧 **System Auto-detection** - Intelligent configuration and validation
+- 🛠 **Developer Tools** - Integrated Skaffold and Telepresence workflows
+- 📦 **Chart Management** - Helm chart installation and ArgoCD deployment
+- 🚀 **Bootstrap Automation** - End-to-end environment setup orchestration
+- 💻 **Clear CLI Interface** - Developer-friendly commands with helpful output
 
-Download the latest release for your platform:
+## Quick Start
 
+### Installation
+
+**From Release (Recommended)**
 ```bash
 # macOS (ARM64)
 curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64.tar.gz | tar xz
@@ -20,77 +42,80 @@ sudo mv openframe /usr/local/bin/
 # Linux (AMD64)
 curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar xz
 sudo mv openframe /usr/local/bin/
-
-# Windows (AMD64)
-# Download from: https://github.com/flamingo-stack/openframe-cli/releases/latest
 ```
 
-### From Source
-
+**From Source**
 ```bash
 git clone https://github.com/flamingo-stack/openframe-cli.git
 cd openframe-cli
 go build -o openframe .
 ```
 
-## Quick Start
+### Basic Usage
 
 ```bash
-# Create a cluster
+# Create a cluster with interactive wizard
 openframe cluster create
 
-# List clusters
+# List all clusters
 openframe cluster list
 
 # Check cluster status
 openframe cluster status
 
-# Bootstrap OpenFrame on cluster
+# Bootstrap complete OpenFrame environment
 openframe bootstrap --deployment-mode=oss-tenant
 
-# Get help
+# Get help for any command
 openframe --help
+openframe cluster --help
 ```
 
-## Features
+### Essential Commands
 
-- 🎯 Interactive cluster creation with guided wizard
-- ⚡ K3d cluster management for local development
-- 📊 Real-time cluster status and monitoring
-- 🔧 Smart system detection and configuration
-- 🛠 Developer-friendly commands and clear output
-- 📦 Chart installation and ArgoCD management
-- 🚀 Development workflow tools (Skaffold, Telepresence)
+| Command | Description |
+|---------|-------------|
+| `openframe cluster create` | Create new K3d cluster with guided setup |
+| `openframe cluster status` | Show detailed cluster information |
+| `openframe bootstrap` | Complete OpenFrame environment setup |
+| `openframe chart install` | Install Helm charts and ArgoCD |
+| `openframe dev scaffold` | Run Skaffold for service development |
+| `openframe dev intercept` | Intercept service traffic with Telepresence |
 
 ## Documentation
 
-For detailed documentation, see the [OpenFrame documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs).
+📚 See the [Documentation](./docs/README.md) for comprehensive guides including:
 
-## Commands
+- **Getting Started** - Installation, prerequisites, and first steps
+- **Development** - Contributing, architecture, and local development
+- **Reference** - Technical architecture and API documentation
+- **Diagrams** - Visual system architecture and workflow diagrams
 
-### Cluster Management
+## Architecture
 
-- `openframe cluster create` - Create a new K3d cluster
-- `openframe cluster list` - List all clusters
-- `openframe cluster status` - Show cluster details
-- `openframe cluster delete` - Delete a cluster
-- `openframe cluster start` - Start a stopped cluster
-- `openframe cluster cleanup` - Clean up cluster resources
+OpenFrame CLI follows a layered architecture with modular components:
 
-### Chart Management
-
-- `openframe chart install` - Install Helm charts and ArgoCD
-- `openframe bootstrap` - Bootstrap full OpenFrame installation
-
-### Development
-
-- `openframe dev scaffold` - Run Skaffold for service development
-- `openframe dev intercept` - Intercept service traffic with Telepresence
+- **CLI Layer** - Cobra command interface with intuitive commands
+- **Service Layer** - Business logic for cluster, chart, and dev operations  
+- **Internal Layer** - Core components for cluster management and bootstrapping
+- **External Tools** - Integration with K3d, Helm, ArgoCD, Telepresence, Skaffold
 
 ## Contributing
 
-Contributions are welcome! Please see the [contributing guidelines](https://github.com/flamingo-stack/openframe-oss-tenant/blob/main/CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for:
 
-## License
+- Development environment setup
+- Code style and standards  
+- Testing requirements
+- Pull request process
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## Support
+
+- 📖 [Documentation](./docs/README.md)
+- 🐛 [Issue Tracker](https://github.com/flamingo-stack/openframe-cli/issues)
+- 💬 [Discussions](https://github.com/flamingo-stack/openframe-cli/discussions)
+
+---
+<div align="center">
+  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
+</div>

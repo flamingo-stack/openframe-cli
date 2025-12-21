@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Bootstrap
+    participant Cluster
+    participant Chart
+    participant External
+    
+    User->>CLI: openframe bootstrap
+    CLI->>Bootstrap: Execute bootstrap
+    Bootstrap->>Cluster: Create cluster
+    Cluster->>External: K3d cluster create
+    External-->>Cluster: Cluster ready
+    Cluster-->>Bootstrap: Creation success
+    Bootstrap->>Chart: Install charts
+    Chart->>External: Helm install ArgoCD
+    Chart->>External: Apply app-of-apps
+    External-->>Chart: Installation complete
+    Chart-->>Bootstrap: Charts installed
+    Bootstrap-->>CLI: Bootstrap complete
+    CLI-->>User: Success message

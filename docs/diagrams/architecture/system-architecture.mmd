@@ -1,0 +1,21 @@
+graph TB
+    CLI[CLI Layer<br/>Cobra Commands] --> Services[Service Layer<br/>Business Logic]
+    Services --> Internal[Internal Layer<br/>Core Components]
+    Internal --> External[External Tools<br/>K3d, Helm, ArgoCD]
+    
+    CLI --> Models[Models<br/>Data Structures]
+    CLI --> UI[UI Components<br/>User Interface]
+    
+    Services --> Prerequisites[Prerequisites<br/>Tool Validation]
+    Services --> Errors[Error Handling<br/>Shared Utilities]
+    
+    Internal --> Cluster[Cluster Management]
+    Internal --> Chart[Chart Management]
+    Internal --> Dev[Dev Tools]
+    Internal --> Bootstrap[Bootstrap Service]
+    
+    External --> K3d[K3d Clusters]
+    External --> Helm[Helm Charts]
+    External --> ArgoCD[ArgoCD Apps]
+    External --> Telepresence[Telepresence]
+    External --> Skaffold[Skaffold]

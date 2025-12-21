@@ -1,0 +1,26 @@
+graph TD
+    Bootstrap[Bootstrap Service] --> Cluster[Cluster Service]
+    Bootstrap --> Chart[Chart Service]
+    
+    Cluster --> Models[Cluster Models]
+    Cluster --> UI[Cluster UI]
+    Cluster --> Utils[Cluster Utils]
+    Cluster --> Prerequisites[Cluster Prerequisites]
+    
+    Chart --> ChartModels[Chart Models]
+    Chart --> ChartServices[Chart Services]
+    Chart --> ChartUtils[Chart Utils]
+    Chart --> ChartPrereqs[Chart Prerequisites]
+    
+    Dev --> DevModels[Dev Models]
+    Dev --> DevPrereqs[Dev Prerequisites]
+    
+    Chart --> SharedUI[Shared UI]
+    Cluster --> SharedUI
+    Dev --> SharedUI
+    Bootstrap --> SharedUI
+    
+    Chart --> SharedErrors[Shared Errors]
+    Cluster --> SharedErrors
+    Dev --> SharedErrors
+    Bootstrap --> SharedErrors

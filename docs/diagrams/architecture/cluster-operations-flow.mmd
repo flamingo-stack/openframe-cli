@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Service
+    participant UI
+    participant K3d
+    
+    User->>CLI: openframe cluster create
+    CLI->>UI: Show logo & wizard
+    UI->>User: Configuration prompts
+    User->>UI: Provide config
+    UI->>Service: Cluster config
+    Service->>K3d: Create cluster
+    K3d-->>Service: Cluster created
+    Service->>UI: Show success
+    UI-->>User: Cluster ready
