@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant User
+    participant BootstrapCmd as Bootstrap Command
+    participant ClusterSvc as Cluster Service
+    participant ChartSvc as Chart Service
+    participant K3d
+    participant Helm
+    
+    User->>BootstrapCmd: openframe bootstrap [cluster-name]
+    BootstrapCmd->>BootstrapCmd: Parse flags (deployment-mode, non-interactive, verbose)
+    BootstrapCmd->>ClusterSvc: Create cluster
+    ClusterSvc->>K3d: k3d cluster create
+    K3d-->>ClusterSvc: Cluster created
+    ClusterSvc-->>BootstrapCmd: Cluster ready
+    BootstrapCmd->>ChartSvc: Install charts
+    ChartSvc->>Helm: Install ArgoCD
+    ChartSvc->>Helm: Install app-of-apps
+    Helm-->>ChartSvc: Charts installed
+    ChartSvc-->>BootstrapCmd: Installation complete
+    BootstrapCmd-->>User: Environment ready

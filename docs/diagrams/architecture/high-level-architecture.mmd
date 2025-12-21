@@ -1,0 +1,23 @@
+graph TB
+    CLI[OpenFrame CLI] --> Bootstrap[Bootstrap Module]
+    CLI --> Cluster[Cluster Module]
+    CLI --> Chart[Chart Module]
+    CLI --> Dev[Dev Module]
+    
+    Bootstrap --> ClusterSvc[Cluster Service]
+    Bootstrap --> ChartSvc[Chart Service]
+    
+    Cluster --> K3d[K3d Provider]
+    Cluster --> Prerequisites[Prerequisites Check]
+    
+    Chart --> ArgoCD[ArgoCD Installation]
+    Chart --> Helm[Helm Operations]
+    
+    Dev --> Telepresence[Traffic Intercept]
+    Dev --> Skaffold[Live Development]
+    
+    External[External Tools]
+    K3d --> External
+    Helm --> External
+    Telepresence --> External
+    Skaffold --> External

@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant User
+    participant ClusterCmd as Cluster Command
+    participant UI as Operations UI
+    participant ClusterSvc as Cluster Service
+    participant K3d
+    
+    User->>ClusterCmd: openframe cluster create [name]
+    ClusterCmd->>UI: Show configuration wizard
+    UI-->>User: Interactive prompts
+    User-->>UI: Configuration choices
+    UI-->>ClusterCmd: Cluster config
+    ClusterCmd->>ClusterSvc: Create cluster with config
+    ClusterSvc->>K3d: k3d cluster create with options
+    K3d-->>ClusterSvc: Cluster status
+    ClusterSvc-->>ClusterCmd: Creation result
+    ClusterCmd-->>User: Success/Error message

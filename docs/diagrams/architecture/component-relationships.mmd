@@ -1,0 +1,52 @@
+graph TD
+    subgraph "Command Layer"
+        BootstrapCmd[Bootstrap Command]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands]
+        DevCmd[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        BootstrapSvc[Bootstrap Service]
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        DevSvc[Dev Service]
+    end
+    
+    subgraph "Infrastructure Layer"
+        Prerequisites[Prerequisites]
+        UI[UI Components]
+        Models[Data Models]
+        Utils[Utilities]
+    end
+    
+    subgraph "External Dependencies"
+        K3d[K3d CLI]
+        Helm[Helm CLI]
+        Kubectl[kubectl]
+        Telepresence[Telepresence]
+        Skaffold[Skaffold CLI]
+    end
+    
+    BootstrapCmd --> BootstrapSvc
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> DevSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> Prerequisites
+    ChartSvc --> Prerequisites
+    DevSvc --> Prerequisites
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    DevSvc --> UI
+    
+    ClusterSvc --> K3d
+    ClusterSvc --> Kubectl
+    ChartSvc --> Helm
+    ChartSvc --> Kubectl
+    DevSvc --> Telepresence
+    DevSvc --> Skaffold
