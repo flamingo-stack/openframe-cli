@@ -1,0 +1,59 @@
+graph TB
+    subgraph "Command Layer"
+        CMD[cmd/*]
+        Bootstrap[bootstrap]
+        Cluster[cluster]
+        Chart[chart] 
+        Dev[dev]
+    end
+    
+    subgraph "Service Layer"
+        ClusterSvc[cluster/service]
+        ChartSvc[chart/services]
+        DevSvc[dev/services]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[cluster/providers/k3d]
+        Helm[chart/providers/helm]
+        ArgoCD[chart/providers/argocd]
+        Telepresence[dev/providers/telepresence]
+        Kubectl[dev/providers/kubectl]
+    end
+    
+    subgraph "Shared Infrastructure"
+        Executor[shared/executor]
+        UI[shared/ui]
+        Config[shared/config]
+        Errors[shared/errors]
+    end
+    
+    CMD --> Bootstrap
+    CMD --> Cluster
+    CMD --> Chart
+    CMD --> Dev
+    
+    Bootstrap --> ClusterSvc
+    Bootstrap --> ChartSvc
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc
+    
+    ClusterSvc --> K3D
+    ChartSvc --> Helm
+    ChartSvc --> ArgoCD
+    DevSvc --> Telepresence
+    DevSvc --> Kubectl
+    
+    K3D --> Executor
+    Helm --> Executor
+    ArgoCD --> Executor
+    Telepresence --> Executor
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    DevSvc --> UI
+    
+    K3D --> Config
+    Helm --> Config
+    ArgoCD --> Config

@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant ClusterSvc
+    participant ChartSvc
+    participant K3D
+    participant ArgoCD
+    
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>ClusterSvc: CreateCluster()
+    ClusterSvc->>K3D: CreateCluster(config)
+    K3D-->>ClusterSvc: cluster ready
+    ClusterSvc-->>Bootstrap: cluster created
+    
+    Bootstrap->>ChartSvc: InstallCharts()
+    ChartSvc->>ArgoCD: InstallArgoCD()
+    ArgoCD-->>ChartSvc: ArgoCD ready
+    ChartSvc->>ArgoCD: InstallAppOfApps()
+    ArgoCD-->>ChartSvc: apps installed
+    ChartSvc->>ArgoCD: WaitForApplications()
+    ArgoCD-->>ChartSvc: all apps synced
+    ChartSvc-->>Bootstrap: charts ready
+    
+    Bootstrap-->>User: complete environment
