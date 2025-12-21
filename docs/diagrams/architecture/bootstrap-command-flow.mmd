@@ -1,0 +1,50 @@
+sequenceDiagram
+    participant User
+    participant BootstrapCmd
+    participant BootstrapSvc
+    participant ClusterSvc
+    participant ChartSvc
+    participant UI
+    participant External as External Tools
+    
+    User->>BootstrapCmd: openframe bootstrap
+    BootstrapCmd->>UI: Show logo
+    BootstrapCmd->>BootstrapSvc: Execute bootstrap
+    
+    BootstrapSvc->>ClusterSvc: Check existing clusters
+    ClusterSvc->>External: k3d cluster list
+    External-->>ClusterSvc: Cluster list
+    ClusterSvc-->>BootstrapSvc: Available clusters
+    
+    BootstrapSvc->>UI: Show cluster selection
+    UI->>User: Prompt for cluster choice
+    User-->>UI: Select/create cluster
+    UI-->>BootstrapSvc: Cluster decision
+    
+    alt Create New Cluster
+        BootstrapSvc->>ClusterSvc: Create cluster
+        ClusterSvc->>UI: Show configuration wizard
+        UI->>User: Collect cluster config
+        User-->>UI: Provide config
+        UI-->>ClusterSvc: Cluster configuration
+        ClusterSvc->>External: k3d cluster create
+        External-->>ClusterSvc: Cluster ready
+        ClusterSvc-->>BootstrapSvc: Creation complete
+    end
+    
+    BootstrapSvc->>ChartSvc: Install charts
+    ChartSvc->>UI: Show deployment mode selection
+    UI->>User: Select deployment mode
+    User-->>UI: Choose mode
+    UI-->>ChartSvc: Deployment configuration
+    
+    ChartSvc->>External: helm install argocd
+    External-->>ChartSvc: ArgoCD installed
+    
+    ChartSvc->>External: Apply app-of-apps
+    External-->>ChartSvc: Applications deployed
+    
+    ChartSvc-->>BootstrapSvc: Installation complete
+    BootstrapSvc-->>BootstrapCmd: Success
+    BootstrapCmd->>UI: Show success message
+    UI-->>User: Bootstrap complete

@@ -1,0 +1,48 @@
+graph TB
+    CLI[CLI Entry Point] --> Bootstrap[Bootstrap Module]
+    CLI --> Cluster[Cluster Module]
+    CLI --> Chart[Chart Module]
+    CLI --> Dev[Dev Module]
+    
+    Bootstrap --> ClusterSvc[Cluster Service]
+    Bootstrap --> ChartSvc[Chart Service]
+    
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc[Dev Service]
+    
+    ClusterSvc --> K3d[K3d Provider]
+    ClusterSvc --> Kubectl[Kubectl]
+    
+    ChartSvc --> Helm[Helm]
+    ChartSvc --> ArgoCD[ArgoCD]
+    
+    DevSvc --> Telepresence[Telepresence]
+    DevSvc --> Skaffold[Skaffold]
+    
+    subgraph External Tools
+        K3d
+        Kubectl
+        Helm
+        ArgoCD
+        Telepresence
+        Skaffold
+    end
+    
+    subgraph Shared Components
+        UI[UI Components]
+        Errors[Error Handling]
+        Prerequisites[Prerequisites]
+    end
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    DevSvc --> UI
+    
+    ClusterSvc --> Errors
+    ChartSvc --> Errors
+    DevSvc --> Errors
+    
+    ClusterSvc --> Prerequisites
+    ChartSvc --> Prerequisites
+    DevSvc --> Prerequisites

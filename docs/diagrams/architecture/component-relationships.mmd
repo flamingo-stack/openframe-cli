@@ -1,0 +1,51 @@
+graph TB
+    subgraph "Command Layer"
+        BootstrapCmd[Bootstrap Command]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands]
+        DevCmd[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        BootstrapSvc[Bootstrap Service]
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        DevSvc[Dev Service]
+    end
+    
+    subgraph "Infrastructure Layer"
+        ClusterProviders[Cluster Providers]
+        ChartInstallers[Chart Installers]
+        DevTools[Dev Tools]
+    end
+    
+    subgraph "Shared Infrastructure"
+        UI[UI Components]
+        ErrorHandler[Error Handler]
+        Prerequisites[Prerequisites]
+        Models[Data Models]
+    end
+    
+    BootstrapCmd --> BootstrapSvc
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> DevSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> ClusterProviders
+    ChartSvc --> ChartInstallers
+    DevSvc --> DevTools
+    
+    ClusterSvc --> UI
+    ClusterSvc --> ErrorHandler
+    ClusterSvc --> Prerequisites
+    ClusterSvc --> Models
+    
+    ChartSvc --> UI
+    ChartSvc --> ErrorHandler
+    ChartSvc --> Prerequisites
+    
+    DevSvc --> UI
+    DevSvc --> Prerequisites
