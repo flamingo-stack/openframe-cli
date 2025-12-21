@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant ClusterSvc as Cluster Service
+    participant ChartSvc as Chart Service
+    participant K3d
+    participant ArgoCD
+    
+    User->>Bootstrap: bootstrap [cluster-name]
+    Bootstrap->>Bootstrap: Parse deployment mode flags
+    Bootstrap->>ClusterSvc: Create cluster
+    ClusterSvc->>K3d: k3d cluster create
+    K3d-->>ClusterSvc: Cluster ready
+    ClusterSvc-->>Bootstrap: Cluster created
+    
+    Bootstrap->>ChartSvc: Install charts
+    ChartSvc->>ArgoCD: Install ArgoCD helm chart
+    ArgoCD-->>ChartSvc: ArgoCD installed
+    ChartSvc->>ArgoCD: Deploy app-of-apps
+    ArgoCD-->>ChartSvc: Apps deployed
+    ChartSvc-->>Bootstrap: Charts installed
+    Bootstrap-->>User: Environment ready

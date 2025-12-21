@@ -1,0 +1,21 @@
+graph TB
+    CLI[OpenFrame CLI] --> Bootstrap[Bootstrap Module]
+    CLI --> Cluster[Cluster Module] 
+    CLI --> Chart[Chart Module]
+    CLI --> Dev[Dev Module]
+    
+    Bootstrap --> ClusterCreate[Cluster Creation]
+    Bootstrap --> ChartInstall[Chart Installation]
+    
+    Cluster --> K3d[K3d Provider]
+    Cluster --> Prerequisites[Prerequisites Check]
+    
+    Chart --> ArgoCD[ArgoCD Installation]
+    Chart --> AppOfApps[App-of-Apps Setup]
+    
+    Dev --> Telepresence[Traffic Interception]
+    Dev --> Skaffold[Development Workflows]
+    
+    K3d --> Docker[Docker Engine]
+    ArgoCD --> Kubernetes[Kubernetes Cluster]
+    Telepresence --> Kubernetes

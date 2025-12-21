@@ -1,0 +1,21 @@
+graph LR
+    Bootstrap --> ClusterServices[Cluster Services]
+    Bootstrap --> ChartServices[Chart Services]
+    
+    ClusterCmd[Cluster Commands] --> ClusterUI[Cluster UI]
+    ClusterCmd --> ClusterModels[Cluster Models]
+    ClusterCmd --> ClusterUtils[Cluster Utils]
+    
+    ChartCmd[Chart Commands] --> ChartServices
+    ChartCmd --> ChartPrereq[Chart Prerequisites]
+    
+    DevCmd[Dev Commands] --> DevModels[Dev Models]
+    DevCmd --> DevPrereq[Dev Prerequisites]
+    
+    ClusterUI --> ClusterModels
+    ClusterUtils --> ClusterModels
+    
+    SharedErrors[Shared Errors] --> ClusterCmd
+    SharedErrors --> ChartCmd
+    SharedUI[Shared UI] --> ClusterCmd
+    SharedUI --> ChartCmd

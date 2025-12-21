@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant User
+    participant ClusterCmd as Cluster Command
+    participant OperationsUI as Operations UI
+    participant ClusterSvc as Cluster Service
+    participant Provider as K3d Provider
+    
+    User->>ClusterCmd: cluster create [name]
+    ClusterCmd->>OperationsUI: Get cluster configuration
+    OperationsUI->>User: Interactive wizard or flags
+    User-->>OperationsUI: Configuration choices
+    OperationsUI-->>ClusterCmd: ClusterConfig
+    
+    ClusterCmd->>ClusterSvc: CreateCluster(config)
+    ClusterSvc->>Provider: Create K3d cluster
+    Provider-->>ClusterSvc: Cluster created
+    ClusterSvc-->>ClusterCmd: Success
+    ClusterCmd-->>User: Cluster ready
