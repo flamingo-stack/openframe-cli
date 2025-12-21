@@ -1,0 +1,50 @@
+flowchart TD
+    subgraph Commands[Command Layer]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands] 
+        DevCmd[Dev Commands]
+        BootstrapCmd[Bootstrap Command]
+    end
+    
+    subgraph Services[Service Layer]
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        DevSvc[Dev Service]
+        BootstrapSvc[Bootstrap Service]
+    end
+    
+    subgraph Infrastructure[Infrastructure Layer]
+        K3dProvider[K3d Provider]
+        HelmClient[Helm Client]
+        SkaffoldRunner[Skaffold Runner]
+        TelepresenceClient[Telepresence Client]
+    end
+    
+    subgraph External[External Tools]
+        K3d[(K3d)]
+        Docker[(Docker)]
+        Helm[(Helm)]
+        ArgoCD[(ArgoCD)]
+        Skaffold[(Skaffold)]
+        Telepresence[(Telepresence)]
+    end
+    
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> DevSvc
+    BootstrapCmd --> BootstrapSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> K3dProvider
+    ChartSvc --> HelmClient
+    DevSvc --> SkaffoldRunner
+    DevSvc --> TelepresenceClient
+    
+    K3dProvider --> K3d
+    K3dProvider --> Docker
+    HelmClient --> Helm
+    HelmClient --> ArgoCD
+    SkaffoldRunner --> Skaffold
+    TelepresenceClient --> Telepresence

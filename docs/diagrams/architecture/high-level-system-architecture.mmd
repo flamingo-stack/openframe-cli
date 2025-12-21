@@ -1,0 +1,37 @@
+flowchart TB
+    CLI[CLI Entry Point] --> Commands{Command Router}
+    
+    Commands --> Cluster[Cluster Management]
+    Commands --> Chart[Chart Management] 
+    Commands --> Dev[Development Tools]
+    Commands --> Bootstrap[Bootstrap Workflow]
+    
+    Cluster --> ClusterSvc[Cluster Service]
+    Chart --> ChartSvc[Chart Service]
+    Dev --> DevSvc[Dev Service]
+    Bootstrap --> BootstrapSvc[Bootstrap Service]
+    
+    ClusterSvc --> K3d[K3d Provider]
+    ClusterSvc --> Docker[Docker Engine]
+    
+    ChartSvc --> Helm[Helm Client]
+    ChartSvc --> ArgoCD[ArgoCD]
+    
+    DevSvc --> Skaffold[Skaffold]
+    DevSvc --> Telepresence[Telepresence]
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    subgraph Shared[Shared Infrastructure]
+        UI[UI Components]
+        Utils[Common Utils]
+        Models[Data Models]
+        Errors[Error Handling]
+        Prerequisites[Prerequisites]
+    end
+    
+    ClusterSvc --> Shared
+    ChartSvc --> Shared
+    DevSvc --> Shared
+    BootstrapSvc --> Shared

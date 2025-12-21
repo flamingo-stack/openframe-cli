@@ -1,10 +1,33 @@
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-dark-bg.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png">
+    <img alt="OpenFrame Logo" src="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png" width="400">
+  </picture>
+</div>
+
+<p align="center">
+  <a href="LICENSE.md"><img alt="License" src="https://img.shields.io/badge/LICENSE-FLAMINGO%20AI%20Unified%20v1.0-%23FFC109?style=for-the-badge&labelColor=white"></a>
+</p>
+
 # OpenFrame CLI
 
-A modern CLI tool for managing OpenFrame Kubernetes clusters and development workflows.
+A modern, developer-friendly command-line tool for managing OpenFrame Kubernetes clusters and development workflows. OpenFrame CLI simplifies local development by providing automated cluster creation, chart deployment, and integrated development tools—all with an intuitive interface and smart automation.
 
-## Installation
+## Features
 
-### From Release
+- 🎯 **Interactive cluster creation** with guided wizard and smart configuration
+- ⚡ **K3d cluster management** for lightning-fast local Kubernetes development  
+- 📊 **Real-time cluster monitoring** with status checking and resource tracking
+- 🔧 **Smart system detection** with automatic prerequisite validation
+- 🛠 **Developer-friendly commands** with clear output and helpful error messages
+- 📦 **Integrated chart management** with Helm and ArgoCD GitOps workflows
+- 🚀 **Development workflow tools** including Skaffold live reloading and Telepresence traffic interception
+- 🌟 **One-command bootstrap** for complete environment setup in minutes
+
+## Quick Start
+
+### Installation
 
 Download the latest release for your platform:
 
@@ -33,64 +56,119 @@ cd openframe-cli
 go build -o openframe .
 ```
 
-## Quick Start
+### Get Started in 5 Minutes
 
 ```bash
-# Create a cluster
-openframe cluster create
-
-# List clusters
-openframe cluster list
-
-# Check cluster status
-openframe cluster status
-
-# Bootstrap OpenFrame on cluster
+# Bootstrap a complete OpenFrame environment
 openframe bootstrap --deployment-mode=oss-tenant
 
-# Get help
+# Or step by step:
+# 1. Create a cluster
+openframe cluster create
+
+# 2. Install charts and ArgoCD
+openframe chart install
+
+# 3. Check cluster status
+openframe cluster status
+
+# 4. Start developing with live reload
+openframe dev scaffold
+
+# Get help anytime
 openframe --help
 ```
 
-## Features
+## Core Commands
 
-- 🎯 Interactive cluster creation with guided wizard
-- ⚡ K3d cluster management for local development
-- 📊 Real-time cluster status and monitoring
-- 🔧 Smart system detection and configuration
-- 🛠 Developer-friendly commands and clear output
-- 📦 Chart installation and ArgoCD management
-- 🚀 Development workflow tools (Skaffold, Telepresence)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `bootstrap` | Complete environment setup (cluster + charts) | `openframe bootstrap --deployment-mode=oss-tenant` |
+| `cluster create` | Create new K3d cluster with interactive setup | `openframe cluster create --nodes 3` |
+| `cluster status` | Show detailed cluster information | `openframe cluster status` |
+| `chart install` | Install Helm charts and ArgoCD | `openframe chart install` |
+| `dev scaffold` | Run Skaffold for service development | `openframe dev scaffold` |
+| `dev intercept` | Intercept service traffic locally | `openframe dev intercept myservice --port 8080` |
+
+See the full command reference in our [documentation](./docs/README.md).
+
+## Architecture
+
+OpenFrame CLI follows a layered architecture with domain-specific modules:
+
+```mermaid
+flowchart TB
+    CLI[CLI Entry Point] --> Commands{Command Router}
+    
+    Commands --> Cluster[Cluster Management]
+    Commands --> Chart[Chart Management] 
+    Commands --> Dev[Development Tools]
+    Commands --> Bootstrap[Bootstrap Workflow]
+    
+    Cluster --> K3d[K3d + Docker]
+    Chart --> Helm[Helm + ArgoCD]
+    Dev --> Tools[Skaffold + Telepresence]
+    Bootstrap --> Integration[Integrated Workflows]
+    
+    subgraph Shared[Shared Components]
+        UI[Interactive UI]
+        Utils[Common Utilities]
+        Errors[Error Handling]
+    end
+    
+    Cluster --> Shared
+    Chart --> Shared
+    Dev --> Shared
+    Bootstrap --> Shared
+```
+
+## Use Cases
+
+### For Developers
+- **Local Development**: Quick Kubernetes environment setup with live reloading
+- **Service Testing**: Traffic interception for debugging microservices
+- **Rapid Prototyping**: One-command environment bootstrap for demos
+
+### For DevOps Engineers  
+- **Cluster Automation**: Standardized cluster provisioning and management
+- **GitOps Workflows**: Automated ArgoCD deployment with app-of-apps pattern
+- **CI/CD Integration**: Scriptable commands for automated testing pipelines
+
+### For Platform Teams
+- **Developer Experience**: Consistent tooling across development teams
+- **Self-Service**: Enable developers to manage their own environments
+- **Standardization**: Unified workflow patterns and best practices
+
+## Deployment Modes
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **oss-tenant** | Open source tenant deployment | Individual developers, small teams |
+| **saas-tenant** | SaaS tenant with dedicated resources | Enterprise customers, isolated environments |
+| **saas-shared** | SaaS shared multi-tenant deployment | Cost-effective scaling, development environments |
 
 ## Documentation
 
-For detailed documentation, see the [OpenFrame documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs).
+📚 See the [Documentation](./docs/README.md) for comprehensive guides including:
 
-## Commands
-
-### Cluster Management
-
-- `openframe cluster create` - Create a new K3d cluster
-- `openframe cluster list` - List all clusters
-- `openframe cluster status` - Show cluster details
-- `openframe cluster delete` - Delete a cluster
-- `openframe cluster start` - Start a stopped cluster
-- `openframe cluster cleanup` - Clean up cluster resources
-
-### Chart Management
-
-- `openframe chart install` - Install Helm charts and ArgoCD
-- `openframe bootstrap` - Bootstrap full OpenFrame installation
-
-### Development
-
-- `openframe dev scaffold` - Run Skaffold for service development
-- `openframe dev intercept` - Intercept service traffic with Telepresence
+- **[Getting Started](./docs/getting-started/introduction.md)** - Quick setup and introduction
+- **[Development](./docs/development/README.md)** - Contributing and advanced usage  
+- **[Architecture](./docs/reference/architecture/overview.md)** - Technical architecture details
 
 ## Contributing
 
-Contributions are welcome! Please see the [contributing guidelines](https://github.com/flamingo-stack/openframe-oss-tenant/blob/main/CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTING.md) for details on:
+
+- Development environment setup
+- Code style and testing requirements  
+- Pull request process
+- Issue reporting guidelines
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Flamingo AI Unified License v1.0. See the [LICENSE](./LICENSE.md) file for details.
+
+---
+<div align="center">
+  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
+</div>
