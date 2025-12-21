@@ -1,0 +1,39 @@
+flowchart LR
+    subgraph "Command Layer"
+        CmdCluster[cmd/cluster]
+        CmdChart[cmd/chart]
+        CmdDev[cmd/dev]
+        CmdBootstrap[cmd/bootstrap]
+    end
+    
+    subgraph "Service Layer"
+        ClusterSvc[internal/cluster/services]
+        ChartSvc[internal/chart/services]
+        DevSvc[internal/dev/services]
+        BootstrapSvc[internal/bootstrap]
+    end
+    
+    subgraph "Infrastructure"
+        SharedUI[internal/shared/ui]
+        SharedErrors[internal/shared/errors]
+        Prerequisites[*/prerequisites]
+    end
+    
+    CmdCluster --> ClusterSvc
+    CmdChart --> ChartSvc
+    CmdDev --> DevSvc
+    CmdBootstrap --> BootstrapSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> SharedUI
+    ChartSvc --> SharedUI
+    DevSvc --> SharedUI
+    
+    CmdCluster --> Prerequisites
+    CmdChart --> Prerequisites
+    CmdDev --> Prerequisites
+    
+    ClusterSvc --> SharedErrors
+    ChartSvc --> SharedErrors

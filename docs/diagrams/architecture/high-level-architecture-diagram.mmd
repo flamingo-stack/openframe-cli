@@ -1,0 +1,25 @@
+flowchart TB
+    CLI[CLI Entry Point] --> Root[Root Command]
+    Root --> Cluster[Cluster Commands]
+    Root --> Chart[Chart Commands] 
+    Root --> Dev[Dev Commands]
+    Root --> Bootstrap[Bootstrap Command]
+    
+    Cluster --> ClusterUI[Cluster UI Layer]
+    Chart --> ChartUI[Chart UI Layer]
+    Dev --> DevUI[Dev UI Layer]
+    
+    ClusterUI --> ClusterService[Cluster Service]
+    ChartUI --> ChartService[Chart Service]
+    DevUI --> DevService[Dev Service]
+    Bootstrap --> BootstrapService[Bootstrap Service]
+    
+    ClusterService --> K3d[K3d Provider]
+    ChartService --> Helm[Helm Client]
+    DevService --> Telepresence[Telepresence]
+    DevService --> Skaffold[Skaffold]
+    
+    K3d --> Docker[Docker Engine]
+    Helm --> K8s[Kubernetes API]
+    Telepresence --> K8s
+    Skaffold --> K8s
