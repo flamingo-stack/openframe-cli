@@ -1,0 +1,58 @@
+graph TB
+    subgraph "Command Layer"
+        BootstrapCmd[Bootstrap Command]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands]
+        DevCmd[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        BootstrapSvc[Bootstrap Service]
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        InterceptSvc[Intercept Service]
+        ScaffoldSvc[Scaffold Service]
+    end
+    
+    subgraph "Provider Layer"
+        K3DProvider[K3D Manager]
+        HelmProvider[Helm Manager]
+        ArgoCDProvider[ArgoCD Manager]
+        GitProvider[Git Repository]
+        TelepresenceProvider[Telepresence Provider]
+        KubectlProvider[Kubectl Provider]
+    end
+    
+    subgraph "Shared Infrastructure"
+        UI[UI Components]
+        Executor[Command Executor]
+        ErrorHandler[Error Handling]
+        Config[Configuration]
+    end
+    
+    BootstrapCmd --> BootstrapSvc
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> InterceptSvc
+    DevCmd --> ScaffoldSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> K3DProvider
+    ChartSvc --> HelmProvider
+    ChartSvc --> ArgoCDProvider
+    ChartSvc --> GitProvider
+    InterceptSvc --> TelepresenceProvider
+    InterceptSvc --> KubectlProvider
+    ScaffoldSvc --> KubectlProvider
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    InterceptSvc --> UI
+    ScaffoldSvc --> UI
+    
+    K3DProvider --> Executor
+    HelmProvider --> Executor
+    TelepresenceProvider --> Executor
+    KubectlProvider --> Executor
