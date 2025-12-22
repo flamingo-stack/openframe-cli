@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant User
+    participant CLI as CLI Entry
+    participant CMD as Command Layer
+    participant SVC as Service Layer
+    participant PROVIDER as Provider
+    participant EXT as External Tool
+    
+    User->>CLI: Execute command
+    CLI->>CMD: Parse args & flags
+    CMD->>CMD: Validate inputs
+    CMD->>SVC: Create service instance
+    SVC->>SVC: Check prerequisites
+    SVC->>PROVIDER: Initialize provider
+    PROVIDER->>EXT: Execute external command
+    EXT-->>PROVIDER: Return result
+    PROVIDER-->>SVC: Process result
+    SVC-->>CMD: Return response
+    CMD-->>CLI: Format output
+    CLI-->>User: Display result

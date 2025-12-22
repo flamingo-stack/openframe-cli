@@ -1,0 +1,34 @@
+graph TD
+    MAIN[main.go] --> CMD[cmd/]
+    CMD --> CLUSTER[internal/cluster/]
+    CMD --> CHART[internal/chart/]
+    CMD --> DEV[internal/dev/]
+    CMD --> BOOTSTRAP[internal/bootstrap/]
+    
+    BOOTSTRAP --> CLUSTER
+    BOOTSTRAP --> CHART
+    
+    CLUSTER --> CLUSTERMODELS[cluster/models]
+    CLUSTER --> CLUSTERPROVIDERS[cluster/providers]
+    CLUSTER --> CLUSTERUI[cluster/ui]
+    CLUSTER --> CLUSTERPREREQ[cluster/prerequisites]
+    
+    CHART --> CHARTMODELS[chart/models]
+    CHART --> CHARTSERVICES[chart/services]
+    CHART --> CHARTUI[chart/ui]
+    CHART --> CHARTPREREQ[chart/prerequisites]
+    
+    DEV --> DEVMODELS[dev/models]
+    DEV --> DEVSERVICES[dev/services]
+    DEV --> DEVUI[dev/ui]
+    DEV --> DEVPREREQ[dev/prerequisites]
+    
+    CLUSTERPROVIDERS --> SHARED[internal/shared/]
+    CHARTSERVICES --> SHARED
+    DEVSERVICES --> SHARED
+    
+    SHARED --> EXECUTOR[shared/executor]
+    SHARED --> CONFIG[shared/config]
+    SHARED --> UI[shared/ui]
+    SHARED --> ERRORS[shared/errors]
+    SHARED --> FLAGS[shared/flags]

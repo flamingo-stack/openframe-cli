@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant User
+    participant UI as Cluster UI
+    participant SVC as Cluster Service
+    participant K3D as K3d Provider
+    participant Docker
+    
+    User->>UI: Request cluster create
+    UI->>UI: Show configuration wizard
+    UI->>SVC: Submit cluster config
+    SVC->>SVC: Validate prerequisites
+    SVC->>K3D: Create cluster
+    K3D->>Docker: Deploy k3d containers
+    Docker-->>K3D: Containers running
+    K3D->>K3D: Configure kubectl context
+    K3D-->>SVC: Cluster ready
+    SVC-->>UI: Success response
+    UI-->>User: Show next steps

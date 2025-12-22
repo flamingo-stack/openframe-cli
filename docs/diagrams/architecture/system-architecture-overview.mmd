@@ -1,0 +1,31 @@
+graph TB
+    CLI[CLI Entry Point] --> CMD[Command Layer]
+    CMD --> CLUSTER[Cluster Management]
+    CMD --> CHART[Chart Management] 
+    CMD --> DEV[Development Tools]
+    CMD --> BOOTSTRAP[Bootstrap Service]
+    
+    CLUSTER --> PREREQ[Prerequisites]
+    CLUSTER --> PROVIDERS[Cluster Providers]
+    CLUSTER --> UI[Cluster UI]
+    
+    CHART --> CHARTUI[Chart UI]
+    CHART --> SERVICES[Chart Services]
+    CHART --> MODELS[Chart Models]
+    
+    DEV --> INTERCEPT[Intercept Service]
+    DEV --> SCAFFOLD[Scaffold Service]
+    DEV --> DEVUI[Dev UI]
+    
+    PROVIDERS --> K3D[K3d Provider]
+    SERVICES --> ARGOCD[ArgoCD Service]
+    SERVICES --> APPOFAPPS[App-of-Apps Service]
+    
+    SHARED[Shared Components] --> EXECUTOR[Command Executor]
+    SHARED --> ERRORS[Error Handling]
+    SHARED --> CONFIG[Configuration]
+    SHARED --> SHAREDUI[Shared UI]
+    
+    CLUSTER --> SHARED
+    CHART --> SHARED
+    DEV --> SHARED
