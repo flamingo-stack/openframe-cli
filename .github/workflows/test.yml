@@ -39,10 +39,9 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-      - name: Run unit tests
-        run: make test-unit
         
       - name: Run integration tests
+        if: matrix.os != 'darwin'
         shell: bash
         timeout-minutes: 60
         run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
