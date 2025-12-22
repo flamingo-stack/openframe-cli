@@ -1,0 +1,52 @@
+graph TD
+    subgraph "Command Layer"
+        CMD[CLI Commands]
+    end
+    
+    subgraph "Service Layer"
+        CS[Cluster Service]
+        CHS[Chart Service] 
+        BS[Bootstrap Service]
+        DS[Dev Services]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[K3d Manager]
+        HELM[Helm Manager]
+        GIT[Git Repository]
+        TP[Telepresence Provider]
+        KUBECTL[Kubectl Provider]
+    end
+    
+    subgraph "Infrastructure"
+        EXEC[Command Executor]
+        UI[UI Components]
+        PREREQ[Prerequisites]
+    end
+    
+    CMD --> CS
+    CMD --> CHS
+    CMD --> BS
+    CMD --> DS
+    
+    CS --> K3D
+    CHS --> HELM
+    CHS --> GIT
+    DS --> TP
+    DS --> KUBECTL
+    BS --> CS
+    BS --> CHS
+    
+    K3D --> EXEC
+    HELM --> EXEC
+    GIT --> EXEC
+    TP --> EXEC
+    KUBECTL --> EXEC
+    
+    CS --> UI
+    CHS --> UI
+    DS --> UI
+    
+    CS --> PREREQ
+    CHS --> PREREQ
+    DS --> PREREQ

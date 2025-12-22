@@ -1,10 +1,32 @@
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-dark-bg.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png">
+    <img alt="OpenFrame Logo" src="https://raw.githubusercontent.com/flamingo-stack/openframe-oss-tenant/main/docs/assets/logo-openframe-full-light-bg.png" width="400">
+  </picture>
+</div>
+
+<p align="center">
+  <a href="LICENSE.md"><img alt="License" src="https://img.shields.io/badge/LICENSE-FLAMINGO%20AI%20Unified%20v1.0-%23FFC109?style=for-the-badge&labelColor=white"></a>
+</p>
+
 # OpenFrame CLI
 
-A modern CLI tool for managing OpenFrame Kubernetes clusters and development workflows.
+A modern CLI tool for managing OpenFrame Kubernetes clusters and development workflows. OpenFrame CLI replaces complex shell scripts with an interactive terminal UI, making it easy to bootstrap OpenFrame Kubernetes deployments with guided workflows.
 
-## Installation
+## ✨ Features
 
-### From Release
+- 🎯 **Interactive Cluster Creation** - Guided wizard for K3d cluster setup
+- ⚡ **Smart K3d Management** - Full lifecycle management of local development clusters
+- 📊 **Real-time Monitoring** - Live cluster status and health monitoring
+- 🔧 **Auto-Configuration** - Smart system detection and automated tool installation
+- 🛠 **Developer Tools** - Integrated Skaffold and Telepresence workflows
+- 📦 **ArgoCD Integration** - Automated Helm chart deployment with GitOps
+- 🚀 **One-Command Bootstrap** - Complete OpenFrame environment in minutes
+
+## 🚀 Quick Start
+
+### Installation
 
 Download the latest release for your platform:
 
@@ -25,72 +47,87 @@ sudo mv openframe /usr/local/bin/
 # Download from: https://github.com/flamingo-stack/openframe-cli/releases/latest
 ```
 
-### From Source
+### Get Started in 60 Seconds
 
 ```bash
-git clone https://github.com/flamingo-stack/openframe-cli.git
-cd openframe-cli
-go build -o openframe .
-```
-
-## Quick Start
-
-```bash
-# Create a cluster
-openframe cluster create
-
-# List clusters
-openframe cluster list
-
-# Check cluster status
-openframe cluster status
-
-# Bootstrap OpenFrame on cluster
+# Bootstrap a complete OpenFrame environment
 openframe bootstrap --deployment-mode=oss-tenant
 
-# Get help
-openframe --help
+# Or step-by-step:
+# 1. Create a cluster
+openframe cluster create
+
+# 2. Install OpenFrame charts
+openframe chart install
+
+# 3. Check status
+openframe cluster status
 ```
 
-## Features
-
-- 🎯 Interactive cluster creation with guided wizard
-- ⚡ K3d cluster management for local development
-- 📊 Real-time cluster status and monitoring
-- 🔧 Smart system detection and configuration
-- 🛠 Developer-friendly commands and clear output
-- 📦 Chart installation and ArgoCD management
-- 🚀 Development workflow tools (Skaffold, Telepresence)
-
-## Documentation
-
-For detailed documentation, see the [OpenFrame documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs).
-
-## Commands
+## 🎯 Core Commands
 
 ### Cluster Management
+- `openframe cluster create` - Create a new K3d cluster with interactive setup
+- `openframe cluster list` - List all managed clusters
+- `openframe cluster status` - Show detailed cluster health and resources
+- `openframe cluster delete` - Clean removal of clusters and resources
+- `openframe cluster cleanup` - Remove unused Docker resources
 
-- `openframe cluster create` - Create a new K3d cluster
-- `openframe cluster list` - List all clusters
-- `openframe cluster status` - Show cluster details
-- `openframe cluster delete` - Delete a cluster
-- `openframe cluster start` - Start a stopped cluster
-- `openframe cluster cleanup` - Clean up cluster resources
+### Chart & GitOps
+- `openframe chart install` - Install Helm charts and configure ArgoCD
+- `openframe bootstrap` - Complete environment setup (cluster + charts)
 
-### Chart Management
-
-- `openframe chart install` - Install Helm charts and ArgoCD
-- `openframe bootstrap` - Bootstrap full OpenFrame installation
-
-### Development
-
-- `openframe dev scaffold` - Run Skaffold for service development
+### Development Workflows
 - `openframe dev intercept` - Intercept service traffic with Telepresence
+- `openframe dev scaffold` - Live development with Skaffold hot-reload
 
-## Contributing
+## 📋 Prerequisites
 
-Contributions are welcome! Please see the [contributing guidelines](https://github.com/flamingo-stack/openframe-oss-tenant/blob/main/CONTRIBUTING.md).
+The CLI automatically detects and installs missing tools:
 
-## License
+- **Docker** - Container runtime (auto-installed on macOS/Windows)
+- **K3d** - Lightweight Kubernetes (auto-installed)
+- **kubectl** - Kubernetes CLI (auto-installed)
+- **Helm** - Package manager (auto-installed)
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+**Hardware Requirements:**
+- **Minimum**: 8GB RAM, 4 CPU cores, 20GB disk
+- **Recommended**: 16GB RAM, 8 CPU cores, 50GB disk
+
+## 🏗 Architecture
+
+OpenFrame CLI follows a layered architecture with clear separation of concerns:
+
+- **Command Layer**: Cobra-based CLI interface with interactive prompts
+- **Service Layer**: Business logic for cluster, chart, and development operations  
+- **Provider Layer**: Abstractions for K3d, Helm, Git, and Telepresence
+- **Infrastructure**: Command execution, UI components, and prerequisites management
+
+The CLI supports both interactive wizard workflows for beginners and flag-based automation for CI/CD pipelines.
+
+## 📚 Documentation
+
+📚 See the [Documentation](./docs/README.md) for comprehensive guides including:
+
+- 🚀 [Getting Started Guide](./docs/getting-started/introduction.md)
+- ⚙️ [Development Setup](./docs/development/setup/environment.md)
+- 🏛 [Architecture Overview](./docs/reference/architecture/overview.md)
+- 🧪 [Testing Guide](./docs/development/testing/overview.md)
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details on:
+
+- Setting up the development environment
+- Running tests and linting
+- Submitting pull requests
+- Code style and conventions
+
+## 📄 License
+
+This project is licensed under the Flamingo AI Unified License v1.0. See the [LICENSE.md](LICENSE.md) file for details.
+
+---
+<div align="center">
+  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
+</div>

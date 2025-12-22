@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant Cluster
+    participant Chart
+    participant K3d
+    participant Helm
+    participant ArgoCD
+    
+    User->>Bootstrap: bootstrap --deployment-mode=oss-tenant
+    Bootstrap->>Cluster: CreateCluster(config)
+    Cluster->>K3d: CreateCluster(k3d-config)
+    K3d->>K3d: Generate cluster config
+    K3d-->>Cluster: Cluster created
+    Cluster-->>Bootstrap: Success
+    
+    Bootstrap->>Chart: InstallCharts(cluster, mode)
+    Chart->>Helm: InstallArgoCD()
+    Helm-->>Chart: ArgoCD installed
+    Chart->>Chart: Generate helm-values.yaml
+    Chart->>Helm: InstallAppOfApps(values)
+    Helm-->>Chart: App-of-apps installed
+    
+    Chart->>ArgoCD: WaitForApplications()
+    loop Application Sync
+        ArgoCD->>ArgoCD: Check app status
+        ArgoCD->>ArgoCD: Sync applications
+    end
+    ArgoCD-->>Chart: All apps healthy
+    Chart-->>Bootstrap: Charts installed
+    Bootstrap-->>User: Bootstrap complete

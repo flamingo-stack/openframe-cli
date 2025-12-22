@@ -1,0 +1,38 @@
+graph TB
+    subgraph "CLI Layer"
+        A[Root Command] --> B[Cluster Commands]
+        A --> C[Chart Commands] 
+        A --> D[Bootstrap Commands]
+        A --> E[Dev Commands]
+    end
+    
+    subgraph "Business Logic"
+        B --> F[Cluster Service]
+        C --> G[Chart Service]
+        D --> H[Bootstrap Service]
+        E --> I[Dev Services]
+    end
+    
+    subgraph "Providers"
+        F --> J[K3d Manager]
+        G --> K[Helm Manager]
+        G --> L[Git Repository]
+        I --> M[Telepresence Provider]
+        I --> N[Kubectl Provider]
+    end
+    
+    subgraph "Infrastructure"
+        J --> O[Command Executor]
+        K --> O
+        L --> O
+        M --> O
+        N --> O
+        O --> P[External Tools]
+    end
+    
+    subgraph "External Systems"
+        P --> Q[Docker/K3d]
+        P --> R[Helm/ArgoCD]
+        P --> S[Git Repositories]
+        P --> T[Kubernetes API]
+    end
