@@ -26,9 +26,9 @@ jobs:
           - os: windows
             arch: amd64
             runner: Windows-x64
-          # - os: darwin
-          #   arch: arm64
-          #   runner: macos-15
+          - os: darwin
+            arch: arm64
+            runner: macos-26
 
     steps:
       - name: Checkout code
@@ -39,8 +39,10 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-
-      - name: Build CLI and run bootstrap
+      - name: Run unit tests
+        run: make test-unit
+        
+      - name: Run integration tests
         shell: bash
         timeout-minutes: 60
         run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
