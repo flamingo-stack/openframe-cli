@@ -1,0 +1,35 @@
+graph TB
+    CLI[CLI Interface] --> Commands[Command Layer]
+    Commands --> Services[Service Layer]
+    Services --> Providers[Provider Layer]
+    Services --> Models[Models/Domain]
+    Providers --> External[External Tools]
+    
+    subgraph "Command Layer"
+        CC[Cluster Commands]
+        ChC[Chart Commands]
+        DC[Dev Commands]
+        BC[Bootstrap Commands]
+    end
+    
+    subgraph "Service Layer"
+        CS[Cluster Service]
+        CHS[Chart Service]
+        IS[Intercept Service]
+        SS[Scaffold Service]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[K3D Provider]
+        Helm[Helm Provider]
+        ArgoCD[ArgoCD Provider]
+        TP[Telepresence Provider]
+    end
+    
+    subgraph "External Tools"
+        Docker[Docker]
+        K3DT[K3D Tool]
+        HelmT[Helm Tool]
+        ArgoCDT[ArgoCD Tool]
+        TPT[Telepresence Tool]
+    end

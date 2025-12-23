@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant Developer
+    participant InterceptUI
+    participant KubectlProvider
+    participant TelepresenceProvider
+    participant LocalService
+    
+    Developer->>InterceptUI: openframe dev intercept
+    InterceptUI->>KubectlProvider: List services
+    KubectlProvider-->>InterceptUI: Available services
+    InterceptUI-->>Developer: Service selection
+    Developer->>InterceptUI: Select service & port
+    InterceptUI->>TelepresenceProvider: Setup intercept
+    TelepresenceProvider->>LocalService: Route traffic
+    LocalService-->>TelepresenceProvider: Handle requests
+    TelepresenceProvider-->>Developer: Intercept active

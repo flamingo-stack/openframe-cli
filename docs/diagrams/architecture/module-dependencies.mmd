@@ -1,0 +1,50 @@
+graph LR
+    subgraph "Command Layer"
+        CMD[cmd/*]
+    end
+    
+    subgraph "Service Layer"  
+        CLUSTER[cluster]
+        CHART[chart]
+        DEV[dev]
+        BOOTSTRAP[bootstrap]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[k3d provider]
+        HELM[helm provider]
+        ARGOCD[argocd provider]
+        TELEPRESENCE[telepresence provider]
+    end
+    
+    subgraph "Shared"
+        EXECUTOR[executor]
+        UI[ui]
+        ERRORS[errors]
+    end
+    
+    CMD --> BOOTSTRAP
+    CMD --> CLUSTER
+    CMD --> CHART  
+    CMD --> DEV
+    
+    BOOTSTRAP --> CLUSTER
+    BOOTSTRAP --> CHART
+    
+    CLUSTER --> K3D
+    CHART --> HELM
+    CHART --> ARGOCD
+    DEV --> TELEPRESENCE
+    
+    CLUSTER --> UI
+    CHART --> UI
+    DEV --> UI
+    
+    K3D --> EXECUTOR
+    HELM --> EXECUTOR
+    ARGOCD --> EXECUTOR
+    TELEPRESENCE --> EXECUTOR
+    
+    CLUSTER --> ERRORS
+    CHART --> ERRORS
+    DEV --> ERRORS

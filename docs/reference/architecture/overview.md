@@ -4,196 +4,191 @@
 
 ## Overview
 
-OpenFrame CLI is a modern, interactive command-line tool for managing Kubernetes clusters and development workflows specifically designed for the OpenFrame platform. It provides cluster lifecycle management (create, delete, list, status), chart installation with ArgoCD, and development tools for service intercepts and scaffolding, replacing traditional shell scripts with a polished Go-based CLI.
+OpenFrame CLI is a modern, interactive command-line tool for managing OpenFrame Kubernetes clusters and development workflows. It provides seamless cluster lifecycle management with K3D, chart installation via ArgoCD, and developer-friendly tools for service intercepts and scaffolding.
 
 ## Architecture
 
-### High-Level System Design
+The CLI follows a modular, layered architecture with clear separation of concerns between UI, business logic, and external integrations.
+
+### System Architecture
 
 ```mermaid
 graph TB
-    CLI[CLI Layer] --> Bootstrap[Bootstrap Service]
-    CLI --> Cluster[Cluster Commands]
-    CLI --> Chart[Chart Commands]
-    CLI --> Dev[Dev Commands]
+    CLI[CLI Interface] --> Commands[Command Layer]
+    Commands --> Services[Service Layer]
+    Services --> Providers[Provider Layer]
+    Services --> Models[Models/Domain]
+    Providers --> External[External Tools]
     
-    Bootstrap --> ClusterSvc[Cluster Service]
-    Bootstrap --> ChartSvc[Chart Service]
+    subgraph "Command Layer"
+        CC[Cluster Commands]
+        ChC[Chart Commands]
+        DC[Dev Commands]
+        BC[Bootstrap Commands]
+    end
     
-    Cluster --> ClusterSvc
-    Chart --> ChartSvc
-    Dev --> DevSvc[Dev Service]
+    subgraph "Service Layer"
+        CS[Cluster Service]
+        CHS[Chart Service]
+        IS[Intercept Service]
+        SS[Scaffold Service]
+    end
     
-    ClusterSvc --> K3D[K3D Provider]
-    ClusterSvc --> Prerequisites[Prerequisites Checker]
+    subgraph "Provider Layer"
+        K3D[K3D Provider]
+        Helm[Helm Provider]
+        ArgoCD[ArgoCD Provider]
+        TP[Telepresence Provider]
+    end
     
-    ChartSvc --> Helm[Helm Manager]
-    ChartSvc --> ArgoCD[ArgoCD Provider]
-    ChartSvc --> Git[Git Repository]
-    
-    DevSvc --> Telepresence[Telepresence Provider]
-    DevSvc --> Skaffold[Skaffold Provider]
-    DevSvc --> Kubectl[Kubectl Provider]
-    
-    K3D --> Docker[Docker/K3D]
-    Helm --> K8s[Kubernetes Cluster]
-    Telepresence --> K8s
-    Kubectl --> K8s
+    subgraph "External Tools"
+        Docker[Docker]
+        K3DT[K3D Tool]
+        HelmT[Helm Tool]
+        ArgoCDT[ArgoCD Tool]
+        TPT[Telepresence Tool]
+    end
 ```
 
 ## Core Components
 
 | Component | Package | Responsibility |
-|-----------|---------|---------------|
-| **CLI Commands** | `cmd/` | Cobra command definitions and argument parsing |
-| **Bootstrap Service** | `internal/bootstrap/` | Orchestrates cluster creation + chart installation |
-| **Cluster Management** | `internal/cluster/` | K3D cluster lifecycle operations |
-| **Chart Installation** | `internal/chart/` | ArgoCD and Helm chart management |
-| **Development Tools** | `internal/dev/` | Telepresence intercepts and Skaffold workflows |
-| **Shared Infrastructure** | `internal/shared/` | Common utilities, UI, errors, and execution |
-| **Prerequisites** | `*/prerequisites/` | Tool installation and validation |
-| **Providers** | `*/providers/` | External tool integrations (K3D, Helm, Git) |
+|-----------|---------|----------------|
+| **CLI Commands** | `cmd/*` | Command-line interface, argument parsing, flag management |
+| **Cluster Management** | `internal/cluster` | K8s cluster lifecycle (create, delete, status, cleanup) |
+| **Chart Installation** | `internal/chart` | Helm chart deployment, ArgoCD configuration |
+| **Development Tools** | `internal/dev` | Telepresence intercepts, Skaffold workflows |
+| **Bootstrap Service** | `internal/bootstrap` | Complete environment setup orchestration |
+| **K3D Provider** | `internal/cluster/providers/k3d` | K3D cluster management implementation |
+| **Helm Provider** | `internal/chart/providers/helm` | Helm chart operations |
+| **ArgoCD Provider** | `internal/chart/providers/argocd` | ArgoCD application management |
+| **Telepresence Provider** | `internal/dev/providers/telepresence` | Service traffic interception |
+| **UI Components** | `internal/*/ui` | Interactive prompts, progress indicators, displays |
+| **Shared Infrastructure** | `internal/shared` | Common utilities, error handling, command execution |
 
 ## Component Relationships
 
+### Module Dependencies
+
 ```mermaid
-graph TB
+graph LR
     subgraph "Command Layer"
-        BootstrapCmd[Bootstrap Command]
-        ClusterCmd[Cluster Commands]
-        ChartCmd[Chart Commands]
-        DevCmd[Dev Commands]
+        CMD[cmd/*]
     end
     
-    subgraph "Service Layer"
-        BootstrapSvc[Bootstrap Service]
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        InterceptSvc[Intercept Service]
-        ScaffoldSvc[Scaffold Service]
+    subgraph "Service Layer"  
+        CLUSTER[cluster]
+        CHART[chart]
+        DEV[dev]
+        BOOTSTRAP[bootstrap]
     end
     
     subgraph "Provider Layer"
-        K3DProvider[K3D Manager]
-        HelmProvider[Helm Manager]
-        ArgoCDProvider[ArgoCD Manager]
-        GitProvider[Git Repository]
-        TelepresenceProvider[Telepresence Provider]
-        KubectlProvider[Kubectl Provider]
+        K3D[k3d provider]
+        HELM[helm provider]
+        ARGOCD[argocd provider]
+        TELEPRESENCE[telepresence provider]
     end
     
-    subgraph "Shared Infrastructure"
-        UI[UI Components]
-        Executor[Command Executor]
-        ErrorHandler[Error Handling]
-        Config[Configuration]
+    subgraph "Shared"
+        EXECUTOR[executor]
+        UI[ui]
+        ERRORS[errors]
     end
     
-    BootstrapCmd --> BootstrapSvc
-    ClusterCmd --> ClusterSvc
-    ChartCmd --> ChartSvc
-    DevCmd --> InterceptSvc
-    DevCmd --> ScaffoldSvc
+    CMD --> BOOTSTRAP
+    CMD --> CLUSTER
+    CMD --> CHART  
+    CMD --> DEV
     
-    BootstrapSvc --> ClusterSvc
-    BootstrapSvc --> ChartSvc
+    BOOTSTRAP --> CLUSTER
+    BOOTSTRAP --> CHART
     
-    ClusterSvc --> K3DProvider
-    ChartSvc --> HelmProvider
-    ChartSvc --> ArgoCDProvider
-    ChartSvc --> GitProvider
-    InterceptSvc --> TelepresenceProvider
-    InterceptSvc --> KubectlProvider
-    ScaffoldSvc --> KubectlProvider
+    CLUSTER --> K3D
+    CHART --> HELM
+    CHART --> ARGOCD
+    DEV --> TELEPRESENCE
     
-    ClusterSvc --> UI
-    ChartSvc --> UI
-    InterceptSvc --> UI
-    ScaffoldSvc --> UI
+    CLUSTER --> UI
+    CHART --> UI
+    DEV --> UI
     
-    K3DProvider --> Executor
-    HelmProvider --> Executor
-    TelepresenceProvider --> Executor
-    KubectlProvider --> Executor
+    K3D --> EXECUTOR
+    HELM --> EXECUTOR
+    ARGOCD --> EXECUTOR
+    TELEPRESENCE --> EXECUTOR
+    
+    CLUSTER --> ERRORS
+    CHART --> ERRORS
+    DEV --> ERRORS
 ```
 
 ## Data Flow
 
-### Cluster Creation and Chart Installation Sequence
+### Bootstrap Workflow
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant CLI
     participant Bootstrap
-    participant Cluster
-    participant Chart
-    participant K3D
-    participant Helm
-    participant ArgoCD
+    participant ClusterService
+    participant ChartService
+    participant K3DProvider
+    participant HelmProvider
+    participant ArgoCDManager
     
-    User->>CLI: openframe bootstrap
-    CLI->>Bootstrap: Execute()
-    Bootstrap->>Cluster: CreateCluster()
-    Cluster->>K3D: Create k3d cluster
-    K3D-->>Cluster: Cluster ready
-    Cluster-->>Bootstrap: Success
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>ClusterService: Create cluster
+    ClusterService->>K3DProvider: Create K3D cluster
+    K3DProvider-->>ClusterService: Cluster ready
+    ClusterService-->>Bootstrap: Cluster created
     
-    Bootstrap->>Chart: InstallCharts()
-    Chart->>Helm: Install ArgoCD
-    Helm-->>Chart: ArgoCD ready
-    Chart->>ArgoCD: Install app-of-apps
-    ArgoCD->>ArgoCD: Sync applications
-    ArgoCD-->>Chart: Applications synced
-    Chart-->>Bootstrap: Charts installed
+    Bootstrap->>ChartService: Install charts
+    ChartService->>HelmProvider: Install ArgoCD
+    HelmProvider-->>ChartService: ArgoCD installed
+    ChartService->>ArgoCDManager: Install app-of-apps
+    ArgoCDManager-->>ChartService: Applications deployed
+    ChartService-->>Bootstrap: Charts installed
     
-    Bootstrap-->>CLI: Complete
-    CLI-->>User: Success message
+    Bootstrap-->>User: Environment ready
 ```
 
-### Development Intercept Flow
+### Development Intercept Workflow
 
 ```mermaid
 sequenceDiagram
-    participant Dev
-    participant CLI
-    participant Intercept
-    participant Kubectl
-    participant Telepresence
-    participant K8s
+    participant Developer
+    participant InterceptUI
+    participant KubectlProvider
+    participant TelepresenceProvider
+    participant LocalService
     
-    Dev->>CLI: openframe dev intercept
-    CLI->>Intercept: StartIntercept()
-    Intercept->>Kubectl: Find service
-    Kubectl->>K8s: Query services
-    K8s-->>Kubectl: Service info
-    Kubectl-->>Intercept: Service found
-    
-    Intercept->>Telepresence: Connect to cluster
-    Telepresence-->>Intercept: Connected
-    Intercept->>Telepresence: Create intercept
-    Telepresence->>K8s: Route traffic
-    K8s-->>Telepresence: Traffic routed
-    Telepresence-->>Intercept: Intercept active
-    
-    Intercept-->>CLI: Intercept running
-    CLI-->>Dev: Traffic intercepted
+    Developer->>InterceptUI: openframe dev intercept
+    InterceptUI->>KubectlProvider: List services
+    KubectlProvider-->>InterceptUI: Available services
+    InterceptUI-->>Developer: Service selection
+    Developer->>InterceptUI: Select service & port
+    InterceptUI->>TelepresenceProvider: Setup intercept
+    TelepresenceProvider->>LocalService: Route traffic
+    LocalService-->>TelepresenceProvider: Handle requests
+    TelepresenceProvider-->>Developer: Intercept active
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `main.go` | Application entry point and version handling |
-| `cmd/root.go` | Root command definition and CLI structure |
-| `cmd/bootstrap/bootstrap.go` | Bootstrap command for complete setup |
+| `main.go` | Application entry point, CLI initialization |
+| `cmd/root.go` | Root command definition, global configuration |
+| `internal/bootstrap/service.go` | Complete environment setup orchestration |
 | `internal/cluster/service.go` | Core cluster management business logic |
-| `internal/chart/services/chart_service.go` | Chart installation orchestration |
+| `internal/cluster/providers/k3d/manager.go` | K3D cluster operations implementation |
+| `internal/chart/services/chart_service.go` | Chart installation workflow coordination |
+| `internal/chart/providers/helm/manager.go` | Helm chart operations |
+| `internal/chart/providers/argocd/applications.go` | ArgoCD application lifecycle management |
 | `internal/dev/services/intercept/service.go` | Telepresence intercept management |
 | `internal/shared/executor/executor.go` | Command execution abstraction |
-| `internal/shared/ui/logo.go` | CLI branding and visual presentation |
-| `internal/cluster/providers/k3d/manager.go` | K3D cluster provider implementation |
-| `internal/chart/providers/helm/manager.go` | Helm chart operations |
+| `internal/shared/ui/prompts.go` | Interactive UI components |
 
 ## Dependencies
 
@@ -202,21 +197,23 @@ The project integrates with several external tools and libraries:
 ### External Tool Dependencies
 - **Docker**: Container runtime for K3D clusters
 - **K3D**: Lightweight Kubernetes distribution for local development
+- **Helm**: Kubernetes package manager for chart deployment
 - **kubectl**: Kubernetes command-line tool for cluster interaction
-- **Helm**: Package manager for Kubernetes applications
-- **Telepresence**: Service intercept and local development
-- **Skaffold**: Continuous development for Kubernetes applications
-- **jq**: JSON processing for parsing command outputs
+- **Telepresence**: Service mesh for development traffic interception
+- **Skaffold**: Continuous development workflow tool
 
 ### Go Library Dependencies
-- **Cobra**: CLI framework for command structure and parsing
-- **pterm**: Terminal styling and interactive prompts
-- **promptui**: Enhanced user input and selection interfaces
-- **testify**: Testing utilities and assertions
+- **Cobra**: CLI framework for command structure and argument parsing
+- **pterm**: Terminal UI library for interactive prompts and styling
+- **promptui**: Interactive prompt library for user input
 - **yaml.v3**: YAML parsing for configuration files
 
-### Integration Patterns
-The CLI uses a provider pattern to abstract external tool interactions, making it testable and maintainable. Each provider implements specific interfaces for their domain (cluster management, chart operations, development tools).
+### Integration Pattern
+The CLI uses a provider pattern to abstract external tool interactions:
+1. **Command Executor**: Abstracts system command execution for testability
+2. **Provider Interfaces**: Define contracts for external tool integration
+3. **Mock Implementations**: Enable comprehensive testing without external dependencies
+4. **Error Handling**: Consistent error management across all integrations
 
 ## CLI Commands
 
@@ -224,37 +221,42 @@ The CLI uses a provider pattern to abstract external tool interactions, making i
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `openframe bootstrap` | Complete cluster setup (create + charts) | `openframe bootstrap my-cluster` |
-| `openframe cluster create` | Create a new K3D cluster | `openframe cluster create dev-cluster` |
-| `openframe cluster list` | List all managed clusters | `openframe cluster list` |
-| `openframe cluster status` | Show cluster details | `openframe cluster status my-cluster` |
-| `openframe cluster delete` | Remove a cluster | `openframe cluster delete my-cluster` |
-| `openframe chart install` | Install ArgoCD and applications | `openframe chart install my-cluster` |
-| `openframe dev intercept` | Intercept service traffic | `openframe dev intercept my-service --port 8080` |
-| `openframe dev skaffold` | Run development workflow | `openframe dev skaffold my-cluster` |
+| `cluster create` | Create new K3D cluster with interactive configuration | `openframe cluster create my-dev-cluster` |
+| `cluster list` | List all managed clusters with status | `openframe cluster list` |
+| `cluster status` | Show detailed cluster information | `openframe cluster status my-cluster` |
+| `cluster delete` | Remove cluster and cleanup resources | `openframe cluster delete my-cluster` |
+| `cluster cleanup` | Clean unused cluster resources | `openframe cluster cleanup my-cluster` |
+| `chart install` | Install ArgoCD and OpenFrame applications | `openframe chart install my-cluster` |
+| `bootstrap` | Complete setup (cluster + charts) | `openframe bootstrap` |
+| `dev intercept` | Route service traffic to local development | `openframe dev intercept my-service --port 8080` |
+| `dev scaffold` | Run Skaffold development workflow | `openframe dev scaffold my-cluster` |
 
-### Bootstrap Workflow
+### Command Flags
+
+| Flag | Description | Applicable Commands |
+|------|-------------|-------------------|
+| `--verbose, -v` | Enable detailed output | All commands |
+| `--dry-run` | Show what would be done | cluster create, chart install |
+| `--force, -f` | Skip confirmation prompts | cluster delete, cleanup |
+| `--non-interactive` | Skip all prompts, use defaults | bootstrap, chart install |
+| `--deployment-mode` | Specify deployment type | bootstrap, chart install |
+| `--skip-wizard` | Use defaults without interactive setup | cluster create |
+
+### Usage Examples
 
 ```bash
-# Complete setup with interactive configuration
+# Complete OpenFrame setup
 openframe bootstrap
 
-# Non-interactive with specific deployment mode
-openframe bootstrap --deployment-mode=oss-tenant --non-interactive
+# Create cluster with custom configuration
+openframe cluster create my-cluster --nodes 5 --type k3d
 
-# Verbose mode with custom cluster name
-openframe bootstrap my-dev-cluster --verbose
-```
+# Install charts with specific deployment mode
+openframe chart install --deployment-mode=oss-tenant
 
-### Development Workflow
-
-```bash
-# Start traffic intercept for a service
+# Set up development intercept
 openframe dev intercept api-service --port 8080 --namespace production
 
-# Run Skaffold development environment
-openframe dev skaffold --skip-bootstrap
-
-# List available clusters for development
-openframe cluster list --quiet
+# Run with verbose output
+openframe cluster status my-cluster --verbose
 ```
