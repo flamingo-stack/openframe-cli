@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-cli-bootstrap:
-    name: Test Bootstrap on ${{ matrix.os }}-${{ matrix.arch }}
+  test-cli:
+    name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 70
 
