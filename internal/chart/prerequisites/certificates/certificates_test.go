@@ -89,27 +89,48 @@ func TestInstallMkcert(t *testing.T) {
 	// This will likely fail in test environment, but should handle errors gracefully
 	err := installer.installMkcert()
 
-	if err != nil {
-		// Should be a reasonable error message
-		validErrors := []string{
-			"Homebrew is required",
-			"failed to install mkcert",
-			"failed to download mkcert",
-			"automatic mkcert installation not supported",
-			"exit status",
-			"executable file not found",
+	// Check expected behavior based on platform
+	switch runtime.GOOS {
+	case "windows":
+		// Windows should always return error
+		if err == nil {
+			t.Error("Expected error on Windows, got nil")
+		} else if !containsSubstring(err.Error(), "automatic mkcert installation") && !containsSubstring(err.Error(), "not supported") {
+			t.Errorf("Expected Windows to return 'not supported' error, got: %v", err)
 		}
-
-		hasValidError := false
-		for _, validError := range validErrors {
-			if containsSubstring(err.Error(), validError) {
-				hasValidError = true
-				break
+	case "darwin":
+		// macOS should fail without brew
+		if !commandExists("brew") {
+			if err == nil {
+				t.Error("Expected error when brew is not installed")
+			} else if !containsSubstring(err.Error(), "Homebrew is required") {
+				t.Errorf("Expected Homebrew error, got: %v", err)
 			}
 		}
+	default:
+		// On other platforms, should return some error or succeed
+		if err != nil {
+			// Should be a reasonable error message
+			validErrors := []string{
+				"Homebrew is required",
+				"failed to install mkcert",
+				"failed to download mkcert",
+				"automatic mkcert installation not supported",
+				"exit status",
+				"executable file not found",
+			}
 
-		if !hasValidError {
-			t.Errorf("Unexpected error type: %v", err)
+			hasValidError := false
+			for _, validError := range validErrors {
+				if containsSubstring(err.Error(), validError) {
+					hasValidError = true
+					break
+				}
+			}
+
+			if !hasValidError {
+				t.Errorf("Unexpected error type: %v", err)
+			}
 		}
 	}
 }

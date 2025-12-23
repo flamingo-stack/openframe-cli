@@ -18,6 +18,7 @@ type ArgoCD struct {
 	helmManager   *helm.HelmManager
 	pathResolver  *config.PathResolver
 	argoCDManager *argocd.Manager
+	executor      executor.CommandExecutor
 }
 
 // NewArgoCD creates a new ArgoCD service
@@ -30,20 +31,25 @@ func NewArgoCD(helmManager *helm.HelmManager, pathResolver *config.PathResolver,
 		helmManager:   helmManager,
 		pathResolver:  pathResolver,
 		argoCDManager: argocd.NewManager(argoCDExecutor),
+		executor:      exec,
 	}
 }
 
 // Install installs ArgoCD using Helm
-func (a *ArgoCD) Install(ctx context.Context, config config.ChartInstallConfig) error {
+func (a *ArgoCD) Install(ctx context.Context, cfg config.ChartInstallConfig) error {
 	// Always install/upgrade ArgoCD
 
 	// Install ArgoCD with progress indication
-	err := a.helmManager.InstallArgoCDWithProgress(ctx, config)
+	err := a.helmManager.InstallArgoCDWithProgress(ctx, cfg)
 	if err != nil {
-		return errors.WrapAsChartError("installation", "ArgoCD", err).WithCluster(config.ClusterName)
+		return errors.WrapAsChartError("installation", "ArgoCD", err).WithCluster(cfg.ClusterName)
 	}
 
 	pterm.Success.Println("ArgoCD installed")
+
+	// Note: Removed kubectl verification checks - they were informational only
+	// and caused issues with WSL networking on Windows CI
+
 	return nil
 }
 

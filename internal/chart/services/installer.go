@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
@@ -39,8 +38,11 @@ func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.
 		}
 
 		// Wait for all ArgoCD applications to be ready after app-of-apps installation
+		// Note: This is NOT a recoverable error - ArgoCD and app-of-apps are already installed,
+		// so retrying would reinstall them unnecessarily. WaitForApplications has its own internal retry logic.
 		if err := i.argoCDService.WaitForApplications(ctx, config); err != nil {
-			return errors.NewRecoverableChartError("waiting", "ArgoCD applications", err, 30*time.Second).WithCluster(config.ClusterName)
+			// Create a new non-recoverable error (don't use WrapAsChartError which preserves existing ChartError's Recoverable flag)
+			return errors.NewChartError("waiting", "ArgoCD applications", err).WithCluster(config.ClusterName)
 		}
 	}
 

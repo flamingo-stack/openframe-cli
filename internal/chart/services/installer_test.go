@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
@@ -219,11 +218,12 @@ func TestInstaller_InstallCharts_RecoverableError(t *testing.T) {
 	err := installer.InstallCharts(config)
 	assert.Error(t, err)
 
-	// Check if error is recoverable
+	// Check that error is NOT recoverable (WaitForApplications failures should not trigger reinstallation)
+	// ArgoCD and app-of-apps are already installed, so retrying would reinstall them unnecessarily.
+	// WaitForApplications has its own internal retry logic.
 	chartErr, ok := err.(*errors.ChartError)
 	assert.True(t, ok, "Expected ChartError")
-	assert.True(t, chartErr.IsRecoverable(), "Expected recoverable error")
-	assert.Equal(t, 30*time.Second, chartErr.RetryAfter, "Expected 30 second retry delay")
+	assert.False(t, chartErr.IsRecoverable(), "Expected non-recoverable error - waiting failures should not trigger reinstallation")
 }
 
 func TestInstaller_InstallCharts_NoWaitWithoutAppOfApps(t *testing.T) {
@@ -298,7 +298,7 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 			},
 		},
 		{
-			name: "Wait error is recoverable",
+			name: "Wait error is NOT recoverable",
 			setupMocks: func(argoCD *MockArgoCDService, appOfApps *MockAppOfAppsService) {
 				argoCD.On("Install", mock.Anything, mock.Anything).Return(nil)
 				appOfApps.On("Install", mock.Anything, mock.Anything).Return(nil)
@@ -312,12 +312,14 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 				},
 			},
 			checkError: func(t *testing.T, err error) {
+				// WaitForApplications failures should NOT trigger reinstallation
+				// ArgoCD and app-of-apps are already installed, and WaitForApplications
+				// has its own internal retry logic.
 				chartErr, ok := err.(*errors.ChartError)
 				assert.True(t, ok)
 				assert.Equal(t, "ArgoCD applications", chartErr.Component)
 				assert.Equal(t, "waiting", chartErr.Operation)
-				assert.True(t, chartErr.IsRecoverable())
-				assert.Equal(t, 30*time.Second, chartErr.RetryAfter)
+				assert.False(t, chartErr.IsRecoverable(), "Wait errors should not trigger reinstallation")
 			},
 		},
 	}

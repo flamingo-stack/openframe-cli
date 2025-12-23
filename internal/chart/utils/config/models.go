@@ -12,6 +12,7 @@ type ChartInstallConfig struct {
 	Verbose        bool
 	Silent         bool
 	NonInteractive bool // Suppresses interactive UI elements and spinners
+	SkipCRDs       bool // Skip installation of ArgoCD CRDs
 	// App-of-apps specific configuration
 	AppOfApps *models.AppOfAppsConfig
 }

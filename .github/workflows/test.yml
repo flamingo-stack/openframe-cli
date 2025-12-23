@@ -1,29 +1,51 @@
-name: Build
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+name: Test
 
 permissions:
   contents: read
 
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
+  test-cli:
+    name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 70
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: Linux-x64
+          - os: windows
+            arch: amd64
+            runner: Windows-x64
+          - os: darwin
+            arch: arm64
+            runner: macos-26
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           cache: true
+        
+      - name: Run integration tests
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 60
+        run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 
-      - name: Build
-        run: go build -v -o openframe .
 
-      - name: Test binary
-        run: ./openframe --version
+      - name: Run unit tests
+        run: make test-unit

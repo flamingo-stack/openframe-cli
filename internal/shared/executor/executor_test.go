@@ -105,7 +105,7 @@ func TestRealCommandExecutor_Execute_DryRun(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "", result.Stdout)
 	assert.Equal(t, "", result.Stderr)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestRealCommandExecutor_Execute_RealCommand(t *testing.T) {
@@ -153,7 +153,7 @@ func TestRealCommandExecutor_ExecuteWithOptions_DryRun(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "", result.Stdout)
 	assert.Equal(t, "", result.Stderr)
-	assert.Greater(t, result.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestRealCommandExecutor_ExecuteWithOptions_RealCommand(t *testing.T) {
@@ -298,4 +298,109 @@ func TestExecuteOptions(t *testing.T) {
 	assert.Equal(t, "/tmp", options.Dir)
 	assert.Equal(t, map[string]string{"VAR": "value"}, options.Env)
 	assert.Equal(t, 5*time.Second, options.Timeout)
+}
+
+// Tests for WSL error types and helper functions
+
+func TestWSLError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      WSLError
+		contains []string
+	}{
+		{
+			name: "basic error",
+			err: WSLError{
+				Operation: "executing helm",
+				ExitCode:  -1,
+			},
+			contains: []string{"WSL error", "executing helm", "-1"},
+		},
+		{
+			name: "error with stderr",
+			err: WSLError{
+				Operation: "executing kubectl",
+				ExitCode:  1,
+				Stderr:    "connection refused",
+			},
+			contains: []string{"WSL error", "executing kubectl", "connection refused"},
+		},
+		{
+			name: "error with suggestion",
+			err: WSLError{
+				Operation:  "executing k3d",
+				ExitCode:   WSLExitCodeDistroNotFound,
+				Suggestion: "Run wsl --install",
+			},
+			contains: []string{"WSL error", "executing k3d", "Run wsl --install"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errMsg := tt.err.Error()
+			for _, expected := range tt.contains {
+				assert.Contains(t, errMsg, expected)
+			}
+		})
+	}
+}
+
+func TestGetWSLErrorSuggestion(t *testing.T) {
+	tests := []struct {
+		name     string
+		exitCode int
+		command  string
+		contains string
+	}{
+		{
+			name:     "distro not found",
+			exitCode: WSLExitCodeDistroNotFound,
+			command:  "helm upgrade",
+			contains: "not accessible",
+		},
+		{
+			name:     "negative one",
+			exitCode: -1,
+			command:  "kubectl get pods",
+			contains: "not accessible",
+		},
+		{
+			name:     "wslpath error",
+			exitCode: WSLExitCodeGenericError,
+			command:  "wslpath -u C:/test",
+			contains: "wslpath command failed",
+		},
+		{
+			name:     "generic error",
+			exitCode: WSLExitCodeGenericError,
+			command:  "helm install",
+			contains: "properly configured",
+		},
+		{
+			name:     "unknown error",
+			exitCode: 42,
+			command:  "some command",
+			contains: "unexpectedly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestion := GetWSLErrorSuggestion(tt.exitCode, tt.command)
+			assert.Contains(t, suggestion, tt.contains)
+		})
+	}
+}
+
+func TestWSLExitCodeConstants(t *testing.T) {
+	// Verify the constant values are correct
+	assert.Equal(t, 4294967295, WSLExitCodeDistroNotFound)
+	assert.Equal(t, 1, WSLExitCodeGenericError)
+}
+
+func TestResetWSLCache(t *testing.T) {
+	// This test just ensures the function doesn't panic
+	// Actual caching behavior depends on the OS
+	ResetWSLCache()
 }

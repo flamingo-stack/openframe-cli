@@ -42,6 +42,40 @@ server:
       memory: 512Mi
 
 
+# Disable non-essential components for lightweight installation (especially CI/k3d)
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+applicationSet:
+  enabled: false
+
+# Resource constraints to prevent k3d/CI cluster overload
+controller:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+  env:
+    - name: ARGOCD_RECONCILIATION_TIMEOUT
+      value: "300s"
+    - name: ARGOCD_REPO_SERVER_TIMEOUT_SECONDS
+      value: "300"
+
+server:
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
 repoServer:
   resources:
     requests:
@@ -95,3 +129,4 @@ notifications:
       memory: 128Mi
 `
 }
+
