@@ -2,11 +2,7 @@ package argocd
 
 // GetArgoCDValues returns the ArgoCD Helm chart values as YAML string
 func GetArgoCDValues() string {
-	return `# global:
-#   imagePullSecrets:
-#     - name: docker-pat-secret
-
-fullnameOverride: argocd
+	return `fullnameOverride: argocd
 
 configs:
   cm:
@@ -23,6 +19,28 @@ configs:
         end
       end
       return hs
+  params:
+    controller.sync.timeout.seconds: "1800"
+
+controller:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+
+server:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 
 # Disable non-essential components for lightweight installation (especially CI/k3d)
 dex:
@@ -59,37 +77,56 @@ server:
       memory: 128Mi
 
 repoServer:
-  replicas: 1
   resources:
-    limits:
-      cpu: "1"
-      memory: 768Mi
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
-      value: "300s"
-    - name: ARGOCD_GIT_ATTEMPTS_COUNT
-      value: "5"
-    - name: ARGOCD_GIT_RETRY_MAX_DURATION
-      value: "30s"
-  initContainers:
-    - name: wait-for-dns
-      image: busybox:1.36
-      command: ['sh', '-c', 'until nslookup github.com; do echo waiting for DNS; sleep 2; done']
-  # Increase parallelism limits to handle manifest generation
-  extraArgs:
-    - --parallelismlimit=2
+      value: "180s"
+
 
 redis:
   resources:
-    limits:
+    requests:
       cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
       memory: 128Mi
+
+
+dex:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
+
+applicationSet:
+  resources:
     requests:
       cpu: 50m
       memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 `
 }
 
