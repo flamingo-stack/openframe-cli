@@ -2,6 +2,7 @@ package kubectl
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -51,47 +52,57 @@ func (p *Provider) FindResourceNamespace(ctx context.Context, serviceName string
 	return "default", nil
 }
 
+// resourceList represents a generic Kubernetes resource list for JSON parsing
+type resourceList struct {
+	Items []struct {
+		Metadata struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+	} `json:"items"`
+}
+
 // searchResourceByType searches for a specific resource type with the given name/prefix
 func (p *Provider) searchResourceByType(ctx context.Context, resourceType, serviceName string) string {
 	// Search across all namespaces for resources matching the service name
-	result, err := p.executor.Execute(ctx, "kubectl", "get", resourceType, "--all-namespaces", "-o", "jsonpath={range .items[*]}{.metadata.namespace}{\" \"}{.metadata.name}{\"\\n\"}{end}")
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
+	result, err := p.executor.Execute(ctx, "kubectl", "get", resourceType, "--all-namespaces", "-o", "json")
 	if err != nil {
 		if p.verbose {
 			fmt.Printf("DEBUG: kubectl search failed for %s: %v\n", resourceType, err)
 		}
 		return ""
 	}
-	
+
 	if p.verbose {
 		fmt.Printf("DEBUG: Searching %s for service '%s'\n", resourceType, serviceName)
-		fmt.Printf("DEBUG: kubectl output: %s\n", result.Stdout)
 	}
-	
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
+
+	var resources resourceList
+	if err := json.Unmarshal([]byte(result.Stdout), &resources); err != nil {
+		if p.verbose {
+			fmt.Printf("DEBUG: Failed to parse JSON for %s: %v\n", resourceType, err)
 		}
-		
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			namespace := parts[0]
-			resourceName := parts[1]
-			
+		return ""
+	}
+
+	for _, item := range resources.Items {
+		namespace := item.Metadata.Namespace
+		resourceName := item.Metadata.Name
+
+		if p.verbose {
+			fmt.Printf("DEBUG: Checking resource '%s' in namespace '%s'\n", resourceName, namespace)
+		}
+
+		// Check if resource name matches or starts with service name
+		if resourceName == serviceName || strings.HasPrefix(resourceName, serviceName+"-") || strings.HasPrefix(resourceName, serviceName) {
 			if p.verbose {
-				fmt.Printf("DEBUG: Checking resource '%s' in namespace '%s'\n", resourceName, namespace)
+				fmt.Printf("DEBUG: Found match! Resource '%s' in namespace '%s'\n", resourceName, namespace)
 			}
-			
-			// Check if resource name matches or starts with service name
-			if resourceName == serviceName || strings.HasPrefix(resourceName, serviceName+"-") || strings.HasPrefix(resourceName, serviceName) {
-				if p.verbose {
-					fmt.Printf("DEBUG: Found match! Resource '%s' in namespace '%s'\n", resourceName, namespace)
-				}
-				return namespace
-			}
+			return namespace
 		}
 	}
-	
+
 	if p.verbose {
 		fmt.Printf("DEBUG: No matching %s found for service '%s'\n", resourceType, serviceName)
 	}

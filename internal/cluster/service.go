@@ -14,6 +14,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
+	"k8s.io/client-go/rest"
 )
 
 // ClusterService provides cluster configuration and management operations
@@ -62,7 +63,8 @@ func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager *k3d.K3
 }
 
 // CreateCluster handles cluster creation operations
-func (s *ClusterService) CreateCluster(config models.ClusterConfig) error {
+// Returns the *rest.Config for the created cluster that can be used to interact with it
+func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Config, error) {
 	ctx := context.Background()
 
 	// Check if cluster already exists
@@ -100,7 +102,12 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) error {
 			pterm.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
 		}
 
-		return nil // Exit gracefully without error
+		// Return the rest.Config for the existing cluster
+		restConfig, err := s.manager.GetRestConfig(ctx, config.Name)
+		if err != nil {
+			return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
+		}
+		return restConfig, nil // Exit gracefully without error
 	}
 
 	// Cluster doesn't exist, proceed with creation
@@ -112,12 +119,12 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) error {
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
 	}
 
-	err := s.manager.CreateCluster(ctx, config)
+	restConfig, err := s.manager.CreateCluster(ctx, config)
 	if err != nil {
 		if spinner != nil {
 			spinner.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
 		}
-		return err
+		return nil, err
 	}
 
 	if spinner != nil {
@@ -134,7 +141,7 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) error {
 	// Show next steps
 	s.showNextSteps(config.Name)
 
-	return nil
+	return restConfig, nil
 }
 
 // DeleteCluster handles cluster deletion business logic
@@ -176,6 +183,12 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 func (s *ClusterService) GetClusterStatus(name string) (models.ClusterInfo, error) {
 	ctx := context.Background()
 	return s.manager.GetClusterStatus(ctx, name)
+}
+
+// GetRestConfig returns the rest.Config for an existing cluster
+func (s *ClusterService) GetRestConfig(name string) (*rest.Config, error) {
+	ctx := context.Background()
+	return s.manager.GetRestConfig(ctx, name)
 }
 
 // DetectClusterType handles cluster type detection business logic
@@ -709,19 +722,21 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 
 // CreateClusterWithPrerequisites creates a cluster after checking prerequisites
 // This is a wrapper function for bootstrap and other automated flows
-func CreateClusterWithPrerequisites(clusterName string, verbose bool) error {
+// Returns the *rest.Config for the created cluster
+func CreateClusterWithPrerequisites(clusterName string, verbose bool) (*rest.Config, error) {
 	return CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, false)
 }
 
 // CreateClusterWithPrerequisitesNonInteractive creates a cluster with non-interactive support
-func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bool, nonInteractive bool) error {
+// Returns the *rest.Config for the created cluster
+func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Show logo first, then check prerequisites (consistent with individual commands)
 	ui.ShowLogo()
 
 	// Check prerequisites using the installer directly
 	installer := prerequisites.NewInstaller()
 	if err := installer.CheckAndInstallNonInteractive(nonInteractive); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Create service directly without using utils to avoid circular import
@@ -739,12 +754,12 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  3,
+		NodeCount:  4,
 	}
 	if clusterName == "" {
 		config.Name = "openframe-dev" // default name
 	}
 
-	// Create the cluster
+	// Create the cluster and return the rest.Config
 	return service.CreateCluster(config)
 }

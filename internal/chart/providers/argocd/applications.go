@@ -2,16 +2,36 @@ package argocd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	argocdclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Manager handles ArgoCD-specific operations
 type Manager struct {
-	executor executor.CommandExecutor
+	executor    executor.CommandExecutor
+	clusterName string // Optional cluster name for explicit context (e.g., "k3d-openframe")
+
+	// Native Kubernetes clients for direct API access (reduces kubectl dependency)
+	kubeConfig       *rest.Config
+	kubeClient       kubernetes.Interface
+	apiextClient     apiextensionsclientset.Interface
+	argocdClient     argocdclientset.Interface
+	clientsInitialized bool
 }
 
 // NewManager creates a new ArgoCD manager
@@ -21,157 +41,269 @@ func NewManager(exec executor.CommandExecutor) *Manager {
 	}
 }
 
-// Application represents an ArgoCD application status
-type Application struct {
-	Name   string
-	Health string
-	Sync   string
+// NewManagerWithCluster creates a new ArgoCD manager with explicit cluster context
+func NewManagerWithCluster(exec executor.CommandExecutor, clusterName string) *Manager {
+	return &Manager{
+		executor:    exec,
+		clusterName: clusterName,
+	}
 }
 
-// getTotalExpectedApplications tries to determine the total number of applications that will be created
-func (m *Manager) getTotalExpectedApplications(ctx context.Context, config config.ChartInstallConfig) int {
-	// Method 1: Get all resources that app-of-apps will create from its status
-	// This shows ALL planned applications across all sync waves
-	manifestResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")
+// NewManagerWithConfig creates a new ArgoCD manager with pre-configured Kubernetes clients
+// This is the preferred constructor when you already have a *rest.Config (e.g., after k3d cluster creation)
+func NewManagerWithConfig(exec executor.CommandExecutor, config *rest.Config) (*Manager, error) {
+	if config == nil {
+		return nil, fmt.Errorf("rest.Config cannot be nil")
+	}
 
-	if err == nil && manifestResult.Stdout != "" {
-		resources := strings.Fields(manifestResult.Stdout)
-		if len(resources) > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Detected %d applications planned by app-of-apps\n", len(resources))
-			}
-			return len(resources)
+	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
+	// Uses Insecure=true with CA data cleared, preserving client cert authentication.
+	// Applied here as defense-in-depth in case the caller's config doesn't have it set.
+	config = sharedconfig.ApplyInsecureTLSConfig(config)
+
+	m := &Manager{
+		executor:   exec,
+		kubeConfig: config,
+	}
+
+	// Create core Kubernetes client
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	m.kubeClient = kubeClient
+
+	// Create API extensions client (for CRD operations)
+	apiextClient, err := apiextensionsclientset.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create apiextensions client: %w", err)
+	}
+	m.apiextClient = apiextClient
+
+	// Create ArgoCD client
+	argocdClient, err := argocdclientset.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ArgoCD client: %w", err)
+	}
+	m.argocdClient = argocdClient
+
+	m.clientsInitialized = true
+	return m, nil
+}
+
+// initKubernetesClients initializes the native Kubernetes clients
+// This is called lazily when native client operations are needed
+func (m *Manager) initKubernetesClients() error {
+	if m.clientsInitialized {
+		return nil
+	}
+
+	// Build kubeconfig path
+	kubeconfigPath := getKubeconfigPath()
+
+	// Build config with explicit context if cluster name is set
+	var kubeContext string
+	if m.clusterName != "" {
+		kubeContext = "k3d-" + m.clusterName
+	}
+
+	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
+	configOverrides := &clientcmd.ConfigOverrides{}
+	if kubeContext != "" {
+		configOverrides.CurrentContext = kubeContext
+	}
+
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides).ClientConfig()
+	if err != nil {
+		return fmt.Errorf("failed to build kubeconfig: %w", err)
+	}
+
+	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
+	// Uses custom HTTP transport to bypass TLS at the deepest level.
+	config = sharedconfig.ApplyInsecureTransport(config)
+
+	// On Windows, normalize the host to 127.0.0.1 if needed
+	if runtime.GOOS == "windows" && strings.Contains(config.Host, "host.docker.internal") {
+		// Extract port and use 127.0.0.1
+		parts := strings.Split(config.Host, ":")
+		if len(parts) >= 3 {
+			port := parts[len(parts)-1]
+			config.Host = fmt.Sprintf("https://127.0.0.1:%s", port)
 		}
 	}
 
-	// Method 2: Get the source manifest from app-of-apps and count applications
-	// This gives us the definitive count from the source repository
-	sourceResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.spec.source}")
+	m.kubeConfig = config
 
-	if err == nil && sourceResult.Stdout != "" && config.Verbose {
-		pterm.Debug.Printf("App-of-apps source: %s\n", sourceResult.Stdout)
+	// Create core Kubernetes client
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	m.kubeClient = kubeClient
+
+	// Create API extensions client (for CRD operations)
+	apiextClient, err := apiextensionsclientset.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create apiextensions client: %w", err)
+	}
+	m.apiextClient = apiextClient
+
+	// Create ArgoCD client
+	argocdClient, err := argocdclientset.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create ArgoCD client: %w", err)
+	}
+	m.argocdClient = argocdClient
+
+	m.clientsInitialized = true
+	return nil
+}
+
+// getKubeconfigPath returns the kubeconfig file path
+func getKubeconfigPath() string {
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		return kubeconfig
 	}
 
-	// Method 3: Try to get the complete resource list from app-of-apps status
-	// This includes all resources that will be created, not just current ones
-	allResourcesResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={range .status.resources[*]}{.kind}{\":\"}{.name}{\"\\n\"}{end}")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return clientcmd.RecommendedHomeFile
+	}
 
-	if err == nil && allResourcesResult.Stdout != "" {
-		lines := strings.Split(strings.TrimSpace(allResourcesResult.Stdout), "\n")
+	return filepath.Join(homeDir, ".kube", "config")
+}
+
+// SetClusterName sets the cluster name for explicit context usage
+func (m *Manager) SetClusterName(name string) {
+	m.clusterName = name
+}
+
+// getKubectlArgs returns kubectl args with explicit context if cluster name is set
+func (m *Manager) getKubectlArgs(args ...string) []string {
+	if m.clusterName != "" {
+		contextName := "k3d-" + m.clusterName
+		return append([]string{"--context", contextName}, args...)
+	}
+	return args
+}
+
+// Application represents an ArgoCD application status
+type Application struct {
+	Name             string
+	Health           string
+	HealthMessage    string // Detailed health message
+	Sync             string
+	SyncRevision     string // Git revision being synced
+	Condition        string // Status condition message (e.g., error messages from repo-server)
+	ConditionType    string // Type of condition (e.g., "ComparisonError", "InvalidSpecError")
+	OperationPhase   string // Operation phase (e.g., "Running", "Failed", "Succeeded")
+	OperationMessage string // Operation error message
+	RepoURL          string // Source repository URL
+	Path             string // Path in repository
+	TargetRevision   string // Target revision (branch/tag)
+	ReconciledAt     string // Last reconciliation time
+}
+
+// argoAppList is used for JSON parsing of ArgoCD applications from kubectl output
+type argoAppList struct {
+	Items []argoApp `json:"items"`
+}
+
+// argoApp represents the minimal ArgoCD application structure for JSON parsing
+type argoApp struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Status struct {
+		Health struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"health"`
+		Sync struct {
+			Status   string `json:"status"`
+			Revision string `json:"revision"`
+		} `json:"sync"`
+		Conditions []struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"conditions"`
+		OperationState struct {
+			Phase   string `json:"phase"`
+			Message string `json:"message"`
+		} `json:"operationState"`
+		ReconciledAt string `json:"reconciledAt"`
+	} `json:"status"`
+	Spec struct {
+		Source struct {
+			RepoURL        string `json:"repoURL"`
+			Path           string `json:"path"`
+			TargetRevision string `json:"targetRevision"`
+		} `json:"source"`
+	} `json:"spec"`
+}
+
+// getTotalExpectedApplications tries to determine the total number of applications that will be created
+// This function prioritizes native Go client calls over kubectl shell commands for better performance
+func (m *Manager) getTotalExpectedApplications(ctx context.Context, config config.ChartInstallConfig) int {
+	// Set cluster name from config if available
+	if config.ClusterName != "" && m.clusterName == "" {
+		m.clusterName = config.ClusterName
+	}
+
+	// On Windows/WSL2, always use kubectl fallback because:
+	// - The native Go client connects to 127.0.0.1:6550 from Windows
+	// - But this port is only accessible from inside WSL where k3d runs
+	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
+	if runtime.GOOS == "windows" {
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
+	// Initialize clients if needed
+	if err := m.initKubernetesClients(); err != nil {
+		if config.Verbose {
+			pterm.Debug.Printf("Could not initialize native clients: %v\n", err)
+		}
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
+	if m.argocdClient == nil {
+		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+	}
+
+	// --- Primary Method: Native ArgoCD Client ---
+
+	// Method 1: Get app-of-apps and count Application resources from its status
+	app, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").Get(ctx, "app-of-apps", metav1.GetOptions{})
+	if err == nil {
 		appCount := 0
-		for _, line := range lines {
-			if strings.HasPrefix(line, "Application:") {
+		for _, res := range app.Status.Resources {
+			if res.Kind == "Application" {
 				appCount++
 			}
 		}
 		if appCount > 0 {
 			if config.Verbose {
-				pterm.Debug.Printf("Found %d total Application resources in app-of-apps status\n", appCount)
+				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via native client)\n", appCount)
 			}
 			return appCount
 		}
 	}
 
-	// Method 4: Check ArgoCD server API for planned applications
-	// Query the ArgoCD server pod directly for application information
-	serverPod, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "pod",
-		"-l", "app.kubernetes.io/name=argocd-server", "-o", "jsonpath={.items[0].metadata.name}")
-
-	if err == nil && serverPod.Stdout != "" {
-		podName := strings.TrimSpace(serverPod.Stdout)
-		// Try to query ArgoCD's internal application list via kubectl exec
-		appsResult, _ := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "exec", podName, "--",
-			"argocd", "app", "list", "-o", "name")
-		if appsResult != nil && appsResult.Stdout != "" {
-			apps := strings.Split(strings.TrimSpace(appsResult.Stdout), "\n")
-			count := 0
-			for _, app := range apps {
-				if strings.TrimSpace(app) != "" && app != "app-of-apps" {
-					count++
-				}
-			}
-			if count > 0 {
-				if config.Verbose {
-					pterm.Debug.Printf("Found %d applications via ArgoCD CLI\n", count)
-				}
-				return count
-			}
-		}
-	}
-
-	// Method 4: Try to get all applications including those being created
-	// This includes applications in all states (even those not yet synced due to sync waves)
-	allAppsResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
-
-	if err == nil && allAppsResult.Stdout != "" {
-		apps := strings.Split(strings.TrimSpace(allAppsResult.Stdout), "\n")
-		// Filter out empty lines and count
+	// Method 2: List all applications directly via native client
+	appList, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").List(ctx, metav1.ListOptions{})
+	if err == nil && len(appList.Items) > 0 {
+		// Count all apps except app-of-apps itself
 		count := 0
-		for _, app := range apps {
-			if strings.TrimSpace(app) != "" {
+		for _, a := range appList.Items {
+			if a.Name != "app-of-apps" {
 				count++
 			}
 		}
-		// If we found a reasonable number of apps, use it
 		if count > 0 {
 			if config.Verbose {
-				pterm.Debug.Printf("Found %d total ArgoCD applications\n", count)
+				pterm.Debug.Printf("Found %d ArgoCD applications (via native client)\n", count)
 			}
 			return count
-		}
-	}
-
-	// Method 2: Check helm values to count applications defined
-	helmResult, err := m.executor.Execute(ctx, "helm", "get", "values", "app-of-apps", "-n", "argocd")
-	if err == nil && helmResult.Stdout != "" {
-		// Count application definitions in various formats
-		// Look for patterns that indicate application definitions
-		appPatterns := []string{
-			"repoURL:",        // Each app typically has a repoURL
-			"targetRevision:", // And a targetRevision
-			"- name:",         // Applications might be in a list
-		}
-
-		maxCount := 0
-		for _, pattern := range appPatterns {
-			count := strings.Count(helmResult.Stdout, pattern)
-			if count > maxCount {
-				maxCount = count
-			}
-		}
-
-		if maxCount > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Estimated %d applications from helm values\n", maxCount)
-			}
-			return maxCount
-		}
-	}
-
-	// Method 3: Check ApplicationSets which generate multiple applications
-	appSetResult, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applicationsets.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
-
-	if err == nil && appSetResult.Stdout != "" {
-		appSets := strings.Split(strings.TrimSpace(appSetResult.Stdout), "\n")
-		count := 0
-		for _, appSet := range appSets {
-			if strings.TrimSpace(appSet) != "" {
-				count++
-			}
-		}
-		// Each ApplicationSet typically generates 5-10 applications
-		// Use a conservative estimate
-		if count > 0 {
-			estimated := count * 7
-			if config.Verbose {
-				pterm.Debug.Printf("Estimated %d applications from %d ApplicationSets\n", estimated, count)
-			}
-			return estimated
 		}
 	}
 
@@ -183,53 +315,237 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 	return 0
 }
 
-// parseApplications gets ArgoCD applications and their status directly via kubectl
-func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
-	// Use direct kubectl command instead of parsing JSON string to avoid control character issues
-	// Use conditional jsonpath to handle missing status fields
-	result, err := m.executor.Execute(ctx, "kubectl", "-n", "argocd", "get", "applications.argoproj.io",
-		"-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\t\"}{.status.health.status}{\"\\t\"}{.status.sync.status}{\"\\n\"}{end}")
+// getTotalExpectedApplicationsViaKubectl is the fallback method using kubectl commands
+func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, config config.ChartInstallConfig) int {
+	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl
+	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
+		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")...)
 
-	if err != nil {
-		// If kubectl fails, try fallback approach
-		if verbose {
-			pterm.Warning.Printf("kubectl jsonpath failed: %v\n", err)
+	if err == nil && manifestResult.Stdout != "" {
+		resources := strings.Fields(manifestResult.Stdout)
+		if len(resources) > 0 {
+			if config.Verbose {
+				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via kubectl)\n", len(resources))
+			}
+			return len(resources)
 		}
-		// Return empty apps list instead of failing - applications may still be initializing
+	}
+
+	// Fallback Method 2: Try to get all applications including those being created
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
+	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+		"-o", "json")...)
+
+	if err == nil && allAppsResult.Stdout != "" {
+		var appList argoAppList
+		if err := json.Unmarshal([]byte(allAppsResult.Stdout), &appList); err == nil && len(appList.Items) > 0 {
+			if config.Verbose {
+				pterm.Debug.Printf("Found %d total ArgoCD applications (via kubectl)\n", len(appList.Items))
+			}
+			return len(appList.Items)
+		}
+	}
+
+	// Default: return 0 to indicate unknown
+	if config.Verbose {
+		pterm.Debug.Println("Could not determine total expected applications upfront, will discover dynamically")
+	}
+
+	return 0
+}
+
+// parseApplications gets ArgoCD applications and their status using native ArgoCD client
+// This reduces reliance on external kubectl binary
+func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
+	// On Windows/WSL2, always use kubectl fallback because:
+	// - The native Go client connects to 127.0.0.1:6550 from Windows
+	// - But this port is only accessible from inside WSL where k3d runs
+	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
+	if runtime.GOOS == "windows" {
+		return m.parseApplicationsViaKubectl(ctx, verbose)
+	}
+
+	// Initialize clients if needed
+	if err := m.initKubernetesClients(); err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to initialize native clients, falling back to kubectl: %v\n", err)
+		}
+		return m.parseApplicationsViaKubectl(ctx, verbose)
+	}
+
+	if m.argocdClient == nil {
+		return m.parseApplicationsViaKubectl(ctx, verbose)
+	}
+
+	// Use native ArgoCD client to list applications
+	appList, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to list Argo CD applications via native client: %v\n", err)
+		}
+		// Return empty list on failure, allowing the wait loop to continue trying
 		return []Application{}, nil
 	}
 
-	apps := make([]Application, 0)
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	apps := make([]Application, 0, len(appList.Items))
 
-	for _, line := range lines {
-		if line == "" {
-			continue
+	for _, argoApp := range appList.Items {
+		health := "Unknown"
+		sync := "Unknown"
+		condition := ""
+		conditionType := ""
+
+		// Safely extract Health and Sync status from the Go struct
+		if argoApp.Status.Health.Status != "" {
+			health = string(argoApp.Status.Health.Status)
+		}
+		if argoApp.Status.Sync.Status != "" {
+			sync = string(argoApp.Status.Sync.Status)
 		}
 
-		parts := strings.Split(line, "\t")
-		if len(parts) >= 3 {
-			health := strings.TrimSpace(parts[1])
-			sync := strings.TrimSpace(parts[2])
-
-			// Default empty values to "Unknown"
-			if health == "" {
-				health = "Unknown"
+		// Extract condition messages (especially errors)
+		for _, cond := range argoApp.Status.Conditions {
+			if cond.Message != "" {
+				condition = cond.Message
+				conditionType = cond.Type
+				break // Take the first condition message
 			}
-			if sync == "" {
-				sync = "Unknown"
-			}
-
-			app := Application{
-				Name:   strings.TrimSpace(parts[0]),
-				Health: health,
-				Sync:   sync,
-			}
-
-			// Include ALL applications, even with Unknown status
-			// This ensures we get accurate counts and don't have apps disappearing
-			apps = append(apps, app)
 		}
+
+		// Extract operation state
+		operationPhase := ""
+		operationMessage := ""
+		if argoApp.Status.OperationState != nil {
+			operationPhase = string(argoApp.Status.OperationState.Phase)
+			operationMessage = argoApp.Status.OperationState.Message
+		}
+
+		// Extract source info
+		repoURL := ""
+		path := ""
+		targetRevision := ""
+		if argoApp.Spec.Source != nil {
+			repoURL = argoApp.Spec.Source.RepoURL
+			path = argoApp.Spec.Source.Path
+			targetRevision = argoApp.Spec.Source.TargetRevision
+		}
+
+		// Extract reconciliation time
+		reconciledAt := ""
+		if argoApp.Status.ReconciledAt != nil {
+			reconciledAt = argoApp.Status.ReconciledAt.String()
+		}
+
+		app := Application{
+			Name:             argoApp.Name,
+			Health:           health,
+			HealthMessage:    argoApp.Status.Health.Message,
+			Sync:             sync,
+			SyncRevision:     argoApp.Status.Sync.Revision,
+			Condition:        condition,
+			ConditionType:    conditionType,
+			OperationPhase:   operationPhase,
+			OperationMessage: operationMessage,
+			RepoURL:          repoURL,
+			Path:             path,
+			TargetRevision:   targetRevision,
+			ReconciledAt:     reconciledAt,
+		}
+		apps = append(apps, app)
+	}
+
+	return apps, nil
+}
+
+// parseApplicationsViaKubectl is the fallback method using kubectl
+func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool) ([]Application, error) {
+	// Use -o json to avoid Windows WSL escaping issues with jsonpath
+	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+		"-o", "json")...)
+
+	if err != nil {
+		if verbose {
+			pterm.Warning.Printf("kubectl get applications failed: %v\n", err)
+		}
+		// Check for WSL-specific errors on Windows - these should be treated as connectivity issues
+		// since they indicate WSL/kubectl infrastructure problems, not application issues
+		errStr := err.Error()
+		if runtime.GOOS == "windows" && (strings.Contains(errStr, "WSL error") ||
+			strings.Contains(errStr, "exit code: 3221225786") || // STATUS_CONTROL_C_EXIT
+			strings.Contains(errStr, "exit code: 4294967295") || // WSL distro not found
+			strings.Contains(errStr, "exit code: -1")) {
+			return []Application{}, fmt.Errorf("cluster unreachable (WSL error): %w", err)
+		}
+		// Return the error so the caller can detect cluster connectivity issues
+		return []Application{}, fmt.Errorf("kubectl execution failed: %w", err)
+	}
+
+	// Try to parse JSON first - if successful, we have valid data regardless of
+	// what text strings appear in application condition messages
+	var appList argoAppList
+	if err := json.Unmarshal([]byte(result.Stdout), &appList); err != nil {
+		if verbose {
+			pterm.Warning.Printf("Failed to parse applications JSON: %v\n", err)
+		}
+
+		// JSON parsing failed - now check if it's a connectivity issue
+		// Only check for connectivity errors when we couldn't parse valid JSON,
+		// since valid JSON output means the command succeeded even if application
+		// conditions contain error-like strings
+		combinedOutput := result.Stdout + result.Stderr
+		if strings.Contains(combinedOutput, "connection refused") ||
+			strings.Contains(combinedOutput, "Unable to connect to the server") ||
+			strings.Contains(combinedOutput, "was refused") ||
+			strings.Contains(combinedOutput, "no such host") {
+			errMsg := "cluster connectivity error"
+			if result.Stderr != "" {
+				errMsg = result.Stderr
+			}
+			return []Application{}, fmt.Errorf("cluster unreachable: %s", errMsg)
+		}
+
+		// JSON parse failed but not a connectivity issue - return empty list
+		return []Application{}, nil
+	}
+
+	apps := make([]Application, 0, len(appList.Items))
+	for _, item := range appList.Items {
+		health := item.Status.Health.Status
+		sync := item.Status.Sync.Status
+		condition := ""
+		conditionType := ""
+
+		if health == "" {
+			health = "Unknown"
+		}
+		if sync == "" {
+			sync = "Unknown"
+		}
+
+		// Extract condition messages (especially errors)
+		for _, cond := range item.Status.Conditions {
+			if cond.Message != "" {
+				condition = cond.Message
+				conditionType = cond.Type
+				break // Take the first condition message
+			}
+		}
+
+		apps = append(apps, Application{
+			Name:             item.Metadata.Name,
+			Health:           health,
+			HealthMessage:    item.Status.Health.Message,
+			Sync:             sync,
+			SyncRevision:     item.Status.Sync.Revision,
+			Condition:        condition,
+			ConditionType:    conditionType,
+			OperationPhase:   item.Status.OperationState.Phase,
+			OperationMessage: item.Status.OperationState.Message,
+			RepoURL:          item.Spec.Source.RepoURL,
+			Path:             item.Spec.Source.Path,
+			TargetRevision:   item.Spec.Source.TargetRevision,
+			ReconciledAt:     item.Status.ReconciledAt,
+		})
 	}
 
 	return apps, nil

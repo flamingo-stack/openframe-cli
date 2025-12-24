@@ -73,9 +73,12 @@ func (a *AppOfApps) Install(ctx context.Context, config config.ChartInstallConfi
 	certFile, keyFile := a.pathResolver.GetCertificateFiles()
 
 	// Create a modified config with the local chart path
+	// Deep copy the AppOfApps config to avoid modifying the original
+	localAppOfApps := *config.AppOfApps
+	localAppOfApps.ChartPath = cloneResult.ChartPath
+	localAppOfApps.ValuesFile = valuesFile
 	localConfig := config
-	localConfig.AppOfApps.ChartPath = cloneResult.ChartPath
-	localConfig.AppOfApps.ValuesFile = valuesFile
+	localConfig.AppOfApps = &localAppOfApps
 
 	// Show details only in verbose mode
 	if config.Verbose {

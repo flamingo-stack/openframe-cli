@@ -130,5 +130,7 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute cluster creation through service layer
-	return service.CreateCluster(config)
+	// We ignore the returned rest.Config as it's not needed for standalone cluster creation
+	_, err := service.CreateCluster(config)
+	return err
 }

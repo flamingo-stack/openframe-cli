@@ -153,15 +153,18 @@ func (su *SkaffoldUI) categorizeSkaffoldFiles(files []SkaffoldFile) []SkaffoldCa
 	for _, file := range files {
 		var categoryKey, categoryName, categoryIcon string
 
-		if strings.Contains(file.FilePath, "openframe/services") {
+		// Normalize path separators for cross-platform compatibility
+		normalizedPath := strings.ReplaceAll(file.FilePath, "\\", "/")
+
+		if strings.Contains(normalizedPath, "openframe/services") {
 			categoryKey = "openframe-services"
 			categoryName = "OpenFrame Services"
 			categoryIcon = "🏗️ "
-		} else if strings.Contains(file.FilePath, "integrated-tools") {
+		} else if strings.Contains(normalizedPath, "integrated-tools") {
 			categoryKey = "integrated-tools"
 			categoryName = "Integrated Tools"
 			categoryIcon = "🔧 "
-		} else if strings.Contains(file.FilePath, "client") {
+		} else if strings.Contains(normalizedPath, "client") {
 			categoryKey = "client"
 			categoryName = "Client Applications"
 			categoryIcon = "💻 "
@@ -221,32 +224,35 @@ func (su *SkaffoldUI) displayCategorizedFiles(categories []SkaffoldCategory) {
 
 // extractServiceName extracts a clean service name from the file path
 func (su *SkaffoldUI) extractServiceName(filePath string) string {
-	parts := strings.Split(filePath, "/")
+	// Normalize path separators for cross-platform compatibility
+	// Windows paths use backslashes, but we want consistent forward slashes
+	normalizedPath := strings.ReplaceAll(filePath, "\\", "/")
+	parts := strings.Split(normalizedPath, "/")
 
 	// For openframe services: ../openframe/services/openframe-api/skaffold.yaml -> openframe-api
-	if len(parts) >= 4 && strings.Contains(filePath, "openframe/services") {
+	if len(parts) >= 4 && strings.Contains(normalizedPath, "openframe/services") {
 		return parts[len(parts)-2]
 	}
 
 	// For integrated tools: ../integrated-tools/authentik/postgresql/skaffold.yaml
-	if strings.Contains(filePath, "integrated-tools") {
+	if strings.Contains(normalizedPath, "integrated-tools") {
 		// Extract tool and service names based on known patterns
-		if strings.Contains(filePath, "authentik/postgresql") {
+		if strings.Contains(normalizedPath, "authentik/postgresql") {
 			return "authentik-postgres"
 		}
-		if strings.Contains(filePath, "fleetmdm/skaffold.yaml") {
+		if strings.Contains(normalizedPath, "fleetmdm/skaffold.yaml") {
 			return "fleetmdm-server"
 		}
-		if strings.Contains(filePath, "meshcentral/server") {
+		if strings.Contains(normalizedPath, "meshcentral/server") {
 			return "meshcentral-server"
 		}
-		if strings.Contains(filePath, "tactical-rmm/tactical-base") {
+		if strings.Contains(normalizedPath, "tactical-rmm/tactical-base") {
 			return "tactical-base"
 		}
-		if strings.Contains(filePath, "tactical-rmm/tactical-frontend") {
+		if strings.Contains(normalizedPath, "tactical-rmm/tactical-frontend") {
 			return "tactical-frontend"
 		}
-		if strings.Contains(filePath, "tactical-rmm/tactical-nginx") {
+		if strings.Contains(normalizedPath, "tactical-rmm/tactical-nginx") {
 			return "tactical-nginx"
 		}
 

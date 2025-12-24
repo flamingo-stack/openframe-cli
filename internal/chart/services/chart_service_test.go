@@ -40,37 +40,41 @@ func (m *MockClusterLister) SetError(err error) {
 	m.err = err
 }
 
-func TestNewChartService(t *testing.T) {
-	service := NewChartService(false, false)
+func TestNewChartServiceDeferred(t *testing.T) {
+	service, err := NewChartServiceDeferred(false, false)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.executor)
 	assert.NotNil(t, service.clusterService)
 	assert.NotNil(t, service.configService)
 	assert.NotNil(t, service.operationsUI)
 	assert.NotNil(t, service.displayService)
-	assert.NotNil(t, service.helmManager)
+	assert.Nil(t, service.helmManager) // Deferred initialization - helmManager is nil until initialized
 	assert.NotNil(t, service.gitRepository)
 }
 
-func TestNewChartService_WithDryRun(t *testing.T) {
-	service := NewChartService(true, false)
+func TestNewChartServiceDeferred_WithDryRun(t *testing.T) {
+	service, err := NewChartServiceDeferred(true, false)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.executor)
 	assert.NotNil(t, service.clusterService)
 }
 
-func TestNewChartService_WithVerbose(t *testing.T) {
-	service := NewChartService(false, true)
+func TestNewChartServiceDeferred_WithVerbose(t *testing.T) {
+	service, err := NewChartServiceDeferred(false, true)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.executor)
 	assert.NotNil(t, service.clusterService)
 }
 
 func TestInstallationWorkflow_Creation(t *testing.T) {
-	service := NewChartService(false, false)
+	service, err := NewChartServiceDeferred(false, false)
+	assert.NoError(t, err)
 	clusterService := NewMockClusterLister()
 
 	workflow := &InstallationWorkflow{

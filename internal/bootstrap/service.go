@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
@@ -10,6 +12,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/rest"
 )
 
 // Service provides bootstrap functionality
@@ -80,12 +83,20 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 
 // bootstrap executes cluster create followed by chart install
 func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+	// On Windows, initialize WSL2 first before anything else
+	if runtime.GOOS == "windows" {
+		if err := s.initializeWSL(verbose); err != nil {
+			return fmt.Errorf("failed to initialize WSL: %w", err)
+		}
+	}
+
 	// Normalize cluster name (use default if empty)
 	config := s.buildClusterConfig(clusterName)
 	actualClusterName := config.Name
 
-	// Step 1: Create cluster with suppressed UI
-	if err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive); err != nil {
+	// Step 1: Create cluster with suppressed UI and get the rest.Config
+	kubeConfig, err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive)
+	if err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
 
@@ -94,7 +105,7 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	fmt.Println()
 
 	// Step 2: Install charts with deployment mode flags on the created cluster
-	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose); err != nil {
+	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
 
@@ -102,7 +113,8 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 }
 
 // createClusterSuppressed creates a cluster with suppressed UI elements
-func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) error {
+// Returns the *rest.Config for the created cluster
+func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Use the wrapper function that includes prerequisite checks
 	return cluster.CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, nonInteractive)
 }
@@ -117,12 +129,12 @@ func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  3,
+		NodeCount:  4,
 	}
 }
 
 // installChartWithMode installs charts with deployment mode flags
-func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	// Use the chart installation function with deployment mode flags
 	return chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
@@ -134,5 +146,70 @@ func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonIn
 		CertDir:        "",                                                       // Auto-detected
 		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
+		KubeConfig:     kubeConfig,
 	})
+}
+
+// initializeWSL initializes WSL2 with Ubuntu and configures the runner user
+// This must run before any tools installation or cluster creation on Windows
+func (s *Service) initializeWSL(verbose bool) error {
+	fmt.Println("Initializing WSL2 with Ubuntu...")
+
+	// PowerShell script to initialize WSL2
+	script := `
+$ErrorActionPreference = 'Continue'
+
+# Install WSL2 with Ubuntu
+echo Y | wsl --install -d Ubuntu --no-launch
+Start-Sleep -Seconds 20
+wsl --set-default-version 2
+wsl --list --verbose
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+# Initialize Ubuntu with retries
+$maxRetries = 5
+$retryDelay = 10
+for ($i = 1; $i -le $maxRetries; $i++) {
+    wsl -d Ubuntu -u root bash -c "echo 'init'" 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { break }
+    Start-Sleep -Seconds $retryDelay
+    $retryDelay += 5
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed to initialize Ubuntu"
+    exit 1
+}
+Start-Sleep -Seconds 10
+
+# Create runner user with sudo access
+wsl -d Ubuntu -u root bash -c "id runner 2>/dev/null || (useradd -m -s /bin/bash runner && echo 'runner:runner' | chpasswd && usermod -aG sudo runner)"
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+wsl -d Ubuntu -u root bash -c "grep -q '%sudo ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers"
+wsl -d Ubuntu -u runner bash -c "whoami" | Out-Null
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "WSL2 configured successfully"
+`
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	if verbose {
+		cmd.Stdout = nil // Will use default (os.Stdout)
+		cmd.Stderr = nil // Will use default (os.Stderr)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if verbose {
+		fmt.Println(string(output))
+	}
+
+	if err != nil {
+		if verbose {
+			fmt.Printf("WSL initialization output: %s\n", string(output))
+		}
+		return fmt.Errorf("WSL initialization failed: %w", err)
+	}
+
+	fmt.Println("✓ WSL2 initialized successfully")
+	return nil
 }

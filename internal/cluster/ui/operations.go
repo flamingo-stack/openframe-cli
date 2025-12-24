@@ -67,15 +67,18 @@ func (ui *OperationsUI) SelectClusterForDelete(clusters []models.ClusterInfo, ar
 		}
 
 		// Validate that the cluster exists in the available clusters
-		found := false
-		for _, cluster := range clusters {
-			if cluster.Name == clusterName {
-				found = true
-				break
+		// Skip validation when force is set (allows fallback cleanup when k3d list fails)
+		if !force {
+			found := false
+			for _, cluster := range clusters {
+				if cluster.Name == clusterName {
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			return "", fmt.Errorf("cluster '%s' not found", clusterName)
+			if !found {
+				return "", fmt.Errorf("cluster '%s' not found", clusterName)
+			}
 		}
 
 		// Ask for confirmation unless forced

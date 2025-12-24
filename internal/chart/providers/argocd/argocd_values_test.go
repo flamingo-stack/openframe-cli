@@ -19,6 +19,17 @@ func TestGetArgoCDValues(t *testing.T) {
 		"configs:",
 		"resource.customizations.health.argoproj.io_Application:",
 		"hs.status = \"Progressing\"",
+		"controller.sync.timeout.seconds:",
+		"controller:",
+		"server:",
+		"repoServer:",
+		"redis:",
+		"dex:",
+		"applicationSet:",
+		"notifications:",
+		"resources:",
+		"cpu:",
+		"memory:",
 	}
 
 	for _, expected := range expectedContent {
@@ -38,8 +49,8 @@ func TestGetArgoCDValuesStructure(t *testing.T) {
 	
 	// Count lines to ensure we have the expected structure
 	lines := strings.Split(values, "\n")
-	if len(lines) < 20 {
-		t.Errorf("GetArgoCDValues() returned too few lines: got %d, want at least 20", len(lines))
+	if len(lines) < 80 {
+		t.Errorf("GetArgoCDValues() returned too few lines: got %d, want at least 80", len(lines))
 	}
 
 	// Check for health check script presence
