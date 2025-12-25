@@ -32,9 +32,9 @@ A modern, interactive command-line tool for managing OpenFrame Kubernetes cluste
 
 ### Prerequisites
 
-- Docker Desktop or Docker Engine
-- 24GB RAM minimum (32GB recommended)
-- 6 CPU cores minimum (12 recommended)
+- **Hardware Requirements**: 24GB RAM minimum (32GB recommended), 6 CPU cores minimum (12 recommended)
+- **Docker**: Docker Desktop or Docker Engine
+- **Operating System**: macOS, Linux, or Windows
 
 ### Installation
 
@@ -54,7 +54,8 @@ curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download
 sudo mv openframe /usr/local/bin/
 
 # Windows (AMD64)
-# Download from: https://github.com/flamingo-stack/openframe-cli/releases/latest
+# Download: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
+# Extract and run the installer
 ```
 
 **From Source:**
@@ -111,7 +112,7 @@ openframe dev scaffold       # Run Skaffold development workflow
 
 ## 🏗 Architecture
 
-OpenFrame CLI follows a modular, service-oriented architecture:
+OpenFrame CLI follows a modular, service-oriented architecture with clean separation between:
 
 - **Command Layer**: Cobra-based CLI with rich terminal UI
 - **Service Layer**: Business logic for cluster, chart, and dev operations  
@@ -140,6 +141,12 @@ We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTIN
 ## 📄 License
 
 This project is licensed under the Flamingo AI Unified License v1.0 - see the [LICENSE](LICENSE.md) file for details.
+
+## 💬 Community
+
+- 💬 **Slack**: Join our [OpenMSP Slack community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) for support and discussions
+- 🌐 **Website**: Learn more at [flamingo.run](https://flamingo.run) and [openframe.ai](https://openframe.ai)
+- 📚 **Documentation**: Visit our comprehensive docs at [docs.openframe.ai](https://docs.openframe.ai)
 
 ---
 <div align="center">

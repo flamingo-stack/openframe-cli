@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant User
+    participant InterceptService
+    participant KubectlProvider
+    participant TelepresenceProvider
+    participant DevUI
+    
+    User->>InterceptService: openframe dev intercept
+    InterceptService->>KubectlProvider: Check cluster connection
+    KubectlProvider-->>InterceptService: Connection verified
+    InterceptService->>DevUI: Get service selection
+    DevUI->>KubectlProvider: List services
+    KubectlProvider-->>DevUI: Return services
+    DevUI-->>InterceptService: User selected service
+    InterceptService->>TelepresenceProvider: Create intercept
+    TelepresenceProvider->>TelepresenceProvider: Setup traffic routing
+    TelepresenceProvider-->>InterceptService: Intercept active
+    InterceptService-->>User: Traffic intercepted
