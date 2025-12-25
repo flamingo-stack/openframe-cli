@@ -54,8 +54,7 @@ curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download
 sudo mv openframe /usr/local/bin/
 
 # Windows (AMD64)
-# Download: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
-# Extract and run the installer
+$tempFile = Join-Path -Path $PWD -ChildPath "download.zip"; Invoke-WebRequest -Uri "https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip" -OutFile $tempFile; Expand-Archive -Path $tempFile -DestinationPath $PWD -Force
 ```
 
 **From Source:**
@@ -146,7 +145,6 @@ This project is licensed under the Flamingo AI Unified License v1.0 - see the [L
 
 - 💬 **Slack**: Join our [OpenMSP Slack community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) for support and discussions
 - 🌐 **Website**: Learn more at [flamingo.run](https://flamingo.run) and [openframe.ai](https://openframe.ai)
-- 📚 **Documentation**: Visit our comprehensive docs at [docs.openframe.ai](https://docs.openframe.ai)
 
 ---
 <div align="center">
