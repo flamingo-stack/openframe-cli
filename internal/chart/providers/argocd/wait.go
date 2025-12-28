@@ -92,22 +92,14 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return fmt.Errorf("ArgoCD not ready: %w", err)
 	}
 
-	// Initial repo-server health check - catch issues early (always run, not just in verbose)
+	// Initial repo-server health check - catch issues early
 	initialIssue := m.checkRepoServerHealth(localCtx, true)
 	if initialIssue != nil {
-		if config.Verbose {
-			pterm.Warning.Printf("Initial repo-server health check: %s\n", initialIssue.Message)
-		}
 		// If repo-server has already restarted, proactively restart it to clear any stuck state
 		// This helps CI environments where the pod may have OOM'd during initial setup
 		if initialIssue.Type == "resource" && initialIssue.Recoverable {
-			if config.Verbose {
-				pterm.Info.Println("Proactively restarting repo-server to clear potential stuck state...")
-			}
 			m.triggerRepoServerRecovery(localCtx, "")
 		}
-	} else if config.Verbose {
-		pterm.Success.Println("Repo-server health check passed")
 	}
 	// Show initial verbose info if enabled
 	if config.Verbose {
@@ -173,10 +165,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				lastBootstrapHealthCheck = time.Now()
 				if err := m.checkClusterConnectivity(localCtx, config.Verbose); err != nil {
 					consecutiveFailures++
-					if config.Verbose {
-						pterm.Warning.Printf("Cluster connectivity check failed during bootstrap (%d/%d): %v\n",
-							consecutiveFailures, maxConsecutiveFailures, err)
-					}
 					if consecutiveFailures >= maxConsecutiveFailures {
 						stopSpinner()
 						m.printClusterDiagnostics(localCtx)
@@ -250,21 +238,14 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				lastClusterHealthCheck = time.Now()
 				if err := m.checkClusterConnectivity(localCtx, false); err != nil {
 					consecutiveFailures++
-					pterm.Warning.Printf("Cluster connectivity check failed (%d/%d): %v\n",
-						consecutiveFailures, maxConsecutiveFailures, err)
 
 					// On Windows, try WSL recovery before giving up
 					if runtime.GOOS == "windows" && consecutiveFailures >= maxConsecutiveFailures-1 {
-						pterm.Info.Println("Attempting WSL recovery...")
-						if wslErr := executor.TryRecoverWSL(); wslErr != nil {
-							pterm.Warning.Printf("WSL recovery failed: %v\n", wslErr)
-						} else {
-							pterm.Success.Println("WSL recovery successful, retrying connectivity check...")
+						if wslErr := executor.TryRecoverWSL(); wslErr == nil {
 							// Give WSL a moment to stabilize
 							time.Sleep(3 * time.Second)
 							// Retry the connectivity check
 							if retryErr := m.checkClusterConnectivity(localCtx, false); retryErr == nil {
-								pterm.Success.Println("Cluster connectivity restored after WSL recovery")
 								consecutiveFailures = 0
 								continue
 							}
@@ -284,9 +265,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					}
 					time.Sleep(backoffDelay)
 				} else {
-					if consecutiveFailures > 0 {
-						pterm.Success.Println("Cluster connectivity restored")
-					}
 					consecutiveFailures = 0
 				}
 			}
@@ -297,17 +275,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				m.logResourceStatus(localCtx, config.Verbose)
 
 				// Also check repo-server health proactively
-				if issue := m.checkRepoServerHealth(localCtx, false); issue != nil {
-					pterm.Warning.Printf("Repo-server health check: %s\n", issue.Message)
-					if issue.Type == "resource" {
-						// Get detailed resource usage
-						memory, cpu, err := m.checkRepoServerResources(localCtx)
-						if err == nil {
-							pterm.Warning.Printf("  Current repo-server resource usage: CPU=%s, Memory=%s\n", cpu, memory)
-						}
-						pterm.Warning.Println("  Consider increasing repo-server memory limits if OOM issues persist")
-					}
-				}
+				m.checkRepoServerHealth(localCtx, false)
 			}
 
 			// Check applications every 2 seconds
@@ -482,48 +450,28 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 							// More frequent resource checks when repo-server issues are detected
 							if time.Since(lastRepoServerResourceCheck) >= repoServerResourceCheckInterval {
 								lastRepoServerResourceCheck = time.Now()
-								// Check repo-server health and resources
-								if issue := m.checkRepoServerHealth(localCtx, false); issue != nil {
-									pterm.Warning.Printf("  Repo-server issue: %s\n", issue.Message)
-								}
-								memory, cpu, err := m.checkRepoServerResources(localCtx)
-								if err == nil {
-									pterm.Info.Printf("  Repo-server resources: CPU=%s, Memory=%s\n", cpu, memory)
-								}
+								m.checkRepoServerHealth(localCtx, false)
 							}
 
 							// Check if any app has had consistent repo-server issues
 							for _, app := range appsWithConditionErrors {
 								consecutiveIssues := appsWithRepoServerIssues[app.Name]
 
-								// After 2 consecutive checks with repo-server issues, run diagnostics (reduced from 3 for faster CI recovery)
+								// After 2 consecutive checks with repo-server issues, run diagnostics
 								if consecutiveIssues >= 2 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
 									lastRepoServerDiagnostic = time.Now()
-									pterm.Warning.Printf("\n  Application '%s' has persistent repo-server communication issues\n", app.Name)
-									m.diagnoseRepoServerIssues(localCtx, app.Name, app.Condition)
 
 									// Attempt recovery if we haven't exceeded max attempts
 									if repoServerRecoveryAttempts < maxRepoServerRecoveryAttempts {
 										repoServerRecoveryAttempts++
-										pterm.Info.Printf("\n  Attempting repo-server recovery (attempt %d/%d)...\n",
-											repoServerRecoveryAttempts, maxRepoServerRecoveryAttempts)
-
 										if m.triggerRepoServerRecovery(localCtx, app.Name) {
-											pterm.Success.Println("  Recovery initiated, continuing to monitor...")
 											// Reset the issue counter for this app to give it a fresh start
 											delete(appsWithRepoServerIssues, app.Name)
-										} else {
-											pterm.Warning.Println("  Recovery attempt failed, will continue monitoring...")
 										}
 									} else if repoServerRecoveryAttempts == maxRepoServerRecoveryAttempts {
-										pterm.Warning.Printf("\n  Maximum recovery attempts (%d) reached for repo-server issues\n", maxRepoServerRecoveryAttempts)
-										pterm.Warning.Println("  This may indicate a persistent problem requiring manual intervention:")
-										pterm.Warning.Println("    - Check if the cluster has sufficient memory (repo-server is memory-intensive)")
-										pterm.Warning.Println("    - Verify network connectivity to Git repositories")
-										pterm.Warning.Println("    - Check for resource limits on repo-server deployment")
-										repoServerRecoveryAttempts++ // Increment to prevent showing this message again
+										repoServerRecoveryAttempts++ // Increment to prevent repeated attempts
 									}
-									break // Only diagnose/recover one app at a time
+									break // Only recover one app at a time
 								}
 							}
 						}
@@ -618,51 +566,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									}
 								}
 
-								// Check repo-server logs - it handles Git operations
-								pterm.Info.Println("\n  === ArgoCD Repo Server recent logs ===")
-								repoLogArgs := m.getKubectlArgs("-n", "argocd", "logs", "-l", "app.kubernetes.io/name=argocd-repo-server", "--tail=30")
-								repoLogResult, _ := m.executor.Execute(localCtx, "kubectl", repoLogArgs...)
-								if repoLogResult != nil && repoLogResult.Stdout != "" {
-									lines := strings.Split(repoLogResult.Stdout, "\n")
-									relevantLines := []string{}
-									for _, line := range lines {
-										lineLower := strings.ToLower(line)
-										if strings.Contains(lineLower, "error") ||
-											strings.Contains(lineLower, "failed") ||
-											strings.Contains(lineLower, "unable") ||
-											strings.Contains(lineLower, "timeout") ||
-											strings.Contains(lineLower, "git") ||
-											strings.Contains(lineLower, "clone") ||
-											strings.Contains(lineLower, "fetch") {
-											relevantLines = append(relevantLines, line)
-										}
-									}
-									if len(relevantLines) > 0 {
-										pterm.Warning.Printf("  Found %d relevant lines:\n", len(relevantLines))
-										for _, line := range relevantLines {
-											if len(line) > 200 {
-												line = line[:200] + "..."
-											}
-											pterm.Warning.Printf("    %s\n", line)
-										}
-									} else {
-										pterm.Info.Println("  No Git-related errors in repo-server logs")
-									}
-								}
-
-								// Test network connectivity from cluster to GitHub
-								pterm.Info.Println("\n  === Testing cluster network connectivity ===")
-								netTestArgs := m.getKubectlArgs("run", "net-test-"+fmt.Sprintf("%d", time.Now().Unix()), "--rm", "-it", "--restart=Never", "--image=busybox:latest", "--", "wget", "-q", "-O", "-", "--timeout=10", "https://github.com")
-								netTestResult, netTestErr := m.executor.Execute(localCtx, "kubectl", netTestArgs...)
-								if netTestErr != nil {
-									pterm.Warning.Printf("  Network test failed: %v\n", netTestErr)
-									if netTestResult != nil && netTestResult.Stderr != "" {
-										pterm.Warning.Printf("  Stderr: %s\n", netTestResult.Stderr)
-									}
-									pterm.Warning.Println("  This suggests the k3d cluster cannot reach GitHub!")
-								} else {
-									pterm.Success.Println("  Network connectivity to GitHub is OK")
-								}
 							}
 						}
 
@@ -1825,131 +1728,14 @@ func (m *Manager) checkRepoServerResources(ctx context.Context) (memoryUsage str
 	return "", "", fmt.Errorf("could not parse metrics output")
 }
 
-// diagnoseRepoServerIssues performs comprehensive diagnostics on repo-server issues
-func (m *Manager) diagnoseRepoServerIssues(ctx context.Context, appName string, conditionMsg string) {
-	pterm.Info.Printf("\n=== Diagnosing Repo-Server Issue for '%s' ===\n", appName)
-
-	// Show the condition message prominently
-	if conditionMsg != "" {
-		pterm.Warning.Printf("Application condition: %s\n", conditionMsg)
-	}
-
-	// Check if this is an EOF/communication error
-	isCommError := strings.Contains(conditionMsg, "EOF") ||
-		strings.Contains(conditionMsg, "Unavailable") ||
-		strings.Contains(conditionMsg, "error reading from server")
-
-	if isCommError {
-		pterm.Info.Println("Detected communication error between Application Controller and Repo Server")
-	}
-
-	// 1. Check repo-server pod health
-	issue := m.checkRepoServerHealth(ctx, true)
-	if issue != nil {
-		pterm.Warning.Printf("Repo-server issue detected: %s\n", issue.Message)
-		if issue.Type == "resource" {
-			pterm.Warning.Println("This may be caused by insufficient memory or CPU resources")
-		}
-	}
-
-	// 2. Get repo-server logs looking for specific errors
-	pterm.Info.Println("\n--- Repo-Server Recent Logs ---")
-	logsArgs := m.getKubectlArgs("-n", "argocd", "logs", "-l", "app.kubernetes.io/name=argocd-repo-server", "--tail=30", "--timestamps")
-	logsResult, _ := m.executor.Execute(ctx, "kubectl", logsArgs...)
-	if logsResult != nil && logsResult.Stdout != "" {
-		lines := strings.Split(logsResult.Stdout, "\n")
-		relevantLines := []string{}
-		for _, line := range lines {
-			lineLower := strings.ToLower(line)
-			// Look for error indicators and git-related messages
-			if strings.Contains(lineLower, "error") ||
-				strings.Contains(lineLower, "failed") ||
-				strings.Contains(lineLower, "timeout") ||
-				strings.Contains(lineLower, "oom") ||
-				strings.Contains(lineLower, "killed") ||
-				strings.Contains(lineLower, "git") ||
-				strings.Contains(lineLower, "clone") ||
-				strings.Contains(lineLower, "fetch") ||
-				strings.Contains(lineLower, "manifest") {
-				relevantLines = append(relevantLines, line)
-			}
-		}
-		if len(relevantLines) > 0 {
-			for _, line := range relevantLines {
-				if len(line) > 200 {
-					line = line[:200] + "..."
-				}
-				pterm.Warning.Printf("  %s\n", line)
-			}
-		} else {
-			pterm.Info.Println("  No obvious errors in recent logs")
-		}
-	}
-
-	// 4. Check repo-server events
-	pterm.Info.Println("\n--- Repo-Server Pod Events ---")
-	eventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
-		"--field-selector", "involvedObject.name=argocd-repo-server",
-		"--sort-by=.lastTimestamp",
-		"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,REASON:.reason,MESSAGE:.message",
-		"--no-headers")
-	eventsResult, _ := m.executor.Execute(ctx, "kubectl", eventsArgs...)
-	if eventsResult != nil && eventsResult.Stdout != "" {
-		eventLines := strings.Split(strings.TrimSpace(eventsResult.Stdout), "\n")
-		if len(eventLines) > 5 {
-			eventLines = eventLines[len(eventLines)-5:]
-		}
-		for _, event := range eventLines {
-			if event != "" {
-				pterm.Info.Printf("  %s\n", event)
-			}
-		}
-	}
-
-	// 5. Check if repo-server can reach the git repo
-	pterm.Info.Println("\n--- Git Repository Connectivity Test ---")
-	// Get the repo URL from the application
-	repoURLArgs := m.getKubectlArgs("-n", "argocd", "get", "application", appName, "-o", "jsonpath={.spec.source.repoURL}")
-	repoURLResult, _ := m.executor.Execute(ctx, "kubectl", repoURLArgs...)
-	if repoURLResult != nil && repoURLResult.Stdout != "" {
-		repoURL := strings.TrimSpace(repoURLResult.Stdout)
-		pterm.Info.Printf("Repository URL: %s\n", repoURL)
-
-		// Try to test connectivity to the repo from within the cluster
-		if strings.Contains(repoURL, "github.com") {
-			// Test GitHub connectivity from repo-server pod
-			testArgs := m.getKubectlArgs("-n", "argocd", "exec", "-l", "app.kubernetes.io/name=argocd-repo-server", "--",
-				"timeout", "10", "git", "ls-remote", "--heads", repoURL)
-			testResult, testErr := m.executor.Execute(ctx, "kubectl", testArgs...)
-			if testErr != nil || (testResult != nil && testResult.ExitCode != 0) {
-				pterm.Warning.Printf("Repo-server cannot reach Git repository: %v\n", testErr)
-				if testResult != nil && testResult.Stderr != "" {
-					pterm.Warning.Printf("  Error: %s\n", testResult.Stderr)
-				}
-			} else {
-				pterm.Success.Println("Repo-server can reach Git repository successfully")
-			}
-		}
-	}
-
-	pterm.Info.Println("\n=== End Repo-Server Diagnostics ===")
-}
-
 // triggerRepoServerRecovery attempts to recover from repo-server issues
 func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string) bool {
-	pterm.Info.Println("Attempting repo-server recovery...")
-
-	// Option 1: Delete the repo-server pod to force a restart
-	// This can help clear any stuck state or memory issues
-	pterm.Info.Println("Restarting repo-server pod...")
+	// Delete the repo-server pod to force a restart
 	deleteArgs := m.getKubectlArgs("-n", "argocd", "delete", "pod", "-l", "app.kubernetes.io/name=argocd-repo-server", "--wait=false")
 	deleteResult, err := m.executor.Execute(ctx, "kubectl", deleteArgs...)
 	if err != nil || (deleteResult != nil && deleteResult.ExitCode != 0) {
-		pterm.Warning.Printf("Failed to restart repo-server: %v\n", err)
 		return false
 	}
-
-	pterm.Info.Println("Repo-server pod deleted, waiting for it to restart...")
 
 	// Wait for repo-server to come back up (max 60 seconds)
 	for i := 0; i < 20; i++ {
@@ -1962,95 +1748,20 @@ func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string)
 		// Check if repo-server is running again
 		issue := m.checkRepoServerHealth(ctx, false)
 		if issue == nil {
-			pterm.Success.Println("Repo-server is back online")
-
-			// Force a refresh of the application
-			pterm.Info.Printf("Forcing refresh of application '%s'...\n", appName)
-			refreshArgs := m.getKubectlArgs("-n", "argocd", "patch", "application", appName,
-				"--type", "merge", "-p", `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
-			m.executor.Execute(ctx, "kubectl", refreshArgs...)
-
+			// Force a refresh of the application if specified
+			if appName != "" {
+				refreshArgs := m.getKubectlArgs("-n", "argocd", "patch", "application", appName,
+					"--type", "merge", "-p", `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
+				m.executor.Execute(ctx, "kubectl", refreshArgs...)
+			}
 			return true
 		}
 	}
 
-	pterm.Warning.Println("Repo-server did not recover in time")
 	return false
 }
 
-// logResourceStatus logs a brief summary of system resources (called periodically during wait)
+// logResourceStatus is a no-op placeholder for resource status logging
 func (m *Manager) logResourceStatus(ctx context.Context, verbose bool) {
-	if !verbose {
-		return // Only log in verbose mode to avoid noise
-	}
-
-	pterm.Debug.Println("=== Periodic Resource Check ===")
-
-	if runtime.GOOS == "windows" {
-		// WSL memory check - compact format
-		memResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"free -h 2>/dev/null | grep -E '^Mem:' | awk '{print \"Memory: \" $3 \"/\" $2 \" used\"}' || echo 'Memory info unavailable'")
-		if memResult != nil && memResult.Stdout != "" {
-			pterm.Debug.Println(strings.TrimSpace(memResult.Stdout))
-		}
-
-		// Docker stats - most memory-hungry containers
-		dockerStatsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"sudo docker stats --no-stream --format '{{.Name}}: {{.MemUsage}} ({{.MemPerc}})' 2>/dev/null | sort -t'(' -k2 -rn | head -3 || echo 'Docker stats unavailable'")
-		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
-			pterm.Debug.Println("Top containers by memory:")
-			for _, line := range strings.Split(strings.TrimSpace(dockerStatsResult.Stdout), "\n") {
-				if line != "" {
-					pterm.Debug.Printf("  %s\n", line)
-				}
-			}
-		}
-
-		// Disk space check
-		diskResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"df -h / 2>/dev/null | tail -1 | awk '{print \"Disk: \" $3 \"/\" $2 \" used (\" $5 \")\"}' || echo 'Disk info unavailable'")
-		if diskResult != nil && diskResult.Stdout != "" {
-			pterm.Debug.Println(strings.TrimSpace(diskResult.Stdout))
-		}
-	} else {
-		// Linux/macOS memory check
-		memResult, _ := m.executor.Execute(ctx, "bash", "-c",
-			"free -h 2>/dev/null | grep -E '^Mem:' | awk '{print \"Memory: \" $3 \"/\" $2 \" used\"}' || vm_stat 2>/dev/null | head -3 || echo 'Memory info unavailable'")
-		if memResult != nil && memResult.Stdout != "" {
-			pterm.Debug.Println(strings.TrimSpace(memResult.Stdout))
-		}
-
-		// Docker stats
-		dockerStatsResult, _ := m.executor.Execute(ctx, "bash", "-c",
-			"docker stats --no-stream --format '{{.Name}}: {{.MemUsage}} ({{.MemPerc}})' 2>/dev/null | sort -t'(' -k2 -rn | head -3 || echo 'Docker stats unavailable'")
-		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
-			pterm.Debug.Println("Top containers by memory:")
-			for _, line := range strings.Split(strings.TrimSpace(dockerStatsResult.Stdout), "\n") {
-				if line != "" {
-					pterm.Debug.Printf("  %s\n", line)
-				}
-			}
-		}
-
-		// Disk space check
-		diskResult, _ := m.executor.Execute(ctx, "bash", "-c",
-			"df -h / 2>/dev/null | tail -1 | awk '{print \"Disk: \" $3 \"/\" $2 \" used (\" $5 \")\"}' || echo 'Disk info unavailable'")
-		if diskResult != nil && diskResult.Stdout != "" {
-			pterm.Debug.Println(strings.TrimSpace(diskResult.Stdout))
-		}
-	}
-
-	// Kubernetes node resources (if available)
-	nodeArgs := m.getKubectlArgs("top", "nodes", "--no-headers")
-	nodeResult, _ := m.executor.Execute(ctx, "kubectl", nodeArgs...)
-	if nodeResult != nil && nodeResult.Stdout != "" && nodeResult.ExitCode == 0 {
-		pterm.Debug.Println("K8s node resources:")
-		for _, line := range strings.Split(strings.TrimSpace(nodeResult.Stdout), "\n") {
-			if line != "" {
-				pterm.Debug.Printf("  %s\n", line)
-			}
-		}
-	}
-
-	pterm.Debug.Println("=== End Resource Check ===")
+	// Resource logging disabled to reduce noise
 }
