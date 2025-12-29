@@ -358,10 +358,6 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		}
 	}
 	
-	// Log command execution in verbose mode
-	if e.verbose {
-		fmt.Printf("Executing: %s\n", fullCommand)
-	}
 	
 	// Execute the command
 	stdout, err := cmd.Output()

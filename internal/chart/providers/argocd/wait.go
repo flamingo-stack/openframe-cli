@@ -476,8 +476,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 							}
 						}
 
-						// After 2 minutes, warn about Unknown status as it may indicate ArgoCD controller issues
-						if len(unknownApps) > 0 && elapsed > 2*time.Minute {
+						// After 5 minutes, warn about Unknown status as it may indicate ArgoCD controller issues
+						if len(unknownApps) > 0 && elapsed > 5*time.Minute {
 							// Show detailed info for each unknown app using data we already have
 							pterm.Warning.Printf("  Applications with 'Unknown' status (%d):\n", len(unknownApps))
 							for _, app := range unknownApps {
@@ -527,46 +527,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 							}
 
 							pterm.Warning.Println("\n  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
-
-							// Check ArgoCD controller pod status every 2 minutes when apps are stuck in Unknown
-							if int(elapsed.Seconds())%120 == 0 {
-								controllerArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-l", "app.kubernetes.io/name=argocd-application-controller", "-o", "wide")
-								controllerResult, _ := m.executor.Execute(localCtx, "kubectl", controllerArgs...)
-								if controllerResult != nil && controllerResult.Stdout != "" {
-									pterm.Info.Printf("  ArgoCD Application Controller status:\n%s\n", controllerResult.Stdout)
-								}
-
-								// Check controller logs for errors related to unknown apps
-								pterm.Info.Println("\n  === ArgoCD Controller recent errors ===")
-								logArgs := m.getKubectlArgs("-n", "argocd", "logs", "argocd-application-controller-0", "--tail=50")
-								logResult, _ := m.executor.Execute(localCtx, "kubectl", logArgs...)
-								if logResult != nil && logResult.Stdout != "" {
-									// Filter for error lines or lines mentioning the app
-									lines := strings.Split(logResult.Stdout, "\n")
-									errorLines := []string{}
-									for _, line := range lines {
-										lineLower := strings.ToLower(line)
-										if strings.Contains(lineLower, "error") ||
-											strings.Contains(lineLower, "failed") ||
-											strings.Contains(lineLower, "unable") ||
-											strings.Contains(lineLower, "argocd-apps") {
-											errorLines = append(errorLines, line)
-										}
-									}
-									if len(errorLines) > 0 {
-										pterm.Warning.Printf("  Found %d error/relevant lines:\n", len(errorLines))
-										for _, line := range errorLines {
-											if len(line) > 200 {
-												line = line[:200] + "..."
-											}
-											pterm.Warning.Printf("    %s\n", line)
-										}
-									} else {
-										pterm.Info.Println("  No obvious errors in controller logs")
-									}
-								}
-
-							}
 						}
 
 						// DEBUG: Show pod details for stuck applications after 7 min, every 5 minutes
