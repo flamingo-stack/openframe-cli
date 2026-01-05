@@ -91,142 +91,57 @@ func (k *KubectlInstaller) installMacOS() error {
 }
 
 func (k *KubectlInstaller) installLinux() error {
-	if commandExists("apt") {
-		return k.installUbuntu()
-	} else if commandExists("yum") {
-		return k.installRedHat()
-	} else if commandExists("dnf") {
-		return k.installFedora()
-	} else if commandExists("pacman") {
-		return k.installArch()
-	} else {
-		return k.installBinary()
-	}
-}
-
-func (k *KubectlInstaller) installUbuntu() error {
-	fmt.Println("Installing kubectl on Ubuntu/Debian...")
-	
-	commands := [][]string{
-		{"sudo", "apt", "update"},
-		{"sudo", "apt", "install", "-y", "apt-transport-https", "ca-certificates", "curl"},
-	}
-
-	for _, cmdArgs := range commands {
-		if err := k.runCommand(cmdArgs[0], cmdArgs[1:]...); err != nil {
-			return fmt.Errorf("failed to run %s: %w", cmdArgs[0], err)
-		}
-	}
-
-	// Add Kubernetes GPG key
-	gpgCmd := "curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg"
-	if err := k.runShellCommand(gpgCmd); err != nil {
-		return fmt.Errorf("failed to add Kubernetes GPG key: %w", err)
-	}
-
-	// Add Kubernetes repository
-	repoCmd := `echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list`
-	if err := k.runShellCommand(repoCmd); err != nil {
-		return fmt.Errorf("failed to add Kubernetes repository: %w", err)
-	}
-
-	// Install kubectl
-	installCommands := [][]string{
-		{"sudo", "apt", "update"},
-		{"sudo", "apt", "install", "-y", "kubectl"},
-	}
-
-	for _, cmdArgs := range installCommands {
-		if err := k.runCommand(cmdArgs[0], cmdArgs[1:]...); err != nil {
-			return fmt.Errorf("failed to run %s: %w", cmdArgs[0], err)
-		}
-	}
-
-	return nil
-}
-
-func (k *KubectlInstaller) installRedHat() error {
-	fmt.Println("Installing kubectl on CentOS/RHEL...")
-	
-	// Create Kubernetes repository
-	repoContent := `[kubernetes]
-name=Kubernetes
-baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-exclude=kubelet kubeadm kubectl`
-
-	repoCmd := fmt.Sprintf("echo '%s' | sudo tee /etc/yum.repos.d/kubernetes.repo", repoContent)
-	if err := k.runShellCommand(repoCmd); err != nil {
-		return fmt.Errorf("failed to add Kubernetes repository: %w", err)
-	}
-
-	// Install kubectl
-	if err := k.runCommand("sudo", "yum", "install", "-y", "kubectl", "--disableexcludes=kubernetes"); err != nil {
-		return fmt.Errorf("failed to install kubectl: %w", err)
-	}
-
-	return nil
-}
-
-func (k *KubectlInstaller) installFedora() error {
-	fmt.Println("Installing kubectl on Fedora...")
-	
-	// Create Kubernetes repository
-	repoContent := `[kubernetes]
-name=Kubernetes
-baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-exclude=kubelet kubeadm kubectl`
-
-	repoCmd := fmt.Sprintf("echo '%s' | sudo tee /etc/yum.repos.d/kubernetes.repo", repoContent)
-	if err := k.runShellCommand(repoCmd); err != nil {
-		return fmt.Errorf("failed to add Kubernetes repository: %w", err)
-	}
-
-	// Install kubectl
-	if err := k.runCommand("sudo", "dnf", "install", "-y", "kubectl", "--disableexcludes=kubernetes"); err != nil {
-		return fmt.Errorf("failed to install kubectl: %w", err)
-	}
-
-	return nil
-}
-
-func (k *KubectlInstaller) installArch() error {
-	fmt.Println("Installing kubectl on Arch Linux...")
-	
-	if err := k.runCommand("sudo", "pacman", "-S", "--noconfirm", "kubectl"); err != nil {
-		return fmt.Errorf("failed to install kubectl: %w", err)
-	}
-
-	return nil
+	// Use direct binary download for all Linux distros - more reliable than package managers
+	// which may have outdated repositories or require additional configuration
+	return k.installBinary()
 }
 
 func (k *KubectlInstaller) installBinary() error {
-	fmt.Println("Installing kubectl via direct binary download...")
-	
 	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "amd64"
-	} else if arch == "arm64" {
-		arch = "arm64"
-	} else {
+	if arch != "amd64" && arch != "arm64" {
 		return fmt.Errorf("unsupported architecture: %s", arch)
 	}
 
-	commands := []string{
-		fmt.Sprintf("curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/%s/kubectl\"", arch),
-		"sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl",
-		"rm kubectl",
-	}
+	// Use a shell script with retry logic and fallback version
+	installCmd := fmt.Sprintf(`
+FALLBACK_VERSION="v1.31.0"
+ARCH="%s"
 
-	for _, cmd := range commands {
-		if err := k.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
+install_kubectl() {
+    local max_retries=3
+    local retry_delay=5
+
+    for i in $(seq 1 $max_retries); do
+        # Try to get the latest stable version
+        local version
+        version=$(curl -fsSL --retry 3 --retry-delay 2 https://dl.k8s.io/release/stable.txt 2>/dev/null || echo "")
+
+        if [ -z "$version" ]; then
+            version="$FALLBACK_VERSION"
+        fi
+
+        local download_url="https://dl.k8s.io/release/${version}/bin/linux/${ARCH}/kubectl"
+
+        if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/kubectl "$download_url" && \
+           chmod +x /tmp/kubectl && \
+           sudo mv /tmp/kubectl /usr/local/bin/kubectl; then
+            return 0
+        fi
+
+        if [ $i -lt $max_retries ]; then
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+    done
+
+    return 1
+}
+
+install_kubectl
+`, arch)
+
+	if err := k.runShellCommand(installCmd); err != nil {
+		return fmt.Errorf("failed to install kubectl via binary download: %w", err)
 	}
 
 	return nil
