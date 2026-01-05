@@ -6,7 +6,6 @@ func GetArgoCDValues() string {
 
 configs:
   cm:
-    timeout.reconciliation: "300s"
     resource.customizations.health.argoproj.io_Application: |
       hs = {}
       hs.status = "Progressing"
@@ -23,36 +22,35 @@ configs:
   params:
     controller.sync.timeout.seconds: "1800"
 
+controller:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+
+server:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+
 # Disable non-essential components for lightweight installation (especially CI/k3d)
 dex:
   enabled: false
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 50m
-      memory: 64Mi
 
 notifications:
   enabled: false
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi
 
 applicationSet:
   enabled: false
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi
 
 # Resource constraints to prevent k3d/CI cluster overload
 controller:
@@ -64,6 +62,8 @@ controller:
       cpu: 200m
       memory: 512Mi
   env:
+    - name: ARGOCD_RECONCILIATION_TIMEOUT
+      value: "300s"
     - name: ARGOCD_REPO_SERVER_TIMEOUT_SECONDS
       value: "300"
 
@@ -88,6 +88,7 @@ repoServer:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "180s"
 
+
 redis:
   resources:
     requests:
@@ -95,6 +96,36 @@ redis:
       memory: 64Mi
     limits:
       cpu: 200m
+      memory: 128Mi
+
+
+dex:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
       memory: 128Mi
 `
 }
