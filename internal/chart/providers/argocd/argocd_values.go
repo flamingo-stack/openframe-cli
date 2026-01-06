@@ -6,7 +6,6 @@ func GetArgoCDValues() string {
 
 configs:
   cm:
-    timeout.reconciliation: "300s"
     resource.customizations.health.argoproj.io_Application: |
       hs = {}
       hs.status = "Progressing"
@@ -23,60 +22,34 @@ configs:
   params:
     controller.sync.timeout.seconds: "1800"
 
-# Disable non-essential components for lightweight installation (especially CI/k3d)
-dex:
-  enabled: false
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 50m
-      memory: 64Mi
 
-notifications:
-  enabled: false
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi
-
-applicationSet:
-  enabled: false
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi
-
-# Resource constraints to prevent k3d/CI cluster overload
 controller:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   resources:
-    limits:
-      cpu: "1"
-      memory: 1Gi
     requests:
-      cpu: 200m
+      cpu: 500m
       memory: 512Mi
-  env:
-    - name: ARGOCD_REPO_SERVER_TIMEOUT_SECONDS
-      value: "300"
+    limits:
+      cpu: 1
+      memory: 1Gi
+
 
 server:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   resources:
-    limits:
-      cpu: 200m
-      memory: 256Mi
     requests:
-      cpu: 50m
+      cpu: 100m
       memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 
 repoServer:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
   resources:
     requests:
       cpu: 100m
@@ -88,6 +61,7 @@ repoServer:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "180s"
 
+
 redis:
   resources:
     requests:
@@ -95,6 +69,36 @@ redis:
       memory: 64Mi
     limits:
       cpu: 200m
+      memory: 128Mi
+
+
+dex:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
       memory: 128Mi
 `
 }
