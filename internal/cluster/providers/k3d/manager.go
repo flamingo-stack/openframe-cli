@@ -26,12 +26,6 @@ import (
 const (
 	defaultK3sImage    = "rancher/k3s:v1.31.5-k3s1"
 	defaultTimeout     = "300s"
-	defaultAPIPort     = "6550"
-	defaultHTTPPort    = "8080"
-	defaultHTTPSPort   = "8443"
-	dynamicPortStart   = 20000
-	dynamicPortEnd     = 50000
-	portSearchStep     = 1000
 	timestampSuffixLen = 6
 )
 
@@ -481,10 +475,14 @@ servers: %d
 agents: %d
 image: %s`, config.Name, servers, agents, image)
 
-	// Use fixed default ports for consistent cluster configuration
-	apiPort := defaultAPIPort
-	httpPort := defaultHTTPPort
-	httpsPort := defaultHTTPSPort
+	// Find available ports, preferring standard ports (80, 443) with fallback to high ports
+	ports, err := m.findAvailablePorts()
+	if err != nil {
+		return "", fmt.Errorf("failed to find available ports: %w", err)
+	}
+	apiPort := strconv.Itoa(ports.API)
+	httpPort := strconv.Itoa(ports.HTTP)
+	httpsPort := strconv.Itoa(ports.HTTPS)
 
 	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL eth0 IP
 	// Docker runs inside WSL2 Ubuntu, and binding to 0.0.0.0 makes the API accessible:
@@ -563,44 +561,59 @@ func (m *K3dManager) isTestCluster(name string) bool {
 		strings.ContainsAny(name[len(name)-timestampSuffixLen:], "0123456789")
 }
 
-// findAvailablePorts finds the specified number of available TCP ports using intelligent approach
-func (m *K3dManager) findAvailablePorts(count int) ([]int, error) {
+// PortConfig holds the allocated ports for a k3d cluster
+type PortConfig struct {
+	API   int
+	HTTP  int
+	HTTPS int
+}
+
+// findAvailablePorts finds available TCP ports for API, HTTP, and HTTPS
+// It prefers standard ports (6550, 80, 443) and falls back to high ports (6551, 8080, 8443) if needed
+func (m *K3dManager) findAvailablePorts() (PortConfig, error) {
 	// Get ports used by existing k3d clusters
 	usedPorts := m.getUsedPortsByExistingClusters()
 
-	// Start with default ports and increment if busy (matching script behavior)
-	defaultPorts := []int{6550, 80, 443} // API, HTTP, HTTPS
-	alternatePorts := []int{6551, 8080, 8443}
+	config := PortConfig{}
 
-	var ports []int
+	// Find API port (6550 preferred, 6551 fallback)
+	config.API = m.findPort([]int{6550, 6551}, 6552, usedPorts)
+	if config.API == 0 {
+		return config, fmt.Errorf("could not find available API port")
+	}
 
-	for i := 0; i < count && i < len(defaultPorts); i++ {
-		// Check if default port is available and not used by existing clusters
-		if m.isPortAvailable(defaultPorts[i]) && !m.isPortInUse(defaultPorts[i], usedPorts) {
-			ports = append(ports, defaultPorts[i])
-		} else if m.isPortAvailable(alternatePorts[i]) && !m.isPortInUse(alternatePorts[i], usedPorts) {
-			ports = append(ports, alternatePorts[i])
-		} else {
-			// Find next available port that's not used by k3d clusters
-			found := false
-			for port := alternatePorts[i] + 1; port < alternatePorts[i]+1000; port++ {
-				if m.isPortAvailable(port) && !m.isPortInUse(port, usedPorts) {
-					ports = append(ports, port)
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil, fmt.Errorf("could not find available port for index %d", i)
-			}
+	// Find HTTP port (80 preferred, 8080 fallback)
+	config.HTTP = m.findPort([]int{80, 8080}, 8081, usedPorts)
+	if config.HTTP == 0 {
+		return config, fmt.Errorf("could not find available HTTP port")
+	}
+
+	// Find HTTPS port (443 preferred, 8443 fallback)
+	config.HTTPS = m.findPort([]int{443, 8443}, 8444, usedPorts)
+	if config.HTTPS == 0 {
+		return config, fmt.Errorf("could not find available HTTPS port")
+	}
+
+	return config, nil
+}
+
+// findPort tries preferred ports first, then searches from searchStart
+func (m *K3dManager) findPort(preferred []int, searchStart int, usedPorts map[int]bool) int {
+	// Try preferred ports first
+	for _, port := range preferred {
+		if !usedPorts[port] && m.isPortAvailable(port) {
+			return port
 		}
 	}
 
-	if len(ports) < count {
-		return nil, fmt.Errorf("could not find %d available ports", count)
+	// Search for an available port
+	for port := searchStart; port < searchStart+1000; port++ {
+		if !usedPorts[port] && m.isPortAvailable(port) {
+			return port
+		}
 	}
 
-	return ports, nil
+	return 0
 }
 
 // getUsedPortsByExistingClusters returns a map of ports used by existing k3d clusters
@@ -646,20 +659,19 @@ func (m *K3dManager) getUsedPortsByExistingClusters() map[int]bool {
 	return usedPorts
 }
 
-// isPortInUse checks if a port is in the used ports map
-func (m *K3dManager) isPortInUse(port int, usedPorts map[int]bool) bool {
-	return usedPorts[port]
-}
-
-// isPortAvailable checks if a TCP port is available
+// isPortAvailable checks if a TCP port is available by attempting to connect to it.
+// If connection is refused, the port is available. This approach works regardless of
+// user privileges (unlike bind-based checks which fail for ports < 1024 without root).
 func (m *K3dManager) isPortAvailable(port int) bool {
-	address := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", address)
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
 	if err != nil {
-		return false
+		// Connection refused or timeout means port is available
+		return true
 	}
-	defer listener.Close()
-	return true
+	// Connection succeeded means something is listening
+	conn.Close()
+	return false
 }
 
 // convertWindowsPathToWSL converts a Windows path to a WSL path format
@@ -961,7 +973,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		}
 		// Default to 127.0.0.1:6550 for k3d
 		host = "127.0.0.1"
-		port = defaultAPIPort
+		port = "6550"
 	}
 
 	// Brief pause before TCP check on Windows/WSL2
