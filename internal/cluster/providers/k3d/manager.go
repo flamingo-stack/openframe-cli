@@ -1490,9 +1490,9 @@ func (m *K3dManager) increaseInotifyLimits(ctx context.Context) error {
 			fmt.Printf("✓ Increased inotify limits in WSL (max_user_watches=%s, max_user_instances=%s)\n",
 				maxUserWatches, maxUserInstances)
 		}
-	} else {
-		// On Linux/macOS, set the limits directly
-		// Note: macOS doesn't use inotify (uses FSEvents), so this only applies to Linux
+	} else if runtime.GOOS == "linux" {
+		// On Linux, set the limits directly via sysctl
+		// macOS doesn't use inotify (uses FSEvents instead), so skip this on macOS
 		sysctlCmd := fmt.Sprintf(
 			"sudo sysctl -w fs.inotify.max_user_watches=%s fs.inotify.max_user_instances=%s 2>/dev/null || true",
 			maxUserWatches, maxUserInstances,
