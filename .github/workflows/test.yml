@@ -10,6 +10,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: pr-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
+
+
+# =============================================================================
+# JOBS
+# =============================================================================
+
 jobs:
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
