@@ -1,306 +1,315 @@
 # Contributing to OpenFrame CLI
 
-Thank you for your interest in contributing to OpenFrame CLI! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to OpenFrame CLI! We welcome contributions from the community and are grateful for your support.
 
-## 🚀 Quick Start for Contributors
+## 📋 Table of Contents
 
-1. **Fork and Clone**
+- [Getting Started](#getting-started)
+- [Development Environment](#development-environment)
+- [Code Standards](#code-standards)
+- [Testing](#testing)
+- [Pull Request Process](#pull-request-process)
+- [Issue Reporting](#issue-reporting)
+- [Community](#community)
+
+## 🚀 Getting Started
+
+Before you begin:
+
+1. **Join our Slack**: Connect with the community on [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+2. **Read the docs**: Familiarize yourself with the [documentation](./docs/README.md)
+3. **Check existing issues**: Browse [open issues](https://github.com/flamingo-stack/openframe-cli/issues) to see what needs help
+
+## 🛠 Development Environment
+
+### Prerequisites
+
+**Hardware Requirements:**
+- Minimum: 24GB RAM, 6 CPU cores, 50GB disk space
+- Recommended: 32GB RAM, 12 CPU cores, 100GB disk space
+
+**Software Requirements:**
+- **Go**: 1.21 or later
+- **Docker**: Docker Desktop or Docker Engine
+- **Git**: Latest version
+- **Make**: For build automation
+
+### Setup
+
+1. **Fork and clone the repository:**
    ```bash
-   git clone https://github.com/your-username/openframe-cli.git
+   git clone https://github.com/YOUR-USERNAME/openframe-cli.git
    cd openframe-cli
    ```
 
-2. **Set Up Development Environment**
+2. **Install dependencies:**
    ```bash
-   # Install Go 1.21+
-   go version
-   
-   # Install dependencies
    go mod download
-   
-   # Run tests
+   ```
+
+3. **Build the CLI:**
+   ```bash
+   make build
+   # Or manually:
+   go build -o openframe .
+   ```
+
+4. **Run tests:**
+   ```bash
+   make test
+   # Or manually:
    go test ./...
    ```
 
-3. **Make Your Changes**
+5. **Test the CLI locally:**
    ```bash
-   git checkout -b feature/your-feature-name
-   # Make your changes
-   git commit -m "feat: add your feature description"
-   git push origin feature/your-feature-name
+   ./openframe --help
    ```
 
-4. **Submit Pull Request**
+### Development Workflow
 
-## 📋 Prerequisites
+1. **Create a feature branch:**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-### System Requirements
-- **Go**: Version 1.21 or higher
-- **Docker**: For running K3D clusters and testing
-- **Git**: For version control
-- **Make**: For running build tasks (optional)
+2. **Make your changes**
 
-### Development Tools (Optional but Recommended)
-- **kubectl**: For testing Kubernetes interactions
-- **k3d**: For testing cluster operations
-- **helm**: For testing chart installations
+3. **Run tests and linting:**
+   ```bash
+   make test
+   make lint
+   ```
 
-## 🏗 Project Structure
+4. **Commit your changes:**
+   ```bash
+   git add .
+   git commit -m "feat: add new feature description"
+   ```
+
+5. **Push and create a pull request**
+
+## 📝 Code Standards
+
+### Go Code Style
+
+We follow standard Go conventions with some additional guidelines:
+
+- **Formatting**: Use `gofmt` and `goimports`
+- **Linting**: Use `golangci-lint` with our configuration
+- **Naming**: Follow Go naming conventions (CamelCase for exported, camelCase for unexported)
+- **Comments**: Document all exported functions and types
+- **Error handling**: Always handle errors explicitly, never ignore them
+
+### Architecture Patterns
+
+OpenFrame CLI follows a hexagonal architecture:
 
 ```
-openframe-cli/
-├── cmd/                    # Cobra command definitions
-│   ├── root.go            # Root command and CLI setup
-│   ├── bootstrap/         # Bootstrap command
-│   ├── cluster/           # Cluster management commands
-│   ├── chart/             # Chart installation commands
-│   └── dev/               # Development workflow commands
-├── internal/              # Internal packages
-│   ├── bootstrap/         # Bootstrap service logic
-│   ├── cluster/           # Cluster management services
-│   ├── chart/             # Chart installation services
-│   ├── dev/               # Development tool services
-│   └── shared/            # Shared utilities and UI
-├── pkg/                   # Public API packages
-├── docs/                  # Documentation
-├── scripts/               # Build and utility scripts
-└── tests/                 # Integration tests
+cmd/                 # Command definitions (Cobra)
+├── cluster/         # Cluster command group
+├── chart/          # Chart command group
+└── dev/            # Development command group
+
+internal/
+├── cluster/        # Cluster business logic
+├── chart/          # Chart business logic
+├── bootstrap/      # Bootstrap orchestration
+├── dev/           # Development tools
+└── shared/        # Shared utilities
+    ├── executor/   # Command execution
+    ├── ui/        # Terminal UI components
+    ├── config/    # Configuration management
+    └── errors/    # Error handling
 ```
-
-## 🧪 Development Workflow
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run integration tests (requires Docker)
-go test -tags=integration ./...
-
-# Run specific test package
-go test ./internal/cluster/...
-```
-
-### Building the CLI
-
-```bash
-# Build for current platform
-go build -o openframe .
-
-# Build for all platforms
-make build-all
-
-# Install locally
-go install .
-```
-
-### Testing Your Changes
-
-```bash
-# Test cluster creation
-./openframe cluster create test-cluster
-
-# Test bootstrap flow
-./openframe bootstrap --deployment-mode=oss-tenant
-
-# Test with verbose output
-./openframe --verbose cluster status test-cluster
-```
-
-## 📝 Code Style and Standards
-
-### Go Conventions
-- Follow standard Go formatting (`gofmt`)
-- Use meaningful variable and function names
-- Write comprehensive tests for new functionality
-- Document exported functions and types
-- Handle errors appropriately with proper context
-
-### CLI Design Principles
-- **Interactive by default**: Provide guided wizards for complex operations
-- **Rich terminal UI**: Use pterm for consistent, beautiful output
-- **Fail fast**: Validate prerequisites and inputs early
-- **Clear feedback**: Provide detailed progress and error messages
-- **Testable**: Design with dependency injection for easy testing
 
 ### Commit Message Format
 
-We follow conventional commits:
+We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-type(scope): description
+<type>[optional scope]: <description>
 
 [optional body]
 
-[optional footer]
+[optional footer(s)]
 ```
 
 **Types:**
 - `feat`: New feature
 - `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (no logic changes)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Build process or auxiliary tool changes
+- `docs`: Documentation only changes
+- `style`: Changes that do not affect the meaning of the code
+- `refactor`: Code change that neither fixes a bug nor adds a feature
+- `perf`: Performance improvement
+- `test`: Adding missing tests or correcting existing tests
+- `chore`: Changes to the build process or auxiliary tools
 
 **Examples:**
-```bash
-feat(cluster): add cluster restart command
-fix(chart): resolve ArgoCD installation timeout
-docs(readme): update installation instructions
-test(dev): add intercept service tests
+```
+feat(cluster): add support for custom node labels
+fix(chart): resolve ArgoCD installation timeout issue
+docs: update contributing guidelines
+test(cluster): add unit tests for k3d provider
 ```
 
-## 🐛 Reporting Issues
+## 🧪 Testing
 
-### Before Submitting an Issue
+### Test Types
 
-1. **Search existing issues** to avoid duplicates
-2. **Update to the latest version** to see if the issue persists
-3. **Gather information** about your environment:
-   - Operating system and version
-   - Go version (`go version`)
-   - Docker version (`docker version`)
-   - OpenFrame CLI version (`openframe --version`)
-
-### Issue Template
-
-```markdown
-**Bug Description**
-A clear description of the bug.
-
-**Steps to Reproduce**
-1. Run command: `openframe cluster create`
-2. Select options: X, Y, Z
-3. See error
-
-**Expected Behavior**
-What you expected to happen.
-
-**Environment**
-- OS: macOS 14.0
-- Go: 1.21.3
-- Docker: 24.0.6
-- OpenFrame CLI: v1.0.0
-
-**Additional Context**
-Any additional information, logs, or screenshots.
-```
-
-## ✨ Submitting Pull Requests
-
-### Pull Request Process
-
-1. **Create Feature Branch**
+1. **Unit Tests**: Test individual components in isolation
    ```bash
-   git checkout -b feature/descriptive-name
+   go test ./internal/cluster/...
+   go test ./internal/chart/...
    ```
 
-2. **Make Changes**
-   - Write code following project conventions
-   - Add tests for new functionality
-   - Update documentation if needed
-
-3. **Test Thoroughly**
+2. **Integration Tests**: Test component interactions
    ```bash
-   go test ./...
    go test -tags=integration ./...
    ```
 
-4. **Commit Changes**
+3. **End-to-End Tests**: Test complete workflows
    ```bash
-   git add .
-   git commit -m "feat(scope): descriptive commit message"
+   go test -tags=e2e ./tests/e2e/...
    ```
 
-5. **Push and Create PR**
-   ```bash
-   git push origin feature/descriptive-name
-   # Create pull request on GitHub
-   ```
+### Test Requirements
 
-### Pull Request Checklist
+- **Coverage**: Maintain at least 80% code coverage for new code
+- **Table-driven tests**: Use table-driven tests for multiple scenarios
+- **Mocking**: Use interfaces and mocks for external dependencies
+- **Clean up**: Always clean up resources in tests (clusters, files, etc.)
 
-- [ ] Code follows project style and conventions
-- [ ] Tests pass locally (`go test ./...`)
-- [ ] New functionality includes tests
-- [ ] Documentation updated (if applicable)
-- [ ] Commit messages follow conventional format
-- [ ] No breaking changes (or clearly documented)
-- [ ] PR description explains the changes and motivation
+### Running Tests
 
-### Pull Request Template
+```bash
+# All tests
+make test
 
-```markdown
-## Description
-Brief description of changes and motivation.
+# Unit tests only
+make test-unit
 
-## Type of Change
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that causes existing functionality to change)
-- [ ] Documentation update
+# Integration tests (requires Docker)
+make test-integration
 
-## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Manual testing completed
+# With coverage
+make test-coverage
 
-## Screenshots (if applicable)
-Add screenshots or terminal output for UI changes.
-
-## Additional Notes
-Any additional context or considerations.
+# Specific package
+go test ./internal/cluster/providers/k3d/
 ```
 
-## 🏷 Release Process
+## 🔄 Pull Request Process
 
-Releases are handled by maintainers:
+### Before Submitting
 
-1. **Version Bump**: Update version in `main.go`
-2. **Changelog**: Update `CHANGELOG.md` with new features and fixes
-3. **Tag Release**: Create and push git tag (`v1.0.0`)
-4. **GitHub Release**: Automated builds create release artifacts
-5. **Documentation**: Update installation instructions if needed
+1. **Update documentation** if you're adding/changing functionality
+2. **Add tests** for new features or bug fixes
+3. **Run the full test suite** and ensure all tests pass
+4. **Update CHANGELOG.md** for significant changes
+5. **Ensure commits follow** our commit message format
 
-## 🤝 Community Guidelines
+### PR Description Template
 
-### Be Respectful
-- Use inclusive language
-- Provide constructive feedback
-- Help newcomers learn and contribute
+```markdown
+## What this PR does
 
-### Be Collaborative
-- Respond to questions and reviews promptly
-- Share knowledge and best practices
-- Coordinate with maintainers on major changes
+Brief description of the change and which issue it fixes.
 
-### Be Patient
-- Code review takes time for quality assurance
-- Maintainers balance multiple priorities
-- Complex features may need iteration
+## Why this change is needed
 
-## 📞 Getting Help
+Explanation of the problem this PR solves.
 
-### Discussion Channels
-- **GitHub Issues**: Bug reports and feature requests
-- **GitHub Discussions**: Questions and community support
-- **Documentation**: Check the [docs/](./docs/) folder first
+## Testing
 
-### Maintainer Contact
-For sensitive issues or questions:
-- Open a private issue with the maintainer team
-- Email: [support@flamingo.run](mailto:support@flamingo.run)
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+- [ ] Manual testing completed
+- [ ] Documentation updated
 
-## 📄 License
+## Checklist
 
-By contributing to OpenFrame CLI, you agree that your contributions will be licensed under the same license as the project (Flamingo AI Unified License v1.0).
+- [ ] Code follows project conventions
+- [ ] Self-review completed
+- [ ] Tests pass locally
+- [ ] Documentation updated
+- [ ] Changelog updated (if needed)
+```
+
+### Review Process
+
+1. **Automated checks**: CI/CD runs tests and linting
+2. **Code review**: At least one maintainer reviews the code
+3. **Testing**: Reviewer tests the changes locally if needed
+4. **Approval**: PR is approved and merged
+
+## 🐛 Issue Reporting
+
+### Bug Reports
+
+When reporting bugs, please include:
+
+1. **Environment information:**
+   - Operating system and version
+   - Go version
+   - Docker version
+   - OpenFrame CLI version
+
+2. **Steps to reproduce**
+
+3. **Expected vs actual behavior**
+
+4. **Logs and error messages**
+
+5. **Additional context**
+
+Use our [bug report template](https://github.com/flamingo-stack/openframe-cli/issues/new?template=bug_report.md).
+
+### Feature Requests
+
+For feature requests, please include:
+
+1. **Problem description**: What problem does this solve?
+2. **Proposed solution**: How should we solve it?
+3. **Alternatives considered**: What other approaches did you consider?
+4. **Additional context**: Any other relevant information
+
+Use our [feature request template](https://github.com/flamingo-stack/openframe-cli/issues/new?template=feature_request.md).
+
+## 💬 Community
+
+### Communication Channels
+
+- **Primary**: [OpenMSP Slack Community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **Issues**: GitHub Issues for bug reports and feature requests
+- **Discussions**: Use Slack for general questions and discussions
+
+### Code of Conduct
+
+This project follows the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). By participating, you are expected to uphold this code.
+
+### Getting Help
+
+1. **Documentation**: Check the [docs](./docs/README.md) first
+2. **Slack**: Ask questions in our Slack community
+3. **GitHub Issues**: Open an issue for bugs or feature requests
+
+## 📚 Additional Resources
+
+- [Development Documentation](./docs/development/README.md)
+- [Architecture Overview](./docs/reference/architecture/overview.md)
+- [Getting Started Guide](./docs/getting-started/quick-start.md)
+- [OpenFrame Website](https://openframe.ai)
+
+## 🙏 Recognition
+
+Contributors will be recognized in:
+- Release notes for significant contributions
+- GitHub contributors list
+- Our community Slack
+
+Thank you for contributing to OpenFrame CLI! 🎉
 
 ---
 
-Thank you for contributing to OpenFrame CLI! Your contributions help make this tool better for the entire community. 🙏
+For questions or support, reach out on [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) or open an issue.

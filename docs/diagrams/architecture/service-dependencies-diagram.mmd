@@ -1,0 +1,35 @@
+graph TB
+    subgraph "Bootstrap Flow"
+        BS[Bootstrap Service] --> CS[Cluster Service]
+        BS --> CHS[Chart Service]
+    end
+    
+    subgraph "Cluster Management"
+        CS --> K3D[K3d Provider]
+        CS --> CPREREQ[Cluster Prerequisites]
+        CS --> CUI[Cluster UI]
+    end
+    
+    subgraph "Chart Management"
+        CHS --> HELM[Helm Provider]
+        CHS --> ARGOCD[ArgoCD Provider]
+        CHS --> GIT[Git Provider]
+        CHS --> CHPREREQ[Chart Prerequisites]
+        CHS --> CHUI[Chart UI]
+    end
+    
+    subgraph "Development Tools"
+        IS[Intercept Service] --> TP[Telepresence Provider]
+        IS --> KUBECTL[Kubectl Provider]
+        SS[Scaffold Service] --> KUBECTL
+        SS --> CHS
+        IS --> DUI[Dev UI]
+        SS --> DUI
+    end
+    
+    subgraph "Shared Infrastructure"
+        ALL[All Services] --> EXEC[Command Executor]
+        ALL --> CONFIG[Configuration]
+        ALL --> ERRORS[Error Handling]
+        ALL --> FILES[File Management]
+    end
