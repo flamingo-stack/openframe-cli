@@ -21,7 +21,7 @@ on:
 
 jobs:
   release:
-    name: Release
+    name: "Release ${{ inputs.version }}"
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && 
