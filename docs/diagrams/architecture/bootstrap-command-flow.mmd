@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant ClusterService
+    participant K3dProvider
+    participant ChartService
+    participant HelmProvider
+    participant ArgoCDProvider
+    
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>Bootstrap: Parse flags and validate
+    Bootstrap->>ClusterService: Create cluster
+    ClusterService->>K3dProvider: Create k3d cluster
+    K3dProvider-->>ClusterService: Return REST config
+    ClusterService-->>Bootstrap: Cluster created
+    
+    Bootstrap->>ChartService: Install charts
+    ChartService->>HelmProvider: Install ArgoCD
+    HelmProvider-->>ChartService: ArgoCD installed
+    ChartService->>ArgoCDProvider: Install app-of-apps
+    ArgoCDProvider->>ArgoCDProvider: Wait for applications
+    ArgoCDProvider-->>ChartService: Applications synced
+    ChartService-->>Bootstrap: Charts installed
+    Bootstrap-->>User: Environment ready

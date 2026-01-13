@@ -1,0 +1,62 @@
+graph TB
+    subgraph "Command Layer"
+        CMD[Cobra Commands]
+        ROOT[Root Command]
+        CLUSTER[Cluster Commands]
+        CHART[Chart Commands]
+        BOOTSTRAP[Bootstrap Command]
+        DEV[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        CS[Cluster Service]
+        CHS[Chart Service]
+        BS[Bootstrap Service]
+        IS[Intercept Service]
+        SS[Scaffold Service]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[K3d Provider]
+        HELM[Helm Provider]
+        ARGOCD[ArgoCD Provider]
+        GIT[Git Provider]
+        TP[Telepresence Provider]
+        KUBECTL[Kubectl Provider]
+    end
+    
+    subgraph "Shared Infrastructure"
+        EXEC[Command Executor]
+        UI[UI Components]
+        CONFIG[Configuration]
+        ERRORS[Error Handling]
+    end
+    
+    CMD --> CS
+    CMD --> CHS
+    CMD --> BS
+    CMD --> IS
+    CMD --> SS
+    
+    CS --> K3D
+    CHS --> HELM
+    CHS --> ARGOCD
+    CHS --> GIT
+    BS --> CS
+    BS --> CHS
+    IS --> TP
+    IS --> KUBECTL
+    SS --> KUBECTL
+    
+    CS --> EXEC
+    CHS --> EXEC
+    IS --> EXEC
+    SS --> EXEC
+    
+    CS --> UI
+    CHS --> UI
+    IS --> UI
+    SS --> UI
+    
+    ALL --> CONFIG
+    ALL --> ERRORS
