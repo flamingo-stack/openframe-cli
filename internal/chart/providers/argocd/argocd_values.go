@@ -7,6 +7,7 @@ func GetArgoCDValues() string {
 global:
   image:
     repository: ghcr.io/flamingo-stack/registry/argoproj/argocd
+    tag: v3.2.5
 
 redis-ha:
   haproxy:
@@ -15,6 +16,7 @@ redis-ha:
   exporter:
     image:
       repository: ghcr.io/flamingo-stack/registry/oliver006/redis_exporter
+      tag: v1.80.1
 
 configs:
   cm:
@@ -60,6 +62,7 @@ server:
   extensions:
     image:
       repository: ghcr.io/flamingo-stack/registry/argoprojlabs/argocd-extension-installer
+      tag: v0.0.9
 
 
 repoServer:
@@ -80,6 +83,7 @@ repoServer:
 redis:
   image:
     repository: ghcr.io/flamingo-stack/registry/redis
+    tag: 8.2.2-alpine
   resources:
     requests:
       cpu: 10m
@@ -92,6 +96,7 @@ redis:
 dex:
   image:
     repository: ghcr.io/flamingo-stack/registry/dexidp/dex
+    tag: v2.44.0
   resources:
     requests:
       cpu: 10m
