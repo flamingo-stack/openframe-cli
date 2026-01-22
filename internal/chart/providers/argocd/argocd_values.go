@@ -4,6 +4,18 @@ package argocd
 func GetArgoCDValues() string {
 	return `fullnameOverride: argocd
 
+global:
+  image:
+    repository: ghcr.io/flamingo-stack/registry/argoproj/argocd
+
+redis-ha:
+  haproxy:
+    image:
+      repository: ghcr.io/flamingo-stack/registry/haproxy
+  exporter:
+    image:
+      repository: ghcr.io/flamingo-stack/registry/oliver006/redis_exporter
+
 configs:
   cm:
     resource.customizations.health.argoproj.io_Application: |
@@ -45,6 +57,9 @@ server:
     limits:
       cpu: 200m
       memory: 400Mi
+  extensions:
+    image:
+      repository: ghcr.io/flamingo-stack/registry/argoprojlabs/argocd-extension-installer
 
 
 repoServer:
@@ -63,6 +78,8 @@ repoServer:
 
 
 redis:
+  image:
+    repository: ghcr.io/flamingo-stack/registry/redis
   resources:
     requests:
       cpu: 10m
@@ -73,6 +90,8 @@ redis:
 
 
 dex:
+  image:
+    repository: ghcr.io/flamingo-stack/registry/dexidp/dex
   resources:
     requests:
       cpu: 10m
