@@ -216,7 +216,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	defer os.Remove(tmpFile.Name())
 
 	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
+	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues(config.ArgoCDConfig)); err != nil {
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
 	tmpFile.Close()
@@ -234,7 +234,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	// CRDs are handled separately via native Go client, so we tell Helm to skip them
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
-		"--version=8.2.7",
+		"--version=9.3.4",
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
@@ -391,9 +391,9 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 		// Install CRDs programmatically using client-go dynamic client
 		crdUrls := []string{
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/application-crd.yaml",
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/applicationset-crd.yaml",
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.8/manifests/crds/appproject-crd.yaml",
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.2/manifests/crds/application-crd.yaml",
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.2/manifests/crds/applicationset-crd.yaml",
+			"https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.2/manifests/crds/appproject-crd.yaml",
 		}
 
 		for _, crdUrl := range crdUrls {
@@ -437,7 +437,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	defer os.Remove(tmpFile.Name())
 
 	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
+	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues(config.ArgoCDConfig)); err != nil {
 		if spinner != nil {
 			spinner.Stop()
 		}
@@ -459,7 +459,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 	// Installation details are now silent - just show in verbose mode
 	if config.Verbose {
-		pterm.Info.Printf("   Version: 8.2.7\n")
+		pterm.Info.Printf("   Version: 9.3.4\n")
 		pterm.Info.Printf("   Namespace: argocd\n")
 		pterm.Info.Printf("   Values file (Windows): %s\n", tmpFile.Name())
 		if runtime.GOOS == "windows" {
@@ -484,7 +484,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// This prevents the race condition where Helm tries to install CRDs that we already installed
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
-		"--version=8.2.7",
+		"--version=9.3.4",
 		"--namespace", "argocd",
 		"--create-namespace",
 		"--wait",
