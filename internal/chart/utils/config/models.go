@@ -13,6 +13,8 @@ type ChartInstallConfig struct {
 	Silent         bool
 	NonInteractive bool // Suppresses interactive UI elements and spinners
 	SkipCRDs       bool // Skip installation of ArgoCD CRDs
+	// ArgoCD image configuration (loaded from helm-values.yaml)
+	ArgoCDConfig *models.ArgoCDConfig
 	// App-of-apps specific configuration
 	AppOfApps *models.AppOfAppsConfig
 }
