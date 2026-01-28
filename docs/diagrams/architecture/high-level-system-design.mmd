@@ -1,0 +1,38 @@
+graph TB
+    subgraph "CLI Commands"
+        bootstrap[Bootstrap Command]
+        cluster[Cluster Management]
+        chart[Chart Management]
+        dev[Dev Tools]
+    end
+    
+    subgraph "Internal Services"
+        clusterSvc[Cluster Service]
+        chartSvc[Chart Service]
+        devSvc[Dev Service]
+        prereq[Prerequisites]
+    end
+    
+    subgraph "External Tools"
+        k3d[K3d]
+        helm[Helm]
+        kubectl[kubectl]
+        argocd[ArgoCD]
+        telepresence[Telepresence]
+    end
+    
+    bootstrap --> clusterSvc
+    bootstrap --> chartSvc
+    cluster --> clusterSvc
+    chart --> chartSvc
+    dev --> devSvc
+    
+    clusterSvc --> k3d
+    clusterSvc --> kubectl
+    chartSvc --> helm
+    chartSvc --> argocd
+    devSvc --> telepresence
+    
+    prereq --> k3d
+    prereq --> helm
+    prereq --> kubectl

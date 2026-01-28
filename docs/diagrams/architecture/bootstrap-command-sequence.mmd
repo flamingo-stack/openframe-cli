@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant ClusterSvc
+    participant ChartSvc
+    participant K3d
+    participant ArgoCD
+    
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>Bootstrap: Show logo and check prerequisites
+    Bootstrap->>ClusterSvc: Create cluster
+    ClusterSvc->>K3d: Create K3d cluster
+    K3d-->>ClusterSvc: Cluster ready
+    ClusterSvc-->>Bootstrap: Cluster created
+    Bootstrap->>ChartSvc: Install charts
+    ChartSvc->>ChartSvc: Generate certificates
+    ChartSvc->>ArgoCD: Install ArgoCD via Helm
+    ChartSvc->>ArgoCD: Deploy app-of-apps
+    ArgoCD-->>ChartSvc: Installation complete
+    ChartSvc-->>Bootstrap: Charts installed
+    Bootstrap-->>User: OpenFrame environment ready

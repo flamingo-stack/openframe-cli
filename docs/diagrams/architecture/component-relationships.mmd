@@ -1,0 +1,41 @@
+graph LR
+    subgraph "Command Layer"
+        A[Bootstrap] 
+        B[Cluster Commands]
+        C[Chart Commands] 
+        D[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        E[Bootstrap Service]
+        F[Cluster Service] 
+        G[Chart Service]
+        H[Dev Service]
+    end
+    
+    subgraph "Infrastructure"
+        I[Prerequisites]
+        J[UI Components]
+        K[Error Handling]
+        L[Configuration]
+    end
+    
+    A --> E
+    B --> F
+    C --> G
+    D --> H
+    
+    E --> F
+    E --> G
+    
+    F --> I
+    G --> I
+    H --> I
+    
+    F --> J
+    G --> J
+    H --> J
+    
+    F --> K
+    G --> K
+    H --> K
