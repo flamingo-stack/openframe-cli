@@ -1,58 +1,41 @@
-graph TB
+graph LR
     subgraph "Command Layer"
-        BootstrapCmd[Bootstrap Command]
-        ClusterCmd[Cluster Commands]
-        ChartCmd[Chart Commands]
-        DevCmd[Dev Commands]
+        A[Bootstrap] 
+        B[Cluster Commands]
+        C[Chart Commands] 
+        D[Dev Commands]
     end
     
     subgraph "Service Layer"
-        BootstrapSvc[Bootstrap Service]
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        InterceptSvc[Intercept Service]
-        ScaffoldSvc[Scaffold Service]
+        E[Bootstrap Service]
+        F[Cluster Service] 
+        G[Chart Service]
+        H[Dev Service]
     end
     
-    subgraph "Provider Layer"
-        K3DProvider[K3D Manager]
-        HelmProvider[Helm Manager]
-        ArgoCDProvider[ArgoCD Manager]
-        GitProvider[Git Repository]
-        TelepresenceProvider[Telepresence Provider]
-        KubectlProvider[Kubectl Provider]
+    subgraph "Infrastructure"
+        I[Prerequisites]
+        J[UI Components]
+        K[Error Handling]
+        L[Configuration]
     end
     
-    subgraph "Shared Infrastructure"
-        UI[UI Components]
-        Executor[Command Executor]
-        ErrorHandler[Error Handling]
-        Config[Configuration]
-    end
+    A --> E
+    B --> F
+    C --> G
+    D --> H
     
-    BootstrapCmd --> BootstrapSvc
-    ClusterCmd --> ClusterSvc
-    ChartCmd --> ChartSvc
-    DevCmd --> InterceptSvc
-    DevCmd --> ScaffoldSvc
+    E --> F
+    E --> G
     
-    BootstrapSvc --> ClusterSvc
-    BootstrapSvc --> ChartSvc
+    F --> I
+    G --> I
+    H --> I
     
-    ClusterSvc --> K3DProvider
-    ChartSvc --> HelmProvider
-    ChartSvc --> ArgoCDProvider
-    ChartSvc --> GitProvider
-    InterceptSvc --> TelepresenceProvider
-    InterceptSvc --> KubectlProvider
-    ScaffoldSvc --> KubectlProvider
+    F --> J
+    G --> J
+    H --> J
     
-    ClusterSvc --> UI
-    ChartSvc --> UI
-    InterceptSvc --> UI
-    ScaffoldSvc --> UI
-    
-    K3DProvider --> Executor
-    HelmProvider --> Executor
-    TelepresenceProvider --> Executor
-    KubectlProvider --> Executor
+    F --> K
+    G --> K
+    H --> K

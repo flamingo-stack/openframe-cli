@@ -1,0 +1,10 @@
+./cmd/bootstrap/bootstrap.go
+./cmd/chart/chart.go
+./cmd/chart/install.go
+./cmd/cluster/cleanup.go
+./cmd/cluster/cluster.go
+./cmd/cluster/create.go
+./cmd/cluster/delete.go
+./cmd/cluster/list.go
+./cmd/cluster/status.go
+./cmd/dev/dev.go
