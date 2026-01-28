@@ -28,10 +28,10 @@ controller:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 200m
+      memory: 800Mi
     limits:
-      cpu: 1
+      cpu: 400m
       memory: 1Gi
 
 
@@ -40,11 +40,11 @@ server:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 200m
+      memory: 400Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 300m
+      memory: 600Mi
 
 
 repoServer:
@@ -52,11 +52,11 @@ repoServer:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 400Mi
     limits:
-      cpu: 500m
-      memory: 768Mi
+      cpu: 400m
+      memory: 800Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "180s"
@@ -65,21 +65,21 @@ repoServer:
 redis:
   resources:
     requests:
-      cpu: 100m
+      cpu: 50m
       memory: 64Mi
     limits:
-      cpu: 200m
+      cpu: 100m
       memory: 128Mi
 
 
 dex:
   resources:
     requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
       cpu: 50m
       memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 
 applicationSet:
@@ -97,7 +97,7 @@ notifications:
     requests:
       cpu: 50m
       memory: 64Mi
-    limits:
+    lrequests:
       cpu: 100m
       memory: 128Mi
 `
