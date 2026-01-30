@@ -143,11 +143,11 @@ controller:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 100m
-      memory: 600Mi
-    limits:
       cpu: 200m
       memory: 800Mi
+    limits:
+      cpu: 400m
+      memory: 1Gi
 
 
 server:
@@ -155,15 +155,11 @@ server:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 100m
-      memory: 200Mi
-    limits:
       cpu: 200m
       memory: 400Mi
-  extensions:
-    image:
-      repository: %s
-      tag: %s
+    limits:
+      cpu: 300m
+      memory: 600Mi
 
 
 repoServer:
@@ -171,11 +167,11 @@ repoServer:
     loki.grafana.com/scrape: "true"
   resources:
     requests:
-      cpu: 100m
-      memory: 512Mi
+      cpu: 200m
+      memory: 400Mi
     limits:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 400m
+      memory: 800Mi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "180s"
@@ -187,11 +183,11 @@ redis:
     tag: %s
   resources:
     requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
       cpu: 50m
-      memory: 32Mi
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 
 dex:
@@ -200,11 +196,11 @@ dex:
     tag: %s
   resources:
     requests:
-      cpu: 10m
-      memory: 64Mi
-    limits:
       cpu: 50m
       memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 
 applicationSet:
@@ -223,20 +219,7 @@ notifications:
       cpu: 10m
       memory: 64Mi
     limits:
-      cpu: 50m
-      memory: 64Mi
-`,
-		images.Image.Repository,
-		images.Image.Tag,
-		images.RedisHAProxy.Repository,
-		haproxyTag,
-		images.RedisExporter.Repository,
-		images.RedisExporter.Tag,
-		images.ExtensionInstaller.Repository,
-		images.ExtensionInstaller.Tag,
-		images.Redis.Repository,
-		images.Redis.Tag,
-		images.Dex.Repository,
-		images.Dex.Tag,
-	)
+      cpu: 100m
+      memory: 128Mi
+`
 }
