@@ -378,3 +378,4 @@ func (h *HelmValuesModifier) GetSaaSRepositoryPassword(values map[string]interfa
 	}
 	return "" // return empty string if not found
 }
+

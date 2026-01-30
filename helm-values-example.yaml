@@ -6,6 +6,39 @@
 # =============================================================================
 
 # =============================================================================
+# 0. ARGOCD IMAGE CONFIGURATION (optional)
+# =============================================================================
+# Override ArgoCD component images. If not specified, defaults from the CLI are used.
+# This allows using custom registries or pinning specific versions.
+
+argocd:
+  images:
+    # Main ArgoCD image
+    global:
+      repository: ghcr.io/flamingo-stack/registry/argoproj/argocd
+      tag: v3.2.5
+    # Redis image
+    redis:
+      repository: ghcr.io/flamingo-stack/registry/redis
+      tag: 8.2.2-alpine
+    # Redis HA HAProxy image
+    redisHAProxy:
+      repository: ghcr.io/flamingo-stack/registry/haproxy
+      # tag: optional
+    # Redis exporter image
+    redisExporter:
+      repository: ghcr.io/flamingo-stack/registry/oliver006/redis_exporter
+      tag: v1.80.1
+    # Dex image (OIDC)
+    dex:
+      repository: ghcr.io/flamingo-stack/registry/dexidp/dex
+      tag: v2.44.0
+    # ArgoCD extension installer image
+    extensionInstaller:
+      repository: ghcr.io/flamingo-stack/registry/argoprojlabs/argocd-extension-installer
+      tag: v0.0.9
+
+# =============================================================================
 # 1. APP-OF-APPS VALUES (app-of-apps/values.yaml)
 # =============================================================================
 # This is the top-level configuration that controls the entire OpenFrame deployment
