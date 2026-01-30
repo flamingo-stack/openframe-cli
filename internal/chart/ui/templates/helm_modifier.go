@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"gopkg.in/yaml.v3"
 )
@@ -380,62 +379,3 @@ func (h *HelmValuesModifier) GetSaaSRepositoryPassword(values map[string]interfa
 	return "" // return empty string if not found
 }
 
-// GetArgoCDConfig extracts ArgoCD configuration from Helm values
-// Returns nil if no argocd section is found (use defaults)
-func (h *HelmValuesModifier) GetArgoCDConfig(values map[string]interface{}) *models.ArgoCDConfig {
-	argocdSection, ok := values["argocd"].(map[string]interface{})
-	if !ok {
-		return nil // No argocd section, use defaults
-	}
-
-	images, ok := argocdSection["images"].(map[string]interface{})
-	if !ok {
-		return nil // No images section, use defaults
-	}
-
-	config := &models.ArgoCDConfig{}
-
-	// Extract global image
-	if global, ok := images["global"].(map[string]interface{}); ok {
-		config.Image = h.extractImageConfig(global)
-	}
-
-	// Extract redis image
-	if redis, ok := images["redis"].(map[string]interface{}); ok {
-		config.Redis = h.extractImageConfig(redis)
-	}
-
-	// Extract redis-ha haproxy image
-	if haproxy, ok := images["redisHAProxy"].(map[string]interface{}); ok {
-		config.RedisHAProxy = h.extractImageConfig(haproxy)
-	}
-
-	// Extract redis exporter image
-	if exporter, ok := images["redisExporter"].(map[string]interface{}); ok {
-		config.RedisExporter = h.extractImageConfig(exporter)
-	}
-
-	// Extract dex image
-	if dex, ok := images["dex"].(map[string]interface{}); ok {
-		config.Dex = h.extractImageConfig(dex)
-	}
-
-	// Extract extension installer image
-	if ext, ok := images["extensionInstaller"].(map[string]interface{}); ok {
-		config.ExtensionInstaller = h.extractImageConfig(ext)
-	}
-
-	return config
-}
-
-// extractImageConfig extracts repository and tag from an image config map
-func (h *HelmValuesModifier) extractImageConfig(imageMap map[string]interface{}) models.ArgoCDImageConfig {
-	config := models.ArgoCDImageConfig{}
-	if repo, ok := imageMap["repository"].(string); ok {
-		config.Repository = repo
-	}
-	if tag, ok := imageMap["tag"].(string); ok {
-		config.Tag = tag
-	}
-	return config
-}

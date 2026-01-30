@@ -3,12 +3,10 @@ package argocd
 import (
 	"strings"
 	"testing"
-
-	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 )
 
 func TestGetArgoCDValues(t *testing.T) {
-	values := GetArgoCDValues(nil)
+	values := GetArgoCDValues()
 
 	// Test that the function returns non-empty string
 	if values == "" {
@@ -47,7 +45,7 @@ func TestGetArgoCDValues(t *testing.T) {
 }
 
 func TestGetArgoCDValuesStructure(t *testing.T) {
-	values := GetArgoCDValues(nil)
+	values := GetArgoCDValues()
 
 	// Count lines to ensure we have the expected structure
 	lines := strings.Split(values, "\n")
@@ -62,7 +60,7 @@ func TestGetArgoCDValuesStructure(t *testing.T) {
 }
 
 func TestGetArgoCDValuesWithDefaults(t *testing.T) {
-	values := GetArgoCDValues(nil)
+	values := GetArgoCDValues()
 
 	// Check default image repositories are present
 	expectedDefaults := []string{
@@ -76,57 +74,7 @@ func TestGetArgoCDValuesWithDefaults(t *testing.T) {
 
 	for _, expected := range expectedDefaults {
 		if !strings.Contains(values, expected) {
-			t.Errorf("GetArgoCDValues(nil) missing default: %s", expected)
+			t.Errorf("GetArgoCDValues() missing default: %s", expected)
 		}
-	}
-}
-
-func TestGetArgoCDValuesWithCustomConfig(t *testing.T) {
-	config := &models.ArgoCDConfig{
-		Image: models.ArgoCDImageConfig{
-			Repository: "custom-registry/argocd",
-			Tag:        "v2.0.0",
-		},
-		Redis: models.ArgoCDImageConfig{
-			Repository: "custom-registry/redis",
-			Tag:        "7.0.0",
-		},
-	}
-
-	values := GetArgoCDValues(config)
-
-	// Check custom values are present
-	if !strings.Contains(values, "repository: custom-registry/argocd") {
-		t.Error("GetArgoCDValues() did not use custom argocd repository")
-	}
-	if !strings.Contains(values, "tag: v2.0.0") {
-		t.Error("GetArgoCDValues() did not use custom argocd tag")
-	}
-	if !strings.Contains(values, "repository: custom-registry/redis") {
-		t.Error("GetArgoCDValues() did not use custom redis repository")
-	}
-
-	// Check that defaults are used for non-overridden values
-	if !strings.Contains(values, "repository: ghcr.io/flamingo-stack/registry/dexidp/dex") {
-		t.Error("GetArgoCDValues() did not preserve default dex repository")
-	}
-}
-
-func TestGetArgoCDValuesPartialOverride(t *testing.T) {
-	// Only override tag, keep default repository
-	config := &models.ArgoCDConfig{
-		Image: models.ArgoCDImageConfig{
-			Tag: "v3.0.0",
-		},
-	}
-
-	values := GetArgoCDValues(config)
-
-	// Check that repository defaults are preserved but tag is overridden
-	if !strings.Contains(values, "repository: ghcr.io/flamingo-stack/registry/argoproj/argocd") {
-		t.Error("GetArgoCDValues() did not preserve default argocd repository")
-	}
-	if !strings.Contains(values, "tag: v3.0.0") {
-		t.Error("GetArgoCDValues() did not use custom argocd tag")
 	}
 }

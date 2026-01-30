@@ -216,7 +216,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	defer os.Remove(tmpFile.Name())
 
 	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues(config.ArgoCDConfig)); err != nil {
+	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
 	tmpFile.Close()
@@ -437,7 +437,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	defer os.Remove(tmpFile.Name())
 
 	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues(config.ArgoCDConfig)); err != nil {
+	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
 		if spinner != nil {
 			spinner.Stop()
 		}
