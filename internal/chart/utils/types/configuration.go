@@ -89,8 +89,9 @@ func GetRepositoryURL(mode DeploymentMode) string {
 	switch mode {
 	case DeploymentModeSaaSShared:
 		return "https://github.com/flamingo-stack/openframe-saas-shared"
-	case DeploymentModeSaaS, DeploymentModeOSS:
-		// Both SaaS and OSS use the same repository for now
+	case DeploymentModeSaaS:
+		return "https://github.com/flamingo-stack/openframe-saas-tenant"
+	case DeploymentModeOSS:
 		return "https://github.com/flamingo-stack/openframe-oss-tenant"
 	default:
 		// Default to OSS repository
