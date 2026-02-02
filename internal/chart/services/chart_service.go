@@ -604,8 +604,8 @@ func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequ
 		// This ensures that SaaS Shared mode gets the correct repository
 		githubRepo = types.GetRepositoryURL(*chartConfig.DeploymentMode)
 
-		// Inject authentication token for private SaaS Shared repository
-		if *chartConfig.DeploymentMode == types.DeploymentModeSaaSShared && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
+		// Inject authentication token for private SaaS repositories (both Shared and Tenant)
+		if (*chartConfig.DeploymentMode == types.DeploymentModeSaaSShared || *chartConfig.DeploymentMode == types.DeploymentModeSaaS) && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
 			// Replace https:// with https://x-access-token:TOKEN@
 			// This format is required for GitHub PAT authentication in non-interactive mode
 			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
