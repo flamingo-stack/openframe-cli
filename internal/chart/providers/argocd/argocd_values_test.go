@@ -46,7 +46,7 @@ func TestGetArgoCDValues(t *testing.T) {
 
 func TestGetArgoCDValuesStructure(t *testing.T) {
 	values := GetArgoCDValues()
-	
+
 	// Count lines to ensure we have the expected structure
 	lines := strings.Split(values, "\n")
 	if len(lines) < 80 {
@@ -56,5 +56,25 @@ func TestGetArgoCDValuesStructure(t *testing.T) {
 	// Check for health check script presence
 	if !strings.Contains(values, "if obj.status ~= nil then") {
 		t.Error("GetArgoCDValues() missing Lua health check script")
+	}
+}
+
+func TestGetArgoCDValuesWithDefaults(t *testing.T) {
+	values := GetArgoCDValues()
+
+	// Check default image repositories are present
+	expectedDefaults := []string{
+		"repository: ghcr.io/flamingo-stack/registry/argoproj/argocd",
+		"tag: v3.2.5",
+		"repository: ghcr.io/flamingo-stack/registry/redis",
+		"tag: 8.2.2-alpine",
+		"repository: ghcr.io/flamingo-stack/registry/dexidp/dex",
+		"tag: v2.44.0",
+	}
+
+	for _, expected := range expectedDefaults {
+		if !strings.Contains(values, expected) {
+			t.Errorf("GetArgoCDValues() missing default: %s", expected)
+		}
 	}
 }
