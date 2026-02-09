@@ -1,634 +1,675 @@
 # Contributing Guidelines
 
-Thank you for your interest in contributing to OpenFrame CLI! This document provides comprehensive guidelines for contributing code, documentation, and other improvements to the project.
+Welcome to the OpenFrame CLI project! This guide outlines the development workflow, coding standards, and contribution process. Following these guidelines ensures a smooth collaboration experience and maintains code quality.
 
-## Getting Started
+> **Prerequisites**: Complete [Environment Setup](../setup/environment.md) and [Local Development](../setup/local-development.md) before contributing.
 
-### Prerequisites for Contributors
+## 🤝 Getting Started
 
-Before you start contributing, ensure you have:
+### Community Resources
 
-- **Development Environment**: [Set up your environment](../setup/environment.md) with Go 1.21+, Docker, and required tools
-- **Local Setup**: [Clone and build the project](../setup/local-development.md) locally
-- **Understanding**: Read the [Architecture Overview](../architecture/overview.md) to understand the system design
+OpenFrame CLI is part of the larger Flamingo/OpenFrame ecosystem:
 
-### First-Time Contributor Setup
+- **💬 Community Support**: [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **🌐 Platform**: [Flamingo](https://flamingo.run) | [OpenFrame](https://openframe.ai)
+- **📖 Documentation**: [OpenMSP Resources](https://www.openmsp.ai/)
+
+> **Important**: We use Slack for all support and discussions. GitHub Issues and GitHub Discussions are not actively monitored.
+
+### Contribution Types
+
+We welcome various types of contributions:
+
+| Type | Description | Examples |
+|------|-------------|----------|
+| **🐛 Bug Fixes** | Fix existing issues or unexpected behavior | Error handling, edge cases, compatibility |
+| **✨ Features** | Add new functionality or capabilities | New commands, providers, integrations |
+| **📚 Documentation** | Improve or expand documentation | Tutorials, API docs, examples |
+| **🧪 Testing** | Add or improve test coverage | Unit tests, integration tests, test utilities |
+| **🔧 Infrastructure** | Improve build, CI/CD, or development tools | Scripts, workflows, tooling |
+
+## 🔄 Development Workflow
+
+### 1. Fork and Clone
 
 ```bash
-# Fork the repository on GitHub first, then:
-git clone https://github.com/YOUR_USERNAME/openframe-cli.git
+# Fork the repository on GitHub first
+# Then clone your fork
+git clone https://github.com/YOUR-USERNAME/openframe-cli.git
 cd openframe-cli
 
 # Add upstream remote
 git remote add upstream https://github.com/flamingo-stack/openframe-cli.git
+git fetch upstream
 
-# Install development dependencies
-make setup-dev
-
-# Verify everything works
-make test build
+# Verify remotes
+git remote -v
 ```
 
-## Code Style and Standards
+### 2. Create Feature Branch
 
-### Go Code Standards
-
-We follow standard Go conventions with some project-specific additions:
-
-#### Code Formatting
 ```bash
-# Format code before committing
-make fmt
+# Sync with upstream
+git checkout main
+git pull upstream main
+git push origin main
 
-# This runs:
-gofmt -s -w .
-goimports -w .
+# Create feature branch
+git checkout -b feature/your-feature-name
+
+# For different contribution types:
+git checkout -b feature/add-new-provider      # New feature
+git checkout -b bugfix/fix-cluster-creation   # Bug fix  
+git checkout -b docs/improve-quickstart       # Documentation
+git checkout -b test/add-integration-tests    # Testing
 ```
 
-#### Linting Requirements
+### 3. Development Cycle
+
+```mermaid
+flowchart LR
+    START[Start Development] --> WRITE[Write Code]
+    WRITE --> TEST[Run Tests]
+    TEST --> LINT[Run Linters]
+    LINT --> BUILD[Build & Test]
+    BUILD --> COMMIT[Commit Changes]
+    COMMIT --> PUSH[Push Branch]
+    PUSH --> PR[Create Pull Request]
+    
+    TEST -.->|Tests Fail| WRITE
+    LINT -.->|Lint Errors| WRITE
+    BUILD -.->|Build Fails| WRITE
+    
+    style START fill:#e1f5fe
+    style PR fill:#c8e6c9
+```
+
+### 4. Make Changes
+
 ```bash
-# Run linters (required before PR)
+# Make your changes following the coding standards below
+# Run tests frequently during development
+make test
+
+# Run linters to catch issues early
 make lint
 
-# This includes:
-# - golangci-lint with comprehensive rule set
-# - go vet for suspicious constructs
-# - gosec for security issues
-# - staticcheck for static analysis
+# Build and test the binary
+make build
+./openframe --help
 ```
 
-### Code Organization Patterns
+### 5. Commit Changes
 
-#### Package Structure
+Follow our commit message conventions:
+
+```bash
+# Add changes
+git add .
+
+# Commit with conventional commit format
+git commit -m "feat: add new cluster provider for GKE"
+git commit -m "fix: resolve cluster deletion race condition"
+git commit -m "docs: update installation guide for Windows"
+git commit -m "test: add integration tests for bootstrap command"
+```
+
+### 6. Push and Create PR
+
+```bash
+# Push your branch
+git push origin feature/your-feature-name
+
+# Create pull request on GitHub
+# Fill out the PR template with:
+# - Clear description of changes
+# - Testing performed
+# - Breaking changes (if any)
+# - Screenshots (for UI changes)
+```
+
+## 📝 Coding Standards
+
+### Go Code Style
+
+#### General Principles
+
 ```go
-// Good: Clear package responsibility
-package cluster
-
-import (
-    "context"
-    "fmt"
-    
-    "github.com/flamingo-stack/openframe-cli/internal/shared/interfaces"
-)
-
-// Service represents the cluster management service
-type Service struct {
-    provider interfaces.ClusterProvider
-    config   Config
+// ✅ Good: Clear, descriptive naming
+type ClusterService struct {
+    provider ClusterProvider
+    ui       UIService
+    config   ConfigService
 }
 
-// NewService creates a new cluster service
-func NewService(provider interfaces.ClusterProvider, config Config) *Service {
-    return &Service{
-        provider: provider,
-        config:   config,
+func (s *ClusterService) CreateCluster(name string, config *ClusterConfig) error {
+    if err := s.validateClusterName(name); err != nil {
+        return fmt.Errorf("invalid cluster name: %w", err)
     }
+    // Implementation...
+}
+
+// ❌ Bad: Unclear, abbreviated naming
+type CS struct {
+    p Provider
+    u UI
+    c Config
+}
+
+func (cs *CS) Create(n string, cfg *CC) error {
+    // Implementation...
 }
 ```
 
 #### Interface Design
+
 ```go
-// Good: Focused, testable interfaces
+// ✅ Good: Small, focused interfaces
 type ClusterProvider interface {
-    Create(ctx context.Context, config ClusterConfig) error
-    Delete(ctx context.Context, name string) error
-    List(ctx context.Context) ([]Cluster, error)
-    Status(ctx context.Context, name string) (ClusterStatus, error)
+    Create(name string, config *ClusterConfig) error
+    Delete(name string) error
+    Status(name string) (*ClusterStatus, error)
 }
 
-// Bad: Large, multi-purpose interfaces
-type ClusterManager interface {
-    Create(...) error
-    Delete(...) error
-    InstallCharts(...) error  // This belongs in ChartProvider
-    SetupDevelopment(...) error  // This belongs in DevProvider
+type ClusterLister interface {
+    List() ([]Cluster, error)
+}
+
+// ❌ Bad: Large, monolithic interfaces
+type ClusterProvider interface {
+    Create(name string, config *ClusterConfig) error
+    Delete(name string) error
+    Status(name string) (*ClusterStatus, error)
+    List() ([]Cluster, error)
+    Update(name string, config *ClusterConfig) error
+    Scale(name string, nodeCount int) error
+    // ... many more methods
 }
 ```
 
 #### Error Handling
+
 ```go
-// Good: Descriptive, actionable errors
-func (s *Service) Create(ctx context.Context, config ClusterConfig) error {
-    if err := s.validateConfig(config); err != nil {
-        return fmt.Errorf("invalid cluster configuration: %w", err)
+// ✅ Good: Wrap errors with context
+func (s *ClusterService) CreateCluster(name string) error {
+    if err := s.provider.Create(name); err != nil {
+        return fmt.Errorf("failed to create cluster %s: %w", name, err)
     }
-    
-    if err := s.provider.Create(ctx, config); err != nil {
-        return fmt.Errorf("failed to create cluster %s: %w", config.Name, err)
-    }
-    
     return nil
 }
 
-// Bad: Generic, unhelpful errors
-func (s *Service) Create(ctx context.Context, config ClusterConfig) error {
-    if err := s.provider.Create(ctx, config); err != nil {
-        return err  // No context about what failed
+// ✅ Good: Custom error types for domain logic
+type ClusterNotFoundError struct {
+    ClusterName string
+}
+
+func (e *ClusterNotFoundError) Error() string {
+    return fmt.Sprintf("cluster %s not found", e.ClusterName)
+}
+
+// ❌ Bad: Generic error handling
+func (s *ClusterService) CreateCluster(name string) error {
+    err := s.provider.Create(name)
+    return err  // Lost context
+}
+```
+
+#### Function Design
+
+```go
+// ✅ Good: Pure functions with clear inputs/outputs
+func ValidateClusterName(name string) error {
+    if name == "" {
+        return errors.New("cluster name cannot be empty")
+    }
+    if len(name) > 63 {
+        return errors.New("cluster name too long")
     }
     return nil
+}
+
+// ✅ Good: Dependency injection
+func NewClusterService(provider ClusterProvider, ui UIService) *ClusterService {
+    return &ClusterService{
+        provider: provider,
+        ui:       ui,
+    }
+}
+
+// ❌ Bad: Global state dependencies
+var globalProvider ClusterProvider
+
+func CreateCluster(name string) error {
+    return globalProvider.Create(name)
+}
+```
+
+### Package Organization
+
+```go
+// ✅ Good: Clear package structure
+package cluster
+
+// Public interfaces
+type Service interface {
+    Create(name string, config *ClusterConfig) error
+}
+
+type Provider interface {
+    Create(name string, config *ClusterConfig) error
+}
+
+// Internal implementation
+type service struct {
+    provider Provider
+}
+
+func NewService(provider Provider) Service {
+    return &service{provider: provider}
 }
 ```
 
 ### Documentation Standards
 
-#### Code Documentation
 ```go
-// Package-level documentation
-// Package cluster provides Kubernetes cluster lifecycle management
-// functionality for OpenFrame CLI. It supports creating, deleting,
-// and managing K3d clusters optimized for local development.
-package cluster
+// ✅ Good: Complete godoc documentation
+// ClusterService manages Kubernetes cluster lifecycle operations.
+// It provides high-level cluster management capabilities including
+// creation, deletion, and status monitoring.
+type ClusterService struct {
+    provider ClusterProvider
+    ui       UIService
+}
 
-// Function documentation with examples
-// Create creates a new Kubernetes cluster with the specified configuration.
-// It performs prerequisite checking, cluster creation, and post-setup validation.
+// CreateCluster creates a new Kubernetes cluster with the specified
+// configuration. It validates the cluster name and configuration
+// before delegating to the configured provider.
 //
-// Example:
-//   config := ClusterConfig{
-//       Name:   "my-cluster",
-//       Agents: 2,
-//   }
-//   err := service.Create(ctx, config)
-//   if err != nil {
-//       return fmt.Errorf("cluster creation failed: %w", err)
-//   }
-func (s *Service) Create(ctx context.Context, config ClusterConfig) error {
-    // Implementation
+// Parameters:
+//   - name: The cluster name (must be valid DNS name)
+//   - config: Cluster configuration options
+//
+// Returns an error if the cluster name is invalid, the configuration
+// is malformed, or the underlying provider fails.
+func (s *ClusterService) CreateCluster(name string, config *ClusterConfig) error {
+    // Implementation...
 }
 ```
 
-#### README and Documentation
-- Update relevant documentation when adding features
-- Include examples and usage patterns
-- Document breaking changes clearly
-- Add troubleshooting information for complex features
+## 🧪 Testing Requirements
 
-## Git Workflow
+### Test Coverage
 
-### Branch Naming Convention
+All contributions must include appropriate test coverage:
 
-| Prefix | Purpose | Example |
-|--------|---------|---------|
-| `feature/` | New features | `feature/add-eks-provider` |
-| `fix/` | Bug fixes | `fix/cluster-creation-timeout` |
-| `docs/` | Documentation only | `docs/improve-setup-guide` |
-| `refactor/` | Code refactoring | `refactor/cluster-service-interfaces` |
-| `test/` | Test improvements | `test/add-integration-coverage` |
-| `chore/` | Maintenance tasks | `chore/update-dependencies` |
+| Component | Required Tests | Coverage Target |
+|-----------|----------------|-----------------|
+| **New Features** | Unit + Integration | >85% |
+| **Bug Fixes** | Regression tests | >80% |
+| **Refactoring** | Maintain existing | No decrease |
+| **Services** | Unit tests + mocks | >90% |
 
-### Commit Message Format
+### Test Writing Standards
 
-We use [Conventional Commits](https://www.conventionalcommits.org/) format:
+```go
+// ✅ Good: Comprehensive table-driven tests
+func TestClusterService_CreateCluster(t *testing.T) {
+    tests := []struct {
+        name        string
+        clusterName string
+        config      *ClusterConfig
+        mockSetup   func(*MockProvider)
+        wantErr     bool
+        wantErrType error
+    }{
+        {
+            name:        "successful creation",
+            clusterName: "test-cluster",
+            config:      &ClusterConfig{Nodes: 3},
+            mockSetup: func(m *MockProvider) {
+                m.On("Create", "test-cluster", mock.AnythingOfType("*ClusterConfig")).
+                    Return(nil)
+            },
+            wantErr: false,
+        },
+        {
+            name:        "invalid cluster name",
+            clusterName: "",
+            config:      &ClusterConfig{},
+            mockSetup:   func(m *MockProvider) {},
+            wantErr:     true,
+            wantErrType: &ValidationError{},
+        },
+        {
+            name:        "provider failure",
+            clusterName: "test-cluster", 
+            config:      &ClusterConfig{Nodes: 3},
+            mockSetup: func(m *MockProvider) {
+                m.On("Create", "test-cluster", mock.AnythingOfType("*ClusterConfig")).
+                    Return(errors.New("provider error"))
+            },
+            wantErr:     true,
+            wantErrType: &ProviderError{},
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Test implementation with proper setup, execution, and assertions
+            mockProvider := &MockProvider{}
+            tt.mockSetup(mockProvider)
+            
+            service := NewClusterService(mockProvider, &MockUIService{})
+            
+            err := service.CreateCluster(tt.clusterName, tt.config)
+            
+            if tt.wantErr {
+                require.Error(t, err)
+                if tt.wantErrType != nil {
+                    assert.IsType(t, tt.wantErrType, err)
+                }
+            } else {
+                require.NoError(t, err)
+            }
+            
+            mockProvider.AssertExpectations(t)
+        })
+    }
+}
+```
+
+### Integration Test Requirements
+
+```go
+// Integration tests for new commands
+func TestBootstrapCommand_Integration(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+
+    testEnv := testutil.NewTestEnvironment(t)
+    defer testEnv.Cleanup()
+
+    // Test real command execution
+    result := testEnv.RunCLI("bootstrap", "test-cluster", "--deployment-mode=oss-tenant")
+    
+    assert.Equal(t, 0, result.ExitCode)
+    assert.Contains(t, result.Output, "✅ Environment ready")
+}
+```
+
+## 📋 Code Review Process
+
+### Submitting Pull Requests
+
+#### PR Title Format
+
+Use conventional commit format for PR titles:
 
 ```text
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
+feat: add support for GKE clusters
+fix: resolve race condition in cluster deletion  
+docs: update Windows installation guide
+test: add integration tests for dev commands
+chore: update Go dependencies to latest versions
 ```
 
-#### Commit Types
+#### PR Description Template
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `feat` | New features | `feat(cluster): add EKS provider support` |
-| `fix` | Bug fixes | `fix(bootstrap): resolve ArgoCD installation timeout` |
-| `docs` | Documentation | `docs(setup): improve development environment guide` |
-| `refactor` | Code refactoring | `refactor(chart): simplify Helm provider interface` |
-| `test` | Tests | `test(cluster): add integration tests for K3d provider` |
-| `chore` | Maintenance | `chore: update Go dependencies to latest versions` |
-
-#### Good Commit Examples
-```bash
-# Feature addition
-feat(dev): implement Telepresence intercept functionality
-
-Add support for creating and managing Telepresence intercepts
-for local development workflows. Includes:
-- Interactive service selection
-- Port forwarding configuration
-- Connection status monitoring
-
-Closes #123
-
-# Bug fix
-fix(cluster): prevent duplicate cluster name creation
-
-Validate cluster names against existing clusters before creation
-to prevent K3d conflicts and provide clear error messages.
-
-Fixes #456
-
-# Documentation
-docs(contributing): add detailed testing guidelines
-
-Expand testing section with examples, best practices, and
-integration test setup instructions for new contributors.
-```
-
-### Pull Request Process
-
-#### 1. Before Creating PR
-
-```bash
-# Ensure your branch is up to date
-git fetch upstream
-git rebase upstream/main
-
-# Run full test suite
-make test-all
-
-# Verify linting and formatting
-make lint fmt
-
-# Build and test locally
-make build
-./bin/openframe --version
-```
-
-#### 2. PR Title and Description
-
-**Title Format**: Use conventional commit format
-```text
-feat(cluster): add support for custom K3d registry mirrors
-```
-
-**Description Template**:
 ```markdown
-## Summary
-Brief description of the changes and motivation.
+## Description
+Brief description of the changes and their purpose.
 
-## Changes Made
-- [ ] Specific change 1
-- [ ] Specific change 2
-- [ ] Specific change 3
+## Type of Change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+- [ ] Test improvements
+- [ ] Refactoring/Code cleanup
 
 ## Testing
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated
-- [ ] Manual testing completed
+- [ ] Unit tests pass locally
+- [ ] Integration tests pass locally
+- [ ] Manual testing performed
+- [ ] New tests added for changes
 
-## Documentation
-- [ ] Code comments updated
-- [ ] Documentation updated
-- [ ] Examples added
+## Checklist
+- [ ] Code follows project style guidelines
+- [ ] Self-review of code completed
+- [ ] Code is commented where necessary
+- [ ] Documentation updated (if applicable)
+- [ ] No breaking changes (or clearly marked)
 
-## Breaking Changes
-None / List any breaking changes
+## Screenshots (if applicable)
+Add screenshots for UI changes or command output examples.
 
 ## Additional Notes
-Any additional context or considerations
+Any additional information, context, or considerations for reviewers.
 ```
 
-#### 3. PR Requirements
+### Review Criteria
 
-All PRs must pass these checks:
+Reviewers will evaluate:
 
-| Check | Requirement |
-|-------|-------------|
-| **Tests** | All tests pass, coverage maintained |
-| **Linting** | No linting errors or warnings |
-| **Build** | Clean build for all target platforms |
-| **Documentation** | Updated for new features |
-| **Security** | Security scan passes |
-| **Review** | At least one maintainer approval |
+| Aspect | Criteria |
+|--------|----------|
+| **Functionality** | Code works as intended, handles edge cases |
+| **Design** | Follows architecture principles, good abstractions |
+| **Readability** | Clear naming, appropriate comments, easy to understand |
+| **Testing** | Adequate test coverage, good test quality |
+| **Performance** | No unnecessary performance degradation |
+| **Security** | No security vulnerabilities introduced |
+| **Documentation** | Code is well-documented, user docs updated |
 
-#### 4. Review Process
+### Review Process Flow
 
 ```mermaid
-graph LR
-    PR[Create PR] --> Auto[Automated Checks]
-    Auto --> Review[Code Review]
-    Review --> Changes{Changes Needed?}
-    Changes -->|Yes| Update[Update PR]
-    Update --> Review
-    Changes -->|No| Merge[Merge PR]
+flowchart TD
+    SUBMIT[Submit PR] --> AUTO[Automated Checks]
+    AUTO --> LINT{Linting Passes?}
+    LINT -->|No| FIX[Fix Issues]
+    LINT -->|Yes| TEST{Tests Pass?}
+    TEST -->|No| FIX
+    TEST -->|Yes| REVIEW[Code Review]
+    REVIEW --> FEEDBACK{Changes Requested?}
+    FEEDBACK -->|Yes| ADDRESS[Address Feedback]
+    ADDRESS --> REVIEW
+    FEEDBACK -->|No| APPROVE[Approve PR]
+    APPROVE --> MERGE[Merge to Main]
+    FIX --> SUBMIT
+    
+    style SUBMIT fill:#e3f2fd
+    style MERGE fill:#c8e6c9
+    style FIX fill:#ffecb3
 ```
 
-**Review Criteria:**
-- Code quality and adherence to guidelines
-- Test coverage and quality
-- Documentation completeness
-- Security considerations
-- Performance implications
-- Backward compatibility
+## 🚀 Release Process
 
-## Testing Requirements
+### Version Management
 
-### Test Coverage Standards
+We follow [Semantic Versioning](https://semver.org/):
 
-| Component | Minimum Coverage | Required Tests |
-|-----------|------------------|----------------|
-| **New Features** | 80% | Unit + Integration |
-| **Bug Fixes** | Test for the bug + fix | Unit tests minimum |
-| **Refactoring** | Maintain existing coverage | All existing tests pass |
-| **Critical Paths** | 90% | Unit + Integration + E2E |
+```text
+MAJOR.MINOR.PATCH
 
-### Testing Checklist
+MAJOR: Breaking changes (e.g., 1.0.0 → 2.0.0)
+MINOR: New features (e.g., 1.0.0 → 1.1.0)  
+PATCH: Bug fixes (e.g., 1.0.0 → 1.0.1)
+```
 
-Before submitting a PR, ensure:
+### Branch Strategy
+
+```mermaid
+gitgraph
+    commit id: "main"
+    
+    branch feature/new-provider
+    commit id: "add provider"
+    commit id: "add tests"
+    
+    checkout main
+    merge feature/new-provider
+    commit id: "merge feature"
+    
+    branch hotfix/critical-bug
+    commit id: "fix bug"
+    
+    checkout main
+    merge hotfix/critical-bug
+    commit id: "hotfix merged"
+    
+    commit id: "tag v1.1.0"
+```
+
+### Contributing to Releases
 
 ```bash
-# Run all test types
-make test           # Unit tests
-make test-integration # Integration tests
-make test-e2e       # End-to-end tests (if applicable)
+# For feature releases
+git checkout main
+git pull upstream main
+git checkout -b feature/my-feature
+# Make changes, test, commit
+git push origin feature/my-feature
+# Create PR to main
 
-# Check coverage
-make test-coverage
-# Verify coverage meets requirements
-
-# Test with race detection
-go test -race ./...
+# For hotfixes
+git checkout main
+git pull upstream main  
+git checkout -b hotfix/critical-issue
+# Make minimal fix, test, commit
+git push origin hotfix/critical-issue
+# Create PR to main with "hotfix:" label
 ```
 
-#### Writing Good Tests
+## 📐 Architecture Decision Records
 
-```go
-// Good: Descriptive, comprehensive test
-func TestClusterService_Create_WithValidConfig_ShouldCreateCluster(t *testing.T) {
-    // Arrange
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    
-    mockProvider := mocks.NewMockClusterProvider(ctrl)
-    mockProvider.EXPECT().
-        Create(gomock.Any(), gomock.Any()).
-        Return(nil)
-    
-    service := cluster.NewService(mockProvider, cluster.Config{})
-    config := cluster.ClusterConfig{
-        Name:   "test-cluster",
-        Agents: 1,
-    }
-    
-    // Act
-    err := service.Create(context.Background(), config)
-    
-    // Assert
-    assert.NoError(t, err)
-}
+### When to Create an ADR
 
-// Include error cases
-func TestClusterService_Create_WithInvalidConfig_ShouldReturnError(t *testing.T) {
-    service := cluster.NewService(nil, cluster.Config{})
-    
-    err := service.Create(context.Background(), cluster.ClusterConfig{})
-    
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "invalid cluster configuration")
-}
+Create an Architecture Decision Record (ADR) for:
+- Major architectural changes
+- New provider integrations
+- Breaking API changes
+- Significant design decisions
+
+### ADR Template
+
+```markdown
+# ADR-001: Add Support for Custom Cluster Providers
+
+## Status
+Proposed | Accepted | Rejected | Superseded
+
+## Context
+Describe the problem or opportunity that led to this decision.
+
+## Decision
+Describe the decision made and the reasoning behind it.
+
+## Consequences
+List the positive and negative consequences of this decision.
+
+## Alternatives Considered
+List other options that were considered and why they were not chosen.
+
+## Implementation
+Describe how this decision will be implemented.
 ```
 
-## Security Guidelines
+## 🛠️ Development Tools
 
-### Security Checklist
+### Required Tools
 
-- [ ] **Input Validation**: Validate all user inputs and external data
-- [ ] **Credential Handling**: Never log or expose credentials
-- [ ] **Command Injection**: Sanitize command arguments
-- [ ] **Path Traversal**: Validate file paths
-- [ ] **Dependency Security**: Keep dependencies updated
+| Tool | Purpose | Installation |
+|------|---------|-------------|
+| **golangci-lint** | Code linting | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
+| **goimports** | Import formatting | `go install golang.org/x/tools/cmd/goimports@latest` |
+| **mockery** | Mock generation | `go install github.com/vektra/mockery/v2@latest` |
 
-#### Secure Coding Patterns
+### Pre-commit Setup
 
-```go
-// Good: Input validation
-func validateClusterName(name string) error {
-    if name == "" {
-        return errors.New("cluster name cannot be empty")
-    }
-    
-    // Validate against injection patterns
-    matched, _ := regexp.MatchString(`^[a-z0-9-]+$`, name)
-    if !matched {
-        return errors.New("cluster name must contain only lowercase letters, numbers, and hyphens")
-    }
-    
-    return nil
-}
-
-// Good: Safe command execution
-func (e *Executor) Execute(ctx context.Context, command string, args ...string) error {
-    // Validate command is in allowed list
-    if !e.isAllowedCommand(command) {
-        return fmt.Errorf("command not allowed: %s", command)
-    }
-    
-    cmd := exec.CommandContext(ctx, command, args...)
-    // Set secure environment
-    cmd.Env = e.getSecureEnvironment()
-    
-    return cmd.Run()
-}
-
-// Bad: Command injection vulnerability
-func dangerousExecute(userInput string) error {
-    cmd := exec.Command("sh", "-c", userInput) // DANGEROUS!
-    return cmd.Run()
-}
-```
-
-## Performance Guidelines
-
-### Performance Considerations
-
-#### Efficient Resource Usage
-```go
-// Good: Context with timeout
-func (s *Service) CreateWithTimeout(name string) error {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer cancel()
-    
-    return s.Create(ctx, name)
-}
-
-// Good: Resource cleanup
-func (s *Service) processWithCleanup() error {
-    resource, err := s.acquireResource()
-    if err != nil {
-        return err
-    }
-    defer resource.Close() // Always cleanup
-    
-    return s.process(resource)
-}
-```
-
-#### Concurrent Operations
-```go
-// Good: Bounded concurrency
-func (s *Service) ProcessMultiple(items []Item) error {
-    const maxConcurrency = 5
-    semaphore := make(chan struct{}, maxConcurrency)
-    
-    var wg sync.WaitGroup
-    errors := make(chan error, len(items))
-    
-    for _, item := range items {
-        wg.Add(1)
-        go func(item Item) {
-            defer wg.Done()
-            semaphore <- struct{}{} // Acquire
-            defer func() { <-semaphore }() // Release
-            
-            if err := s.processItem(item); err != nil {
-                errors <- err
-            }
-        }(item)
-    }
-    
-    wg.Wait()
-    close(errors)
-    
-    // Check for errors
-    for err := range errors {
-        if err != nil {
-            return err
-        }
-    }
-    
-    return nil
-}
-```
-
-## Release Process
-
-### Versioning Strategy
-
-We use [Semantic Versioning](https://semver.org/) (SemVer):
-
-- **MAJOR**: Incompatible API changes
-- **MINOR**: Backward-compatible functionality additions
-- **PATCH**: Backward-compatible bug fixes
-
-#### Version Bump Guidelines
-
-| Change Type | Version Bump | Example |
-|-------------|--------------|---------|
-| Breaking CLI changes | Major | `v1.2.3 → v2.0.0` |
-| New commands/features | Minor | `v1.2.3 → v1.3.0` |
-| Bug fixes | Patch | `v1.2.3 → v1.2.4` |
-| Documentation only | None | No version change |
-
-### Release Checklist
-
-#### Pre-Release
-- [ ] All tests pass
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated
-- [ ] Version bumped in relevant files
-- [ ] Security scan passes
-- [ ] Performance benchmarks stable
-
-#### Release Process
 ```bash
-# Create release branch
-git checkout -b release/v1.3.0
+# Install pre-commit hooks
+cat > .git/hooks/pre-commit << 'EOF'
+#!/bin/bash
+set -e
 
-# Update version
-make update-version VERSION=v1.3.0
+echo "Running pre-commit checks..."
 
-# Run full test suite
-make test-all
+# Format code
+goimports -w .
 
-# Create release PR
-git commit -am "chore: bump version to v1.3.0"
-git push origin release/v1.3.0
+# Run linter
+golangci-lint run
 
-# After PR merge, create tag
-git tag -a v1.3.0 -m "Release v1.3.0"
-git push upstream v1.3.0
+# Run tests
+go test -short ./...
+
+echo "Pre-commit checks passed!"
+EOF
+
+chmod +x .git/hooks/pre-commit
 ```
 
-## Community Guidelines
+### Useful Make Targets
 
-### Code of Conduct
+```bash
+# Development commands
+make deps          # Download dependencies
+make build         # Build binary
+make test          # Run unit tests  
+make test-integration # Run integration tests
+make lint          # Run linters
+make fmt           # Format code
+make clean         # Clean build artifacts
 
-We follow the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/). Please:
+# Quality checks
+make coverage      # Generate coverage report
+make security      # Run security scan
+make benchmarks    # Run performance benchmarks
+```
 
-- Be respectful and inclusive
-- Welcome newcomers and help them learn
-- Focus on constructive feedback
-- Assume good intentions
-
-### Getting Help
-
-| Resource | Purpose |
-|----------|---------|
-| **GitHub Issues** | Bug reports, feature requests |
-| **GitHub Discussions** | General questions, ideas |
-| **Pull Requests** | Code contributions |
-| **Documentation** | Self-service help and guides |
+## 🤔 Getting Help
 
 ### Communication Channels
 
-- **GitHub Issues**: Technical problems and feature requests
-- **Pull Request Comments**: Code review and discussion
-- **Commit Messages**: Clear change documentation
+- **General Questions**: [OpenMSP Slack #general](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **Development Discussion**: [OpenMSP Slack #developers](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **Bug Reports**: [OpenMSP Slack #bugs](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **Feature Requests**: [OpenMSP Slack #feature-requests](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
 
-## Review Checklist for Maintainers
+### Mentorship and Support
 
-### Code Review Checklist
+New contributors can get help through:
+- **Pair Programming Sessions**: Scheduled through Slack
+- **Code Review Feedback**: Detailed feedback on PRs
+- **Office Hours**: Weekly community sessions
+- **Documentation**: Comprehensive guides and examples
 
-- [ ] **Functionality**: Does the code work as intended?
-- [ ] **Tests**: Are there appropriate tests with good coverage?
-- [ ] **Documentation**: Is documentation updated and clear?
-- [ ] **Code Quality**: Follows project standards and best practices?
-- [ ] **Security**: No security vulnerabilities introduced?
-- [ ] **Performance**: No significant performance regressions?
-- [ ] **Compatibility**: Backward compatible unless breaking change is justified?
+### Contribution Recognition
 
-### Merge Criteria
+We recognize contributors through:
+- **Contributor List**: Recognition in project documentation
+- **Community Highlights**: Featured contributions in community updates
+- **Collaboration Opportunities**: Invitation to special projects and initiatives
 
-All criteria must be met before merging:
+## 📚 Additional Resources
 
-1. ✅ All automated checks pass
-2. ✅ At least one maintainer approval
-3. ✅ No unresolved review comments
-4. ✅ Documentation updated (if applicable)
-5. ✅ Tests pass and coverage maintained
-6. ✅ No merge conflicts
+### OpenFrame Ecosystem
+- **[OpenFrame Documentation](https://openframe.ai)**
+- **[Flamingo Platform](https://flamingo.run)**
+- **[OpenMSP Community](https://www.openmsp.ai/)**
 
-## Common Contribution Scenarios
+### Go Development
+- **[Effective Go](https://golang.org/doc/effective_go.html)**
+- **[Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)**
+- **[Go Best Practices](https://golang.org/doc/)**
 
-### Adding a New Feature
+### Testing and Quality
+- **[Advanced Testing](https://golang.org/doc/tutorial/fuzz)**
+- **[Testify Documentation](https://pkg.go.dev/github.com/stretchr/testify)**
+- **[Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)**
 
-```mermaid
-graph TB
-    Issue[Create Issue] --> Discussion[Discuss Approach]
-    Discussion --> Design[Design Review]
-    Design --> Implementation[Implement Feature]
-    Implementation --> Tests[Write Tests]
-    Tests --> Docs[Update Documentation]
-    Docs --> PR[Create Pull Request]
-    PR --> Review[Code Review]
-    Review --> Merge[Merge to Main]
-```
+---
 
-### Fixing a Bug
-
-1. **Reproduce the bug** locally
-2. **Write a test** that demonstrates the bug
-3. **Fix the bug** while ensuring the test passes
-4. **Verify** the fix doesn't break existing functionality
-5. **Submit PR** with test and fix
-
-### Improving Documentation
-
-1. **Identify** documentation gaps or errors
-2. **Write clear, accurate content** with examples
-3. **Test examples** to ensure they work
-4. **Submit PR** with documentation changes only
-
-## What's Next?
-
-Ready to contribute? Here are your next steps:
-
-1. **[Set up your environment](../setup/environment.md)** - Get development tools ready
-2. **[Clone and build locally](../setup/local-development.md)** - Start with the codebase
-3. **Find an issue** - Look for "good first issue" labels
-4. **Join the community** - Engage with other contributors
-
-> **💡 Remember**: Every contribution matters, whether it's code, documentation, bug reports, or helping other contributors. We appreciate all forms of participation in making OpenFrame CLI better!
+*Ready to contribute? Join our [Slack community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) and start collaborating with the OpenFrame team!*

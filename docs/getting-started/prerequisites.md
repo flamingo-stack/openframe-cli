@@ -1,150 +1,192 @@
-# Prerequisites
+# Prerequisites Guide
 
-Before installing OpenFrame CLI, ensure your system meets the requirements and has the necessary dependencies installed.
+Before installing OpenFrame CLI, ensure your system meets all requirements and has the necessary tools installed. This guide will help you prepare your environment for a smooth installation experience.
 
 ## System Requirements
 
-### Minimum Requirements
+### Hardware Requirements
 
-| Resource | Requirement |
-|----------|-------------|
-| **RAM** | 24GB |
-| **CPU** | 6 cores |
-| **Disk Space** | 50GB free |
-| **Operating System** | Windows 10+, macOS 10.15+, Ubuntu 18.04+, or equivalent Linux |
+| Resource | Minimum | Recommended | Purpose |
+|----------|---------|-------------|---------|
+| **RAM** | 24GB | 32GB | Kubernetes containers, ArgoCD, and application workloads |
+| **CPU Cores** | 6 cores | 12 cores | Container orchestration and concurrent processing |
+| **Disk Space** | 50GB free | 100GB free | Container images, logs, persistent volumes |
+| **Network** | Broadband | High-speed | Container image downloads and Git operations |
 
-### Recommended Requirements
+### Operating System Support
 
-| Resource | Recommendation |
-|----------|----------------|
-| **RAM** | 32GB |
-| **CPU** | 12 cores |
-| **Disk Space** | 100GB free |
-| **Operating System** | Latest stable versions |
+OpenFrame CLI supports all major operating systems:
 
-> **⚠️ Important**: These requirements ensure smooth operation of Kubernetes clusters and all development tools. Lower specifications may result in performance issues.
+| OS | Version | Architecture | Notes |
+|-------|---------|--------------|-------|
+| **Windows** | 10+ (64-bit) | AMD64 | PowerShell 5.1+ required |
+| **macOS** | 10.15+ (Catalina) | Intel/Apple Silicon | Homebrew recommended |
+| **Linux** | Modern distributions | AMD64, ARM64 | Ubuntu 20.04+, CentOS 8+, etc. |
 
 ## Required Software Dependencies
 
-The OpenFrame CLI automatically checks and can install missing prerequisites, but you may want to install them manually for better control.
-
 ### Core Dependencies
 
-| Tool | Version | Purpose | Installation |
-|------|---------|---------|--------------|
-| **Docker** | 20.10+ | Container runtime for K3d clusters | [Install Docker](https://docs.docker.com/get-docker/) |
-| **kubectl** | 1.24+ | Kubernetes command-line tool | [Install kubectl](https://kubernetes.io/docs/tasks/tools/) |
-| **Helm** | 3.8+ | Kubernetes package manager | [Install Helm](https://helm.sh/docs/intro/install/) |
-| **K3d** | 5.4+ | Lightweight Kubernetes in Docker | [Install K3d](https://k3d.io/) |
-
-### Development Tools (Optional)
+These tools are **required** and must be installed before using OpenFrame CLI:
 
 | Tool | Version | Purpose | Installation |
+|------|---------|---------|-------------|
+| **Docker** | 20.10+ | Container runtime | [Install Docker](https://docs.docker.com/get-docker/) |
+| **kubectl** | 1.21+ | Kubernetes CLI | [Install kubectl](https://kubernetes.io/docs/tasks/tools/) |
+| **Helm** | 3.8+ | Package manager | [Install Helm](https://helm.sh/docs/intro/install/) |
+| **Git** | 2.30+ | Version control | [Install Git](https://git-scm.com/downloads) |
+
+### Optional Dependencies
+
+These tools enhance functionality but are not strictly required:
+
+| Tool | Version | Purpose | Auto-Install |
 |------|---------|---------|--------------|
-| **Telepresence** | 2.10+ | Local service intercepts | [Install Telepresence](https://www.telepresence.io/docs/latest/install/) |
-| **jq** | 1.6+ | JSON processing for CLI operations | [Install jq](https://stedolan.github.io/jq/download/) |
-| **Git** | 2.30+ | Version control for GitOps workflows | [Install Git](https://git-scm.com/downloads) |
+| **k3d** | 5.4+ | Local cluster provider | ✅ Yes |
+| **jq** | 1.6+ | JSON processing | ✅ Yes |
+| **Telepresence** | 2.10+ | Service intercepts | ✅ Yes |
 
-## Platform-Specific Installation
+> **Note**: OpenFrame CLI can automatically install optional dependencies when needed, but manual installation provides better control and faster setup times.
 
-### Windows
+## Platform-Specific Setup
 
-1. **Download the installer** from the [releases page](https://github.com/flamingo-stack/openframe-cli/releases)
-2. **Run the installer** as Administrator
-3. **Add to PATH** (installer does this automatically)
-4. **Verify installation** in Command Prompt or PowerShell:
+### Windows Setup
+
+1. **Install Docker Desktop**
+   ```bash
+   # Download and install Docker Desktop for Windows
+   # Enable WSL 2 backend for better performance
+   ```
+
+2. **Install Windows Package Manager (Optional)**
+   ```bash
+   # Install winget if not available
+   winget install Microsoft.WindowsPackageManager
+   ```
+
+3. **Install dependencies via winget**
+   ```bash
+   winget install Docker.DockerDesktop
+   winget install Kubernetes.kubectl
+   winget install Helm.Helm
+   winget install Git.Git
+   ```
+
+### macOS Setup
+
+1. **Install Homebrew** (if not already installed)
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+2. **Install dependencies via Homebrew**
+   ```bash
+   brew install docker kubectl helm git
+   brew install --cask docker
+   ```
+
+3. **Start Docker Desktop**
+   ```bash
+   open /Applications/Docker.app
+   ```
+
+### Linux Setup
+
+#### Ubuntu/Debian
 
 ```bash
-openframe --version
+# Update package index
+sudo apt update
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
+
+# Install kubectl
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install Git
+sudo apt install git
 ```
 
-### macOS
+#### CentOS/RHEL/Fedora
 
-#### Using Homebrew (Recommended)
 ```bash
-# Add the OpenFrame tap (if available)
-brew tap flamingo-stack/openframe
+# Install Docker
+sudo dnf install docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker $USER
 
-# Install OpenFrame CLI
-brew install openframe-cli
+# Install kubectl
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install Git
+sudo dnf install git
 ```
 
-#### Manual Installation
-1. Download the macOS binary from releases
-2. Move to `/usr/local/bin/`:
+## Account and Access Requirements
 
-```bash
-sudo mv openframe-cli /usr/local/bin/openframe
-sudo chmod +x /usr/local/bin/openframe
-```
+### Required Accounts
 
-### Linux
+| Service | Purpose | Required |
+|---------|---------|----------|
+| **GitHub Account** | Source code access and releases | ✅ Yes |
+| **Docker Hub** | Container image pulls (rate limits) | ⭕ Recommended |
 
-#### Using Package Manager (Ubuntu/Debian)
-```bash
-# Download the .deb package
-wget https://github.com/flamingo-stack/openframe-cli/releases/download/v1.0.0/openframe-cli_1.0.0_linux_amd64.deb
+### Optional Services
 
-# Install the package
-sudo dpkg -i openframe-cli_1.0.0_linux_amd64.deb
-```
-
-#### Manual Installation
-```bash
-# Download and extract
-wget https://github.com/flamingo-stack/openframe-cli/releases/download/v1.0.0/openframe-cli_1.0.0_linux_amd64.tar.gz
-tar -xzf openframe-cli_1.0.0_linux_amd64.tar.gz
-
-# Move to system PATH
-sudo mv openframe /usr/local/bin/
-sudo chmod +x /usr/local/bin/openframe
-```
+| Service | Purpose | Benefit |
+|---------|---------|---------|
+| **Container Registry** | Private image storage | Enhanced security |
+| **Git Provider** | Custom chart repositories | Advanced workflows |
+| **Cloud Provider** | Remote cluster deployment | Production usage |
 
 ## Environment Variables
 
-OpenFrame CLI uses these environment variables for configuration:
+### Required Variables
 
-| Variable | Purpose | Default | Example |
-|----------|---------|---------|---------|
-| `KUBECONFIG` | Kubernetes config file location | `~/.kube/config` | `/home/user/.kube/config` |
-| `OPENFRAME_LOG_LEVEL` | Logging verbosity | `info` | `debug` |
-| `OPENFRAME_CLUSTER_NAME` | Default cluster name | `openframe-local` | `my-dev-cluster` |
-| `DOCKER_HOST` | Docker daemon connection | System default | `unix:///var/run/docker.sock` |
+Set these environment variables in your shell profile:
 
-### Setting Environment Variables
-
-#### Windows (PowerShell)
 ```bash
-$env:KUBECONFIG = "C:\Users\username\.kube\config"
-$env:OPENFRAME_LOG_LEVEL = "debug"
-```
-
-#### macOS/Linux (Bash)
-```bash
+# Add to ~/.bashrc, ~/.zshrc, or equivalent
 export KUBECONFIG=~/.kube/config
-export OPENFRAME_LOG_LEVEL=debug
+export PATH=$PATH:/usr/local/bin
 ```
 
-To make these permanent, add them to your shell profile (`.bashrc`, `.zshrc`, etc.).
+### Optional Variables
+
+```bash
+# Docker configuration
+export DOCKER_BUILDKIT=1
+
+# Kubernetes configuration  
+export KUBECTL_EXTERNAL_DIFF="colordiff -N -u"
+
+# Development configuration
+export OPENFRAME_LOG_LEVEL=info
+export OPENFRAME_CONFIG_DIR=~/.openframe
+```
 
 ## Verification Commands
 
-After installation, verify your setup with these commands:
+Run these commands to verify your environment is ready:
 
-### Verify OpenFrame CLI Installation
-```bash
-# Check version
-openframe --version
+### Core Tools Verification
 
-# Verify command structure
-openframe --help
-```
-
-### Verify Dependencies
 ```bash
 # Check Docker
 docker --version
-docker ps
+docker run hello-world
 
 # Check kubectl
 kubectl version --client
@@ -152,72 +194,99 @@ kubectl version --client
 # Check Helm
 helm version
 
-# Check K3d
-k3d --version
+# Check Git
+git --version
 ```
 
-### Verify System Resources
+### System Resources Verification
+
 ```bash
-# Check available memory (Linux/macOS)
+# Check available RAM (Linux/macOS)
 free -h
 
-# Check CPU cores (Linux/macOS)
-nproc
-
-# Check disk space
+# Check available disk space
 df -h
+
+# Check CPU cores
+nproc
 ```
 
-## Network Requirements
+### Network Connectivity
 
-Ensure your system can access these external resources:
+```bash
+# Test GitHub connectivity
+curl -I https://github.com
 
-| Resource | Purpose | Ports |
-|----------|---------|-------|
-| **Docker Hub** | Container image pulls | 443 (HTTPS) |
-| **GitHub** | Repository access | 443 (HTTPS), 22 (SSH) |
-| **Kubernetes API** | Cluster communication | 6443, 8443 |
-| **ArgoCD** | GitOps operations | 443 (HTTPS) |
+# Test Docker Hub connectivity  
+docker pull hello-world
 
-### Firewall Considerations
-
-If behind a corporate firewall, ensure these outbound connections are allowed:
-- Docker registry access (docker.io, gcr.io, quay.io)
-- Helm chart repositories
-- Git repositories for ArgoCD
-- Telepresence relay services
+# Test Helm repository access
+helm repo add stable https://charts.helm.sh/stable
+helm repo update
+```
 
 ## Troubleshooting Common Issues
 
-### Docker Permission Issues (Linux)
+### Docker Issues
+
+**Problem**: "Docker daemon not running"
+```bash
+# Windows/macOS: Start Docker Desktop
+# Linux: Start Docker service
+sudo systemctl start docker
+```
+
+**Problem**: Permission denied
 ```bash
 # Add user to docker group
 sudo usermod -aG docker $USER
-
-# Log out and back in, then test
-docker ps
+# Log out and back in, or:
+newgrp docker
 ```
 
-### kubectl Connection Issues
-```bash
-# Check cluster connection
-kubectl cluster-info
+### kubectl Issues
 
-# Verify config
+**Problem**: "connection refused"
+```bash
+# Verify kubectl configuration
+kubectl config view
 kubectl config current-context
 ```
 
-### Resource Constraints
-If you experience performance issues:
-1. Close unnecessary applications
-2. Increase Docker resource limits
-3. Consider using a smaller K3d cluster configuration
+### Resource Issues
 
-## What's Next?
+**Problem**: Insufficient memory
+```bash
+# Check memory usage
+free -h
+# Close unnecessary applications
+# Consider upgrading hardware
+```
 
-Once you've verified all prerequisites are met:
+## Ready to Install?
 
-1. **[Quick Start](quick-start.md)** - Bootstrap your first OpenFrame environment
-2. **[First Steps](first-steps.md)** - Learn essential OpenFrame operations
+Once you've completed all prerequisites, you can proceed to the [Quick Start Guide](quick-start.md) to install and configure OpenFrame CLI.
 
-> **💡 Pro Tip**: The OpenFrame CLI includes an automatic prerequisite checker that runs before major operations. It will guide you through installing any missing dependencies.
+### Pre-Installation Checklist
+
+- [ ] Hardware requirements met (24GB+ RAM, 6+ cores, 50GB+ disk)
+- [ ] Operating system supported
+- [ ] Docker installed and running
+- [ ] kubectl installed and accessible
+- [ ] Helm 3.8+ installed
+- [ ] Git installed and configured
+- [ ] Environment variables configured
+- [ ] Network connectivity verified
+- [ ] User permissions configured
+
+### Need Help?
+
+If you encounter issues during setup:
+
+1. **Check the [troubleshooting section](#troubleshooting-common-issues)** above
+2. **Join our community**: [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+3. **Review platform-specific documentation** for detailed setup guides
+
+---
+
+*Prerequisites complete? Let's [get started with the quick installation](quick-start.md)!*

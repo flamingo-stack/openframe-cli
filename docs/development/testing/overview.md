@@ -1,713 +1,727 @@
 # Testing Overview
 
-OpenFrame CLI employs a comprehensive testing strategy that ensures reliability, maintainability, and confidence in deployments. This document covers the testing architecture, strategies, and best practices used throughout the project.
+This guide covers the comprehensive testing strategy for OpenFrame CLI, including test structure, running tests, writing new tests, and maintaining test coverage. Our testing approach ensures reliability, maintainability, and confidence in the codebase.
 
-## Testing Philosophy
+> **Prerequisites**: Complete [Environment Setup](../setup/environment.md) and [Local Development](../setup/local-development.md) setup.
 
-### Core Testing Principles
+## 🎯 Testing Philosophy
 
-- **Test Pyramid**: More unit tests, fewer integration tests, minimal E2E tests
-- **Fast Feedback**: Quick test execution for rapid development cycles
-- **Reliable Tests**: Deterministic tests that don't produce false positives
-- **Comprehensive Coverage**: Both happy path and error scenarios
-- **Real-World Scenarios**: Tests that reflect actual usage patterns
+OpenFrame CLI follows a multi-layered testing approach:
 
-### Test Categories
+### Testing Pyramid
 
 ```mermaid
-graph TB
-    subgraph "Test Pyramid"
-        E2E[End-to-End Tests<br/>~5%]
-        Integration[Integration Tests<br/>~15%]
-        Unit[Unit Tests<br/>~80%]
+pyramid LR
+    subgraph "Testing Pyramid"
+        E2E[End-to-End Tests<br/>Few, High Value]
+        INTEGRATION[Integration Tests<br/>Moderate Coverage]
+        UNIT[Unit Tests<br/>High Coverage, Fast]
     end
     
-    E2E --> Integration
-    Integration --> Unit
-    
-    subgraph "Test Types"
-        Functional[Functional Tests]
-        Performance[Performance Tests]
-        Security[Security Tests]
-        Contract[Contract Tests]
+    subgraph "Test Characteristics"
+        SPEED[Speed: Fast → Slow]
+        COST[Cost: Low → High] 
+        ISOLATION[Isolation: High → Low]
+        CONFIDENCE[Confidence: Medium → High]
     end
+    
+    UNIT --> SPEED
+    INTEGRATION --> COST
+    E2E --> ISOLATION
+    E2E --> CONFIDENCE
 ```
 
-## Test Structure
+### Testing Principles
 
-### Directory Organization
+| Principle | Description | Implementation |
+|-----------|-------------|----------------|
+| **Fast Feedback** | Tests should run quickly to enable rapid development | Unit tests complete in <1s, integration in <30s |
+| **Reliable** | Tests should be deterministic and not flaky | Mock external dependencies, clean state |
+| **Maintainable** | Tests should be easy to understand and modify | Clear naming, helper functions, good structure |
+| **Comprehensive** | Tests should cover critical paths and edge cases | Aim for >80% coverage on business logic |
+
+## 📁 Test Organization
+
+### Directory Structure
 
 ```text
 tests/
-├── integration/           # Integration test suites
-│   ├── common/           # Shared integration utilities
-│   ├── bootstrap/        # Bootstrap workflow tests
-│   ├── cluster/          # Cluster management tests
-│   ├── chart/            # Chart installation tests
-│   └── dev/              # Development tools tests
-├── mocks/                # Generated mock objects
-│   ├── cluster/          # Cluster service mocks
-│   ├── chart/            # Chart service mocks
-│   └── dev/              # Development service mocks
-├── testutil/             # Test utility functions
-│   ├── assertions.go     # Custom assertion helpers
-│   ├── cluster.go        # Cluster test utilities
-│   ├── setup.go          # Test environment setup
-│   └── patterns.go       # Common test patterns
-└── fixtures/             # Test data and configuration
-    ├── charts/           # Test Helm charts
-    ├── configs/          # Test configurations
-    └── manifests/        # Test Kubernetes manifests
+├── integration/               # Integration tests
+│   ├── common/               # Shared integration test utilities
+│   │   ├── cli_runner.go    # CLI execution helpers
+│   │   ├── cluster_management.go # Cluster setup/teardown
+│   │   └── dependencies.go   # External tool management
+│   ├── bootstrap_test.go     # Bootstrap command integration tests
+│   ├── cluster_test.go       # Cluster command integration tests
+│   └── dev_test.go          # Dev command integration tests
+│
+├── mocks/                    # Test mocks and stubs
+│   ├── dev/                 # Development tool mocks
+│   │   └── kubernetes.go    # Kubernetes API mocks
+│   └── providers/           # Provider mocks
+│       ├── k3d.go          # K3d provider mock
+│       └── helm.go         # Helm provider mock
+│
+├── testutil/                 # Test utilities and helpers
+│   ├── assertions.go        # Custom test assertions
+│   ├── cluster.go          # Test cluster management
+│   ├── patterns.go         # Common test patterns
+│   ├── setup.go            # Test environment setup
+│   └── utilities.go        # General test utilities
+│
+└── fixtures/                # Test data and configurations
+    ├── charts/              # Test Helm charts
+    ├── configs/             # Test configuration files
+    └── manifests/           # Test Kubernetes manifests
 ```
 
-## Unit Testing
+### Test Types by Location
 
-### Unit Test Strategy
+| Test Type | Location | Purpose | Scope |
+|-----------|----------|---------|--------|
+| **Unit Tests** | `*_test.go` (same package) | Test individual functions/methods | Single function or struct |
+| **Integration Tests** | `tests/integration/` | Test component interactions | Multiple components |
+| **Mock Tests** | `tests/mocks/` | Test with external dependencies mocked | Service-level testing |
 
-Unit tests focus on individual functions, methods, and components in isolation using mocked dependencies.
+## 🧪 Unit Testing
 
-#### Example Unit Test Structure
+### Unit Test Structure
 
 ```go
-package cluster_test
+// Example unit test structure
+package cluster
 
 import (
-    "context"
     "testing"
-    
-    "github.com/golang/mock/gomock"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
-    
-    "github.com/flamingo-stack/openframe-cli/internal/cluster"
-    "github.com/flamingo-stack/openframe-cli/tests/mocks/cluster"
 )
 
 func TestClusterService_Create(t *testing.T) {
     tests := []struct {
-        name     string
-        input    cluster.Config
-        setupMock func(*mocks.MockClusterProvider)
-        want     error
+        name        string
+        clusterName string
+        config      ClusterConfig
+        mockSetup   func(*MockProvider)
+        wantErr     bool
+        wantErrMsg  string
     }{
         {
-            name: "successful cluster creation",
-            input: cluster.Config{
-                Name: "test-cluster",
-                Nodes: 3,
+            name:        "successful cluster creation",
+            clusterName: "test-cluster",
+            config:      ClusterConfig{Nodes: 3},
+            mockSetup: func(m *MockProvider) {
+                m.On("Create", "test-cluster", mock.Anything).Return(nil)
             },
-            setupMock: func(m *mocks.MockClusterProvider) {
-                m.EXPECT().
-                    Create(gomock.Any(), gomock.Any()).
-                    Return(nil)
-            },
-            want: nil,
+            wantErr: false,
         },
         {
-            name: "cluster creation failure",
-            input: cluster.Config{
-                Name: "invalid-cluster",
+            name:        "invalid cluster name",
+            clusterName: "",
+            config:      ClusterConfig{},
+            mockSetup:   func(m *MockProvider) {},
+            wantErr:     true,
+            wantErrMsg:  "cluster name cannot be empty",
+        },
+        {
+            name:        "provider failure",
+            clusterName: "test-cluster",
+            config:      ClusterConfig{Nodes: 3},
+            mockSetup: func(m *MockProvider) {
+                m.On("Create", "test-cluster", mock.Anything).Return(errors.New("provider error"))
             },
-            setupMock: func(m *mocks.MockClusterProvider) {
-                m.EXPECT().
-                    Create(gomock.Any(), gomock.Any()).
-                    Return(errors.New("creation failed"))
-            },
-            want: errors.New("creation failed"),
+            wantErr:    true,
+            wantErrMsg: "failed to create cluster",
         },
     }
-    
+
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            ctrl := gomock.NewController(t)
-            defer ctrl.Finish()
+            // Setup
+            mockProvider := &MockProvider{}
+            tt.mockSetup(mockProvider)
             
-            mockProvider := mocks.NewMockClusterProvider(ctrl)
-            tt.setupMock(mockProvider)
-            
-            service := cluster.NewService(mockProvider)
-            
-            err := service.Create(context.Background(), tt.input)
-            
-            if tt.want != nil {
-                assert.Error(t, err)
-                assert.Equal(t, tt.want.Error(), err.Error())
+            service := &ClusterService{
+                provider: mockProvider,
+            }
+
+            // Execute
+            err := service.Create(tt.clusterName, tt.config)
+
+            // Assert
+            if tt.wantErr {
+                require.Error(t, err)
+                assert.Contains(t, err.Error(), tt.wantErrMsg)
             } else {
-                assert.NoError(t, err)
+                require.NoError(t, err)
+            }
+
+            // Verify mock expectations
+            mockProvider.AssertExpectations(t)
+        })
+    }
+}
+```
+
+### Running Unit Tests
+
+```bash
+# Run all unit tests
+go test ./...
+
+# Run unit tests with coverage
+go test -race -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+
+# Run tests for specific package
+go test ./internal/cluster/...
+
+# Run specific test
+go test ./internal/cluster -run TestClusterService_Create
+
+# Run with verbose output
+go test -v ./internal/cluster
+
+# Run tests with race detection
+go test -race ./...
+
+# Run tests with timeout
+go test -timeout 30s ./...
+```
+
+### Test Coverage Requirements
+
+| Component | Minimum Coverage | Target Coverage |
+|-----------|------------------|-----------------|
+| **Service Layer** | 80% | 90% |
+| **Domain Models** | 70% | 85% |
+| **Utilities** | 75% | 90% |
+| **CLI Commands** | 60% | 80% |
+
+## 🔗 Integration Testing
+
+### Integration Test Structure
+
+```go
+// Example integration test
+package integration
+
+import (
+    "testing"
+    "github.com/flamingo-stack/openframe-cli/tests/testutil"
+)
+
+func TestBootstrapCommand_E2E(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+
+    tests := []struct {
+        name           string
+        args           []string
+        envVars        map[string]string
+        setupCluster   bool
+        wantExitCode   int
+        wantContains   []string
+        wantNotContain []string
+    }{
+        {
+            name:         "bootstrap with oss-tenant mode",
+            args:         []string{"bootstrap", "test-cluster", "--deployment-mode=oss-tenant", "--non-interactive"},
+            envVars:      map[string]string{"OPENFRAME_LOG_LEVEL": "debug"},
+            setupCluster: false,
+            wantExitCode: 0,
+            wantContains: []string{
+                "✅ Cluster created successfully",
+                "✅ ArgoCD installed",
+                "✅ Applications synced",
+            },
+        },
+        {
+            name:         "bootstrap with existing cluster",
+            args:         []string{"bootstrap", "existing-cluster"},
+            setupCluster: true,
+            wantExitCode: 1,
+            wantContains: []string{"cluster already exists"},
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Setup test environment
+            testEnv := testutil.NewTestEnvironment(t)
+            defer testEnv.Cleanup()
+
+            if tt.setupCluster {
+                testEnv.CreateTestCluster("existing-cluster")
+            }
+
+            // Set environment variables
+            for key, value := range tt.envVars {
+                testEnv.SetEnv(key, value)
+            }
+
+            // Execute command
+            result := testEnv.RunCLI(tt.args...)
+
+            // Assertions
+            assert.Equal(t, tt.wantExitCode, result.ExitCode)
+            
+            for _, want := range tt.wantContains {
+                assert.Contains(t, result.Output, want)
+            }
+            
+            for _, notWant := range tt.wantNotContain {
+                assert.NotContains(t, result.Output, notWant)
             }
         })
     }
 }
 ```
 
-### Mock Generation
-
-We use `mockgen` to generate mocks from interfaces:
+### Running Integration Tests
 
 ```bash
-# Generate mocks for cluster interfaces
-mockgen -source=internal/cluster/interfaces.go \
-        -destination=tests/mocks/cluster/provider.go \
-        -package=mocks
+# Run all integration tests
+go test -tags=integration ./tests/integration/...
 
-# Generate all mocks
-make generate-mocks
+# Run integration tests with setup
+make test-integration
+
+# Run specific integration test
+go test -tags=integration ./tests/integration -run TestBootstrapCommand
+
+# Run integration tests with timeout
+go test -tags=integration -timeout 10m ./tests/integration/...
+
+# Skip integration tests (unit tests only)
+go test -short ./...
 ```
 
-### Unit Test Best Practices
+### Integration Test Environment
 
-| Practice | Description | Example |
-|----------|-------------|---------|
-| **AAA Pattern** | Arrange, Act, Assert structure | Setup → Execute → Verify |
-| **Table-Driven Tests** | Multiple test cases in one function | `tests := []struct{...}` |
-| **Descriptive Names** | Clear test case descriptions | `TestClusterService_Create_WithInvalidName` |
-| **Setup/Teardown** | Proper test isolation | `t.Cleanup()` functions |
-| **Error Testing** | Both success and failure scenarios | Happy path + edge cases |
+```bash
+# Setup integration test environment
+cat > scripts/setup-integration-tests.sh << 'EOF'
+#!/bin/bash
+set -e
 
-## Integration Testing
+echo "Setting up integration test environment..."
 
-### Integration Test Architecture
+# Create test cluster for integration tests
+k3d cluster create openframe-integration-test \
+  --agents 2 \
+  --port "8080:80@loadbalancer" \
+  --wait
 
-Integration tests verify component interactions with real or containerized dependencies.
+# Export kubeconfig for tests
+export KUBECONFIG=$(k3d kubeconfig write openframe-integration-test)
 
-```mermaid
-graph TB
-    subgraph "Integration Test Environment"
-        TestRunner[Test Runner]
-        TestCluster[Test K3d Cluster]
-        TestCharts[Test Helm Charts]
-        TestServices[Test Services]
-    end
-    
-    subgraph "Test Dependencies"
-        Docker[Docker Containers]
-        K3d[K3d Clusters]
-        Helm[Helm Charts]
-        Git[Git Repositories]
-    end
-    
-    TestRunner --> TestCluster
-    TestRunner --> TestCharts
-    TestCluster --> K3d
-    TestCharts --> Helm
-    TestServices --> Docker
+# Verify cluster is ready
+kubectl cluster-info
+kubectl get nodes
+
+echo "Integration test environment ready!"
+EOF
+
+chmod +x scripts/setup-integration-tests.sh
 ```
 
-#### Integration Test Example
+## 🤖 Mock Testing
+
+### Mock Generation
+
+We use `mockery` for generating mocks from interfaces:
+
+```bash
+# Install mockery
+go install github.com/vektra/mockery/v2@latest
+
+# Generate mocks for all interfaces
+mockery --all --dir internal/ --output tests/mocks/
+
+# Generate mock for specific interface
+mockery --name ClusterProvider --dir internal/cluster/ --output tests/mocks/cluster/
+```
+
+### Mock Usage Example
 
 ```go
-package integration_test
-
-import (
-    "context"
-    "testing"
-    "time"
-    
-    "github.com/stretchr/testify/suite"
-    
-    "github.com/flamingo-stack/openframe-cli/internal/bootstrap"
-    "github.com/flamingo-stack/openframe-cli/tests/testutil"
-)
-
-type BootstrapIntegrationSuite struct {
-    suite.Suite
-    clusterName string
-    cleanup     func()
+// Mock provider interface
+type MockClusterProvider struct {
+    mock.Mock
 }
 
-func (s *BootstrapIntegrationSuite) SetupSuite() {
-    s.clusterName = testutil.GenerateClusterName()
-    
-    // Setup test environment
-    cleanup, err := testutil.SetupTestEnvironment(s.clusterName)
-    s.Require().NoError(err)
-    s.cleanup = cleanup
+func (m *MockClusterProvider) Create(name string, config *ClusterConfig) error {
+    args := m.Called(name, config)
+    return args.Error(0)
 }
 
-func (s *BootstrapIntegrationSuite) TearDownSuite() {
-    if s.cleanup != nil {
-        s.cleanup()
-    }
+func (m *MockClusterProvider) Delete(name string) error {
+    args := m.Called(name)
+    return args.Error(0)
 }
 
-func (s *BootstrapIntegrationSuite) TestBootstrap_FullWorkflow() {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer cancel()
+// Test using mock
+func TestClusterService_CreateAndDelete(t *testing.T) {
+    mockProvider := &MockClusterProvider{}
     
-    // Arrange
-    config := bootstrap.Config{
-        ClusterName: s.clusterName,
-        Mode:        "oss-tenant",
-        Interactive: false,
-    }
+    // Setup expectations
+    mockProvider.On("Create", "test-cluster", mock.AnythingOfType("*ClusterConfig")).Return(nil)
+    mockProvider.On("Delete", "test-cluster").Return(nil)
     
-    service := bootstrap.NewService(/* dependencies */)
+    service := &ClusterService{provider: mockProvider}
     
-    // Act
-    err := service.Execute(ctx, config)
+    // Test create
+    err := service.Create("test-cluster", &ClusterConfig{})
+    assert.NoError(t, err)
     
-    // Assert
-    s.NoError(err)
+    // Test delete
+    err = service.Delete("test-cluster")
+    assert.NoError(t, err)
     
-    // Verify cluster exists
-    exists, err := testutil.ClusterExists(s.clusterName)
-    s.NoError(err)
-    s.True(exists)
-    
-    // Verify ArgoCD is running
-    ready, err := testutil.WaitForArgoCD(ctx, s.clusterName)
-    s.NoError(err)
-    s.True(ready)
-    
-    // Verify applications are synced
-    synced, err := testutil.WaitForApplicationSync(ctx, s.clusterName)
-    s.NoError(err)
-    s.True(synced)
-}
-
-func TestBootstrapIntegration(t *testing.T) {
-    if testing.Short() {
-        t.Skip("Skipping integration tests in short mode")
-    }
-    
-    suite.Run(t, new(BootstrapIntegrationSuite))
+    // Verify all expectations were met
+    mockProvider.AssertExpectations(t)
 }
 ```
 
-### Integration Test Utilities
+## 🛠️ Test Utilities
 
-#### Test Cluster Management
+### Test Helper Functions
 
 ```go
-// tests/testutil/cluster.go
+// testutil/setup.go
 package testutil
 
 import (
-    "context"
-    "fmt"
-    "time"
+    "testing"
+    "os"
+    "path/filepath"
 )
 
-// SetupTestCluster creates a test cluster for integration tests
-func SetupTestCluster(name string) (func(), error) {
-    config := ClusterConfig{
-        Name:    name,
-        Agents:  1,
-        APIPort: GetAvailablePort(),
-    }
-    
-    if err := CreateCluster(config); err != nil {
-        return nil, fmt.Errorf("failed to create test cluster: %w", err)
-    }
-    
-    cleanup := func() {
-        DeleteCluster(name)
-    }
-    
-    return cleanup, nil
+// TestEnvironment provides isolated test environment
+type TestEnvironment struct {
+    t           *testing.T
+    tempDir     string
+    originalEnv map[string]string
 }
 
-// WaitForClusterReady waits for cluster to be ready
-func WaitForClusterReady(ctx context.Context, name string) error {
-    for {
-        select {
-        case <-ctx.Done():
-            return ctx.Err()
-        default:
-            ready, err := IsClusterReady(name)
-            if err != nil {
-                return err
-            }
-            if ready {
-                return nil
-            }
-            time.Sleep(2 * time.Second)
+func NewTestEnvironment(t *testing.T) *TestEnvironment {
+    tempDir, err := os.MkdirTemp("", "openframe-test-*")
+    require.NoError(t, err)
+    
+    return &TestEnvironment{
+        t:           t,
+        tempDir:     tempDir,
+        originalEnv: make(map[string]string),
+    }
+}
+
+func (te *TestEnvironment) SetEnv(key, value string) {
+    te.originalEnv[key] = os.Getenv(key)
+    os.Setenv(key, value)
+}
+
+func (te *TestEnvironment) CreateTempFile(name, content string) string {
+    filePath := filepath.Join(te.tempDir, name)
+    err := os.WriteFile(filePath, []byte(content), 0644)
+    require.NoError(te.t, err)
+    return filePath
+}
+
+func (te *TestEnvironment) Cleanup() {
+    // Restore environment variables
+    for key, originalValue := range te.originalEnv {
+        if originalValue == "" {
+            os.Unsetenv(key)
+        } else {
+            os.Setenv(key, originalValue)
         }
     }
+    
+    // Remove temp directory
+    os.RemoveAll(te.tempDir)
 }
 ```
 
-## End-to-End Testing
-
-### E2E Test Strategy
-
-End-to-end tests verify complete user workflows from CLI invocation to final state.
-
-```mermaid
-sequenceDiagram
-    participant Test as E2E Test
-    participant CLI as OpenFrame CLI
-    participant K3d as K3d Cluster
-    participant ArgoCD as ArgoCD
-    participant Apps as Applications
-    
-    Test->>CLI: Execute bootstrap command
-    CLI->>K3d: Create cluster
-    K3d-->>CLI: Cluster ready
-    CLI->>ArgoCD: Install ArgoCD
-    ArgoCD-->>CLI: ArgoCD ready
-    CLI->>ArgoCD: Deploy applications
-    ArgoCD->>Apps: Sync applications
-    Apps-->>ArgoCD: Applications ready
-    ArgoCD-->>CLI: Sync complete
-    CLI-->>Test: Bootstrap complete
-    Test->>Test: Verify final state
-```
-
-#### E2E Test Implementation
+### CLI Test Runner
 
 ```go
-package e2e_test
+// testutil/cli_runner.go
+package testutil
 
 import (
+    "bytes"
     "os/exec"
-    "testing"
-    "time"
-    
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
+    "strings"
 )
 
-func TestCLI_BootstrapWorkflow(t *testing.T) {
-    if !*runE2E {
-        t.Skip("E2E tests disabled")
-    }
-    
-    clusterName := fmt.Sprintf("e2e-test-%d", time.Now().Unix())
-    
-    // Cleanup
-    defer func() {
-        exec.Command("./bin/openframe", "cluster", "delete", clusterName).Run()
-    }()
-    
-    // Execute bootstrap
-    cmd := exec.Command("./bin/openframe", "bootstrap",
-        "--cluster-name", clusterName,
-        "--mode", "oss-tenant",
-        "--non-interactive",
-        "--verbose")
-    
-    output, err := cmd.CombinedOutput()
-    require.NoError(t, err, "Bootstrap command failed: %s", string(output))
-    
-    // Verify cluster exists
-    cmd = exec.Command("./bin/openframe", "cluster", "list")
-    output, err = cmd.Output()
-    require.NoError(t, err)
-    assert.Contains(t, string(output), clusterName)
-    
-    // Verify ArgoCD is running
-    cmd = exec.Command("kubectl", "get", "pods", "-n", "argocd",
-        "--context", fmt.Sprintf("k3d-%s", clusterName))
-    output, err = cmd.Output()
-    require.NoError(t, err)
-    assert.Contains(t, string(output), "Running")
-}
-```
-
-## Performance Testing
-
-### Benchmarking
-
-Performance tests ensure operations complete within acceptable time bounds.
-
-```go
-func BenchmarkClusterCreate(b *testing.B) {
-    for i := 0; i < b.N; i++ {
-        clusterName := fmt.Sprintf("bench-cluster-%d", i)
-        
-        b.StartTimer()
-        err := createCluster(clusterName)
-        b.StopTimer()
-        
-        require.NoError(b, err)
-        
-        // Cleanup
-        deleteCluster(clusterName)
-    }
+type CLIResult struct {
+    ExitCode int
+    Output   string
+    Error    string
 }
 
-func BenchmarkBootstrap(b *testing.B) {
-    b.ResetTimer()
+func (te *TestEnvironment) RunCLI(args ...string) *CLIResult {
+    // Build OpenFrame CLI binary for testing
+    binaryPath := filepath.Join(te.tempDir, "openframe")
+    buildCmd := exec.Command("go", "build", "-o", binaryPath, "../../main.go")
+    err := buildCmd.Run()
+    require.NoError(te.t, err)
     
-    for i := 0; i < b.N; i++ {
-        clusterName := fmt.Sprintf("bench-bootstrap-%d", i)
-        
-        b.StartTimer()
-        err := runBootstrap(clusterName)
-        b.StopTimer()
-        
-        require.NoError(b, err)
-        
-        // Cleanup
-        cleanup(clusterName)
+    // Run the CLI command
+    cmd := exec.Command(binaryPath, args...)
+    cmd.Dir = te.tempDir
+    
+    var stdout, stderr bytes.Buffer
+    cmd.Stdout = &stdout
+    cmd.Stderr = &stderr
+    
+    err = cmd.Run()
+    
+    exitCode := 0
+    if err != nil {
+        if exitError, ok := err.(*exec.ExitError); ok {
+            exitCode = exitError.ExitCode()
+        }
+    }
+    
+    return &CLIResult{
+        ExitCode: exitCode,
+        Output:   stdout.String(),
+        Error:    stderr.String(),
     }
 }
 ```
 
-### Load Testing
+## 📊 Test Coverage and Quality
 
-```go
-func TestConcurrentClusterCreation(t *testing.T) {
-    const numClusters = 5
-    
-    results := make(chan error, numClusters)
-    
-    for i := 0; i < numClusters; i++ {
-        go func(id int) {
-            clusterName := fmt.Sprintf("load-test-%d", id)
-            err := createCluster(clusterName)
-            results <- err
-            
-            if err == nil {
-                defer deleteCluster(clusterName)
-            }
-        }(i)
-    }
-    
-    // Collect results
-    for i := 0; i < numClusters; i++ {
-        err := <-results
-        assert.NoError(t, err)
-    }
-}
-```
-
-## Test Execution
-
-### Running Tests
-
-#### Local Development
-```bash
-# Run all unit tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Run integration tests
-make test-integration
-
-# Run E2E tests
-make test-e2e
-
-# Run specific test package
-go test ./internal/cluster/...
-
-# Run tests with race detection
-go test -race ./...
-
-# Run tests with verbose output
-go test -v ./...
-```
-
-#### Continuous Integration
-```bash
-# CI test pipeline
-make ci-test
-
-# This runs:
-# 1. Unit tests with coverage
-# 2. Integration tests (if dependencies available)
-# 3. Linting and security checks
-# 4. Build verification
-```
-
-### Test Configuration
-
-#### Environment Variables
-```bash
-# Test configuration
-export TEST_TIMEOUT=300s
-export TEST_CLUSTER_PREFIX=ci-test
-export TEST_SKIP_CLEANUP=false
-export TEST_VERBOSE=true
-
-# Integration test settings
-export INTEGRATION_TESTS_ENABLED=true
-export E2E_TESTS_ENABLED=false
-export TEST_KUBECONFIG=/tmp/test-kubeconfig
-
-# Performance test settings
-export BENCHMARK_DURATION=30s
-export LOAD_TEST_CONCURRENCY=10
-```
-
-### Test Data Management
-
-#### Test Fixtures
-```go
-// tests/fixtures/cluster.go
-package fixtures
-
-func NewClusterConfig() *cluster.Config {
-    return &cluster.Config{
-        Name:       "test-cluster",
-        Agents:     1,
-        APIPort:    6443,
-        Traefik:    true,
-        LoadBalancer: []string{"8080:80@loadbalancer"},
-    }
-}
-
-func NewBootstrapConfig() *bootstrap.Config {
-    return &bootstrap.Config{
-        ClusterName:   "test-bootstrap",
-        Mode:          "oss-tenant",
-        Interactive:   false,
-        SkipValidation: true,
-    }
-}
-```
-
-## Test Quality Metrics
-
-### Coverage Requirements
-
-| Component | Minimum Coverage | Target Coverage |
-|-----------|------------------|-----------------|
-| **Core Services** | 80% | 90% |
-| **Providers** | 70% | 85% |
-| **CLI Commands** | 60% | 75% |
-| **Utilities** | 85% | 95% |
-| **Overall** | 75% | 85% |
-
-### Test Execution Metrics
+### Coverage Analysis
 
 ```bash
-# Generate coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
+# Generate detailed coverage report
+go test -coverprofile=coverage.out -covermode=atomic ./...
 
-# Show coverage by package
+# View coverage by package
 go tool cover -func=coverage.out
 
-# Test execution summary
-go test -json ./... | jq '.Action,.Test,.Package' | grep -E "(PASS|FAIL)"
+# Generate HTML coverage report
+go tool cover -html=coverage.out -o coverage.html
+open coverage.html
+
+# Check coverage threshold
+COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+    echo "Coverage $COVERAGE% is below threshold of 80%"
+    exit 1
+fi
 ```
 
-## Testing Best Practices
+### Quality Metrics
 
-### Do's and Don'ts
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| **Test Coverage** | >80% | `go tool cover -func=coverage.out` |
+| **Test Speed** | <30s for full suite | `go test -timeout 30s ./...` |
+| **Flaky Tests** | 0% failure rate | CI/CD monitoring |
+| **Test Maintainability** | Clear, readable tests | Code reviews |
 
-| ✅ DO | ❌ DON'T |
-|-------|----------|
-| Write tests before or alongside code | Write tests as an afterthought |
-| Use descriptive test names | Use generic names like "Test1" |
-| Test both success and error paths | Only test the happy path |
-| Mock external dependencies | Use real external services in unit tests |
-| Clean up test resources | Leave test clusters/resources running |
-| Use table-driven tests for multiple scenarios | Duplicate test logic |
-| Assert on specific values | Use generic "not nil" assertions |
+### Automated Quality Checks
 
-### Test Patterns
+```bash
+# Create test quality script
+cat > scripts/test-quality.sh << 'EOF'
+#!/bin/bash
+set -e
 
-#### The Arrange-Act-Assert Pattern
-```go
-func TestService_Method(t *testing.T) {
-    // Arrange
-    mockDep := setupMockDependency()
-    service := NewService(mockDep)
-    input := createTestInput()
-    
-    // Act
-    result, err := service.Method(input)
-    
-    // Assert
-    assert.NoError(t, err)
-    assert.Equal(t, expectedResult, result)
-}
+echo "Running test quality checks..."
+
+# Run tests with coverage
+echo "Running tests with coverage..."
+go test -race -coverprofile=coverage.out -timeout 30s ./...
+
+# Check coverage threshold
+COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+echo "Test coverage: $COVERAGE%"
+
+if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+    echo "❌ Coverage $COVERAGE% is below threshold of 80%"
+    exit 1
+fi
+
+# Check for race conditions
+echo "Running race detection tests..."
+go test -race ./...
+
+# Run integration tests if not in CI short mode
+if [ "$CI_SHORT" != "true" ]; then
+    echo "Running integration tests..."
+    go test -tags=integration ./tests/integration/...
+fi
+
+echo "✅ All test quality checks passed!"
+EOF
+
+chmod +x scripts/test-quality.sh
 ```
 
-#### The Given-When-Then Pattern
+## 🚀 Writing New Tests
+
+### Test Writing Guidelines
+
+1. **Follow the AAA Pattern**:
+   ```go
+   func TestExample(t *testing.T) {
+       // Arrange - Set up test conditions
+       input := "test-input"
+       expected := "expected-output"
+       
+       // Act - Execute the function under test
+       result := functionUnderTest(input)
+       
+       // Assert - Verify the results
+       assert.Equal(t, expected, result)
+   }
+   ```
+
+2. **Use Descriptive Test Names**:
+   ```go
+   // ✅ Good
+   func TestClusterService_Create_WithValidName_ReturnsSuccess(t *testing.T) {}
+   
+   // ❌ Bad
+   func TestCreate(t *testing.T) {}
+   ```
+
+3. **Test Edge Cases**:
+   ```go
+   func TestValidateClusterName(t *testing.T) {
+       tests := []struct {
+           name     string
+           input    string
+           wantErr  bool
+       }{
+           {"valid name", "my-cluster", false},
+           {"empty name", "", true},
+           {"too long", strings.Repeat("a", 64), true},
+           {"invalid chars", "my_cluster", true},
+           {"starts with number", "1cluster", true},
+       }
+       // ... test implementation
+   }
+   ```
+
+### Test Templates
+
+#### Unit Test Template
+
 ```go
-func TestClusterCreation(t *testing.T) {
-    // Given a cluster configuration
-    config := givenValidClusterConfig()
-    
-    // When creating the cluster
-    err := whenCreatingCluster(config)
-    
-    // Then the cluster should be created successfully
-    thenClusterShouldExist(t, config.Name)
-    thenNoErrorShouldOccur(t, err)
-}
-```
+func TestServiceName_MethodName(t *testing.T) {
+    tests := []struct {
+        name      string
+        input     InputType
+        mockSetup func(*MockDependency)
+        want      OutputType
+        wantErr   bool
+    }{
+        {
+            name:  "successful case",
+            input: InputType{/* valid input */},
+            mockSetup: func(m *MockDependency) {
+                m.On("Method", mock.Anything).Return(nil)
+            },
+            want:    OutputType{/* expected output */},
+            wantErr: false,
+        },
+        // Add more test cases...
+    }
 
-## Debugging Test Failures
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Setup
+            mockDep := &MockDependency{}
+            if tt.mockSetup != nil {
+                tt.mockSetup(mockDep)
+            }
+            
+            service := &ServiceName{
+                dependency: mockDep,
+            }
 
-### Common Test Failure Scenarios
+            // Execute
+            got, err := service.MethodName(tt.input)
 
-#### Timeout Failures
-```go
-func TestWithTimeout(t *testing.T) {
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
-    
-    // Use context in operations
-    err := longRunningOperation(ctx)
-    
-    if err == context.DeadlineExceeded {
-        t.Fatalf("Operation timed out - may need to increase timeout or optimize")
+            // Assert
+            if tt.wantErr {
+                assert.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+                assert.Equal(t, tt.want, got)
+            }
+            
+            mockDep.AssertExpectations(t)
+        })
     }
 }
 ```
 
-#### Resource Cleanup Issues
+#### Integration Test Template
+
 ```go
-func TestWithCleanup(t *testing.T) {
-    resource := createTestResource()
-    
-    // Always cleanup, even if test fails
-    t.Cleanup(func() {
-        if err := cleanupResource(resource); err != nil {
-            t.Logf("Cleanup failed: %v", err)
-        }
-    })
-    
-    // Test logic here
+func TestCommandName_Integration(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+
+    testEnv := testutil.NewTestEnvironment(t)
+    defer testEnv.Cleanup()
+
+    // Setup test conditions
+    testEnv.SetEnv("OPENFRAME_LOG_LEVEL", "debug")
+
+    // Execute command
+    result := testEnv.RunCLI("command", "subcommand", "--flag=value")
+
+    // Assertions
+    assert.Equal(t, 0, result.ExitCode)
+    assert.Contains(t, result.Output, "expected output")
 }
 ```
 
-#### Flaky Test Debugging
+## 🔍 Debugging Tests
+
+### Test Debugging Strategies
+
 ```bash
-# Run test multiple times to identify flaky tests
-go test -count=100 ./internal/cluster
+# Run single test with verbose output
+go test -v ./internal/cluster -run TestClusterService_Create
 
-# Run with race detection
-go test -race ./...
+# Run test with debugger
+dlv test ./internal/cluster -- -test.run TestClusterService_Create
 
-# Verbose output for debugging
-go test -v -run TestFlakyTest ./...
+# Add debug prints in tests
+t.Logf("Debug: variable value = %v", variable)
+
+# Use testify require for early exit on failures
+require.NoError(t, err, "Setup failed, cannot continue test")
 ```
 
-## Continuous Integration
+### Common Test Issues
 
-### CI Test Pipeline
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| **Flaky tests** | Intermittent failures | Remove time dependencies, improve isolation |
+| **Slow tests** | Tests timeout | Mock external calls, optimize setup/teardown |
+| **Resource leaks** | Memory/disk usage grows | Ensure proper cleanup in test teardown |
+| **Test pollution** | Tests affect each other | Improve test isolation, reset state |
 
-```mermaid
-graph TB
-    subgraph "CI Pipeline"
-        Lint[Code Linting]
-        Unit[Unit Tests]
-        Build[Build Verification]
-        Integration[Integration Tests]
-        Security[Security Scanning]
-        E2E[E2E Tests]
-    end
-    
-    Lint --> Unit
-    Unit --> Build
-    Build --> Integration
-    Integration --> Security
-    Security --> E2E
-```
+## 📈 Continuous Testing
 
-### Test Automation
+### CI/CD Integration
 
 ```yaml
 # .github/workflows/test.yml
-name: Tests
+name: Test
 on: [push, pull_request]
 
 jobs:
@@ -715,29 +729,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      
+      - uses: actions/setup-go@v4
         with:
           go-version: '1.21'
-      
-      - name: Run unit tests
-        run: make test-coverage
-      
+          
+      - name: Run tests
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          
       - name: Run integration tests
-        run: make test-integration
-        env:
-          INTEGRATION_TESTS_ENABLED: true
-      
+        run: |
+          make setup-integration-env
+          go test -tags=integration ./tests/integration/...
+          
       - name: Upload coverage
         uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
 ```
 
-## What's Next?
+### Pre-commit Hooks
 
-To implement effective testing in your OpenFrame contributions:
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+set -e
 
-1. **[Set up your test environment](../setup/local-development.md#testing-setup)** - Configure local testing
-2. **[Write your first test](writing-tests.md)** - Practical test writing guide  
-3. **[Mock external dependencies](mocking.md)** - Advanced mocking strategies
-4. **[Review testing guidelines](../contributing/guidelines.md#testing)** - Team standards
+echo "Running pre-commit tests..."
 
-> **💡 Testing Philosophy**: Remember that tests are documentation of your code's behavior. Write tests that clearly express intent and catch real problems, not just increase coverage numbers.
+# Run fast tests
+go test -short ./...
+
+# Run linter
+golangci-lint run
+
+echo "Pre-commit checks passed!"
+```
+
+## 📚 Testing Resources
+
+### Testing Tools
+- **[testify](https://github.com/stretchr/testify)** - Testing toolkit
+- **[mockery](https://github.com/vektra/mockery)** - Mock generation
+- **[ginkgo](https://github.com/onsi/ginkgo)** - BDD testing framework
+- **[gomega](https://github.com/onsi/gomega)** - Matcher library
+
+### Best Practices
+- **[Go Testing Best Practices](https://golang.org/doc/tutorial/add-a-test)**
+- **[Table Driven Tests](https://github.com/golang/go/wiki/TableDrivenTests)**
+- **[Advanced Testing](https://golang.org/doc/tutorial/fuzz)**
+
+---
+
+*Ready to contribute to OpenFrame CLI? Check out our [contributing guidelines](../contributing/guidelines.md) to get started with the development workflow.*

@@ -1,631 +1,691 @@
 # Architecture Overview
 
-OpenFrame CLI is built using clean architecture principles with a layered design that promotes maintainability, testability, and extensibility. This document provides a comprehensive overview of the system's architecture, design patterns, and component relationships.
+This document provides a comprehensive overview of OpenFrame CLI's architecture, including its design principles, component relationships, and data flow patterns. Understanding this architecture will help you navigate the codebase and contribute effectively.
 
-## High-Level Architecture
+## 🏗️ Architectural Principles
+
+OpenFrame CLI is built on several key architectural principles:
+
+### Clean Architecture
+- **Separation of Concerns**: Clear boundaries between business logic, infrastructure, and presentation
+- **Dependency Inversion**: High-level modules don't depend on low-level modules; both depend on abstractions
+- **Single Responsibility**: Each component has one reason to change
+
+### Hexagonal Architecture
+- **Port and Adapter Pattern**: Business logic is isolated from external dependencies
+- **Provider Pattern**: External integrations (K3d, Helm, ArgoCD) are swappable implementations
+- **Service Layer**: Core business logic independent of CLI framework
+
+### Domain-Driven Design
+- **Bounded Contexts**: Clear boundaries between cluster, chart, dev, and bootstrap domains
+- **Ubiquitous Language**: Consistent terminology throughout the codebase
+- **Rich Domain Models**: Business logic encapsulated in domain entities
+
+## 🎯 High-Level Architecture
 
 ```mermaid
 graph TB
-    subgraph "Presentation Layer"
+    subgraph "User Interface Layer"
         CLI[CLI Commands]
         UI[Interactive UI]
-        Flags[Command Flags]
+        WIZARD[Setup Wizards]
     end
     
-    subgraph "Application Layer"  
-        Bootstrap[Bootstrap Service]
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        DevSvc[Development Service]
+    subgraph "Application Layer" 
+        BOOTSTRAP[Bootstrap Service]
+        CLUSTER[Cluster Service]
+        CHART[Chart Service]
+        DEV[Dev Service]
     end
     
     subgraph "Domain Layer"
-        Models[Domain Models]
-        Interfaces[Service Interfaces]
-        BusinessLogic[Business Rules]
+        MODELS[Domain Models]
+        INTERFACES[Service Interfaces]
+        POLICIES[Business Rules]
     end
     
     subgraph "Infrastructure Layer"
-        K3DProvider[K3D Provider]
-        HelmProvider[Helm Provider]
-        ArgoCDProvider[ArgoCD Provider]
-        GitProvider[Git Provider]
-        TelepresenceProvider[Telepresence Provider]
+        subgraph "Providers"
+            K3D[K3d Provider]
+            HELM[Helm Provider]
+            ARGOCD[ArgoCD Provider]
+            GIT[Git Provider]
+            TELEPRESENCE[Telepresence Provider]
+        end
+        
+        subgraph "Shared Infrastructure"
+            EXECUTOR[Command Executor]
+            CONFIG[Configuration]
+            ERRORS[Error Handling]
+            FILES[File Operations]
+        end
     end
     
-    subgraph "External Systems"
-        Docker[Docker Engine]
-        K8s[Kubernetes API]
-        Git[Git Repositories]
-        Registry[Container Registry]
-    end
+    CLI --> BOOTSTRAP
+    CLI --> CLUSTER
+    CLI --> CHART
+    CLI --> DEV
     
-    CLI --> Bootstrap
-    CLI --> ClusterSvc
-    CLI --> ChartSvc
-    CLI --> DevSvc
+    UI --> BOOTSTRAP
+    WIZARD --> CLUSTER
     
-    Bootstrap --> ClusterSvc
-    Bootstrap --> ChartSvc
+    BOOTSTRAP --> MODELS
+    CLUSTER --> INTERFACES
+    CHART --> POLICIES
+    DEV --> INTERFACES
     
-    ClusterSvc --> K3DProvider
-    ChartSvc --> HelmProvider
-    ChartSvc --> ArgoCDProvider
-    DevSvc --> TelepresenceProvider
+    MODELS --> K3D
+    INTERFACES --> HELM
+    POLICIES --> ARGOCD
+    INTERFACES --> GIT
+    INTERFACES --> TELEPRESENCE
     
-    K3DProvider --> Docker
-    HelmProvider --> K8s
-    ArgoCDProvider --> K8s
-    GitProvider --> Git
+    K3D --> EXECUTOR
+    HELM --> CONFIG
+    ARGOCD --> ERRORS
+    GIT --> FILES
 ```
 
-## Core Architectural Principles
+## 📁 Directory Structure
 
-### 🏗️ **Clean Architecture**
-- **Separation of Concerns**: Each layer has a single, well-defined responsibility
-- **Dependency Inversion**: High-level modules don't depend on low-level modules
-- **Interface Segregation**: Clients depend only on interfaces they use
-- **Single Responsibility**: Each component has one reason to change
+### Package Organization
 
-### 🔄 **Dependency Injection**
-- Constructor-based injection for better testability
-- Interface-based abstractions for loose coupling
-- Mockable dependencies for comprehensive testing
+```text
+openframe-cli/
+├── cmd/                           # Command Layer (Cobra CLI)
+│   ├── bootstrap/                 # Bootstrap command implementation
+│   ├── cluster/                   # Cluster management commands  
+│   ├── chart/                     # Chart management commands
+│   ├── dev/                       # Development tool commands
+│   └── root.go                    # Root command and CLI setup
+│
+├── internal/                      # Internal packages (non-importable)
+│   ├── bootstrap/                 # Bootstrap domain
+│   │   └── service.go            # Bootstrap orchestration logic
+│   │
+│   ├── cluster/                   # Cluster management domain
+│   │   ├── service.go            # Cluster service implementation
+│   │   ├── models/               # Cluster domain models
+│   │   ├── providers/            # Cluster provider implementations
+│   │   │   └── k3d/             # K3d-specific implementation
+│   │   ├── ui/                   # Cluster UI components
+│   │   └── utils/                # Cluster utilities
+│   │
+│   ├── chart/                     # Chart management domain
+│   │   ├── service.go            # Chart service implementation
+│   │   ├── models/               # Chart domain models
+│   │   ├── providers/            # Chart provider implementations
+│   │   │   ├── helm/            # Helm provider
+│   │   │   ├── argocd/          # ArgoCD provider
+│   │   │   └── git/             # Git provider
+│   │   ├── ui/                   # Chart UI components
+│   │   └── utils/                # Chart utilities
+│   │
+│   ├── dev/                       # Development tools domain
+│   │   ├── services/             # Dev service implementations
+│   │   │   ├── intercept/       # Service intercept logic
+│   │   │   └── scaffold/        # Application scaffolding
+│   │   ├── providers/            # Dev tool providers
+│   │   │   ├── telepresence/    # Telepresence integration
+│   │   │   └── kubectl/         # Kubectl integration
+│   │   └── ui/                   # Dev UI components
+│   │
+│   └── shared/                    # Shared infrastructure
+│       ├── executor/             # Command execution abstraction
+│       ├── ui/                   # Common UI components
+│       ├── config/               # Configuration management
+│       ├── errors/               # Error handling utilities
+│       └── files/                # File operation utilities
+│
+└── tests/                         # Test files and utilities
+    ├── integration/              # Integration tests
+    ├── mocks/                    # Test mocks and stubs
+    └── testutil/                 # Test utilities and helpers
+```
 
-### 🎯 **Provider Pattern**
-- Pluggable implementations for different platforms
-- Consistent interfaces across all external integrations
-- Easy extension and customization
+## 🔄 Component Relationships
 
-## Layer Breakdown
+### Service Dependencies
 
-### 1. Presentation Layer (`cmd/`)
+```mermaid
+graph TB
+    subgraph "Bootstrap Orchestration"
+        BS[Bootstrap Service]
+        BS --> CS[Cluster Service]
+        BS --> CHS[Chart Service]
+    end
+    
+    subgraph "Cluster Management"
+        CS --> K3D[K3d Provider]
+        CS --> CUI[Cluster UI]
+        CS --> CPREREQ[Prerequisites Checker]
+    end
+    
+    subgraph "Chart Management"  
+        CHS --> HELM[Helm Provider]
+        CHS --> ARGOCD[ArgoCD Provider]
+        CHS --> GIT[Git Provider]
+        CHS --> CHUI[Chart UI]
+        CHS --> CHPREREQ[Chart Prerequisites]
+    end
+    
+    subgraph "Development Tools"
+        IS[Intercept Service] --> TP[Telepresence Provider]
+        IS --> KUBECTL[Kubectl Provider] 
+        SS[Scaffold Service] --> KUBECTL
+        SS --> CHS
+        IS --> DUI[Dev UI]
+        SS --> DUI
+    end
+    
+    subgraph "Shared Infrastructure"
+        ALL[All Services] --> EXEC[Command Executor]
+        ALL --> CONFIG[Configuration]
+        ALL --> ERRORS[Error Handling]
+        ALL --> FILES[File Management]
+        ALL --> UI_SHARED[Shared UI]
+    end
+```
 
-The presentation layer handles user interaction through the CLI interface.
+### Interface Boundaries
 
 ```mermaid
 graph LR
-    subgraph "CLI Commands"
-        Root[root.go]
-        Bootstrap[bootstrap/]
-        Cluster[cluster/]
-        Chart[chart/]
-        Dev[dev/]
+    subgraph "External Systems"
+        DOCKER[Docker]
+        K8S[Kubernetes]
+        GIT_REMOTE[Git Repositories]
+        REGISTRY[Container Registry]
     end
     
-    Root --> Bootstrap
-    Root --> Cluster
-    Root --> Chart
-    Root --> Dev
-```
-
-**Key Responsibilities:**
-- Command line argument parsing
-- User input validation
-- Interactive prompts and wizards
-- Output formatting and display
-- Error presentation
-
-**Core Components:**
-
-| Component | Purpose |
-|-----------|---------|
-| **Root Command** | CLI entry point and global configuration |
-| **Bootstrap Command** | Orchestrates complete environment setup |
-| **Cluster Commands** | K3d cluster lifecycle management |
-| **Chart Commands** | Helm and ArgoCD operations |
-| **Dev Commands** | Development workflow tools |
-
-### 2. Application Layer (`internal/*/services/`)
-
-The application layer contains business logic and orchestrates use cases.
-
-```mermaid
-graph TB
-    subgraph "Application Services"
-        BootstrapSvc[Bootstrap Service]
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        InterceptSvc[Intercept Service]
-        ScaffoldSvc[Scaffold Service]
+    subgraph "Provider Interfaces"
+        CLUSTER_IF[ClusterProvider]
+        CHART_IF[ChartProvider] 
+        DEV_IF[DevProvider]
+        EXEC_IF[CommandExecutor]
     end
     
-    subgraph "Shared Services"
-        Config[Configuration Service]
-        Validation[Validation Service]
-        Prerequisites[Prerequisites Service]
-    end
-    
-    BootstrapSvc --> ClusterSvc
-    BootstrapSvc --> ChartSvc
-    ClusterSvc --> Prerequisites
-    ChartSvc --> Prerequisites
-    InterceptSvc --> Config
-    ScaffoldSvc --> Validation
-```
-
-**Service Responsibilities:**
-
-| Service | Purpose |
-|---------|---------|
-| **Bootstrap** | Coordinates cluster creation and chart installation |
-| **Cluster** | Manages K3d cluster lifecycle operations |
-| **Chart** | Handles Helm charts and ArgoCD applications |
-| **Intercept** | Manages Telepresence service intercepts |
-| **Scaffold** | Generates development scaffolding |
-
-### 3. Domain Layer (`internal/*/models/`)
-
-The domain layer contains business entities, rules, and interfaces.
-
-```mermaid
-classDiagram
-    class Cluster {
-        +Name string
-        +Status ClusterStatus
-        +Config ClusterConfig
-        +Validate() error
-        +IsReady() bool
-    }
-    
-    class Application {
-        +Name string
-        +Namespace string
-        +SyncStatus SyncStatus
-        +Health HealthStatus
-        +Deploy() error
-    }
-    
-    class InterceptConfig {
-        +ServiceName string
-        +Namespace string
-        +Port int
-        +LocalPort int
-        +Start() error
-        +Stop() error
-    }
-    
-    class ClusterProvider {
-        <<interface>>
-        +Create(config) error
-        +Delete(name) error
-        +List() []Cluster
-        +Status(name) ClusterStatus
-    }
-    
-    Cluster --> ClusterProvider
-    Application --> ChartProvider
-    InterceptConfig --> InterceptProvider
-```
-
-**Domain Models:**
-- **Cluster**: Represents Kubernetes cluster state and operations
-- **Application**: ArgoCD application with sync and health status
-- **Chart**: Helm chart with configuration and dependencies
-- **Intercept**: Telepresence intercept configuration
-
-### 4. Infrastructure Layer (`internal/*/providers/`)
-
-The infrastructure layer implements external system integrations.
-
-```mermaid
-graph TB
     subgraph "Provider Implementations"
-        K3D[K3D Manager]
-        Helm[Helm Manager]
-        ArgoCD[ArgoCD Manager]
-        Git[Git Repository]
-        Telepresence[Telepresence Provider]
-        Kubectl[Kubectl Provider]
+        K3D_IMPL[K3d Implementation]
+        HELM_IMPL[Helm Implementation]
+        ARGOCD_IMPL[ArgoCD Implementation]
+        TP_IMPL[Telepresence Implementation]
     end
     
-    subgraph "External APIs"
-        DockerAPI[Docker API]
-        K8sAPI[Kubernetes API]
-        GitAPI[Git Repositories]
-        HelmRepos[Helm Repositories]
-    end
+    DOCKER -.-> CLUSTER_IF
+    K8S -.-> CHART_IF
+    GIT_REMOTE -.-> DEV_IF
+    REGISTRY -.-> EXEC_IF
     
-    K3D --> DockerAPI
-    Helm --> K8sAPI
-    Helm --> HelmRepos
-    ArgoCD --> K8sAPI
-    Git --> GitAPI
-    Telepresence --> K8sAPI
-    Kubectl --> K8sAPI
+    CLUSTER_IF --> K3D_IMPL
+    CHART_IF --> HELM_IMPL
+    CHART_IF --> ARGOCD_IMPL
+    DEV_IF --> TP_IMPL
 ```
 
-**Provider Interfaces:**
+## 📊 Data Flow Patterns
 
-```go
-type ClusterProvider interface {
-    Create(ctx context.Context, config ClusterConfig) error
-    Delete(ctx context.Context, name string) error
-    List(ctx context.Context) ([]Cluster, error)
-    Status(ctx context.Context, name string) (ClusterStatus, error)
-}
-
-type ChartProvider interface {
-    Install(ctx context.Context, chart Chart) error
-    Upgrade(ctx context.Context, chart Chart) error
-    Uninstall(ctx context.Context, name string) error
-    Status(ctx context.Context, name string) (ChartStatus, error)
-}
-
-type InterceptProvider interface {
-    Start(ctx context.Context, config InterceptConfig) error
-    Stop(ctx context.Context, name string) error
-    List(ctx context.Context) ([]Intercept, error)
-}
-```
-
-## Data Flow Architecture
-
-### Bootstrap Workflow
+### Bootstrap Flow
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant CLI
-    participant Bootstrap
-    participant Cluster
-    participant Chart
-    participant K3D
-    participant Helm
-    participant ArgoCD
+    participant BootstrapCmd as Bootstrap Command
+    participant BootstrapSvc as Bootstrap Service
+    participant ClusterSvc as Cluster Service
+    participant K3dProvider as K3d Provider
+    participant ChartSvc as Chart Service
+    participant HelmProvider as Helm Provider
+    participant ArgoCDProvider as ArgoCD Provider
     
-    User->>CLI: openframe bootstrap
-    CLI->>Bootstrap: Execute()
+    User->>BootstrapCmd: openframe bootstrap
+    BootstrapCmd->>BootstrapSvc: Execute(args)
     
-    Bootstrap->>Cluster: ValidatePrerequisites()
-    Cluster-->>Bootstrap: Prerequisites OK
+    BootstrapSvc->>ClusterSvc: CreateCluster()
+    ClusterSvc->>K3dProvider: Create()
+    K3dProvider-->>ClusterSvc: ClusterConfig
+    ClusterSvc-->>BootstrapSvc: ClusterReady
     
-    Bootstrap->>Cluster: CreateCluster()
-    Cluster->>K3D: Create(config)
-    K3D->>K3D: Pull images
-    K3D->>K3D: Start containers
-    K3D-->>Cluster: Cluster ready
-    Cluster-->>Bootstrap: Success
+    BootstrapSvc->>ChartSvc: InstallCharts()
+    ChartSvc->>HelmProvider: InstallArgoCD()
+    HelmProvider-->>ChartSvc: ArgoCDReady
     
-    Bootstrap->>Chart: InstallCharts()
-    Chart->>Helm: Install ArgoCD
-    Helm->>Helm: Apply manifests
-    Helm-->>Chart: ArgoCD ready
+    ChartSvc->>ArgoCDProvider: InstallAppOfApps()
+    ArgoCDProvider->>ArgoCDProvider: WaitForSync()
+    ArgoCDProvider-->>ChartSvc: ApplicationsSynced
+    ChartSvc-->>BootstrapSvc: ChartsInstalled
     
-    Chart->>ArgoCD: Deploy app-of-apps
-    ArgoCD->>ArgoCD: Sync applications
-    ArgoCD-->>Chart: Applications synced
-    Chart-->>Bootstrap: Charts installed
-    
-    Bootstrap-->>CLI: Complete
-    CLI-->>User: Environment ready
+    BootstrapSvc-->>BootstrapCmd: Success
+    BootstrapCmd-->>User: Environment Ready
 ```
 
-### Development Intercept Workflow
+### Intercept Flow
 
 ```mermaid
 sequenceDiagram
-    participant Dev
-    participant CLI
-    participant Intercept
-    participant Kubectl
-    participant Telepresence
-    participant K8s
+    participant Developer
+    participant DevCmd as Dev Command
+    participant InterceptSvc as Intercept Service
+    participant KubectlProvider as Kubectl Provider
+    participant TelepresenceProvider as Telepresence Provider
+    participant LocalApp as Local Application
+    participant K8sCluster as Kubernetes Cluster
     
-    Dev->>CLI: openframe dev intercept
-    CLI->>Intercept: StartIntercept()
+    Developer->>DevCmd: openframe dev intercept
+    DevCmd->>InterceptSvc: StartIntercept()
     
-    Intercept->>Kubectl: DiscoverServices()
-    Kubectl->>K8s: List services
-    K8s-->>Kubectl: Service list
-    Kubectl-->>Intercept: Available services
+    InterceptSvc->>KubectlProvider: ListServices()
+    KubectlProvider->>K8sCluster: Get Services
+    K8sCluster-->>KubectlProvider: Service List
+    KubectlProvider-->>InterceptSvc: Available Services
     
-    Intercept->>Intercept: PromptForService()
-    Intercept->>Telepresence: Connect()
-    Telepresence->>K8s: Establish tunnel
-    K8s-->>Telepresence: Tunnel ready
+    InterceptSvc->>Developer: Select Service
+    Developer-->>InterceptSvc: Selected Service
     
-    Telepresence->>Telepresence: CreateIntercept()
-    Telepresence->>K8s: Route traffic
-    K8s-->>Telepresence: Traffic routed
-    Telepresence-->>Intercept: Intercept active
+    InterceptSvc->>TelepresenceProvider: CreateIntercept()
+    TelepresenceProvider->>K8sCluster: Install Traffic Agent
+    TelepresenceProvider->>LocalApp: Setup Port Forwarding
     
-    Intercept-->>CLI: Success
-    CLI-->>Dev: Local development ready
+    K8sCluster->>TelepresenceProvider: Service Traffic
+    TelepresenceProvider->>LocalApp: Forwarded Requests
+    LocalApp-->>TelepresenceProvider: Response
+    TelepresenceProvider-->>K8sCluster: Response
+    
+    TelepresenceProvider-->>InterceptSvc: Intercept Active
+    InterceptSvc-->>DevCmd: Success
+    DevCmd-->>Developer: Intercept Running
 ```
 
-## Component Interactions
+## 🧩 Core Components Deep Dive
 
-### Shared Infrastructure Components
+### Command Layer (`cmd/`)
+
+The command layer implements the CLI interface using the Cobra framework:
+
+```go
+// Example command structure
+type Command struct {
+    Use   string
+    Short string
+    Long  string
+    RunE  func(cmd *cobra.Command, args []string) error
+}
+
+// Command delegates to service layer
+func runBootstrap(cmd *cobra.Command, args []string) error {
+    service := bootstrap.NewService()
+    return service.Execute(cmd, args)
+}
+```
+
+**Responsibilities:**
+- Parse command-line arguments and flags
+- Validate input parameters
+- Delegate to appropriate service layer
+- Handle user interaction and display
+
+### Service Layer (`internal/*/`)
+
+The service layer contains the core business logic:
+
+```go
+// Service interface pattern
+type ClusterService interface {
+    Create(name string, config ClusterConfig) error
+    Delete(name string) error
+    List() ([]Cluster, error)
+    Status(name string) (*ClusterStatus, error)
+}
+
+// Service implementation
+type clusterService struct {
+    provider ClusterProvider
+    ui       UIService
+    config   ConfigService
+}
+```
+
+**Responsibilities:**
+- Implement business logic and workflows
+- Coordinate between multiple providers
+- Manage domain models and state
+- Enforce business rules and validation
+
+### Provider Layer (`internal/*/providers/`)
+
+The provider layer implements external integrations:
+
+```go
+// Provider interface
+type ClusterProvider interface {
+    Create(name string, config *ClusterConfig) error
+    Delete(name string) error
+    List() ([]string, error)
+    GetStatus(name string) (*ClusterStatus, error)
+}
+
+// K3d provider implementation
+type k3dProvider struct {
+    executor CommandExecutor
+}
+
+func (p *k3dProvider) Create(name string, config *ClusterConfig) error {
+    // K3d-specific implementation
+    return p.executor.Execute("k3d", "cluster", "create", name)
+}
+```
+
+**Responsibilities:**
+- Integrate with external tools (k3d, helm, kubectl)
+- Abstract tool-specific details
+- Provide consistent interfaces
+- Handle tool-specific error scenarios
+
+### Shared Infrastructure (`internal/shared/`)
+
+Shared infrastructure provides common utilities:
+
+```go
+// Command executor interface
+type CommandExecutor interface {
+    Execute(command string, args ...string) error
+    ExecuteWithOutput(command string, args ...string) (string, error)
+}
+
+// UI service for user interaction
+type UIService interface {
+    ShowProgress(message string)
+    PromptSelect(message string, options []string) (string, error)
+    DisplayTable(data [][]string)
+}
+```
+
+**Responsibilities:**
+- Provide reusable utilities across domains
+- Abstract system-level operations
+- Manage configuration and state
+- Handle cross-cutting concerns
+
+## 🔍 Design Patterns
+
+### Provider Pattern
+
+```go
+// Provider registration
+type ProviderRegistry struct {
+    clusterProviders map[string]ClusterProvider
+    chartProviders   map[string]ChartProvider
+}
+
+func (r *ProviderRegistry) RegisterClusterProvider(name string, provider ClusterProvider) {
+    r.clusterProviders[name] = provider
+}
+
+func (r *ProviderRegistry) GetClusterProvider(name string) ClusterProvider {
+    return r.clusterProviders[name]
+}
+```
+
+### Service Locator
+
+```go
+// Service locator for dependency management
+type ServiceContainer struct {
+    services map[string]interface{}
+}
+
+func (c *ServiceContainer) Register(name string, service interface{}) {
+    c.services[name] = service
+}
+
+func (c *ServiceContainer) Resolve(name string) interface{} {
+    return c.services[name]
+}
+```
+
+### Command Pattern
+
+```go
+// Command pattern for operations
+type Command interface {
+    Execute() error
+    Rollback() error
+}
+
+type CreateClusterCommand struct {
+    name     string
+    provider ClusterProvider
+}
+
+func (c *CreateClusterCommand) Execute() error {
+    return c.provider.Create(c.name)
+}
+
+func (c *CreateClusterCommand) Rollback() error {
+    return c.provider.Delete(c.name)
+}
+```
+
+## 🚦 Error Handling Strategy
+
+### Error Types
+
+```go
+// Domain-specific error types
+type ClusterError struct {
+    Operation string
+    Cluster   string
+    Cause     error
+}
+
+func (e *ClusterError) Error() string {
+    return fmt.Sprintf("cluster %s failed during %s: %v", e.Cluster, e.Operation, e.Cause)
+}
+
+// User-friendly error wrapper
+type UserError struct {
+    Message     string
+    Suggestions []string
+    Cause       error
+}
+```
+
+### Error Flow
 
 ```mermaid
 graph TB
-    subgraph "Shared Infrastructure"
-        Executor[Command Executor]
-        UI[UI Components]
-        Config[Configuration]
-        Errors[Error Handling]
-        Logger[Logging]
-        Progress[Progress Tracking]
-    end
+    ERROR[Error Occurs] --> WRAP[Wrap with Context]
+    WRAP --> LOG[Log Technical Details]
+    LOG --> USER[Show User Message]
+    USER --> SUGGEST[Provide Suggestions]
+    SUGGEST --> RECOVER[Recovery Options]
     
-    subgraph "Services"
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        DevSvc[Dev Service]
-    end
-    
-    ClusterSvc --> Executor
-    ClusterSvc --> UI
-    ClusterSvc --> Config
-    ClusterSvc --> Progress
-    
-    ChartSvc --> Executor
-    ChartSvc --> UI  
-    ChartSvc --> Errors
-    
-    DevSvc --> Executor
-    DevSvc --> Logger
-    DevSvc --> Progress
+    RECOVER --> RETRY[Retry Operation]
+    RECOVER --> ROLLBACK[Rollback Changes]
+    RECOVER --> EXIT[Graceful Exit]
 ```
 
-**Shared Components:**
+## 📋 Configuration Management
 
-| Component | Purpose |
-|-----------|---------|
-| **Command Executor** | Abstracts external command execution with logging and error handling |
-| **UI Components** | Consistent terminal UI with progress bars, prompts, and formatting |
-| **Configuration** | Manages CLI settings, credentials, and environment variables |
-| **Error Handling** | Centralized error processing with user-friendly messages |
-| **Progress Tracking** | Visual progress indicators for long-running operations |
-
-### Configuration Management
+### Configuration Layers
 
 ```mermaid
-graph LR
+graph TB
     subgraph "Configuration Sources"
-        Flags[Command Flags]
-        Env[Environment Variables]
-        Files[Config Files]
-        Defaults[Default Values]
+        CLI[CLI Flags] 
+        ENV[Environment Variables]
+        FILE[Config Files]
+        DEFAULT[Default Values]
     end
     
-    subgraph "Configuration Hierarchy"
-        Merged[Merged Configuration]
+    subgraph "Configuration Merger"
+        MERGER[Config Merger]
     end
     
-    Flags --> Merged
-    Env --> Merged
-    Files --> Merged
-    Defaults --> Merged
+    subgraph "Domain Configs"
+        CLUSTER_CONFIG[Cluster Config]
+        CHART_CONFIG[Chart Config]
+        DEV_CONFIG[Dev Config]
+    end
     
-    Merged --> Services[Application Services]
+    CLI --> MERGER
+    ENV --> MERGER
+    FILE --> MERGER
+    DEFAULT --> MERGER
+    
+    MERGER --> CLUSTER_CONFIG
+    MERGER --> CHART_CONFIG
+    MERGER --> DEV_CONFIG
 ```
 
-Configuration precedence (highest to lowest):
-1. Command line flags
-2. Environment variables
-3. Configuration files
-4. Default values
+### Configuration Structure
 
-## Error Handling Strategy
+```go
+// Hierarchical configuration
+type Config struct {
+    Cluster ClusterConfig `yaml:"cluster"`
+    Chart   ChartConfig   `yaml:"chart"`
+    Dev     DevConfig     `yaml:"dev"`
+    Logging LogConfig     `yaml:"logging"`
+}
 
-### Error Types and Handling
-
-```mermaid
-graph TB
-    subgraph "Error Categories"
-        UserError[User Input Errors]
-        SystemError[System Errors]
-        NetworkError[Network Errors]
-        InfraError[Infrastructure Errors]
-    end
-    
-    subgraph "Error Handling"
-        Validation[Input Validation]
-        Retry[Retry Logic]
-        Fallback[Fallback Strategies]
-        Recovery[Error Recovery]
-    end
-    
-    UserError --> Validation
-    SystemError --> Retry
-    NetworkError --> Retry
-    InfraError --> Fallback
-    
-    Validation --> Recovery
-    Retry --> Recovery
-    Fallback --> Recovery
+type ClusterConfig struct {
+    Provider    string            `yaml:"provider"`
+    Name        string            `yaml:"name"`
+    Nodes       int               `yaml:"nodes"`
+    Version     string            `yaml:"version"`
+    ExtraArgs   map[string]string `yaml:"extraArgs"`
+}
 ```
 
-**Error Handling Patterns:**
-- **Validation Errors**: Immediate feedback with suggestions
-- **Transient Errors**: Automatic retry with exponential backoff
-- **Infrastructure Errors**: Graceful degradation and cleanup
-- **Fatal Errors**: Clean shutdown with helpful error messages
+## 🧪 Testing Architecture
 
-## Testing Architecture
-
-### Test Layer Structure
+### Test Organization
 
 ```mermaid
 graph TB
     subgraph "Test Types"
-        Unit[Unit Tests]
-        Integration[Integration Tests]
+        UNIT[Unit Tests]
+        INTEGRATION[Integration Tests]
         E2E[End-to-End Tests]
-        Performance[Performance Tests]
     end
     
     subgraph "Test Infrastructure"
-        Mocks[Mock Objects]
-        Fixtures[Test Fixtures]
-        Utilities[Test Utilities]
-        Helpers[Test Helpers]
+        MOCKS[Mocks & Stubs]
+        FIXTURES[Test Fixtures]
+        HELPERS[Test Helpers]
     end
     
-    Unit --> Mocks
-    Integration --> Fixtures
-    E2E --> Utilities
-    Performance --> Helpers
+    subgraph "Test Environments"
+        LOCAL[Local Testing]
+        CI[CI/CD Testing]
+        STAGING[Staging Testing]
+    end
+    
+    UNIT --> MOCKS
+    INTEGRATION --> FIXTURES
+    E2E --> HELPERS
+    
+    MOCKS --> LOCAL
+    FIXTURES --> CI
+    HELPERS --> STAGING
 ```
 
-**Testing Strategy:**
-- **Unit Tests**: Fast, isolated tests with mocked dependencies
-- **Integration Tests**: Service interaction tests with test containers
-- **E2E Tests**: Complete workflow tests with real clusters
-- **Performance Tests**: Benchmarks and load testing
+### Testing Patterns
 
-## Extension Points
+```go
+// Table-driven tests
+func TestClusterService_Create(t *testing.T) {
+    tests := []struct {
+        name        string
+        clusterName string
+        config      ClusterConfig
+        mockSetup   func(*MockProvider)
+        wantErr     bool
+    }{
+        // Test cases...
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Test implementation
+        })
+    }
+}
+
+// Mock interfaces for testing
+type MockClusterProvider struct {
+    CreateFunc func(string, ClusterConfig) error
+}
+
+func (m *MockClusterProvider) Create(name string, config ClusterConfig) error {
+    if m.CreateFunc != nil {
+        return m.CreateFunc(name, config)
+    }
+    return nil
+}
+```
+
+## 📈 Performance Considerations
+
+### Command Execution Optimization
+
+- **Concurrent Operations**: Parallel execution where safe
+- **Caching**: Cache expensive operations and results  
+- **Lazy Loading**: Load resources only when needed
+- **Resource Pooling**: Reuse connections and clients
+
+### Memory Management
+
+- **Streaming**: Process large outputs in streams
+- **Cleanup**: Proper resource cleanup and garbage collection
+- **Limits**: Respect system resource constraints
+
+## 🚀 Extensibility Points
 
 ### Adding New Providers
 
-```mermaid
-graph LR
-    subgraph "Provider Interface"
-        IProvider[Provider Interface]
-    end
-    
-    subgraph "Implementations"
-        K3D[K3D Provider]
-        Kind[Kind Provider]
-        EKS[EKS Provider]
-        New[New Provider]
-    end
-    
-    IProvider --> K3D
-    IProvider --> Kind
-    IProvider --> EKS
-    IProvider --> New
+```go
+// 1. Implement provider interface
+type MyClusterProvider struct{}
+
+func (p *MyClusterProvider) Create(name string, config *ClusterConfig) error {
+    // Custom implementation
+}
+
+// 2. Register provider
+func init() {
+    registry.RegisterClusterProvider("myprovider", &MyClusterProvider{})
+}
 ```
 
-**Extension Process:**
-1. Implement provider interface
-2. Add configuration options
-3. Register with provider factory
-4. Add integration tests
-5. Update documentation
+### Adding New Commands
 
-### Plugin Architecture (Future)
+```go
+// 1. Create command file
+func GetMyCmd() *cobra.Command {
+    return &cobra.Command{
+        Use:  "mycmd",
+        RunE: runMyCmd,
+    }
+}
 
-```mermaid
-graph TB
-    subgraph "Plugin System"
-        Registry[Plugin Registry]
-        Loader[Plugin Loader]
-        Manager[Plugin Manager]
-    end
-    
-    subgraph "Plugin Types"
-        ProviderPlugin[Provider Plugins]
-        CommandPlugin[Command Plugins]
-        UIPlugin[UI Plugins]
-    end
-    
-    Registry --> Loader
-    Loader --> Manager
-    Manager --> ProviderPlugin
-    Manager --> CommandPlugin
-    Manager --> UIPlugin
+// 2. Add to root command
+rootCmd.AddCommand(GetMyCmd())
 ```
 
-## Design Decisions
+## 📚 Architecture Resources
 
-### Key Architectural Decisions
+### Design Documents
+- **[ADR-001: Architecture Decision Records](../contributing/guidelines.md)**
+- **[Provider Interface Design](../contributing/guidelines.md)**
+- **[Error Handling Strategy](../contributing/guidelines.md)**
 
-| Decision | Rationale | Trade-offs |
-|----------|-----------|------------|
-| **Clean Architecture** | Maintainability and testability | More complexity for simple operations |
-| **Provider Pattern** | Extensibility and platform support | Additional abstraction layer |
-| **Cobra CLI Framework** | Rich CLI features and community support | Framework dependency |
-| **Go Language** | Performance, concurrency, and deployment simplicity | Learning curve for some developers |
-| **K3d for Local Development** | Lightweight and fast cluster creation | Limited to local development |
+### Code Examples
+- **[Service Implementation Examples](../testing/overview.md)**
+- **[Provider Implementation Patterns](../testing/overview.md)**
+- **[Testing Strategies](../testing/overview.md)**
 
-### Future Architecture Evolution
+---
 
-```mermaid
-graph TB
-    subgraph "Current Architecture"
-        CLI[Monolithic CLI]
-        Local[Local Only]
-        K3D[K3D Only]
-    end
-    
-    subgraph "Future Architecture"
-        Microservices[Service Architecture]
-        Cloud[Cloud Integration]
-        MultiProvider[Multi-Provider Support]
-        WebUI[Web Interface]
-    end
-    
-    CLI --> Microservices
-    Local --> Cloud
-    K3D --> MultiProvider
-    CLI --> WebUI
-```
-
-**Planned Enhancements:**
-- Plugin system for custom providers
-- Web-based management interface
-- Cloud provider integrations
-- Distributed service architecture
-- Advanced GitOps workflows
-
-## Performance Considerations
-
-### Optimization Strategies
-
-| Area | Strategy | Implementation |
-|------|----------|----------------|
-| **Command Startup** | Lazy loading of providers | On-demand initialization |
-| **Concurrent Operations** | Go routines for parallel tasks | Cluster creation and chart installation |
-| **Resource Usage** | Efficient resource cleanup | Defer statements and context cancellation |
-| **Network Operations** | Connection pooling and caching | HTTP client reuse |
-
-## Security Architecture
-
-### Security Layers
-
-```mermaid
-graph TB
-    subgraph "Security Layers"
-        Input[Input Validation]
-        Auth[Authentication]
-        Authz[Authorization] 
-        Audit[Audit Logging]
-        Encryption[Data Encryption]
-    end
-    
-    subgraph "Security Controls"
-        RBAC[RBAC Integration]
-        Secrets[Secret Management]
-        Network[Network Security]
-        Container[Container Security]
-    end
-    
-    Input --> Auth
-    Auth --> Authz
-    Authz --> Audit
-    Audit --> Encryption
-    
-    RBAC --> Authz
-    Secrets --> Encryption
-    Network --> Container
-```
-
-**Security Principles:**
-- Least privilege access
-- Secure by default configuration
-- Credential management best practices
-- Audit logging for compliance
-
-## Next Steps
-
-To dive deeper into the OpenFrame CLI architecture:
-
-1. **[Code Structure Guide](code-structure.md)** - Detailed package organization
-2. **[Design Patterns](design-patterns.md)** - Common patterns used throughout the codebase
-3. **[API Reference](../reference/api.md)** - Internal API documentation
-4. **[Testing Architecture](../testing/overview.md)** - How testing is structured
-
-> **💡 Understanding the Flow**: Start by tracing a command from the CLI layer through the services to the providers. This will give you a concrete understanding of how the architecture works in practice.
+*Ready to dive into testing? Check out our [testing overview](../testing/overview.md) to understand how to test OpenFrame CLI effectively.*
