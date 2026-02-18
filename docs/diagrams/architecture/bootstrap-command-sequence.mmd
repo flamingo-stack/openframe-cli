@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant User
+    participant CLI as CLI Command
+    participant Bootstrap as Bootstrap Service
+    participant Cluster as Cluster Service
+    participant Chart as Chart Service
+    participant K3D as K3D Provider
+    participant Helm as Helm Provider
+    participant ArgoCD as ArgoCD Manager
+    
+    User->>CLI: openframe bootstrap
+    CLI->>Bootstrap: Execute()
+    
+    Bootstrap->>Cluster: CreateCluster()
+    Cluster->>K3D: Create k3d cluster
+    K3D->>K3D: Configure networking & certificates
+    K3D-->>Cluster: Return REST config
+    Cluster-->>Bootstrap: Cluster ready + REST config
+    
+    Bootstrap->>Chart: InstallCharts(REST config)
+    Chart->>Helm: Install ArgoCD
+    Helm->>Helm: Apply Helm values
+    Helm-->>Chart: ArgoCD installed
+    
+    Chart->>ArgoCD: Install app-of-apps
+    ArgoCD->>ArgoCD: Clone GitHub repository
+    ArgoCD->>ArgoCD: Apply manifests
+    ArgoCD-->>Chart: App-of-apps deployed
+    
+    Chart->>ArgoCD: WaitForApplications()
+    ArgoCD->>ArgoCD: Monitor sync status
+    ArgoCD-->>Chart: Applications synced
+    
+    Chart-->>Bootstrap: Installation complete
+    Bootstrap-->>CLI: Success
+    CLI-->>User: Ready for use

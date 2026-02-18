@@ -1,0 +1,29 @@
+graph TB
+    CLI[CLI Layer - Cobra Commands] --> Services[Service Layer]
+    Services --> Providers[Provider Layer]
+    Providers --> External[External Systems]
+    
+    CLI --> Bootstrap[Bootstrap Service]
+    CLI --> Chart[Chart Service]
+    CLI --> Cluster[Cluster Service]
+    CLI --> Dev[Dev Service]
+    
+    Bootstrap --> ClusterProviders[Cluster Providers]
+    Bootstrap --> ChartProviders[Chart Providers]
+    
+    Chart --> Helm[Helm Provider]
+    Chart --> ArgoCD[ArgoCD Provider]
+    Chart --> Git[Git Provider]
+    
+    Cluster --> K3D[K3D Provider]
+    
+    Dev --> Telepresence[Telepresence Provider]
+    Dev --> Kubectl[Kubectl Provider]
+    Dev --> Scaffold[Scaffold Provider]
+    
+    Helm --> HelmBinary[Helm Binary]
+    ArgoCD --> ArgoCDAPI[ArgoCD APIs]
+    Git --> GitCommands[Git Commands]
+    K3D --> K3DBinary[K3D Binary]
+    Telepresence --> TelepresenceBinary[Telepresence Binary]
+    Kubectl --> KubectlBinary[Kubectl Binary]
