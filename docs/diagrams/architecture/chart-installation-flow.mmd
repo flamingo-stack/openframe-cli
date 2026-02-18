@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant CLI as Chart CMD
+    participant ChS as Chart Service
+    participant Git as Git Provider
+    participant Helm as Helm Provider
+    participant ArgoCD as ArgoCD Provider
+    participant UI as Configuration UI
+    
+    CLI->>UI: Show deployment selection
+    UI-->>CLI: User selects mode
+    CLI->>UI: Configure helm values
+    UI-->>CLI: Generated config
+    
+    CLI->>ChS: InstallCharts()
+    ChS->>Helm: Install ArgoCD
+    Helm-->>ChS: ArgoCD ready
+    
+    ChS->>Git: Clone repository
+    Git-->>ChS: Local chart path
+    ChS->>Helm: Install app-of-apps
+    Helm-->>ChS: Apps installed
+    
+    ChS->>ArgoCD: Wait for applications
+    loop Application Sync
+        ArgoCD->>ArgoCD: Sync applications
+        ArgoCD-->>ChS: Status update
+    end
+    ArgoCD-->>ChS: All healthy & synced
+    ChS-->>CLI: Success
