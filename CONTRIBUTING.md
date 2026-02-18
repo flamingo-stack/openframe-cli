@@ -1,445 +1,539 @@
 # Contributing to OpenFrame CLI
 
-Welcome to the OpenFrame CLI project! We appreciate your interest in contributing to this open-source tool that helps manage Kubernetes clusters and development workflows. This guide will help you understand our development process, coding standards, and contribution workflow.
+Thank you for your interest in contributing to OpenFrame CLI! This guide will help you get started with contributing to our Go-based command-line tool for Kubernetes cluster management and MSP development workflows.
+
+## 🌟 Welcome Contributors
+
+OpenFrame CLI is built by the community, for the community. Whether you're fixing bugs, adding features, improving documentation, or helping with testing, every contribution makes a difference.
+
+## 📋 Table of Contents
+
+- [Getting Started](#getting-started)
+- [Development Setup](#development-setup)
+- [Contribution Workflow](#contribution-workflow)
+- [Code Standards](#code-standards)
+- [Testing Guidelines](#testing-guidelines)
+- [Documentation](#documentation)
+- [Community](#community)
 
 ## 🚀 Getting Started
 
-### Before You Contribute
+### Prerequisites
 
-1. **Join Our Community**: Connect with us on [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-2. **Read the Documentation**: Familiarize yourself with the [project documentation](./docs/README.md)
-3. **Check Open Issues**: Look for issues labeled `good first issue` or `help wanted`
-4. **Discuss Large Changes**: For significant features or changes, discuss with maintainers first
+Before you begin, ensure you have:
 
-### System Requirements
+- **System Requirements**:
+  - Minimum: 24GB RAM, 6 CPU cores, 50GB disk
+  - Recommended: 32GB RAM, 12 CPU cores, 100GB disk
+- **Development Tools**:
+  - Go 1.21+ installed and configured
+  - Docker installed and running
+  - Git for version control
+  - Your favorite IDE or editor
 
-- **Hardware**: Minimum 24GB RAM, 6 CPU cores, 50GB disk
-- **Software**: Go 1.19+, Docker 20.10+, Git 2.30+
-- **OS**: Linux, macOS, or Windows with WSL2
+### Quick Contributor Setup
+
+```bash
+# 1. Fork the repository on GitHub
+# 2. Clone your fork
+git clone https://github.com/YOUR_USERNAME/openframe-cli.git
+cd openframe-cli
+
+# 3. Add upstream remote
+git remote add upstream https://github.com/flamingo-stack/openframe-cli.git
+
+# 4. Install dependencies
+go mod download
+go mod verify
+
+# 5. Build from source
+go build -o bin/openframe main.go
+
+# 6. Verify your setup
+./bin/openframe --version
+go test ./... -short
+```
+
+## 🔧 Development Setup
+
+### Local Development Environment
+
+Follow our comprehensive [Local Development Guide](./docs/development/setup/local-development.md) for detailed setup instructions.
+
+**Quick Setup:**
+
+```bash
+# Install build dependencies
+make install-deps
+
+# Development build
+make build
+
+# Run tests
+make test
+
+# Start development with hot reload (optional)
+make dev
+```
+
+### Repository Structure
+
+Understanding the codebase:
+
+```text
+openframe-cli/
+├── cmd/                    # CLI command definitions (Cobra)
+│   ├── bootstrap/         # Bootstrap command
+│   ├── cluster/           # Cluster management
+│   ├── chart/             # Chart installation
+│   ├── dev/               # Development tools
+│   └── root.go            # Root command setup
+├── internal/              # Internal packages
+│   ├── bootstrap/         # Bootstrap service logic
+│   ├── cluster/           # K3D cluster management
+│   ├── chart/             # ArgoCD/Helm services
+│   ├── dev/               # Development workflows
+│   └── shared/            # Shared utilities
+├── tests/                 # Test suites
+│   ├── integration/       # End-to-end tests
+│   ├── mocks/            # Generated mocks
+│   └── testutil/         # Test utilities
+├── docs/                 # Documentation
+└── main.go               # Application entry point
+```
 
 ## 🔄 Contribution Workflow
 
-### 1. Fork and Clone
+### 1. Find or Create an Issue
+
+- **Existing Issues**: Browse our Slack community for open discussions
+- **New Features**: Propose ideas in our OpenMSP Slack community first
+- **Bug Reports**: Join our Slack to report and discuss issues
+
+**🔗 Join our community**: https://www.openmsp.ai/
+
+### 2. Fork and Branch
 
 ```bash
-# Fork the repository on GitHub first, then:
-git clone https://github.com/YOUR-USERNAME/openframe-oss-tenant.git
-cd openframe-oss-tenant
+# Fork the repository on GitHub
+# Clone your fork
+git clone https://github.com/YOUR_USERNAME/openframe-cli.git
 
-# Add upstream remote
-git remote add upstream https://github.com/flamingo-stack/openframe-oss-tenant.git
-git fetch upstream
-```
-
-### 2. Set Up Development Environment
-
-```bash
-# Build the CLI
-go build -o openframe .
-
-# Verify installation
-./openframe --version
-
-# Run tests to ensure environment is working
-make test
-```
-
-### 3. Create a Feature Branch
-
-```bash
-# Create and switch to a new branch
+# Create feature branch
 git checkout -b feature/your-feature-name
 
 # Or for bug fixes
 git checkout -b fix/issue-description
-
-# Or for documentation
-git checkout -b docs/documentation-update
 ```
 
-### 4. Make Your Changes
-
-- Follow the coding standards outlined below
-- Write or update tests for your changes
-- Update documentation if needed
-- Ensure your changes work across platforms (Linux, macOS, Windows/WSL2)
-
-### 5. Test Your Changes
+### 3. Development Process
 
 ```bash
-# Run all tests
-make test
+# Make your changes
+# ... edit code ...
 
-# Run specific test suites
-make test-unit
-make test-integration
+# Test your changes
+go test ./...
+go test -race ./...
 
-# Check code formatting and linting
-make lint
-make format
+# Build and test manually
+go build -o bin/openframe main.go
+./bin/openframe --version
 
-# Build and test locally
-make build
-./openframe --version
+# Run integration tests (if applicable)
+export OPENFRAME_INTEGRATION_TESTS="true"
+go test ./tests/integration/... -timeout=10m
 ```
 
-### 6. Commit Your Changes
+### 4. Commit Guidelines
 
-Follow our commit message conventions:
+We follow conventional commit standards:
 
 ```bash
-# Stage your changes
-git add .
+# Feature commits
+git commit -m "feat: add cluster auto-scaling support"
 
-# Commit with descriptive message
-git commit -m "feat: add cluster auto-scaling support
+# Bug fix commits
+git commit -m "fix: resolve K3D networking issue"
 
-- Implement horizontal pod autoscaling for services
-- Add configuration options for scaling thresholds
-- Update documentation with scaling examples
+# Documentation commits
+git commit -m "docs: update installation guide"
 
-Fixes #123"
+# Test commits
+git commit -m "test: add integration tests for bootstrap command"
 ```
 
-### 7. Push and Create Pull Request
+**Commit Types:**
+- `feat`: New features
+- `fix`: Bug fixes
+- `docs`: Documentation changes
+- `test`: Test additions or modifications
+- `refactor`: Code refactoring
+- `perf`: Performance improvements
+- `chore`: Maintenance tasks
+
+### 5. Submit Pull Request
 
 ```bash
 # Push to your fork
 git push origin feature/your-feature-name
 
-# Create pull request on GitHub
-# Fill out the PR template with details about your changes
+# Create Pull Request on GitHub with:
+# - Clear title and description
+# - Reference to related issues/discussions
+# - Screenshots/videos if applicable
+# - Test results and verification steps
 ```
 
-## 📝 Code Style and Standards
+## 📏 Code Standards
 
-### Go Code Style
+### Go Code Guidelines
 
-We follow standard Go conventions with additional guidelines:
-
-#### Formatting
-
-```bash
-# Use gofmt and goimports for formatting
-gofmt -s -w .
-goimports -w .
-```
-
-#### Naming Conventions
-
+**1. Follow Go Best Practices:**
 ```go
-// Exported types use PascalCase
-type ClusterManager struct {
-    name string
+// Use meaningful names
+func CreateClusterWithConfig(name string, config *ClusterConfig) error {
+    // Implementation
 }
 
-// Exported functions use PascalCase
-func CreateCluster(config *Config) error {
-    return nil
+// Handle errors properly
+if err := cluster.Create(); err != nil {
+    return fmt.Errorf("failed to create cluster: %w", err)
 }
 
-// Private functions use camelCase
-func validateClusterName(name string) error {
-    return nil
-}
-
-// Constants use PascalCase or UPPER_CASE
-const DefaultTimeout = 30 * time.Second
-const MAX_RETRY_ATTEMPTS = 3
-```
-
-#### Error Handling
-
-```go
-// Wrap errors with context
-func createCluster(name string) error {
-    if err := validateName(name); err != nil {
-        return fmt.Errorf("invalid cluster name: %w", err)
+// Use context for cancellation
+func (s *Service) CreateCluster(ctx context.Context, name string) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    default:
+        // Continue with creation
     }
-    
-    if err := executeCommand(name); err != nil {
-        return fmt.Errorf("failed to create cluster %s: %w", name, err)
-    }
-    
-    return nil
 }
 ```
 
-#### Documentation
-
+**2. Package Organization:**
 ```go
-// Package documentation
+// Package declaration with clear purpose
 // Package cluster provides Kubernetes cluster management functionality.
 package cluster
 
-// Function documentation with examples
-// CreateCluster creates a new K3D cluster with the specified configuration.
-//
-// Example:
-//   config := &ClusterConfig{Name: "dev-cluster"}
-//   result, err := CreateCluster(ctx, config)
-//   if err != nil {
-//       return fmt.Errorf("cluster creation failed: %w", err)
-//   }
-func CreateCluster(ctx context.Context, config *ClusterConfig) (*ClusterResult, error) {
-    // Implementation
+// Imports organized: std lib, external, internal
+import (
+    "context"
+    "fmt"
+    
+    "github.com/spf13/cobra"
+    
+    "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+)
+```
+
+**3. Error Handling:**
+```go
+// Wrap errors with context
+if err != nil {
+    return fmt.Errorf("failed to validate cluster config: %w", err)
+}
+
+// Use custom error types for specific cases
+type ClusterNotFoundError struct {
+    Name string
+}
+
+func (e *ClusterNotFoundError) Error() string {
+    return fmt.Sprintf("cluster %q not found", e.Name)
 }
 ```
 
-### Project Structure
+### Code Formatting
 
-```text
-internal/
-├── bootstrap/          # Bootstrap orchestration
-├── cluster/           # Cluster management domain
-├── chart/            # Chart installation services
-├── dev/              # Development tools
-└── shared/           # Shared utilities
-    ├── executor/     # Command execution
-    ├── ui/          # Common UI components
-    └── errors/      # Error handling utilities
+```bash
+# Format code
+go fmt ./...
+
+# Organize imports
+goimports -w .
+
+# Run linter
+golangci-lint run
+
+# Check for common issues
+go vet ./...
 ```
 
-### Testing Standards
+### CLI Command Standards
 
+**Command Structure:**
 ```go
-func TestServiceMethod(t *testing.T) {
+func NewCreateCommand() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "create [NAME]",
+        Short: "Create a new OpenFrame cluster",
+        Long: `Create a new OpenFrame cluster with the specified configuration.
+        
+This command will create a K3D cluster with networking and certificates
+configured for OpenFrame development.`,
+        Args: cobra.ExactArgs(1),
+        RunE: runCreate,
+    }
+    
+    // Add flags with clear descriptions
+    cmd.Flags().StringSlice("nodes", []string{}, "Number of worker nodes")
+    cmd.Flags().String("version", "latest", "Kubernetes version")
+    
+    return cmd
+}
+```
+
+**Interactive UI Standards:**
+```go
+// Use consistent UI components
+import "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+
+// Progress indication
+ui.Info("Creating cluster", "name", clusterName)
+spinner := ui.NewSpinner("Installing components...")
+spinner.Start()
+defer spinner.Stop()
+
+// Success/error reporting
+ui.Success("Cluster created successfully", "name", clusterName)
+ui.Error("Failed to create cluster", "error", err)
+```
+
+## 🧪 Testing Guidelines
+
+### Test Categories
+
+**1. Unit Tests:**
+```go
+func TestCreateCluster(t *testing.T) {
     tests := []struct {
-        name           string
-        input          InputType
-        expectedResult ExpectedType
-        expectedError  string
+        name    string
+        input   string
+        want    error
+        wantErr bool
     }{
         {
-            name: "successful operation",
-            input: InputType{Field: "value"},
-            expectedResult: ExpectedType{},
-            expectedError: "",
+            name:    "valid cluster name",
+            input:   "test-cluster",
+            want:    nil,
+            wantErr: false,
         },
         {
-            name: "error condition",
-            input: InputType{Field: "invalid"},
-            expectedResult: ExpectedType{},
-            expectedError: "validation error",
+            name:    "invalid cluster name",
+            input:   "",
+            wantErr: true,
         },
     }
-
+    
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            // Arrange
-            service := NewService()
-
-            // Act
-            result, err := service.Method(tt.input)
-
-            // Assert
-            if tt.expectedError != "" {
-                assert.Error(t, err)
-                assert.Contains(t, err.Error(), tt.expectedError)
-            } else {
-                assert.NoError(t, err)
-                assert.Equal(t, tt.expectedResult, result)
+            err := CreateCluster(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("CreateCluster() error = %v, wantErr %v", err, tt.wantErr)
             }
         })
     }
 }
 ```
 
-#### Test Requirements
-
-1. **Test Coverage**: Maintain >80% code coverage
-2. **Table-Driven Tests**: Use for multiple test cases
-3. **Mocking**: Mock external dependencies
-4. **Integration Tests**: Test with real dependencies when appropriate
-5. **Error Testing**: Test both success and failure paths
-
-## 💬 Commit Message Conventions
-
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-### Format
-
-```text
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
+**2. Integration Tests:**
+```go
+func TestBootstrapIntegration(t *testing.T) {
+    if !testing.Short() && os.Getenv("OPENFRAME_INTEGRATION_TESTS") == "true" {
+        t.Skip("Skipping integration tests")
+    }
+    
+    // Test full bootstrap workflow
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+    defer cancel()
+    
+    err := bootstrap.Execute(ctx, &bootstrap.Config{
+        ClusterName: "test-integration",
+        NonInteractive: true,
+    })
+    
+    require.NoError(t, err)
+    
+    // Cleanup
+    defer cluster.Delete("test-integration")
+}
 ```
 
-### Types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `feat` | New feature | `feat: add cluster auto-scaling` |
-| `fix` | Bug fix | `fix: resolve cluster creation timeout` |
-| `docs` | Documentation changes | `docs: update installation guide` |
-| `style` | Code style changes | `style: format cluster service` |
-| `refactor` | Code refactoring | `refactor: extract chart validation` |
-| `test` | Test additions or changes | `test: add cluster lifecycle tests` |
-| `chore` | Build or tool changes | `chore: update dependencies` |
-
-### Examples
+### Running Tests
 
 ```bash
-# Feature addition
-git commit -m "feat(cluster): add support for custom node labels
+# Run unit tests
+go test ./internal/... -v
 
-- Allow users to specify custom labels for cluster nodes
-- Update configuration validation to accept label format
-- Add tests for label validation and application
+# Run with race detection
+go test -race ./...
 
-Closes #456"
+# Run integration tests (requires Docker)
+export OPENFRAME_INTEGRATION_TESTS="true"
+go test ./tests/integration/... -timeout=15m
 
-# Bug fix
-git commit -m "fix(chart): resolve ArgoCD installation timeout
-
-The ArgoCD installation was timing out due to insufficient
-wait time for the operator to become ready. Increased the
-timeout and improved status checking logic.
-
-Fixes #789"
+# Generate coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
 ```
 
-## 🔍 Pull Request Process
+### Test Requirements
 
-### PR Template
+- **Unit test coverage**: Aim for >80% coverage on new code
+- **Integration tests**: Add for new commands and workflows
+- **Error scenarios**: Test error paths and edge cases
+- **Mocking**: Use mocks for external dependencies
 
-```markdown
-## Description
-Brief description of the changes and motivation.
+## 📚 Documentation
 
-## Type of Change
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+### Code Documentation
 
-## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Manual testing performed
+```go
+// Package cluster provides Kubernetes cluster lifecycle management.
+//
+// This package handles creating, managing, and destroying K3D clusters
+// for OpenFrame development environments.
+package cluster
 
-## Checklist
-- [ ] My code follows the project's coding standards
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
+// ClusterService manages Kubernetes cluster operations.
+type ClusterService struct {
+    provider ClusterProvider
+    ui       ui.Interface
+}
+
+// Create creates a new Kubernetes cluster with the specified configuration.
+//
+// The cluster will be configured with networking, certificates, and
+// storage required for OpenFrame services.
+//
+// Example:
+//   service := cluster.NewService(provider, ui)
+//   err := service.Create(ctx, "my-cluster", config)
+func (s *ClusterService) Create(ctx context.Context, name string, config *Config) error {
+    // Implementation
+}
 ```
 
-### Review Process
+### Documentation Updates
 
-1. **Automated Checks**: CI/CD pipeline runs tests and linting
-2. **Maintainer Review**: Core maintainers review code quality and design
-3. **Community Review**: Community members may provide feedback
-4. **Approval**: At least one maintainer approval required
-5. **Merge**: Maintainers handle merging approved PRs
+- Update relevant documentation in `docs/` directory
+- Include examples and use cases
+- Add troubleshooting information
+- Update CLI help text and descriptions
 
-### Branch Naming
+## 🎯 Contribution Checklist
 
-```bash
-# Features
-feature/cluster-auto-scaling
-feature/add-helm-chart-validation
+Before submitting your contribution:
 
-# Bug fixes
-fix/cluster-creation-timeout
-fix/argocd-sync-issue
+### Code Quality
+- [ ] **Code builds successfully**: `go build main.go`
+- [ ] **Tests pass**: `go test ./...`
+- [ ] **Linting passes**: `golangci-lint run`
+- [ ] **Code formatted**: `go fmt ./...`
+- [ ] **Dependencies updated**: `go mod tidy`
 
-# Documentation
-docs/update-installation-guide
-docs/add-troubleshooting-section
+### Testing
+- [ ] **Unit tests written** for new functionality
+- [ ] **Integration tests added** (if applicable)
+- [ ] **Manual testing completed** on target platforms
+- [ ] **Error scenarios tested**
+
+### Documentation
+- [ ] **Code documented** with clear comments
+- [ ] **CLI help updated** for new commands
+- [ ] **User documentation updated** in `docs/`
+- [ ] **README updated** (if needed)
+
+### Review Preparation
+- [ ] **Commit messages follow conventions**
+- [ ] **Branch is up-to-date** with upstream main
+- [ ] **PR description is comprehensive**
+- [ ] **Related issues referenced**
+
+## 🏗️ Architecture Contributions
+
+### Adding New Commands
+
+1. Create command in `cmd/` directory
+2. Implement service logic in `internal/`
+3. Add provider interfaces and implementations
+4. Include comprehensive tests
+5. Update documentation
+
+### Service Layer Patterns
+
+```go
+// Service interface pattern
+type Service interface {
+    Execute(ctx context.Context, config *Config) error
+}
+
+// Provider interface pattern  
+type Provider interface {
+    Create(ctx context.Context, name string) error
+    Delete(ctx context.Context, name string) error
+}
+
+// Implementation with dependency injection
+func NewService(provider Provider, ui ui.Interface) *ServiceImpl {
+    return &ServiceImpl{
+        provider: provider,
+        ui:       ui,
+    }
+}
 ```
 
-## 🐛 Issue Reports and Feature Requests
-
-### Creating Issues
-
-1. **Search existing issues**: Avoid duplicates
-2. **Use templates**: Fill out the provided issue templates
-3. **Be specific**: Provide detailed descriptions and steps to reproduce
-4. **Include context**: Operating system, version, environment details
-
-### Bug Report Template
-
-```markdown
-## Bug Description
-A clear and concise description of what the bug is.
-
-## Steps to Reproduce
-1. Run command '...'
-2. Configure option '...'
-3. See error
-
-## Expected Behavior
-A clear description of what you expected to happen.
-
-## Actual Behavior
-What actually happened instead.
-
-## Environment
-- OS: [e.g., Ubuntu 20.04, macOS 12, Windows 11]
-- OpenFrame CLI Version: [e.g., v1.2.3]
-- Go Version: [e.g., 1.19.5]
-- Docker Version: [e.g., 20.10.21]
-
-## Additional Context
-Add any other context about the problem here.
-```
-
-## 🏷️ Versioning and Releases
-
-We use [Semantic Versioning](https://semver.org/):
-- **MAJOR.MINOR.PATCH** (e.g., 1.2.3)
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes (backward compatible)
-
-## 👥 Community Guidelines
-
-### Code of Conduct
-
-1. **Be respectful**: Treat all community members with respect
-2. **Be inclusive**: Welcome newcomers and help them get started
-3. **Be collaborative**: Work together toward common goals
-4. **Be constructive**: Provide helpful feedback and suggestions
+## 🤝 Community
 
 ### Communication Channels
 
-- **Slack**: [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) for discussions and support
-- **GitHub Issues**: For bug reports and feature requests
-- **Pull Requests**: For code contributions and reviews
+- **Primary Community**: OpenMSP Slack Community
+  - Join: https://www.openmsp.ai/
+  - Invite Link: https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA
+- **GitHub**: For code reviews and pull requests
+- **Documentation**: In-repo docs for technical reference
 
-> **Note**: We don't use GitHub Discussions. All community interaction happens in Slack.
+### Getting Help
 
-## 🆘 Getting Help
+1. **Development Questions**: Ask in #openframe-dev channel
+2. **Feature Discussions**: Use #feature-requests channel
+3. **Bug Reports**: Report in #bug-reports channel
+4. **General Support**: Use #general channel
 
-1. **Check Documentation**: Start with the [documentation](./docs/README.md)
-2. **Search Issues**: Look for existing similar issues
-3. **Ask in Slack**: Join our Slack community for help
-4. **Create an Issue**: If you find a bug or need a feature
+### Code Review Process
 
-## 🙏 Recognition
+1. **Automated Checks**: CI runs tests and linting
+2. **Peer Review**: Community members review code
+3. **Maintainer Review**: Core team provides final review
+4. **Merge**: Approved changes are merged to main
 
-Contributors will be:
-- Listed in release notes for their contributions
-- Recognized in the project README
-- Invited to join contributor Slack channels
-- Considered for maintainer roles based on consistent contributions
+## 🎉 Recognition
 
-## 📞 Questions?
+We appreciate all contributors! Contributors will be:
 
-If you have questions about contributing:
-1. Join our [Slack community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-2. Ask in the `#openframe-cli` channel
-3. Tag maintainers for specific questions
+- Listed in project contributors
+- Recognized in release notes
+- Invited to contributor channels
+- Eligible for contributor swag (when available)
 
-## 📚 External Repository
+## 📄 License
 
-The OpenFrame CLI main codebase is maintained in a separate repository:
-- **Repository**: [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
-- **Development Setup**: Follow the setup instructions in the external repository
+By contributing to OpenFrame CLI, you agree that your contributions will be licensed under the [Flamingo AI Unified License v1.0](LICENSE.md).
 
-Thank you for contributing to OpenFrame CLI! Your contributions help make Kubernetes cluster management more accessible and efficient for the entire community.
+## 🚀 Next Steps
+
+1. **Join the Community**: https://www.openmsp.ai/
+2. **Set Up Development**: Follow the [Local Development Guide](./docs/development/setup/local-development.md)
+3. **Pick Your First Issue**: Ask in Slack for good first contribution ideas
+4. **Start Contributing**: Follow this guide and submit your first PR!
+
+---
+
+**Thank you for contributing to OpenFrame CLI!** 🙏
+
+Your contributions help make MSP development more accessible and efficient for the entire community.
+
+*For questions about this guide, reach out in our Slack community.*
