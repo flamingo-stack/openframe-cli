@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap as Bootstrap Service
+    participant Cluster as Cluster Service
+    participant K3d as K3d Provider
+    participant Chart as Chart Service
+    participant Helm as Helm Provider
+    participant ArgoCD as ArgoCD Provider
+    participant UI as UI Components
+    
+    User->>Bootstrap: openframe bootstrap my-cluster
+    Bootstrap->>UI: Show logo and prerequisites check
+    Bootstrap->>Cluster: CreateCluster(config)
+    Cluster->>K3d: Create k3d cluster
+    K3d-->>Cluster: *rest.Config
+    Cluster-->>Bootstrap: *rest.Config
+    
+    Bootstrap->>Chart: InstallChartsWithConfig(req)
+    Chart->>Helm: Install ArgoCD
+    Helm-->>Chart: Success
+    Chart->>ArgoCD: Install app-of-apps
+    ArgoCD-->>Chart: Success
+    Chart->>ArgoCD: WaitForApplications()
+    
+    loop Application Sync
+        ArgoCD->>ArgoCD: Check application status
+        ArgoCD->>UI: Update progress spinner
+    end
+    
+    ArgoCD-->>Chart: All applications synced
+    Chart-->>Bootstrap: Installation complete
+    Bootstrap->>UI: Show success message
+    Bootstrap-->>User: Next steps and usage info

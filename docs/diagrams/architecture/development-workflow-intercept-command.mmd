@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant Developer
+    participant DevUI as Dev UI Service
+    participant Kubectl as Kubectl Provider
+    participant Intercept as Intercept Service
+    participant Telepresence as Telepresence Provider
+    
+    Developer->>DevUI: openframe dev intercept
+    DevUI->>Kubectl: GetNamespaces()
+    Kubectl-->>DevUI: [namespaces]
+    DevUI->>Kubectl: GetServices(namespace)
+    Kubectl-->>DevUI: [services]
+    DevUI->>Developer: Select service and ports
+    Developer-->>DevUI: Service selection
+    
+    DevUI->>Intercept: StartIntercept(service, flags)
+    Intercept->>Telepresence: Connect to cluster
+    Telepresence-->>Intercept: Connected
+    Intercept->>Telepresence: Create intercept
+    Telepresence-->>Intercept: Intercept active
+    
+    Intercept->>Developer: Intercept running on localhost:8080
+    
+    Note over Developer,Telepresence: Traffic flows to local development environment
+    
+    Developer->>Intercept: Ctrl+C
+    Intercept->>Telepresence: Leave intercept
+    Telepresence->>Telepresence: Cleanup connections
+    Intercept-->>Developer: Intercept stopped

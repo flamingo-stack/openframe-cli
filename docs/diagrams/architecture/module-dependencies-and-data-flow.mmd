@@ -1,0 +1,73 @@
+graph TB
+    subgraph "Command Layer"
+        RootCmd[cmd/root.go]
+        ClusterCmd[cmd/cluster/]
+        ChartCmd[cmd/chart/]
+        DevCmd[cmd/dev/]
+        BootstrapCmd[cmd/bootstrap/]
+    end
+    
+    subgraph "Business Logic Layer"
+        ClusterService[internal/cluster/service.go]
+        ChartServices[internal/chart/services/]
+        DevServices[internal/dev/services/]
+        BootstrapService[internal/bootstrap/service.go]
+    end
+    
+    subgraph "Provider Layer"
+        K3dProvider[internal/cluster/providers/k3d/]
+        HelmProvider[internal/chart/providers/helm/]
+        ArgoCDProvider[internal/chart/providers/argocd/]
+        GitProvider[internal/chart/providers/git/]
+        TelepresenceProvider[internal/dev/providers/telepresence/]
+        KubectlProvider[internal/dev/providers/kubectl/]
+    end
+    
+    subgraph "Infrastructure Layer"
+        Executor[internal/shared/executor/]
+        UIComponents[internal/shared/ui/]
+        Configuration[internal/shared/config/]
+        ErrorHandling[internal/shared/errors/]
+        Prerequisites[internal/*/prerequisites/]
+    end
+    
+    RootCmd --> ClusterCmd
+    RootCmd --> ChartCmd
+    RootCmd --> DevCmd
+    RootCmd --> BootstrapCmd
+    
+    ClusterCmd --> ClusterService
+    ChartCmd --> ChartServices
+    DevCmd --> DevServices
+    BootstrapCmd --> BootstrapService
+    BootstrapCmd --> ClusterService
+    BootstrapCmd --> ChartServices
+    
+    ClusterService --> K3dProvider
+    ChartServices --> HelmProvider
+    ChartServices --> ArgoCDProvider
+    ChartServices --> GitProvider
+    DevServices --> TelepresenceProvider
+    DevServices --> KubectlProvider
+    
+    K3dProvider --> Executor
+    HelmProvider --> Executor
+    ArgoCDProvider --> Executor
+    TelepresenceProvider --> Executor
+    KubectlProvider --> Executor
+    
+    ClusterService --> UIComponents
+    ChartServices --> UIComponents
+    DevServices --> UIComponents
+    
+    ClusterService --> Configuration
+    ChartServices --> Configuration
+    DevServices --> Configuration
+    
+    ClusterService --> ErrorHandling
+    ChartServices --> ErrorHandling
+    DevServices --> ErrorHandling
+    
+    ClusterCmd --> Prerequisites
+    ChartCmd --> Prerequisites
+    DevCmd --> Prerequisites
