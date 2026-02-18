@@ -55,7 +55,8 @@ on:
         required: true
       dependencies:
         description: 'Comma-separated dependency repos'
-        required: true
+        required: false
+        default: ''
       source_branch:
         description: 'Branch to analyze code from'
         required: true
