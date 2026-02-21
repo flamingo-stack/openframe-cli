@@ -136,14 +136,16 @@ type StepResult struct {
 
 // InstallationRequest contains all parameters for chart installation
 type InstallationRequest struct {
-	Args           []string
-	Force          bool
-	DryRun         bool
-	Verbose        bool
-	GitHubRepo     string
-	GitHubBranch   string
-	CertDir        string
-	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
-	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
-	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
+	Args              []string
+	Force             bool
+	DryRun            bool
+	Verbose           bool
+	GitHubRepo        string
+	GitHubBranch      string
+	CertDir           string
+	DeploymentMode    string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
+	NonInteractive    bool         // Skip all prompts, use existing helm-values.yaml
+	KubeConfig        *rest.Config // Kubernetes REST config for cluster communication
+	SkipPrerequisites bool         // Skip prerequisite checks (already done by caller, e.g. bootstrap preflight)
+	SkipConfigPrompts bool         // Skip config mode selection; auto-use defaults when deployment mode is set
 }

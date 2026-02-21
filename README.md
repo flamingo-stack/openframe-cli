@@ -53,6 +53,7 @@ Creates a complete Kubernetes environment with ArgoCD, networking, and certifica
 - **Minimum**: 24GB RAM, 6 CPU cores, 50GB disk
 - **Recommended**: 32GB RAM, 12 CPU cores, 100GB disk
 - Docker installed and running
+- **Windows**: WSL2 with Ubuntu (automatically configured during bootstrap)
 
 ### Installation
 
@@ -78,17 +79,34 @@ sudo mv openframe-cli /usr/local/bin/openframe
 # Verify installation
 openframe --version
 
-# Create complete OpenFrame environment
+# Interactive — walks you through deployment mode and configuration
 openframe bootstrap
+
+# One-liner with no prompts — ideal for getting started fast
+openframe bootstrap --deployment-mode=oss-tenant
+
+# Full CI/CD mode — zero interaction, uses existing helm-values.yaml
+openframe bootstrap --deployment-mode=oss-tenant --non-interactive
+
+# Continue past memory warnings (useful for machines with <24GB RAM)
+openframe bootstrap --force
 ```
 
 This single command will:
-1. ✅ Check prerequisites and install missing tools
-2. ✅ Create K3D cluster with networking configuration
-3. ✅ Install ArgoCD for GitOps continuous delivery
-4. ✅ Deploy application charts using app-of-apps pattern
-5. ✅ Configure local HTTPS certificates
-6. ✅ Verify all services are healthy and running
+
+1. ✅ Run a unified pre-flight check — validates **all** prerequisites (tools, memory, certificates) upfront
+2. ✅ Auto-install missing tools (K3D, Helm, kubectl, mkcert) across macOS, Linux, and Windows/WSL2
+3. ✅ Create K3D cluster with networking configuration
+4. ✅ Install ArgoCD for GitOps continuous delivery
+5. ✅ Deploy application charts using app-of-apps pattern
+6. ✅ Configure local HTTPS certificates
+7. ✅ Verify all services are healthy and running
+
+> **Contributing from a fork?** Use `--repo` and `--branch` to point bootstrap at your fork:
+>
+> ```bash
+> openframe bootstrap --repo=https://github.com/myorg/openframe-oss-tenant --branch=my-feature
+> ```
 
 ### Access Your Environment
 
@@ -166,6 +184,12 @@ openframe bootstrap --deployment-mode=oss-tenant
 
 # Non-interactive with custom configuration
 openframe bootstrap --deployment-mode=saas-shared --non-interactive
+
+# Force past memory warnings
+openframe bootstrap --deployment-mode=oss-tenant --force
+
+# Bootstrap from a fork or feature branch
+openframe bootstrap --repo=https://github.com/myorg/openframe-oss-tenant --branch=dev
 
 # Cluster management with custom settings
 openframe cluster create --nodes 5 --type k3d --version v1.31.5-k3s1

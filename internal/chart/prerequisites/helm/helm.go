@@ -88,69 +88,13 @@ func (h *HelmInstaller) installMacOS() error {
 }
 
 func (h *HelmInstaller) installLinux() error {
-	if commandExists("apt") {
-		return h.installUbuntu()
-	} else if commandExists("yum") {
-		return h.installRedHat()
-	} else if commandExists("dnf") {
-		return h.installFedora()
-	} else if commandExists("pacman") {
-		return h.installArch()
-	} else {
-		return h.installScript()
-	}
-}
-
-func (h *HelmInstaller) installUbuntu() error {
-	commands := []string{
-		"curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null",
-		"sudo apt-get install apt-transport-https --yes",
-		"echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main\" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list",
-		"sudo apt-get update",
-		"sudo apt-get install helm",
-	}
-
-	for _, cmd := range commands {
-		if err := h.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
-	}
-
-	return nil
-}
-
-func (h *HelmInstaller) installRedHat() error {
-	commands := []string{
-		"curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
-	}
-
-	for _, cmd := range commands {
-		if err := h.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
-	}
-
-	return nil
-}
-
-func (h *HelmInstaller) installFedora() error {
-	if err := h.runCommand("sudo", "dnf", "install", "-y", "helm"); err != nil {
-		// If dnf package not available, fall back to script
-		return h.installScript()
-	}
-	return nil
-}
-
-func (h *HelmInstaller) installArch() error {
-	if err := h.runCommand("sudo", "pacman", "-S", "--noconfirm", "helm"); err != nil {
-		return fmt.Errorf("failed to install Helm: %w", err)
-	}
-	return nil
+	// Use the official Helm install script — works reliably across all distros
+	// without requiring repo setup, GPG key imports, or package manager specifics.
+	return h.installScript()
 }
 
 func (h *HelmInstaller) installScript() error {
-	// Use the official Helm install script
-	installCmd := "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
+	installCmd := "curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
 
 	if err := h.runShellCommand(installCmd); err != nil {
 		return fmt.Errorf("failed to install Helm via script: %w", err)

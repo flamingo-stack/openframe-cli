@@ -61,3 +61,10 @@ func (w *ConfigurationWizard) ConfigureHelmValuesWithMode(deploymentMode types.D
 
 	return w.configureInteractive(deploymentMode)
 }
+
+// ConfigureHelmValuesWithModeDefaults configures helm values with pre-selected
+// deployment mode using default configuration, skipping all prompts.
+// This is used by bootstrap when --deployment-mode is provided to minimize interaction.
+func (w *ConfigurationWizard) ConfigureHelmValuesWithModeDefaults(deploymentMode types.DeploymentMode) (*types.ChartConfiguration, error) {
+	return w.configureWithDefaults(deploymentMode)
+}

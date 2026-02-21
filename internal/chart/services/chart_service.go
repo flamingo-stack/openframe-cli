@@ -213,8 +213,23 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
 		}
+	} else if req.DeploymentMode != "" && req.SkipConfigPrompts {
+		// Mode 2a: BOOTSTRAP DEFAULT (deployment mode set, skip all config prompts)
+		pterm.Info.Printf("Using default configuration for %s deployment\n", req.DeploymentMode)
+		var err error
+		chartConfig, err = w.runDefaultConfigurationWithMode(req.DeploymentMode)
+		if err != nil {
+			return fmt.Errorf("configuration failed: %w", err)
+		}
+
+		// Register temporary file for cleanup
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
+		}
 	} else if req.DeploymentMode != "" {
-		// Mode 2: PARTIAL NON-INTERACTIVE (Skip deployment selection only)
+		// Mode 2b: PARTIAL NON-INTERACTIVE (Skip deployment selection only)
 		pterm.Warning.Printf("Deployment mode pre-selected: %s\n", req.DeploymentMode)
 		var err error
 		chartConfig, err = w.runPartialConfigurationWizard(req.DeploymentMode)
@@ -250,8 +265,9 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		return err
 	}
 
-	// Step 3: Confirm installation on the selected cluster (skip in non-interactive mode)
-	if !req.NonInteractive {
+	// Step 3: Confirm installation on the selected cluster
+	// Skip in non-interactive mode or when config prompts are skipped (bootstrap with --deployment-mode)
+	if !req.NonInteractive && !req.SkipConfigPrompts {
 		if !w.confirmInstallationOnCluster(clusterName) {
 			pterm.Info.Println("Installation cancelled.")
 			return fmt.Errorf("installation cancelled by user")
@@ -353,6 +369,19 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
 		}
+	} else if req.DeploymentMode != "" && req.SkipConfigPrompts {
+		// Mode 2a: BOOTSTRAP DEFAULT (deployment mode set, skip all config prompts)
+		pterm.Info.Printf("Using default configuration for %s deployment\n", req.DeploymentMode)
+		var err error
+		chartConfig, err = w.runDefaultConfigurationWithMode(req.DeploymentMode)
+		if err != nil {
+			return fmt.Errorf("configuration failed: %w", err)
+		}
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
+		}
 	} else if req.DeploymentMode != "" {
 		pterm.Warning.Printf("Deployment mode pre-selected: %s\n", req.DeploymentMode)
 		var err error
@@ -398,8 +427,9 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return fmt.Errorf("failed to initialize HelmManager: %w", err)
 	}
 
-	// Step 3: Confirm installation on the selected cluster (skip in non-interactive mode)
-	if !req.NonInteractive {
+	// Step 3: Confirm installation on the selected cluster
+	// Skip in non-interactive mode or when config prompts are skipped (bootstrap with --deployment-mode)
+	if !req.NonInteractive && !req.SkipConfigPrompts {
 		if !w.confirmInstallationOnCluster(clusterName) {
 			pterm.Info.Println("Installation cancelled.")
 			return fmt.Errorf("installation cancelled by user")
@@ -547,6 +577,25 @@ func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr strin
 	return result, nil
 }
 
+// runDefaultConfigurationWithMode applies default configuration for the given deployment mode
+// without any interactive prompts. Used by bootstrap with --deployment-mode to minimize interaction.
+func (w *InstallationWorkflow) runDefaultConfigurationWithMode(deploymentModeStr string) (*types.ChartConfiguration, error) {
+	var deploymentMode types.DeploymentMode
+	switch deploymentModeStr {
+	case "oss-tenant":
+		deploymentMode = types.DeploymentModeOSS
+	case "saas-tenant":
+		deploymentMode = types.DeploymentModeSaaS
+	case "saas-shared":
+		deploymentMode = types.DeploymentModeSaaSShared
+	default:
+		return nil, fmt.Errorf("invalid deployment mode: %s", deploymentModeStr)
+	}
+
+	wizard := configuration.NewConfigurationWizard()
+	return wizard.ConfigureHelmValuesWithModeDefaults(deploymentMode)
+}
+
 // runPartialConfigurationWizard runs wizard with pre-selected deployment mode
 func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr string) (*types.ChartConfiguration, error) {
 	// Convert string to DeploymentMode
@@ -597,19 +646,25 @@ func (w *InstallationWorkflow) waitForArgoCDSync(ctx context.Context, config con
 func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
 	configBuilder := config.NewBuilder(w.chartService.operationsUI)
 
-	// Determine repository URL based on deployment mode
+	// Determine repository URL: explicit --repo flag takes priority,
+	// otherwise derive from deployment mode, otherwise fall back to default.
 	githubRepo := req.GitHubRepo
-	if chartConfig.DeploymentMode != nil {
-		// Always use deployment mode to determine repository URL if deployment mode is specified
-		// This ensures that SaaS Shared mode gets the correct repository
+	if chartConfig.DeploymentMode != nil && githubRepo == "" {
+		// No explicit repo override — use deployment mode to determine repository URL
 		githubRepo = types.GetRepositoryURL(*chartConfig.DeploymentMode)
+	}
+	if githubRepo == "" {
+		// Final fallback — no --repo and no deployment mode yet (interactive wizard)
+		githubRepo = "https://github.com/flamingo-stack/openframe-oss-tenant"
+	}
 
-		// Inject authentication token for private SaaS repositories (both Shared and Tenant)
-		if (*chartConfig.DeploymentMode == types.DeploymentModeSaaSShared || *chartConfig.DeploymentMode == types.DeploymentModeSaaS) && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
-			// Replace https:// with https://x-access-token:TOKEN@
-			// This format is required for GitHub PAT authentication in non-interactive mode
-			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
-		}
+	// Inject authentication token for private SaaS repositories (both Shared and Tenant)
+	if chartConfig.DeploymentMode != nil &&
+		(*chartConfig.DeploymentMode == types.DeploymentModeSaaSShared || *chartConfig.DeploymentMode == types.DeploymentModeSaaS) &&
+		chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
+		// Replace https:// with https://x-access-token:TOKEN@
+		// This format is required for GitHub PAT authentication in non-interactive mode
+		githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
 	}
 
 	// Convert deployment mode to string for builder
@@ -711,10 +766,12 @@ func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.Installat
 	default:
 	}
 
-	// Check prerequisites first
-	installer := prerequisites.NewInstaller()
-	if err := installer.CheckAndInstallNonInteractive(req.NonInteractive); err != nil {
-		return err
+	// Check prerequisites first (skip if already done by caller, e.g. bootstrap preflight)
+	if !req.SkipPrerequisites {
+		installer := prerequisites.NewInstaller()
+		if err := installer.CheckAndInstallNonInteractive(req.NonInteractive); err != nil {
+			return err
+		}
 	}
 
 	// Check context again after prerequisites

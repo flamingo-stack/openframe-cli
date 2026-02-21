@@ -36,8 +36,8 @@ func TestCertificateInstaller_GetInstallHelp(t *testing.T) {
 			t.Errorf("Linux help should mention download: %s", help)
 		}
 	case "windows":
-		if !containsSubstring(help, "manually") {
-			t.Errorf("Windows help should mention manual installation: %s", help)
+		if !containsSubstring(help, "WSL2") {
+			t.Errorf("Windows help should mention WSL2 installation: %s", help)
 		}
 	}
 }
@@ -73,14 +73,18 @@ func TestAreCertificatesGenerated(t *testing.T) {
 }
 
 func TestIsMkcertInstalled(t *testing.T) {
-	// Test mkcert detection
+	// Test mkcert detection — just verify it doesn't crash
 	installed := isMkcertInstalled()
 
-	// Should be equivalent to commandExists("mkcert")
-	expected := commandExists("mkcert")
-	if installed != expected {
-		t.Errorf("isMkcertInstalled() = %v, expected %v", installed, expected)
+	if runtime.GOOS != "windows" {
+		// On non-Windows, should be equivalent to commandExists("mkcert")
+		expected := commandExists("mkcert")
+		if installed != expected {
+			t.Errorf("isMkcertInstalled() = %v, expected %v", installed, expected)
+		}
 	}
+	// On Windows, the function checks WSL2 which may not be available in test env
+	_ = installed
 }
 
 func TestInstallMkcert(t *testing.T) {
@@ -92,19 +96,41 @@ func TestInstallMkcert(t *testing.T) {
 	// Check expected behavior based on platform
 	switch runtime.GOOS {
 	case "windows":
-		// Windows should always return error
-		if err == nil {
-			t.Error("Expected error on Windows, got nil")
-		} else if !containsSubstring(err.Error(), "automatic mkcert installation") && !containsSubstring(err.Error(), "not supported") {
-			t.Errorf("Expected Windows to return 'not supported' error, got: %v", err)
+		// Windows installs via WSL2 — may fail if WSL is not available
+		if err != nil {
+			validErrors := []string{
+				"failed to install mkcert in WSL2",
+				"exit status",
+			}
+			hasValidError := false
+			for _, validError := range validErrors {
+				if containsSubstring(err.Error(), validError) {
+					hasValidError = true
+					break
+				}
+			}
+			if !hasValidError {
+				t.Errorf("Unexpected error type on Windows: %v", err)
+			}
 		}
 	case "darwin":
-		// macOS should fail without brew
-		if !commandExists("brew") {
-			if err == nil {
-				t.Error("Expected error when brew is not installed")
-			} else if !containsSubstring(err.Error(), "Homebrew is required") {
-				t.Errorf("Expected Homebrew error, got: %v", err)
+		// macOS tries Homebrew first, then falls back to binary download
+		if err != nil {
+			validErrors := []string{
+				"failed to install mkcert",
+				"failed to download mkcert",
+				"Homebrew",
+				"exit status",
+			}
+			hasValidError := false
+			for _, validError := range validErrors {
+				if containsSubstring(err.Error(), validError) {
+					hasValidError = true
+					break
+				}
+			}
+			if !hasValidError {
+				t.Errorf("Unexpected error type on macOS: %v", err)
 			}
 		}
 	default:

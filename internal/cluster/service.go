@@ -763,3 +763,31 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 	// Create the cluster and return the rest.Config
 	return service.CreateCluster(config)
 }
+
+// CreateClusterSkipPrerequisites creates a cluster without running prerequisite checks.
+// This is used by the bootstrap command which runs its own unified preflight checks.
+// Returns the *rest.Config for the created cluster.
+func CreateClusterSkipPrerequisites(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
+	// Create service directly without using utils to avoid circular import
+	exec := executor.NewRealCommandExecutor(false, verbose) // dryRun = false
+	var service *ClusterService
+	if nonInteractive {
+		service = NewClusterServiceSuppressed(exec)
+	} else {
+		service = NewClusterService(exec)
+	}
+
+	// Build cluster configuration
+	config := models.ClusterConfig{
+		Name:       clusterName,
+		Type:       models.ClusterTypeK3d,
+		K8sVersion: "",
+		NodeCount:  4,
+	}
+	if clusterName == "" {
+		config.Name = "openframe-dev" // default name
+	}
+
+	// Create the cluster and return the rest.Config
+	return service.CreateCluster(config)
+}
