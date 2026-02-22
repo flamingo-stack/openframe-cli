@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap as Bootstrap Service
+    participant Cluster as Cluster Service
+    participant K3D as K3D Provider
+    participant Chart as Chart Service
+    participant Helm as Helm Provider
+    participant ArgoCD as ArgoCD Provider
+    participant K8s as Kubernetes API
+    
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>Bootstrap: Check prerequisites
+    Bootstrap->>Cluster: Create cluster
+    Cluster->>K3D: Create K3D cluster
+    K3D->>K8s: Initialize cluster
+    K8s-->>K3D: Cluster ready
+    K3D-->>Cluster: Cluster config
+    Cluster-->>Bootstrap: rest.Config
+    
+    Bootstrap->>Chart: Install charts
+    Chart->>Helm: Install ArgoCD
+    Helm->>K8s: Deploy ArgoCD
+    K8s-->>Helm: ArgoCD running
+    Helm-->>Chart: Installation complete
+    
+    Chart->>ArgoCD: Install app-of-apps
+    ArgoCD->>K8s: Create Application CRDs
+    K8s-->>ArgoCD: Applications created
+    ArgoCD->>ArgoCD: Sync applications
+    ArgoCD-->>Chart: Applications synced
+    Chart-->>Bootstrap: Charts installed
+    Bootstrap-->>User: Environment ready

@@ -1,0 +1,56 @@
+graph TB
+    subgraph "CLI Layer"
+        Root[Root Command]
+        Bootstrap[Bootstrap Command]
+        Cluster[Cluster Commands]
+        Chart[Chart Commands] 
+        Dev[Dev Commands]
+    end
+    
+    subgraph "Service Layer"
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        InterceptSvc[Intercept Service]
+        ScaffoldSvc[Scaffold Service]
+    end
+    
+    subgraph "Provider Layer"
+        K3D[K3D Provider]
+        Helm[Helm Provider]
+        ArgoCD[ArgoCD Provider]
+        Telepresence[Telepresence Provider]
+        Kubectl[Kubectl Provider]
+    end
+    
+    subgraph "External Systems"
+        Docker[Docker]
+        K8s[Kubernetes]
+        Git[Git Repositories]
+        Registry[Container Registry]
+    end
+    
+    Root --> Bootstrap
+    Root --> Cluster
+    Root --> Chart
+    Root --> Dev
+    
+    Bootstrap --> ClusterSvc
+    Bootstrap --> ChartSvc
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> InterceptSvc
+    Dev --> ScaffoldSvc
+    
+    ClusterSvc --> K3D
+    ChartSvc --> Helm
+    ChartSvc --> ArgoCD
+    InterceptSvc --> Telepresence
+    InterceptSvc --> Kubectl
+    ScaffoldSvc --> Kubectl
+    
+    K3D --> Docker
+    Helm --> K8s
+    ArgoCD --> K8s
+    ArgoCD --> Git
+    Telepresence --> K8s
+    Kubectl --> K8s

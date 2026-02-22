@@ -1,0 +1,76 @@
+graph TD
+    subgraph "Command Layer"
+        RootCmd[Root Command]
+        BootstrapCmd[Bootstrap Command]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands]
+        DevCmd[Dev Commands]
+    end
+    
+    subgraph "Service Orchestration"
+        BootstrapSvc[Bootstrap Service]
+    end
+    
+    subgraph "Domain Services"
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service] 
+        InterceptSvc[Intercept Service]
+        ScaffoldSvc[Scaffold Service]
+    end
+    
+    subgraph "Provider Implementations"
+        K3DMgr[K3D Manager]
+        HelmMgr[Helm Manager]
+        ArgoCDMgr[ArgoCD Manager]
+        TelepresenceProv[Telepresence Provider]
+        KubectlProv[Kubectl Provider]
+        GitRepo[Git Repository]
+    end
+    
+    subgraph "Shared Infrastructure"
+        Executor[Command Executor]
+        UI[UI Components]
+        Config[Configuration]
+        Prerequisites[Prerequisites]
+    end
+    
+    RootCmd --> BootstrapCmd
+    RootCmd --> ClusterCmd
+    RootCmd --> ChartCmd
+    RootCmd --> DevCmd
+    
+    BootstrapCmd --> BootstrapSvc
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> InterceptSvc
+    DevCmd --> ScaffoldSvc
+    
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    
+    ClusterSvc --> K3DMgr
+    ChartSvc --> HelmMgr
+    ChartSvc --> ArgoCDMgr
+    ChartSvc --> GitRepo
+    InterceptSvc --> TelepresenceProv
+    InterceptSvc --> KubectlProv
+    ScaffoldSvc --> KubectlProv
+    
+    K3DMgr --> Executor
+    HelmMgr --> Executor
+    ArgoCDMgr --> Executor
+    TelepresenceProv --> Executor
+    KubectlProv --> Executor
+    GitRepo --> Executor
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    InterceptSvc --> UI
+    ScaffoldSvc --> UI
+    
+    ClusterSvc --> Config
+    ChartSvc --> Config
+    
+    ClusterSvc --> Prerequisites
+    ChartSvc --> Prerequisites
+    DevCmd --> Prerequisites

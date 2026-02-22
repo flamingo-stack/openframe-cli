@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant Dev as Developer
+    participant Intercept as Intercept Service
+    participant Kubectl as Kubectl Provider
+    participant Telepresence as Telepresence Provider
+    participant K8s as Kubernetes
+    participant Local as Local Development
+    
+    Dev->>Intercept: openframe dev intercept
+    Intercept->>Kubectl: Get services
+    Kubectl->>K8s: List services
+    K8s-->>Kubectl: Service list
+    Kubectl-->>Intercept: Available services
+    Intercept->>Dev: Select service/port
+    Dev->>Intercept: Service selection
+    
+    Intercept->>Telepresence: Setup intercept
+    Telepresence->>K8s: Create intercept
+    K8s->>Telepresence: Traffic routing active
+    Telepresence->>Local: Forward traffic
+    Local->>Dev: Local debugging
+    
+    Note over Dev,Local: Development session active
+    
+    Dev->>Intercept: Stop intercept (Ctrl+C)
+    Intercept->>Telepresence: Cleanup intercept
+    Telepresence->>K8s: Remove routing
+    K8s-->>Telepresence: Cleanup complete
+    Telepresence-->>Intercept: Disconnected
+    Intercept-->>Dev: Session ended
