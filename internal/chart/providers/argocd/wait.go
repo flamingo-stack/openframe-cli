@@ -197,6 +197,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	maxAppsSeenTotal := 0
 	maxAppsSeenReady := 0
+	consecutiveAllReady := 0
+	stabilizationChecks := m.StabilizationChecks
+	if stabilizationChecks <= 0 {
+		stabilizationChecks = 15 // default: 15 * 2s = 30s
+	}
 
 	// Track applications that have ever been ready (healthy + synced) during this session
 	// Once an app is ready, it stays counted even if it temporarily goes out of sync
@@ -859,9 +864,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 			// Check if deployment is complete - ALL currently detected apps must be healthy and synced
 			// All apps must be currently ready (not just "ever ready")
+			// Additionally, totalApps must be >= the highest count we've ever seen (high-water-mark guard)
+			// to prevent declaring success when the API momentarily returns fewer apps
 			allReady := false
-			if totalApps > 0 && currentlyReady == totalApps {
+			if totalApps > 0 && currentlyReady == totalApps && totalApps >= maxAppsSeenTotal {
 				allReady = true
+			} else if totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
+				pterm.Warning.Printf("Application count dropped: %d visible vs %d previously seen — waiting for all apps to reappear\n", totalApps, maxAppsSeenTotal)
 			}
 
 			// Update ready count for display purposes (still use everReady for progress tracking)
@@ -869,15 +878,28 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				maxAppsSeenReady = currentlyReady
 			}
 
+			// Stabilization window: require multiple consecutive all-ready checks
+			// to handle inter-wave gaps where next-wave apps haven't been created yet
 			if allReady {
-				spinnerMutex.Lock()
-				if !spinnerStopped && spinner != nil && spinner.IsActive {
-					spinner.Stop()
-					spinnerStopped = true
+				consecutiveAllReady++
+				if config.Verbose {
+					pterm.Debug.Printf("All apps ready (%d/%d stabilization checks)\n", consecutiveAllReady, stabilizationChecks)
 				}
-				spinnerMutex.Unlock()
-				pterm.Success.Println("All ArgoCD applications installed")
-				return nil
+				if consecutiveAllReady >= stabilizationChecks {
+					spinnerMutex.Lock()
+					if !spinnerStopped && spinner != nil && spinner.IsActive {
+						spinner.Stop()
+						spinnerStopped = true
+					}
+					spinnerMutex.Unlock()
+					pterm.Success.Println("All ArgoCD applications installed")
+					return nil
+				}
+			} else {
+				if consecutiveAllReady > 0 && config.Verbose {
+					pterm.Debug.Printf("Stabilization reset: was %d/%d, app became not-ready\n", consecutiveAllReady, stabilizationChecks)
+				}
+				consecutiveAllReady = 0
 			}
 		}
 	}
