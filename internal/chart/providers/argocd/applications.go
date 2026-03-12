@@ -32,6 +32,11 @@ type Manager struct {
 	apiextClient     apiextensionsclientset.Interface
 	argocdClient     argocdclientset.Interface
 	clientsInitialized bool
+
+	// StabilizationChecks is the number of consecutive all-ready polls required
+	// before declaring success. Defaults to 15 (~30s at 2s interval).
+	// Tests can override this to a smaller value for speed.
+	StabilizationChecks int
 }
 
 // NewManager creates a new ArgoCD manager
@@ -383,8 +388,7 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 		if verbose {
 			pterm.Warning.Printf("Failed to list Argo CD applications via native client: %v\n", err)
 		}
-		// Return empty list on failure, allowing the wait loop to continue trying
-		return []Application{}, nil
+		return []Application{}, fmt.Errorf("native ArgoCD client list failed: %w", err)
 	}
 
 	apps := make([]Application, 0, len(appList.Items))
