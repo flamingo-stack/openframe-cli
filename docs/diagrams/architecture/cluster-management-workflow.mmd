@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant User
+    participant ClusterCmd
+    participant UI
+    participant Service
+    participant K3d
+    
+    User->>ClusterCmd: openframe cluster create
+    ClusterCmd->>UI: Show Logo
+    ClusterCmd->>UI: Get Configuration
+    UI->>User: Interactive Wizard
+    User-->>UI: Cluster Config
+    UI-->>ClusterCmd: Configuration
+    ClusterCmd->>Service: Create Cluster
+    Service->>K3d: Create with Config
+    K3d-->>Service: Cluster Ready
+    Service-->>ClusterCmd: Success
+    ClusterCmd-->>User: Cluster Created

@@ -1,0 +1,30 @@
+graph TB
+    CLI[OpenFrame CLI] --> Bootstrap[Bootstrap Command]
+    CLI --> Cluster[Cluster Management]
+    CLI --> Chart[Chart Management]
+    CLI --> Dev[Development Tools]
+    
+    Bootstrap --> ClusterCreate[Cluster Creation]
+    Bootstrap --> ChartInstall[Chart Installation]
+    
+    Cluster --> Create[Create Clusters]
+    Cluster --> Delete[Delete Clusters]
+    Cluster --> List[List Clusters]
+    Cluster --> Status[Status Check]
+    Cluster --> Cleanup[Resource Cleanup]
+    
+    Chart --> ArgoCD[ArgoCD Installation]
+    Chart --> AppOfApps[App-of-Apps Setup]
+    
+    Dev --> Intercept[Traffic Interception]
+    Dev --> Skaffold[Live Development]
+    
+    subgraph Infrastructure[Infrastructure Layer]
+        K3d[K3d Clusters]
+        Kubernetes[Kubernetes API]
+        ArgoCD[ArgoCD GitOps]
+    end
+    
+    Create --> K3d
+    ArgoCD --> Kubernetes
+    Intercept --> Kubernetes

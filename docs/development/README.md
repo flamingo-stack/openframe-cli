@@ -1,180 +1,180 @@
 # Development Documentation
 
-This section contains comprehensive guides for developing with and contributing to OpenFrame CLI. Whether you're setting up a development environment, understanding the architecture, or contributing code, these guides will help you get started.
+Welcome to the OpenFrame CLI development documentation. This section provides comprehensive guides for developers working with, contributing to, or extending OpenFrame CLI.
 
-## 🏗️ Architecture & Design
+## Overview
 
-Understanding how OpenFrame CLI is structured and how its components interact:
-
-- **[Architecture Overview](architecture/README.md)** - High-level system design, component relationships, and data flows
-
-## 🛠️ Development Setup
-
-Get your development environment ready:
-
-- **[Environment Setup](setup/environment.md)** - IDE configuration, tools, and development dependencies
-- **[Local Development](setup/local-development.md)** - Clone, build, run, and debug OpenFrame CLI locally
-
-## 🔒 Security
-
-Security best practices and guidelines:
-
-- **[Security Guidelines](security/README.md)** - Authentication patterns, data protection, and vulnerability prevention
-
-## 🧪 Testing
-
-Comprehensive testing approaches:
-
-- **[Testing Guide](testing/README.md)** - Test structure, running tests, writing new tests, and coverage requirements
-
-## 🤝 Contributing  
-
-Guidelines for contributing to the project:
-
-- **[Contributing Guidelines](contributing/guidelines.md)** - Code standards, review process, and submission guidelines
+OpenFrame CLI is a Go-based command-line tool that orchestrates Kubernetes cluster management with GitOps automation. The development documentation covers everything from setting up your development environment to understanding the architecture and contributing guidelines.
 
 ## Quick Navigation
 
-### New Contributors
-If you're new to OpenFrame CLI development, start here:
-1. [Architecture Overview](architecture/README.md) - Understand the system
-2. [Environment Setup](setup/environment.md) - Configure your tools  
-3. [Local Development](setup/local-development.md) - Get the code running
-4. [Contributing Guidelines](contributing/guidelines.md) - Learn the process
+### Setup and Environment
+- **[Environment Setup](setup/environment.md)** - IDE, tools, and development environment configuration
+- **[Local Development](setup/local-development.md)** - Clone, build, run, and debug locally
 
-### Experienced Developers
-Jump to specific areas:
-- **Architecture**: Deep dive into design patterns and component interactions
-- **Security**: Review security models and best practices
-- **Testing**: Understand test patterns and coverage expectations
+### Architecture and Design
+- **[Architecture Overview](architecture/README.md)** - High-level system architecture and component relationships
 
-### Operations & DevOps
-Focus on deployment and operational aspects:
-- **Architecture**: Service dependencies and operational considerations
-- **Security**: Production security requirements and configurations
-- **Testing**: Integration and end-to-end testing strategies
+### Security
+- **[Security Guidelines](security/README.md)** - Security best practices, authentication patterns, and vulnerability management
 
-## Development Workflow Overview
-
-```mermaid
-flowchart TD
-    A[Fork Repository] --> B[Setup Dev Environment]
-    B --> C[Create Feature Branch]
-    C --> D[Write Code & Tests]
-    D --> E[Run Local Tests]
-    E --> F{Tests Pass?}
-    F -->|No| D
-    F -->|Yes| G[Commit Changes]
-    G --> H[Push to Fork]
-    H --> I[Create Pull Request]
-    I --> J[Code Review]
-    J --> K{Review Approved?}
-    K -->|No| D
-    K -->|Yes| L[Merge to Main]
-    L --> M[CI/CD Pipeline]
-    M --> N[Deploy & Test]
-```
-
-## Key Technologies
-
-OpenFrame CLI is built with:
-
-| Technology | Purpose | Version |
-|------------|---------|---------|
-| **Go** | Primary language | 1.24.6+ |
-| **Cobra** | CLI framework | v1.8.1+ |
-| **Kubernetes** | Container orchestration | v1.31.2+ |
-| **K3D** | Local Kubernetes clusters | v5.0+ |
-| **Helm** | Package management | v3.10+ |
-| **ArgoCD** | GitOps deployments | v2.14+ |
-| **Telepresence** | Service intercepts | v2.10+ |
-
-## Project Structure
-
-```text
-openframe-cli/
-├── cmd/                    # CLI command definitions
-│   ├── bootstrap/         # Bootstrap command
-│   ├── cluster/           # Cluster management commands
-│   ├── chart/             # Chart installation commands
-│   ├── dev/               # Development workflow commands
-│   └── root.go            # Root command setup
-├── internal/              # Internal packages
-│   ├── bootstrap/         # Bootstrap orchestration
-│   ├── cluster/           # Cluster lifecycle management
-│   ├── chart/             # Chart and ArgoCD integration
-│   ├── dev/               # Development tools
-│   └── shared/            # Common utilities
-├── tests/                 # Test suites
-│   ├── integration/       # Integration tests
-│   ├── mocks/             # Test mocks
-│   └── testutil/          # Test utilities
-├── docs/                  # Documentation
-├── examples/              # Usage examples
-├── scripts/               # Build and utility scripts
-├── go.mod                 # Go module definition
-├── go.sum                 # Go dependency checksums
-└── main.go                # Application entry point
-```
-
-## Development Principles
-
-### Code Quality
-- **Clean Architecture**: Clear separation of concerns with layered design
-- **Testability**: All components designed for easy testing and mocking
-- **Error Handling**: Comprehensive error handling with user-friendly messages
-- **Documentation**: Code is self-documenting with clear comments
-
-### User Experience
-- **Interactive Design**: Wizard-style interfaces for complex operations
-- **Clear Feedback**: Progress indicators and status messages
-- **Error Recovery**: Helpful error messages with suggested solutions
-- **Consistency**: Uniform command patterns and flag usage
-
-### Operational Excellence
-- **Observability**: Comprehensive logging and monitoring capabilities
-- **Reliability**: Robust error handling and recovery mechanisms
-- **Performance**: Efficient resource usage and fast execution
-- **Security**: Secure defaults and best practices
-
-## Getting Started
-
-### Prerequisites
-Before diving into development, ensure you have:
-- Go 1.24.6 or later installed
-- Docker and Kubernetes tools (kubectl, helm, k3d)
-- Git and a code editor/IDE
-- Basic familiarity with Kubernetes concepts
-
-### Quick Start
-1. **Read the [Architecture Overview](architecture/README.md)** to understand the system
-2. **Follow the [Environment Setup](setup/environment.md)** guide
-3. **Complete the [Local Development](setup/local-development.md)** setup
-4. **Review [Contributing Guidelines](contributing/guidelines.md)** before making changes
-
-## Community & Support
-
-### Getting Help
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) for development questions
-- **Documentation**: Browse these guides for detailed information
-- **Code Reviews**: Learn from existing pull requests and code reviews
+### Testing
+- **[Testing Overview](testing/README.md)** - Test structure, running tests, and writing new tests
 
 ### Contributing
-We welcome contributions! Here's how to get involved:
-1. **Start Small**: Begin with bug fixes or documentation improvements
-2. **Discuss Large Changes**: Use Slack to discuss major features or architectural changes
-3. **Follow Guidelines**: Adhere to coding standards and review processes
-4. **Be Patient**: Maintain a collaborative and respectful approach
+- **[Contributing Guidelines](contributing/guidelines.md)** - Code style, PR process, and review checklist
 
-### Code of Conduct
-- Be respectful and inclusive in all interactions
-- Focus on constructive feedback and learning
-- Help others learn and grow in the community
-- Follow the project's established patterns and conventions
+## Development Workflow
 
----
+### Typical Development Process
 
-Ready to start developing? Choose your path:
-- **New to the project**: Start with [Architecture Overview](architecture/README.md)
-- **Ready to code**: Jump to [Local Development](setup/local-development.md)  
-- **Want to contribute**: Review [Contributing Guidelines](contributing/guidelines.md)
+1. **Setup**: Configure your development environment
+2. **Build**: Compile and test the CLI locally
+3. **Develop**: Make changes following architecture patterns
+4. **Test**: Run comprehensive tests before committing
+5. **Security**: Follow security best practices
+6. **Contribute**: Submit PRs following contribution guidelines
+
+### Development Commands
+
+```bash
+# Build the CLI
+go build -o openframe ./main.go
+
+# Run tests
+go test ./...
+
+# Run with race detection
+go test -race ./...
+
+# Build for multiple platforms
+make build-all
+
+# Run linting
+golangci-lint run
+```
+
+## Technology Stack
+
+OpenFrame CLI is built using:
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Core Language** | Go 1.21+ | CLI implementation and business logic |
+| **CLI Framework** | Cobra | Command structure and argument parsing |
+| **Container Runtime** | Docker | K3d cluster management |
+| **Kubernetes** | K3d, kubectl | Local cluster creation and management |
+| **GitOps** | ArgoCD, Helm | Application deployment and management |
+| **Development Tools** | Telepresence, Skaffold | Traffic interception and live development |
+
+## Architecture Highlights
+
+### Command Structure
+```text
+openframe
+├── bootstrap/          # Complete environment setup
+├── cluster/            # Cluster lifecycle management
+│   ├── create         # Interactive cluster creation
+│   ├── delete         # Safe cluster removal
+│   ├── list           # Display managed clusters
+│   ├── status         # Cluster health monitoring
+│   └── cleanup        # Resource cleanup
+├── chart/             # Helm chart and ArgoCD management
+│   └── install        # ArgoCD installation
+└── dev/               # Development workflow tools
+    ├── intercept      # Traffic interception
+    └── skaffold       # Live development
+```
+
+### Key Design Principles
+
+- **Modularity**: Each command is self-contained with clear responsibilities
+- **User Experience**: Interactive wizards and helpful error messages
+- **Safety**: Confirmation prompts and safe defaults
+- **Extensibility**: Plugin-friendly architecture for custom workflows
+- **GitOps Native**: Built-in ArgoCD integration and app-of-apps pattern
+
+## Development Environment
+
+### Recommended Tools
+
+- **IDE**: VS Code with Go extension, GoLand
+- **Go Version**: 1.21 or later
+- **Docker**: Latest stable version
+- **Git**: Latest version with SSH key setup
+- **Make**: For build automation
+
+### Environment Variables
+
+```bash
+# Go development
+export GOPATH=$HOME/go
+export PATH=$GOPATH/bin:$PATH
+
+# OpenFrame development
+export OPENFRAME_DEV_MODE=true
+export OPENFRAME_LOG_LEVEL=debug
+
+# Kubernetes development
+export KUBECONFIG=$HOME/.kube/config
+```
+
+## Contributing Areas
+
+We welcome contributions in these areas:
+
+### Core Features
+- New command implementations
+- Enhanced interactive wizards
+- Improved error handling and messaging
+- Performance optimizations
+
+### Platform Support
+- Additional deployment modes
+- Cloud provider integrations
+- Windows compatibility improvements
+- macOS Apple Silicon optimizations
+
+### Development Experience
+- Enhanced debugging capabilities
+- Better logging and observability
+- Developer productivity tools
+- Documentation improvements
+
+### Testing and Quality
+- Unit test coverage improvements
+- Integration test scenarios
+- Performance benchmarks
+- Security testing automation
+
+## Getting Started with Development
+
+1. **Read the setup guides** to configure your environment
+2. **Explore the architecture** to understand the system design
+3. **Review security guidelines** before making changes
+4. **Check the testing approach** for quality standards
+5. **Follow contributing guidelines** for smooth collaboration
+
+## Code Quality Standards
+
+- **Test Coverage**: Minimum 80% for new code
+- **Linting**: All code must pass `golangci-lint`
+- **Documentation**: Public APIs must have Go doc comments
+- **Security**: Follow OWASP guidelines and security best practices
+- **Performance**: Benchmark critical paths and avoid regressions
+
+## Resources
+
+### External Documentation
+- [Go Documentation](https://golang.org/doc/)
+- [Cobra CLI Framework](https://cobra.dev/)
+- [K3d Documentation](https://k3d.io/)
+- [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+
+### Community
+- **OpenMSP Slack**: [Join here](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **GitHub Discussions**: Use for feature requests and architectural discussions
+- **GitHub Issues**: For bug reports and specific improvements
+
+> 💡 **New to the codebase?** Start with the [Environment Setup](setup/environment.md) guide, then explore the [Architecture Overview](architecture/README.md) to understand how everything fits together.

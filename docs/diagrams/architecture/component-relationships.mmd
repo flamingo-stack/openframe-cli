@@ -1,0 +1,41 @@
+graph LR
+    subgraph Commands[CLI Commands]
+        Bootstrap[Bootstrap]
+        ClusterCmd[Cluster Commands]
+        ChartCmd[Chart Commands]
+        DevCmd[Dev Commands]
+    end
+    
+    subgraph Internal[Internal Services]
+        ClusterSvc[Cluster Service]
+        ChartSvc[Chart Service]
+        DevSvc[Dev Service]
+        UI[UI Components]
+        Prerequisites[Prerequisites]
+    end
+    
+    subgraph External[External Dependencies]
+        K3d[K3d CLI]
+        Helm[Helm CLI]
+        kubectl[kubectl]
+        ArgoCD[ArgoCD]
+    end
+    
+    Bootstrap --> ClusterSvc
+    Bootstrap --> ChartSvc
+    
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> DevSvc
+    
+    ClusterSvc --> K3d
+    ChartSvc --> Helm
+    ChartSvc --> kubectl
+    
+    ClusterSvc --> UI
+    ChartSvc --> UI
+    DevSvc --> UI
+    
+    ClusterCmd --> Prerequisites
+    ChartCmd --> Prerequisites
+    DevCmd --> Prerequisites
