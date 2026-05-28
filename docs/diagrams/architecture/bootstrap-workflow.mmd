@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant User
+    participant Bootstrap
+    participant ClusterService
+    participant ChartService
+    participant K3d
+    participant ArgoCD
+    
+    User->>Bootstrap: openframe bootstrap
+    Bootstrap->>Bootstrap: Show Logo
+    Bootstrap->>ClusterService: Create Cluster
+    ClusterService->>K3d: k3d cluster create
+    K3d-->>ClusterService: Cluster Ready
+    ClusterService-->>Bootstrap: Cluster Created
+    
+    Bootstrap->>ChartService: Install Charts
+    ChartService->>ChartService: Install ArgoCD
+    ChartService->>ArgoCD: Deploy App-of-Apps
+    ArgoCD-->>ChartService: Applications Synced
+    ChartService-->>Bootstrap: Installation Complete
+    Bootstrap-->>User: Environment Ready

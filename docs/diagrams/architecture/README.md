@@ -4,10 +4,10 @@ This directory contains Mermaid diagrams generated from architecture analysis.
 
 ## Diagrams
 
-- **[High-Level System Design](./high-level-system-design.mmd)** - `.mmd` file
-- **[Dependency Flow Between Modules](./dependency-flow-between-modules.mmd)** - `.mmd` file
-- **[Complete Bootstrap Workflow](./complete-bootstrap-workflow.mmd)** - `.mmd` file
-- **[Development Intercept Workflow](./development-intercept-workflow.mmd)** - `.mmd` file
+- **[High-Level Architecture](./high-level-architecture.mmd)** - `.mmd` file
+- **[Component Relationships](./component-relationships.mmd)** - `.mmd` file
+- **[Bootstrap Workflow](./bootstrap-workflow.mmd)** - `.mmd` file
+- **[Cluster Management Workflow](./cluster-management-workflow.mmd)** - `.mmd` file
 
 ## Viewing Diagrams
 
