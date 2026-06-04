@@ -1,0 +1,87 @@
+graph TD
+    subgraph CLI["CLI Entry Layer (cmd/)"]
+        Root["Root Command"]
+        Bootstrap["bootstrap"]
+        Cluster["cluster"]
+        Chart["chart"]
+        Dev["dev"]
+    end
+
+    subgraph Services["Service Layer (internal/)"]
+        BootstrapSvc["Bootstrap Service"]
+        ClusterSvc["Cluster Service"]
+        ChartSvc["Chart Service"]
+        DevSvc["Dev Services"]
+    end
+
+    subgraph Providers["Provider Layer"]
+        K3D["K3D Manager"]
+        HelmMgr["Helm Manager"]
+        ArgoCDMgr["ArgoCD Manager"]
+        GitRepo["Git Repository"]
+        KubectlProv["Kubectl Provider"]
+        TelepresenceProv["Telepresence Provider"]
+    end
+
+    subgraph Infra["Shared Infrastructure"]
+        Executor["Command Executor"]
+        UIShared["Shared UI"]
+        ErrorsShared["Error Handling"]
+        ConfigShared["Config / Paths"]
+        FilesShared["File Cleanup"]
+    end
+
+    subgraph External["External Systems"]
+        K3dBin["k3d binary"]
+        HelmBin["helm binary"]
+        ArgoCDAPI["ArgoCD Kubernetes API"]
+        GitHubRepo["GitHub Repository"]
+        K8sAPI["Kubernetes API"]
+        TelepresenceBin["telepresence binary"]
+        SkaffoldBin["skaffold binary"]
+    end
+
+    Root --> Bootstrap
+    Root --> Cluster
+    Root --> Chart
+    Root --> Dev
+
+    Bootstrap --> BootstrapSvc
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc
+
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+
+    ClusterSvc --> K3D
+    ChartSvc --> HelmMgr
+    ChartSvc --> ArgoCDMgr
+    ChartSvc --> GitRepo
+    DevSvc --> KubectlProv
+    DevSvc --> TelepresenceProv
+
+    K3D --> Executor
+    HelmMgr --> Executor
+    ArgoCDMgr --> K8sAPI
+    GitRepo --> Executor
+    KubectlProv --> Executor
+    TelepresenceProv --> Executor
+
+    Executor --> K3dBin
+    Executor --> HelmBin
+    Executor --> TelepresenceBin
+    Executor --> SkaffoldBin
+    HelmMgr --> ArgoCDAPI
+    ArgoCDMgr --> ArgoCDAPI
+    GitRepo --> GitHubRepo
+    KubectlProv --> K8sAPI
+
+    ClusterSvc --> UIShared
+    ChartSvc --> UIShared
+    DevSvc --> UIShared
+    ClusterSvc --> ErrorsShared
+    ChartSvc --> ErrorsShared
+    ClusterSvc --> ConfigShared
+    ChartSvc --> ConfigShared
+    ChartSvc --> FilesShared

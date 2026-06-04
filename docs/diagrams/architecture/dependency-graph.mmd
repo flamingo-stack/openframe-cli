@@ -1,0 +1,104 @@
+graph LR
+    subgraph Commands["cmd/ layer"]
+        CmdRoot["root"]
+        CmdBoot["bootstrap"]
+        CmdCluster["cluster/*"]
+        CmdChart["chart/*"]
+        CmdDev["dev/*"]
+    end
+
+    subgraph InternalBootstrap["internal/bootstrap"]
+        SvcBoot["Bootstrap Service"]
+    end
+
+    subgraph InternalCluster["internal/cluster"]
+        SvcCluster["Cluster Service"]
+        ModCluster["models"]
+        ProvK3D["providers/k3d"]
+        UICluster["ui/*"]
+        PrereqCluster["prerequisites/*"]
+        UtilsCluster["utils/"]
+    end
+
+    subgraph InternalChart["internal/chart"]
+        SvcChart["services/*"]
+        ModChart["models"]
+        ProvHelm["providers/helm"]
+        ProvArgoCD["providers/argocd"]
+        ProvGit["providers/git"]
+        UIChart["ui/*"]
+        PrereqChart["prerequisites/*"]
+        UtilsChart["utils/config + errors + types"]
+    end
+
+    subgraph InternalDev["internal/dev"]
+        SvcIntercept["services/intercept"]
+        SvcScaffold["services/scaffold"]
+        ProvKubectl["providers/kubectl"]
+        ProvTelepresence["providers/telepresence"]
+        ProvDevChart["providers/chart"]
+        UIDevIntercept["ui/intercept + service"]
+        PrereqDev["prerequisites/*"]
+    end
+
+    subgraph Shared["internal/shared"]
+        SharedExec["executor"]
+        SharedUI["ui/"]
+        SharedErrors["errors/"]
+        SharedConfig["config/"]
+        SharedFiles["files/"]
+        SharedFlags["flags/"]
+    end
+
+    CmdRoot --> CmdBoot
+    CmdRoot --> CmdCluster
+    CmdRoot --> CmdChart
+    CmdRoot --> CmdDev
+
+    CmdBoot --> SvcBoot
+    SvcBoot --> SvcCluster
+    SvcBoot --> SvcChart
+
+    CmdCluster --> UtilsCluster
+    UtilsCluster --> SvcCluster
+    SvcCluster --> ProvK3D
+    SvcCluster --> UICluster
+    SvcCluster --> ModCluster
+    SvcCluster --> PrereqCluster
+
+    CmdChart --> SvcChart
+    SvcChart --> ProvHelm
+    SvcChart --> ProvArgoCD
+    SvcChart --> ProvGit
+    SvcChart --> UIChart
+    SvcChart --> UtilsChart
+    SvcChart --> ModChart
+    SvcChart --> PrereqChart
+
+    CmdDev --> SvcIntercept
+    CmdDev --> SvcScaffold
+    SvcIntercept --> ProvTelepresence
+    SvcIntercept --> ProvKubectl
+    SvcScaffold --> ProvDevChart
+    SvcScaffold --> ProvKubectl
+    SvcScaffold --> PrereqDev
+    UIDevIntercept --> ProvKubectl
+
+    ProvK3D --> SharedExec
+    ProvHelm --> SharedExec
+    ProvHelm --> SharedConfig
+    ProvArgoCD --> SharedConfig
+    ProvGit --> SharedExec
+    ProvKubectl --> SharedExec
+    ProvTelepresence --> SharedExec
+
+    SvcCluster --> SharedUI
+    SvcCluster --> SharedErrors
+    SvcChart --> SharedErrors
+    SvcChart --> SharedFiles
+    SvcChart --> SharedConfig
+    UICluster --> SharedUI
+    UIChart --> SharedUI
+    UIDevIntercept --> SharedUI
+
+    ModCluster --> SharedFlags

@@ -1,0 +1,48 @@
+sequenceDiagram
+    participant User
+    participant BootstrapCmd as "bootstrap cmd"
+    participant BootstrapSvc as "Bootstrap Service"
+    participant ClusterSvc as "Cluster Service"
+    participant K3DMgr as "K3D Manager"
+    participant ChartSvc as "Chart Service"
+    participant GitProv as "Git Provider"
+    participant HelmMgr as "Helm Manager"
+    participant ArgoCDMgr as "ArgoCD Manager"
+    participant K8sAPI as "Kubernetes API"
+    participant GitHub as "GitHub"
+
+    User->>BootstrapCmd: openframe bootstrap [name] [--deployment-mode]
+    BootstrapCmd->>BootstrapSvc: Execute(cmd, args)
+    BootstrapSvc->>ClusterSvc: CreateClusterWithPrerequisites(name, verbose)
+    ClusterSvc->>K3DMgr: CreateCluster(ClusterConfig)
+    K3DMgr->>K3DMgr: Generate k3d config YAML
+    K3DMgr->>K3DMgr: k3d cluster create --config ...
+    K3DMgr-->>ClusterSvc: rest.Config
+    ClusterSvc-->>BootstrapSvc: rest.Config
+
+    BootstrapSvc->>ChartSvc: InstallChartsWithConfig(InstallationRequest)
+    ChartSvc->>ChartSvc: Check prerequisites (helm, git, certs)
+    ChartSvc->>ChartSvc: Interactive wizard OR use --deployment-mode
+
+    ChartSvc->>HelmMgr: InstallArgoCDWithProgress(config)
+    HelmMgr->>HelmMgr: helm repo add / helm upgrade --install argo-cd
+    HelmMgr-->>ChartSvc: ArgoCD installed
+
+    ChartSvc->>GitProv: CloneChartRepository(AppOfAppsConfig)
+    GitProv->>GitHub: git clone --depth 1 --branch [branch]
+    GitHub-->>GitProv: chart files
+    GitProv-->>ChartSvc: CloneResult{TempDir, ChartPath}
+
+    ChartSvc->>HelmMgr: InstallAppOfAppsFromLocal(config, certFile, keyFile)
+    HelmMgr->>K8sAPI: helm upgrade --install app-of-apps
+    HelmMgr-->>ChartSvc: app-of-apps installed
+
+    ChartSvc->>ArgoCDMgr: WaitForApplications(config)
+    loop Poll every 2s up to timeout
+        ArgoCDMgr->>K8sAPI: List Application CRDs
+        K8sAPI-->>ArgoCDMgr: Application statuses
+        ArgoCDMgr->>ArgoCDMgr: Check Healthy + Synced
+    end
+    ArgoCDMgr-->>ChartSvc: All applications ready
+    ChartSvc-->>BootstrapSvc: Success
+    BootstrapSvc-->>User: Environment ready
