@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant User
+    participant CLI as "cmd/chart install"
+    participant ChartSvc as "chart.ChartService"
+    participant Wizard as "configuration.ConfigurationWizard"
+    participant Builder as "config.Builder"
+    participant Installer as "chart.Installer"
+
+    User->>CLI: openframe chart install
+    CLI->>ChartSvc: InstallWithContextDeferred(ctx, req)
+    ChartSvc->>ChartSvc: SelectCluster() interactive
+
+    alt No deployment-mode flag
+        ChartSvc->>Wizard: ConfigureHelmValues()
+        Wizard->>User: Select deployment mode (OSS/SaaS/SaaS-Shared)
+        User-->>Wizard: oss-tenant
+        Wizard->>User: Default or interactive config?
+        User-->>Wizard: interactive
+        Wizard->>User: Branch, Docker, Ingress prompts
+        User-->>Wizard: configuration answers
+        Wizard->>Wizard: CreateTemporaryValuesFile()
+        Wizard-->>ChartSvc: ChartConfiguration{TempHelmValuesPath}
+    else deployment-mode flag provided
+        ChartSvc->>Builder: BuildInstallConfig(...)
+        Builder->>Builder: ReadHelmValuesFile() for branch override
+        Builder-->>ChartSvc: ChartInstallConfig
+    end
+
+    ChartSvc->>Installer: InstallChartsWithContext(ctx, config)
+    Installer-->>User: success
