@@ -1,73 +1,9 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://shdrojejslhgnojzkzak.supabase.co/storage/v1/object/public/public/doc-orchestrator/logos/1771384772513-n227fc-logo-openframe-full-dark-bg.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://shdrojejslhgnojzkzak.supabase.co/storage/v1/object/public/public/doc-orchestrator/logos/1771384777189-nbcwbo-logo-openframe-full-light-bg.png">
-    <img alt="OpenFrame" src="https://shdrojejslhgnojzkzak.supabase.co/storage/v1/object/public/public/doc-orchestrator/logos/1771384777189-nbcwbo-logo-openframe-full-light-bg.png" width="300">
-  </picture>
-</div>
+# Contributing Guidelines
 
-# Contributing to OpenFrame CLI
-
-Thank you for your interest in contributing to OpenFrame CLI! This guide covers everything you need to know about code style, branching strategy, pull requests, and the review process.
+Thank you for contributing to OpenFrame CLI! This guide covers everything you need to know about code style, branching strategy, pull requests, and the review process.
 
 > **Community support happens in Slack, not GitHub Issues.**
 > Join the [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) to discuss contributions, ask questions, or report bugs before opening a PR.
-
----
-
-## Table of Contents
-
-- [Getting Started](#getting-started)
-- [Code Style and Conventions](#code-style-and-conventions)
-- [Branch Naming Convention](#branch-naming-convention)
-- [Commit Message Format](#commit-message-format)
-- [Pull Request Process](#pull-request-process)
-- [Adding New Commands](#adding-new-commands)
-- [Local Validation Before Submitting](#local-validation-before-submitting)
-- [Getting Help](#getting-help)
-
----
-
-## Getting Started
-
-Before contributing, set up your development environment:
-
-1. **Install Go 1.21+** — the primary language runtime
-2. **Clone the repository**:
-
-```bash
-git clone https://github.com/flamingo-stack/openframe-cli.git
-cd openframe-cli
-```
-
-3. **Install dependencies**:
-
-```bash
-go mod download
-go mod tidy
-```
-
-4. **Install development tools**:
-
-```bash
-# Linter
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-# Import formatter
-go install golang.org/x/tools/cmd/goimports@latest
-
-# Vulnerability scanner
-go install golang.org/x/vuln/cmd/govulncheck@latest
-```
-
-5. **Build and verify**:
-
-```bash
-go build -o openframe ./main.go
-./openframe --help
-```
-
-For detailed environment setup, see the [Development Documentation](./docs/README.md).
 
 ---
 
@@ -75,7 +11,7 @@ For detailed environment setup, see the [Development Documentation](./docs/READM
 
 ### Go Style Guide
 
-OpenFrame CLI follows standard Go conventions with these project-specific rules:
+OpenFrame CLI follows standard Go conventions with a few project-specific rules:
 
 - **Format with `gofmt`**: All code must be formatted with `gofmt` before committing
 - **Organize imports with `goimports`**: Use `goimports` for import grouping (stdlib, external, internal)
@@ -111,6 +47,9 @@ return errors.CreateCommandError("k3d", args, originalErr)
 if err := someOperation(); err != nil {
     return err
 }
+
+// ❌ WRONG — using errors.New when wrapping
+return errors.New("operation failed")
 ```
 
 ### Logging and Output
@@ -138,6 +77,7 @@ if err := someOperation(); err != nil {
 - Branch off `main` for all new work
 
 ```bash
+# Create a new feature branch
 git checkout main
 git pull origin main
 git checkout -b feature/my-new-feature
@@ -186,6 +126,7 @@ chore(deps): update client-go to v0.29.0
 - Subject line: 72 characters max, imperative mood ("add X", not "added X" or "adds X")
 - No period at the end of the subject line
 - Body: wrap at 72 characters; explain *what* and *why*, not *how*
+- Reference issues/discussions in the footer: `Closes #123` or `Fixes #456`
 
 ---
 
@@ -233,49 +174,40 @@ Describe how you tested these changes:
 Link to Slack discussion or related context (if applicable).
 ```
 
-### Review Checklist
+---
 
-When reviewing a PR, verify:
+## Review Checklist
 
-**Code Quality**
+When reviewing a PR, check the following:
+
+### Code Quality
 - [ ] Logic is clear and follows existing patterns
 - [ ] No unnecessary complexity or over-engineering
 - [ ] Error messages are user-friendly and actionable
 - [ ] No hardcoded values that should be configurable
 
-**Architecture**
+### Architecture
 - [ ] New external tools are abstracted behind interfaces
-- [ ] Dependencies are injected (not instantiated inline)
+- [ ] Dependencies are injected (not instantiated inline in service methods)
 - [ ] Commands delegate to services; services delegate to providers
 - [ ] Shared infrastructure is used (don't re-implement logging, prompts, errors)
 
-**Testing**
-- [ ] Unit tests cover the happy path and error cases
+### Testing
+- [ ] Unit tests cover the happy path
+- [ ] Unit tests cover error cases
 - [ ] Mock executor is used correctly (no real tool calls in unit tests)
+- [ ] New prerequisite tools have installer tests
 
-**Security**
+### Security
 - [ ] No credentials or secrets in source code
 - [ ] All user inputs are validated
 - [ ] External commands use `exec.Command` with arg arrays (not shell strings)
 - [ ] Temporary files are cleaned up with `defer`
 
-**Documentation**
+### Documentation
 - [ ] Exported functions and types have Go doc comments
 - [ ] New commands have `Short` and `Long` descriptions in the Cobra command
-
----
-
-## Adding New Commands
-
-When adding a new command, follow this pattern:
-
-1. **Create the command file**: `cmd/<group>/<command>.go`
-2. **Register in group file**: Add to `cmd/<group>/<group>.go`'s `AddCommand()` call
-3. **Create service logic**: `internal/<group>/services/<command>.go`
-4. **Define interface**: Add to `internal/<group>/utils/types/interfaces.go`
-5. **Add prerequisite checks**: Update `internal/<group>/prerequisites/checker.go` if needed
-6. **Write unit tests**: `internal/<group>/services/<command>_test.go`
-7. **Update inline docs**: Exported functions and types must have doc comments
+- [ ] README or CHANGELOG updated if user-facing behavior changed
 
 ---
 
@@ -303,32 +235,17 @@ go build -o /tmp/openframe-test ./main.go
 
 ---
 
-## Repository Structure
+## Adding New Commands
 
-```text
-openframe-cli/
-├── main.go                          # Binary entry point
-├── cmd/                             # Cobra CLI commands
-│   ├── root.go                      # Root command wiring
-│   ├── bootstrap/bootstrap.go       # openframe bootstrap
-│   ├── cluster/                     # openframe cluster *
-│   ├── chart/                       # openframe chart *
-│   └── dev/                         # openframe dev *
-├── internal/                        # Business logic (not exported)
-│   ├── bootstrap/                   # Bootstrap service
-│   ├── cluster/                     # Cluster service, models, providers
-│   ├── chart/                       # Chart service, models, providers, UI
-│   ├── dev/                         # Dev service, intercept, scaffold
-│   └── shared/                      # Cross-cutting concerns
-│       ├── executor/                # Command execution abstraction
-│       ├── errors/                  # Error types and handlers
-│       ├── ui/                      # Prompts, tables, logo, progress
-│       └── config/                  # TLS, credentials, system init
-└── tests/                           # Test utilities and integration tests
-    ├── testutil/                    # Mock executors, flag factories
-    ├── integration/                 # End-to-end CLI integration tests
-    └── mocks/                       # Mock implementations
-```
+When adding a new command, follow this pattern:
+
+1. **Create the command file**: `cmd/<group>/<command>.go`
+2. **Register in group file**: Add to `cmd/<group>/<group>.go`'s `AddCommand()` call
+3. **Create service logic**: `internal/<group>/services/<command>.go`
+4. **Define interface**: Add to `internal/<group>/utils/types/interfaces.go`
+5. **Add prerequisite checks**: Update `internal/<group>/prerequisites/checker.go` if needed
+6. **Write unit tests**: `internal/<group>/services/<command>_test.go`
+7. **Update inline docs**: Exported functions and types must have doc comments
 
 ---
 
@@ -336,17 +253,7 @@ openframe-cli/
 
 Stuck on something? The best place to ask is the **OpenMSP Slack**:
 
-| Resource | Link |
-|---|---|
-| OpenMSP Community | [openmsp.ai](https://www.openmsp.ai/) |
-| Slack Invite | [Join OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) |
-| OpenFrame Platform | [openframe.ai](https://openframe.ai) |
-| Flamingo | [flamingo.run](https://flamingo.run) |
+- **Join**: [openmsp.ai](https://www.openmsp.ai/)
+- **Slack invite**: [Join OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
 
 Discuss your contribution idea in Slack before starting large changes — this avoids duplicated effort and ensures alignment with the project's direction.
-
----
-
-<div align="center">
-  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
-</div>

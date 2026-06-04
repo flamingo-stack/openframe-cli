@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant User
+    participant Workflow as "InstallationWorkflow"
+    participant Wizard as "ConfigurationWizard"
+    participant Modifier as "HelmValuesModifier"
+    participant Builder as "config.Builder"
+    participant Installer as "chart.Installer"
+
+    User->>Workflow: ExecuteWithContext(ctx, req)
+    Workflow->>Workflow: SelectCluster (interactive or arg)
+    Workflow->>Wizard: ConfigureHelmValues()
+    Wizard->>User: Select deployment mode (OSS/SaaS/SaaS-Shared)
+    User-->>Wizard: oss-tenant
+    Wizard->>User: Select config mode (default/interactive)
+    User-->>Wizard: interactive
+    Wizard->>Modifier: LoadOrCreateBaseValues()
+    Modifier-->>Wizard: map[string]interface{}
+    Wizard->>User: Configure branch / Docker / Ingress
+    User-->>Wizard: selections
+    Wizard->>Modifier: ApplyConfiguration(values, config)
+    Wizard->>Modifier: CreateTemporaryValuesFile(values)
+    Modifier-->>Wizard: helm-values-tmp.yaml
+    Wizard-->>Workflow: ChartConfiguration
+
+    Workflow->>Builder: BuildInstallConfig(...)
+    Builder->>Builder: getBranchFromHelmValues()
+    Builder-->>Workflow: ChartInstallConfig
+
+    Workflow->>Installer: InstallChartsWithContext(ctx, config)
+    Installer->>Installer: ArgoCD install
+    Installer->>Installer: app-of-apps install
+    Installer->>Installer: WaitForApplications
+    Installer-->>Workflow: success

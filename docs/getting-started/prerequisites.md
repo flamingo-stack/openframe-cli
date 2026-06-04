@@ -1,315 +1,158 @@
 # Prerequisites
 
-Before installing and using OpenFrame CLI, ensure your system meets the following requirements and has the necessary dependencies installed.
+Before running OpenFrame CLI, ensure your system meets the hardware requirements and has all required software installed. The CLI will also perform its own prerequisite checks and provide guided installation instructions for any missing tools.
 
-## System Requirements
+---
 
-### Hardware Requirements
+## Hardware Requirements
 
-| Resource | Minimum | Recommended |
-|----------|---------|-------------|
-| **RAM** | 24GB | 32GB |
-| **CPU Cores** | 6 cores | 12 cores |
-| **Disk Space** | 50GB free | 100GB free |
-| **Architecture** | x86_64, ARM64 | x86_64, ARM64 |
+| Tier | RAM | CPU Cores | Disk Space |
+|---|---|---|---|
+| **Minimum** | 24 GB | 6 cores | 50 GB |
+| **Recommended** | 32 GB | 12 cores | 100 GB |
 
-### Operating System Support
+> K3D runs Kubernetes nodes as Docker containers. Insufficient memory is the most common cause of failed bootstraps — ensure Docker has access to at least 16 GB RAM.
 
-| OS | Version | Status |
-|---|---------|--------|
-| **Linux** | Ubuntu 20.04+, CentOS 8+, RHEL 8+ | ✅ Fully Supported |
-| **macOS** | 11+ (Big Sur and later) | ✅ Fully Supported |
-| **Windows** | Windows 10/11 with WSL2 | ⚠️ Supported via WSL2 |
+---
 
-> **Windows Users**: OpenFrame CLI requires WSL2 for proper Kubernetes integration. Native Windows support is not currently available.
+## Required Software
 
-## Required Dependencies
+The OpenFrame CLI depends on the following tools being installed on your system. The CLI will check for these automatically and provide installation guidance if any are missing.
 
-### Core Dependencies
+### Core Prerequisites (Cluster Operations)
 
-These tools must be installed before using OpenFrame CLI:
+| Tool | Minimum Version | Purpose | Install Guide |
+|---|---|---|---|
+| **Docker** | 20.10+ | Container runtime for K3D nodes | [docs.docker.com](https://docs.docker.com/get-docker/) |
+| **kubectl** | 1.26+ | Kubernetes CLI for cluster interaction | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
+| **k3d** | 5.6+ | Lightweight Kubernetes via K3D | [k3d.io](https://k3d.io/#installation) |
+| **Helm** | 3.12+ | Kubernetes package manager | [helm.sh](https://helm.sh/docs/intro/install/) |
 
-| Tool | Version | Purpose | Installation |
-|------|---------|---------|--------------|
-| **Docker** | 20.10+ | Container runtime for K3D clusters | [Docker Install Guide](https://docs.docker.com/get-docker/) |
-| **kubectl** | 1.25+ | Kubernetes command-line tool | [kubectl Install Guide](https://kubernetes.io/docs/tasks/tools/) |
-| **Helm** | 3.10+ | Kubernetes package manager | [Helm Install Guide](https://helm.sh/docs/intro/install/) |
-| **K3D** | 5.0+ | Lightweight Kubernetes clusters | [K3D Install Guide](https://k3d.io/v5.4.6/#installation) |
+### Additional Prerequisites (Chart Installation)
 
-### Development Dependencies (Optional)
+| Tool | Minimum Version | Purpose | Install Guide |
+|---|---|---|---|
+| **Git** | 2.30+ | Clone app-of-apps chart repositories | [git-scm.com](https://git-scm.com/downloads) |
+| **mkcert** | 1.4+ | Generate local TLS certificates | [github.com/FiloSottile/mkcert](https://github.com/FiloSottile/mkcert) |
 
-Required only if using development features (`openframe dev` commands):
+### Developer Prerequisites (Dev Workflows Only)
 
-| Tool | Version | Purpose | Installation |
-|------|---------|---------|--------------|
-| **Telepresence** | 2.10+ | Service intercepts for local development | [Telepresence Install](https://www.telepresence.io/docs/latest/install/) |
-| **jq** | 1.6+ | JSON processing for dev scripts | [jq Install Guide](https://jqlang.github.io/jq/download/) |
+| Tool | Minimum Version | Purpose | Install Guide |
+|---|---|---|---|
+| **Telepresence** | 2.x | Route K8s traffic to local machine | [telepresence.io](https://www.telepresence.io/docs/latest/install/) |
+| **Skaffold** | 2.x | Hot-reload workflow for services | [skaffold.dev](https://skaffold.dev/docs/install/) |
+| **jq** | 1.6+ | JSON processing for dev scripts | [jqlang.github.io](https://jqlang.github.io/jq/download/) |
 
-## Installation Verification
+---
 
-### Check Docker
-```bash
-docker --version
-docker ps
-```
+## Operating System Support
 
-Expected output:
-```text
-Docker version 20.10.0 or higher
-CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS   PORTS   NAMES
-```
+| Platform | Status | Notes |
+|---|---|---|
+| **macOS** (Intel / Apple Silicon) | ✅ Fully supported | Docker Desktop or Colima recommended |
+| **Linux** (Ubuntu, Debian, RHEL, Arch) | ✅ Fully supported | Native Docker Engine |
+| **Windows** (WSL2) | ✅ Supported | Requires WSL2 with Docker Desktop or Docker Engine in WSL2 |
 
-### Check kubectl
-```bash
-kubectl version --client
-```
+> **Windows users**: The CLI includes special WSL2 integration for Docker, IP detection, and inotify limits. Ensure WSL2 is enabled and Docker is accessible from within your WSL2 distribution.
 
-Expected output:
-```text
-Client Version: version.Info{Major:"1", Minor:"25"+...}
-```
+---
 
-### Check Helm
-```bash
-helm version
-```
+## OpenFrame CLI Binary
 
-Expected output:
-```text
-version.BuildInfo{Version:"v3.10.0"+...}
-```
+Download the latest `openframe` CLI binary for your platform:
 
-### Check K3D
-```bash
-k3d version
-```
+| Platform | Architecture | Download |
+|---|---|---|
+| **macOS** | ARM64 (Apple Silicon) | [openframe-cli_darwin_arm64](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64.tar.gz) |
+| **macOS** | AMD64 (Intel) | [openframe-cli_darwin_amd64](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_amd64.tar.gz) |
+| **Linux** | AMD64 | [openframe-cli_linux_amd64](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz) |
+| **Linux** | ARM64 | [openframe-cli_linux_arm64](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_arm64.tar.gz) |
+| **Windows** | AMD64 | [openframe-cli_windows_amd64.zip](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip) |
 
-Expected output:
-```text
-k3d version v5.0.0+
-```
-
-### Check Telepresence (Optional)
-```bash
-telepresence version
-```
-
-Expected output:
-```text
-Client: v2.10.0+
-```
-
-### Check jq (Optional)
-```bash
-jq --version
-```
-
-Expected output:
-```text
-jq-1.6+
-```
-
-## Network Requirements
-
-### Outbound Connectivity
-OpenFrame CLI requires internet access for:
-- Pulling Docker images
-- Downloading Helm charts
-- Accessing Git repositories
-- Installing prerequisites
-
-### Port Requirements
-| Port Range | Protocol | Purpose |
-|------------|----------|---------|
-| 80, 443 | TCP | HTTPS/HTTP for downloads |
-| 6443 | TCP | Kubernetes API server |
-| 30000-32767 | TCP | Kubernetes NodePort range |
-| 2376, 2377 | TCP | Docker daemon (if remote) |
-
-### Firewall Considerations
-Ensure your firewall allows:
-- Docker daemon communication
-- Kubernetes cluster communication
-- Outbound HTTPS connections
+---
 
 ## Environment Variables
 
-Set these environment variables for optimal experience:
+The following environment variables are recognized by the CLI:
 
-### Required
-```bash
-# Docker daemon configuration
-export DOCKER_HOST="unix:///var/run/docker.sock"
+| Variable | Purpose | Example |
+|---|---|---|
+| `OPENFRAME_FANCY_LOGO` | Enable/disable fancy terminal logo rendering | `true` / `false` |
+| `NO_COLOR` | Disable all colored terminal output | `1` |
+| `TERM` | Terminal type detection for UI rendering | `xterm-256color` |
+| `KUBECONFIG` | Path to kubeconfig file (standard Kubernetes) | `~/.kube/config` |
 
-# Kubernetes configuration
-export KUBECONFIG="$HOME/.kube/config"
-```
+---
 
-### Optional
-```bash
-# OpenFrame CLI configuration
-export OPENFRAME_LOG_LEVEL="info"
-export OPENFRAME_CONFIG_DIR="$HOME/.openframe"
+## Verification Commands
 
-# Development tools
-export TELEPRESENCE_LOGIN_DOMAIN="auth.datawire.io"
-```
-
-## Account Requirements
-
-### Container Registry Access
-- **Public registries**: Docker Hub, GHCR.io (no authentication required)
-- **Private registries**: Configure Docker credentials if using private images
-
-### Git Repository Access
-- **Public repositories**: No authentication required
-- **Private repositories**: Configure SSH keys or personal access tokens
-
-## Quick Setup Script
-
-For convenience, here's a script to verify all prerequisites:
+Run these commands to confirm your environment is ready before running the CLI:
 
 ```bash
-#!/bin/bash
-# prerequisites-check.sh
+# Verify Docker is running
+docker info
 
-echo "🔍 Checking OpenFrame CLI prerequisites..."
+# Verify kubectl is available
+kubectl version --client
 
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# Verify k3d is installed
+k3d version
 
-# Function to check version
-check_version() {
-    local tool="$1"
-    local min_version="$2"
-    local current_version="$3"
-    
-    echo "  $tool: $current_version (required: $min_version+)"
-}
+# Verify Helm is installed
+helm version
 
-errors=0
+# Verify Git is installed
+git --version
 
-# Check Docker
-if command_exists docker; then
-    docker_version=$(docker --version | cut -d' ' -f3 | cut -d',' -f1)
-    check_version "Docker" "20.10.0" "$docker_version"
-    if ! docker ps >/dev/null 2>&1; then
-        echo "  ❌ Docker daemon is not running or accessible"
-        ((errors++))
-    fi
-else
-    echo "  ❌ Docker not found"
-    ((errors++))
-fi
-
-# Check kubectl
-if command_exists kubectl; then
-    kubectl_version=$(kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' 2>/dev/null || echo "unknown")
-    check_version "kubectl" "1.25.0" "$kubectl_version"
-else
-    echo "  ❌ kubectl not found"
-    ((errors++))
-fi
-
-# Check Helm
-if command_exists helm; then
-    helm_version=$(helm version --short | cut -d'+' -f1)
-    check_version "Helm" "3.10.0" "$helm_version"
-else
-    echo "  ❌ Helm not found"
-    ((errors++))
-fi
-
-# Check K3D
-if command_exists k3d; then
-    k3d_version=$(k3d version | grep k3d | cut -d' ' -f2)
-    check_version "K3D" "5.0.0" "$k3d_version"
-else
-    echo "  ❌ K3D not found"
-    ((errors++))
-fi
-
-# Check optional tools
-echo ""
-echo "📋 Optional development tools:"
-
-if command_exists telepresence; then
-    telepresence_version=$(telepresence version --output=json 2>/dev/null | jq -r '.client.version' 2>/dev/null || "unknown")
-    check_version "Telepresence" "2.10.0" "$telepresence_version"
-else
-    echo "  ⚠️  Telepresence not found (optional for dev workflows)"
-fi
-
-if command_exists jq; then
-    jq_version=$(jq --version | cut -d'-' -f2)
-    check_version "jq" "1.6" "$jq_version"
-else
-    echo "  ⚠️  jq not found (optional for dev scripts)"
-fi
-
-echo ""
-if [ $errors -eq 0 ]; then
-    echo "✅ All required prerequisites are installed!"
-    echo "🚀 You're ready to install OpenFrame CLI"
-else
-    echo "❌ $errors required dependencies are missing"
-    echo "📖 Please install missing dependencies before proceeding"
-    exit 1
-fi
+# Verify mkcert is installed
+mkcert --version
 ```
 
-Save this as `prerequisites-check.sh`, make it executable, and run:
+Expected output example for Docker:
 
-```bash
-chmod +x prerequisites-check.sh
-./prerequisites-check.sh
+```text
+Client:
+ Version:           24.0.5
+ API version:       1.43
+ ...
+Server: Docker Engine - Community
+ Engine:
+  Version:          24.0.5
 ```
 
-## Troubleshooting Common Issues
+---
 
-### Docker Permission Issues
-If you get permission denied errors:
+## Automatic Prerequisite Checking
 
-```bash
-# Add your user to the docker group
-sudo usermod -aG docker $USER
+The CLI performs automatic prerequisite validation before every operation. If a required tool is missing, it will display:
 
-# Log out and back in, or run:
-newgrp docker
+1. Which tool is missing
+2. Platform-specific installation instructions
+3. An option to attempt automatic installation
+
+```text
+⚠  Prerequisites check failed:
+   Missing: k3d
+   Install: brew install k3d   (macOS)
+            curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash   (Linux)
 ```
 
-### kubectl Not Finding Config
-```bash
-# Create kubeconfig directory
-mkdir -p ~/.kube
+> You do not need to manually install all tools before first use — the CLI will guide you.
 
-# Verify KUBECONFIG environment variable
-echo `$KUBECONFIG`
-```
+---
 
-### K3D Installation Issues on macOS
-```bash
-# If using Homebrew
-brew install k3d
+## Memory Requirements for K3D
 
-# If using curl
-curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-```
+The CLI checks available system memory before cluster creation. A typical OpenFrame deployment requires:
 
-### WSL2 Setup on Windows
-1. Enable WSL2: `wsl --install`
-2. Install Ubuntu from Microsoft Store
-3. Install Docker Desktop with WSL2 backend
-4. Install all prerequisites inside WSL2 environment
+- **Minimum**: 8 GB available to Docker
+- **Recommended**: 16 GB+ available to Docker
+
+On macOS with Docker Desktop, ensure the memory limit in Docker Desktop preferences is set to at least 16 GB.
+
+---
 
 ## Next Steps
 
-Once all prerequisites are installed and verified:
-
-1. **[Quick Start Guide](quick-start.md)** - Install OpenFrame CLI and bootstrap your first environment
-2. **[First Steps Guide](first-steps.md)** - Explore key features and workflows
-
-Need help? Join our community:
-- **OpenMSP Slack**: [Join here](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- Follow the [Quick Start Guide](quick-start.md) to bootstrap your first environment
+- Read the [First Steps Guide](first-steps.md) once your environment is running

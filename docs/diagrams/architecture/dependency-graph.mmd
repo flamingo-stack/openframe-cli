@@ -1,0 +1,75 @@
+graph LR
+    subgraph Commands["cmd/"]
+        RC["root.go"]
+        BC["bootstrap"]
+        CC["cluster/*"]
+        CHC["chart/*"]
+        DC["dev/*"]
+    end
+
+    subgraph Services["internal/*/services"]
+        BS["bootstrap.Service"]
+        CS["cluster.ClusterService"]
+        CHS["chart.ChartService"]
+        IS["intercept.Service"]
+        SS["scaffold.Service"]
+    end
+
+    subgraph Providers["internal/*/providers"]
+        K3DP["k3d.Manager"]
+        HP["helm.HelmManager"]
+        AP["argocd.Manager"]
+        GP["git.Repository"]
+        KP["kubectl.Provider"]
+        TP["telepresence.Provider"]
+    end
+
+    subgraph SharedInfra["internal/shared/"]
+        EX["executor"]
+        ERR["errors"]
+        UIL["ui"]
+        CFG["config"]
+    end
+
+    RC --> BC
+    RC --> CC
+    RC --> CHC
+    RC --> DC
+
+    BC --> BS
+    CC --> CS
+    CHC --> CHS
+    DC --> IS
+    DC --> SS
+
+    BS --> CS
+    BS --> CHS
+
+    CS --> K3DP
+    CHS --> HP
+    CHS --> AP
+    CHS --> GP
+    IS --> KP
+    IS --> TP
+    SS --> KP
+    SS --> CHS
+
+    K3DP --> EX
+    HP --> EX
+    AP --> EX
+    GP --> EX
+    KP --> EX
+    TP --> EX
+
+    CS --> ERR
+    CHS --> ERR
+    IS --> ERR
+
+    CS --> UIL
+    CHS --> UIL
+    IS --> UIL
+    SS --> UIL
+
+    HP --> CFG
+    AP --> CFG
+    K3DP --> CFG

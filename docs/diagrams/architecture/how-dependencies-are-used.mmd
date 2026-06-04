@@ -1,0 +1,20 @@
+graph TD
+    CLI["OpenFrame CLI"] --> cobra["cobra\n(command routing)"]
+    CLI --> pterm["pterm\n(all terminal UI)"]
+    CLI --> promptui["promptui\n(select menus, text input)"]
+
+    ChartSvc["Chart Services"] --> clientgo["client-go\n(K8s API)"]
+    ChartSvc --> argocdclient["argo-cd client\n(application watch)"]
+    ChartSvc --> apiext["apiextensions\n(CRD checks)"]
+    ChartSvc --> dynamic["dynamic client\n(resource ops)"]
+    ChartSvc --> yamlsigs["sigs.k8s.io/yaml\n(K8s YAML)"]
+    ChartSvc --> yamlv3["gopkg.in/yaml.v3\n(helm values)"]
+
+    ClusterSvc["Cluster Service"] --> clientgo
+    ClusterSvc --> clientcmd["clientcmd\n(kubeconfig)"]
+
+    SharedUI["shared/ui"] --> pterm
+    SharedUI["shared/ui"] --> promptui
+    SharedUI["shared/ui"] --> term["golang.org/x/term\n(raw terminal)"]
+
+    Tests["Tests"] --> testify["testify\n(assertions)"]

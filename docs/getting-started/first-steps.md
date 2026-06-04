@@ -1,467 +1,220 @@
-# First Steps with OpenFrame CLI
+# First Steps
 
-Now that you have OpenFrame CLI installed and your first environment bootstrapped, let's explore the key features and workflows. This guide covers the essential first steps to get you productive with OpenFrame.
+You've successfully bootstrapped your first OpenFrame environment. Here are the first 5 things to do to get comfortable with your new cluster and start using OpenFrame effectively.
 
-## Your First 5 Actions
+---
 
-### 1. Explore the CLI Structure
+## 1. Check Your Cluster Status
 
-Get familiar with the command hierarchy:
+After bootstrap, verify everything is healthy:
 
 ```bash
-# See all available commands
-openframe --help
+openframe cluster status my-openframe
+```
 
-# Explore each command group
+Use the `--detailed` flag for full node and application information:
+
+```bash
+openframe cluster status my-openframe --detailed
+```
+
+This will display:
+
+- Cluster health and node count
+- Running Kubernetes nodes
+- ArgoCD application sync/health status for all deployed apps
+
+To see a quick list of all managed clusters:
+
+```bash
+openframe cluster list
+```
+
+---
+
+## 2. Explore the Available Commands
+
+OpenFrame CLI is organized into four command groups. Get familiar with each:
+
+```bash
+# Cluster lifecycle management
 openframe cluster --help
-openframe chart --help  
+
+# Helm chart and ArgoCD operations
+openframe chart --help
+
+# Developer workflow tools
 openframe dev --help
+
+# Full environment bootstrap
 openframe bootstrap --help
 ```
 
-The CLI is organized into logical groups:
-- **bootstrap**: One-time environment setup
-- **cluster**: Kubernetes cluster lifecycle  
-- **chart**: Application and service deployment
-- **dev**: Development and debugging tools
+### Full Command Reference
 
-### 2. Check Your Environment Status
+| Command | What It Does |
+|---|---|
+| `openframe bootstrap [name]` | Bootstrap a complete environment (cluster + charts) |
+| `openframe cluster create [name]` | Create a new K3D cluster |
+| `openframe cluster delete [name]` | Delete a cluster |
+| `openframe cluster list` | List all managed clusters |
+| `openframe cluster status [name]` | Show cluster health and ArgoCD app status |
+| `openframe cluster cleanup [name]` | Remove unused Docker images and resources |
+| `openframe chart install [name]` | Install/reinstall ArgoCD + app-of-apps on a cluster |
+| `openframe dev intercept [service]` | Start a Telepresence intercept for local development |
+| `openframe dev skaffold [cluster]` | Run a Skaffold hot-reload workflow |
 
-Verify everything is running correctly:
-
-```bash
-# Overall cluster health
-openframe cluster status
-
-# List all running clusters
-openframe cluster list
-
-# Check installed charts and applications
-openframe chart list
-```
-
-Expected healthy output:
-```text
-📊 Cluster Status: openframe-local
-✅ Cluster is running
-✅ ArgoCD is healthy
-✅ All core services operational
-```
-
-### 3. Access the ArgoCD Dashboard
-
-ArgoCD provides a web interface for GitOps deployments:
-
-```bash
-# Get admin password
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d; echo
-
-# Port forward to access UI
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-
-# Open in browser: https://localhost:8080
-# Username: admin
-# Password: (from command above)
-```
-
-In the ArgoCD UI, you'll see:
-- **Applications**: Deployed services and components
-- **Repositories**: Connected Git repositories  
-- **Settings**: Configuration and policies
-- **User Info**: Access controls and authentication
-
-### 4. Deploy Your First Application
-
-Let's deploy a simple application to test the workflow:
-
-```bash
-# Create a test namespace
-kubectl create namespace hello-world
-
-# Deploy a sample application
-kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hello-world
-  namespace: hello-world
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: hello-world
-  template:
-    metadata:
-      labels:
-        app: hello-world
-    spec:
-      containers:
-      - name: hello-world
-        image: nginx:alpine
-        ports:
-        - containerPort: 80
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: hello-world
-  namespace: hello-world
-spec:
-  selector:
-    app: hello-world
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 80
-EOF
-```
 
-Verify the deployment:
-```bash
-# Check pods
-kubectl get pods -n hello-world
+## 3. Configure Your Local Development Workflow
 
-# Check service
-kubectl get svc -n hello-world
+If you're a developer working on OpenFrame services, set up a service intercept for local development. This routes live Kubernetes traffic from a running service to your local machine.
 
-# Test connectivity
-kubectl port-forward svc/hello-world -n hello-world 8081:80 &
-curl http://localhost:8081
-kill %1  # Stop port forward
-```
-
-### 5. Set Up Your Development Environment
-
-Configure kubectl context and helpful aliases:
+### Start an Intercept
 
 ```bash
-# Set default context
-kubectl config use-context k3d-openframe-local
+# Interactive mode — select service and port via wizard
+openframe dev intercept
 
-# Add helpful aliases to your shell profile
-cat >> ~/.bashrc << 'EOF'
-# OpenFrame aliases
-alias of="openframe"
-alias ofcs="openframe cluster status"
-alias ofcl="openframe cluster list"
-alias k="kubectl"
-alias kgp="kubectl get pods"
-alias kgs="kubectl get svc"
-alias kgn="kubectl get nodes"
-EOF
-
-# Reload shell configuration
-source ~/.bashrc
+# Or specify directly
+openframe dev intercept my-api-service --port 8080 --namespace development
 ```
 
-## Key Workflows to Learn
+The intercept command will:
 
-### Cluster Management Workflow
+1. Validate your kubectl context and cluster connectivity
+2. Connect Telepresence to the cluster
+3. Route traffic from the specified Kubernetes service to your local port
 
-```mermaid
-flowchart TD
-    A[Create Cluster] --> B[Check Status]
-    B --> C[Deploy Applications]
-    C --> D[Monitor Health]
-    D --> E{Issues?}
-    E -->|Yes| F[Debug & Fix]
-    E -->|No| G[Continue Development]
-    F --> D
-    G --> H[Scale or Update]
-    H --> D
-```
+### Stop an Intercept
 
-#### Common Cluster Commands
+Intercepts are automatically cleaned up when you exit (`Ctrl+C`). The service handles signal cleanup gracefully.
+
+---
+
+## 4. Run the Skaffold Hot-Reload Workflow
+
+For rapid iteration on services, use the Skaffold workflow. This automatically rebuilds and redeploys container images as you change code:
+
 ```bash
-# Create a new cluster
-openframe cluster create my-new-cluster
+# Run Skaffold dev with optional cluster bootstrap
+openframe dev skaffold my-openframe
+
+# Skip bootstrap if cluster is already running
+openframe dev skaffold my-openframe --skip-bootstrap
+
+# With a custom helm values file
+openframe dev skaffold my-openframe --helm-values ./values-dev.yaml
+```
+
+> The Skaffold workflow handles prerequisite checking, interactive service selection, cluster management, and Helm chart installation automatically.
+
+---
+
+## 5. Learn the Deployment Modes
+
+OpenFrame supports three deployment configurations, selected at bootstrap time via `--deployment-mode`:
+
+```bash
+# Self-hosted OSS (most common)
+openframe bootstrap --deployment-mode=oss-tenant
+
+# SaaS managed tenant
+openframe bootstrap --deployment-mode=saas-tenant
+
+# Shared SaaS infrastructure
+openframe bootstrap --deployment-mode=saas-shared
+```
+
+| Mode | When to Use |
+|---|---|
+| `oss-tenant` | Standard self-hosted OpenFrame — recommended for most operators |
+| `saas-tenant` | When deploying as a managed tenant on the SaaS platform |
+| `saas-shared` | Shared infrastructure layer for SaaS deployments |
+
+---
+
+## Common Initial Configuration
+
+### Working with Multiple Clusters
+
+You can manage multiple isolated environments simultaneously:
+
+```bash
+# Create separate clusters for different environments
+openframe cluster create dev-cluster --nodes 2
+openframe cluster create staging-cluster --nodes 4
+
+# Install charts on each independently
+openframe chart install dev-cluster --deployment-mode=oss-tenant
+openframe chart install staging-cluster --deployment-mode=oss-tenant
 
 # List all clusters
 openframe cluster list
-
-# Get detailed status
-openframe cluster status my-cluster
-
-# Delete a cluster
-openframe cluster delete my-cluster
-
-# Clean up resources
-openframe cluster cleanup
 ```
 
-### Application Deployment Workflow
+### Reinstalling Charts
 
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant CLI as OpenFrame CLI
-    participant ArgoCD as ArgoCD
-    participant K8s as Kubernetes
-    
-    Dev->>CLI: openframe chart install
-    CLI->>ArgoCD: Create Application
-    ArgoCD->>K8s: Deploy Resources
-    K8s-->>ArgoCD: Resource Status
-    ArgoCD-->>CLI: Sync Status
-    CLI-->>Dev: Deployment Complete
-```
-
-#### Common Chart Commands
-```bash
-# Install a chart from repository
-openframe chart install my-app \
-  --repo=https://github.com/my-org/my-app \
-  --path=charts/my-app
-
-# List installed applications
-openframe chart list
-
-# Check application sync status
-kubectl get applications -n argocd
-
-# Manually sync an application
-kubectl patch application my-app -n argocd \
-  --type=json \
-  -p='[{"op": "replace", "path": "/spec/syncPolicy", "value": {"automated": {"selfHeal": true}}}]'
-```
-
-### Development Workflow
-
-For local development with live Kubernetes integration:
+If you need to reinstall or update charts on an existing cluster without recreating it:
 
 ```bash
-# Start a development intercept
-openframe dev intercept my-service \
-  --namespace=default \
-  --port=3000:8080
-
-# Generate scaffold for new service
-openframe dev scaffold my-new-service \
-  --template=microservice \
-  --language=go
+openframe chart install my-openframe --deployment-mode=oss-tenant --force
 ```
 
-## Essential Configuration
+### Cleaning Up Resources
 
-### Customize OpenFrame Settings
-
-Create a configuration file for personalized settings:
+When a cluster is no longer needed:
 
 ```bash
-mkdir -p ~/.openframe
-cat > ~/.openframe/config.yaml << 'EOF'
-# OpenFrame CLI Configuration
-default:
-  cluster_name: "openframe-local"
-  namespace: "default"
-  log_level: "info"
-  
-bootstrap:
-  mode: "oss-tenant"
-  interactive: true
-  timeout: "15m"
+# Clean up Docker images and unused resources (keeps cluster)
+openframe cluster cleanup my-openframe
 
-cluster:
-  provider: "k3d"
-  nodes: 1
-  
-chart:
-  timeout: "10m"
-  wait: true
-  
-dev:
-  intercept_timeout: "5m"
-  scaffold_templates_dir: "~/.openframe/templates"
-EOF
+# Fully delete the cluster
+openframe cluster delete my-openframe
 ```
 
-### Configure Git Integration
+---
 
-For ArgoCD to access your repositories:
+## Verbose Mode
+
+For troubleshooting or to see detailed logs during any operation, add the `-v` / `--verbose` flag:
 
 ```bash
-# Add a Git repository to ArgoCD
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: my-private-repo
-  namespace: argocd
-  labels:
-    argocd.argoproj.io/secret-type: repository
-stringData:
-  type: git
-  url: https://github.com/my-org/my-private-repo
-  password: <your-token>
-  username: <your-username>
-EOF
+openframe bootstrap my-openframe --verbose
+openframe cluster create my-openframe --verbose
+openframe chart install my-openframe --verbose
 ```
 
-### Set Up Ingress (Optional)
+Verbose mode shows:
+- Detailed ArgoCD synchronization progress
+- All Helm operations and outputs
+- Full prerequisite check results
 
-Configure Traefik ingress for external access:
+---
 
-```bash
-# Create an ingress for your application
-kubectl apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: hello-world-ingress
-  namespace: hello-world
-  annotations:
-    kubernetes.io/ingress.class: traefik
-spec:
-  rules:
-  - host: hello-world.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: hello-world
-            port:
-              number: 80
-EOF
+## Where to Get Help
 
-# Add to /etc/hosts for local testing
-echo "127.0.0.1 hello-world.local" | sudo tee -a /etc/hosts
+> **Support is handled in the OpenMSP Slack community — not GitHub Issues.**
 
-# Access via: http://hello-world.local
-```
+| Resource | Link |
+|---|---|
+| OpenMSP Community | [openmsp.ai](https://www.openmsp.ai/) |
+| Slack Invite | [Join OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) |
+| OpenFrame Platform | [openframe.ai](https://openframe.ai) |
+| Flamingo | [flamingo.run](https://flamingo.run) |
 
-## Monitoring and Debugging
+In Slack you can:
+- Ask questions about setup and configuration
+- Report bugs and unexpected behavior
+- Request new features
+- Connect with other MSP operators and developers using OpenFrame
 
-### Check System Health
+---
 
-```bash
-# View all pods across namespaces
-kubectl get pods --all-namespaces
+## What's Next
 
-# Check node resource usage
-kubectl top nodes
+After getting comfortable with the basics, explore:
 
-# Check pod resource usage  
-kubectl top pods --all-namespaces
-
-# View cluster events
-kubectl get events --sort-by=.metadata.creationTimestamp
-```
-
-### Debug Common Issues
-
-#### Pod Not Starting
-```bash
-# Describe pod to see events
-kubectl describe pod <pod-name> -n <namespace>
-
-# Check logs
-kubectl logs <pod-name> -n <namespace>
-
-# Check resource constraints
-kubectl get resourcequota -n <namespace>
-```
-
-#### Service Not Accessible
-```bash
-# Check service endpoints
-kubectl get endpoints <service-name> -n <namespace>
-
-# Test internal connectivity
-kubectl run test-pod --image=busybox -it --rm -- sh
-# Inside pod:
-wget -q -O- http://<service-name>.<namespace>.svc.cluster.local
-```
-
-#### ArgoCD Application Not Syncing
-```bash
-# Check application status
-kubectl get application <app-name> -n argocd -o yaml
-
-# Force refresh
-kubectl patch application <app-name> -n argocd \
-  --type=json \
-  -p='[{"op": "replace", "path": "/spec/source/targetRevision", "value": "HEAD"}]'
-
-# Manual sync
-kubectl patch application <app-name> -n argocd \
-  --type=json \
-  -p='[{"op": "add", "path": "/metadata/annotations/argocd.argoproj.io~1sync", "value": ""}]'
-```
-
-## Best Practices
-
-### Development Environment
-1. **Use namespaces**: Organize applications by environment or team
-2. **Resource limits**: Set appropriate CPU/memory limits
-3. **Health checks**: Implement liveness and readiness probes
-4. **Secrets management**: Use Kubernetes secrets, not hardcoded values
-
-### GitOps Workflow
-1. **Infrastructure as Code**: Store all configurations in Git
-2. **Automated sync**: Enable ArgoCD auto-sync for non-production
-3. **Manual approval**: Require manual sync for production deployments  
-4. **Rollback strategy**: Use Git reverts for quick rollbacks
-
-### Cluster Management
-1. **Regular backups**: Backup cluster state and data
-2. **Monitor resources**: Set up alerts for resource usage
-3. **Update strategy**: Plan regular updates for cluster components
-4. **Security scanning**: Regularly scan images and configurations
-
-## Next Steps
-
-Now that you're familiar with OpenFrame basics, explore advanced topics:
-
-### Development Workflows
-Learn how to set up a complete development environment:
-- Configure your IDE and editor
-- Set up local development workflows
-- Use service intercepts for debugging
-
-### Architecture Understanding
-Dive deeper into how OpenFrame components work:
-- Study the service architecture
-- Understand data flows and dependencies
-- Learn about security models and best practices
-
-### Advanced Deployment Patterns
-Master sophisticated deployment strategies:
-- Blue/green deployments
-- Canary releases
-- Multi-environment promotion pipelines
-
-## Getting Help
-
-### Community Resources
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) for questions and support
-- **Documentation**: Explore other guides in this repository
-- **Examples**: Check the examples directory for sample configurations
-
-### Useful Commands Reference
-```bash
-# Quick status check
-openframe cluster status
-
-# View all resources
-kubectl get all --all-namespaces
-
-# Emergency cluster reset
-openframe cluster delete <cluster-name>
-openframe bootstrap
-
-# Export current configuration
-kubectl get all -o yaml > backup.yaml
-
-# View OpenFrame CLI logs
-openframe --verbose <command>
-```
-
-### Debugging Resources
-- ArgoCD UI: https://localhost:8080 (after port forward)
-- Traefik Dashboard: https://localhost:9000 (after port forward)
-- Kubernetes Dashboard: Install with `kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml`
-
-You're now ready to be productive with OpenFrame CLI! Explore the features, experiment with deployments, and join the community for support and sharing experiences.
+- The architecture documentation to understand how the CLI components work together
+- The development setup guide for contributing to OpenFrame CLI
+- Security best practices for managing credentials and certificates in your environment
