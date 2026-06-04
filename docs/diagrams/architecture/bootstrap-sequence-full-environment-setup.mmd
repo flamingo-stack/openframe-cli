@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant User
+    participant CLI as "cmd/bootstrap"
+    participant BSvc as "bootstrap.Service"
+    participant CSvc as "cluster.ClusterService"
+    participant K3dMgr as "k3d.K3dManager"
+    participant ChartSvc as "chart.ChartService"
+    participant Installer as "chart.Installer"
+    participant HelmMgr as "helm.HelmManager"
+    participant ArgoCDMgr as "argocd.Manager"
+    participant GitRepo as "git.Repository"
+
+    User->>CLI: openframe bootstrap [cluster-name]
+    CLI->>BSvc: Execute(cmd, args)
+    BSvc->>CSvc: CreateClusterWithPrerequisitesNonInteractive()
+    CSvc->>K3dMgr: CreateCluster(config)
+    K3dMgr->>K3dMgr: createK3dConfigFile()
+    K3dMgr-->>CSvc: *rest.Config
+    CSvc-->>BSvc: *rest.Config (kubeConfig)
+
+    BSvc->>ChartSvc: InstallChartsWithConfig(InstallationRequest)
+    ChartSvc->>ChartSvc: SelectCluster() or use provided name
+    ChartSvc->>HelmMgr: NewHelmManager(kubeConfig)
+    ChartSvc->>Installer: InstallChartsWithContext(ctx, config)
+
+    Installer->>HelmMgr: InstallArgoCDWithProgress(ctx, cfg)
+    HelmMgr-->>Installer: ArgoCD deployed
+
+    Installer->>GitRepo: CloneChartRepository(ctx, appConfig)
+    GitRepo-->>Installer: CloneResult{TempDir, ChartPath}
+
+    Installer->>HelmMgr: InstallAppOfAppsFromLocal(ctx, config, certFile, keyFile)
+    HelmMgr-->>Installer: App-of-apps deployed
+
+    Installer->>ArgoCDMgr: WaitForApplications(ctx, config)
+    ArgoCDMgr->>ArgoCDMgr: Poll ArgoCD application health/sync status
+    ArgoCDMgr-->>Installer: All applications Healthy + Synced
+
+    Installer-->>ChartSvc: success
+    ChartSvc-->>BSvc: success
+    BSvc-->>User: Environment ready

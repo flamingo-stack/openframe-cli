@@ -1,0 +1,81 @@
+graph TB
+    subgraph CLI["CLI Entry Points"]
+        Root["openframe (root)"]
+        Bootstrap["bootstrap"]
+        Cluster["cluster"]
+        Chart["chart"]
+        Dev["dev"]
+    end
+
+    subgraph Internal["Internal Services"]
+        BootstrapSvc["bootstrap.Service"]
+        ClusterSvc["cluster.ClusterService"]
+        ChartSvc["chart.ChartService"]
+        DevSvc["dev.Service"]
+    end
+
+    subgraph Providers["Infrastructure Providers"]
+        K3dMgr["k3d.K3dManager"]
+        HelmMgr["helm.HelmManager"]
+        ArgoCDMgr["argocd.Manager"]
+        GitRepo["git.Repository"]
+        TelepresenceProv["telepresence.Provider"]
+        KubectlProv["kubectl.Provider"]
+    end
+
+    subgraph External["External Tools"]
+        K3D["K3D CLI"]
+        HelmCLI["Helm CLI"]
+        ArgoCD["ArgoCD API"]
+        KubectlCLI["kubectl"]
+        TelepresenceCLI["Telepresence CLI"]
+        SkaffoldCLI["Skaffold CLI"]
+    end
+
+    subgraph SharedLayer["Shared Layer"]
+        Executor["executor.CommandExecutor"]
+        SharedUI["shared/ui"]
+        SharedErrors["shared/errors"]
+        SharedConfig["shared/config"]
+    end
+
+    Root --> Bootstrap
+    Root --> Cluster
+    Root --> Chart
+    Root --> Dev
+
+    Bootstrap --> BootstrapSvc
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc
+
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+
+    ClusterSvc --> K3dMgr
+    ChartSvc --> HelmMgr
+    ChartSvc --> ArgoCDMgr
+    ChartSvc --> GitRepo
+    DevSvc --> TelepresenceProv
+    DevSvc --> KubectlProv
+
+    K3dMgr --> Executor
+    HelmMgr --> Executor
+    ArgoCDMgr --> Executor
+    GitRepo --> Executor
+    TelepresenceProv --> Executor
+    KubectlProv --> Executor
+
+    Executor --> K3D
+    Executor --> HelmCLI
+    ArgoCDMgr --> ArgoCD
+    Executor --> KubectlCLI
+    Executor --> TelepresenceCLI
+    Executor --> SkaffoldCLI
+
+    ClusterSvc --> SharedUI
+    ChartSvc --> SharedUI
+    DevSvc --> SharedUI
+    ClusterSvc --> SharedErrors
+    ChartSvc --> SharedErrors
+    SharedConfig --> SharedLayer

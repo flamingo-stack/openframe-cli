@@ -1,0 +1,78 @@
+graph LR
+    subgraph Commands["cmd Layer"]
+        CmdRoot["cmd/root.go"]
+        CmdBootstrap["cmd/bootstrap"]
+        CmdCluster["cmd/cluster"]
+        CmdChart["cmd/chart"]
+        CmdDev["cmd/dev"]
+    end
+
+    subgraph Services["Service Layer"]
+        SvcBootstrap["internal/bootstrap/service.go"]
+        SvcCluster["internal/cluster/service.go"]
+        SvcChart["internal/chart/services/chart_service.go"]
+        SvcInstaller["internal/chart/services/installer.go"]
+        SvcArgoCD["internal/chart/services/argocd.go"]
+        SvcAppOfApps["internal/chart/services/appofapps.go"]
+        SvcIntercept["internal/dev/services/intercept"]
+        SvcScaffold["internal/dev/services/scaffold"]
+    end
+
+    subgraph Providers["Provider Layer"]
+        ProvK3d["internal/cluster/providers/k3d"]
+        ProvHelm["internal/chart/providers/helm"]
+        ProvArgoCD["internal/chart/providers/argocd"]
+        ProvGit["internal/chart/providers/git"]
+        ProvKubectl["internal/dev/providers/kubectl"]
+        ProvTelepresence["internal/dev/providers/telepresence"]
+        ProvChartDev["internal/dev/providers/chart"]
+    end
+
+    subgraph Shared["Shared Infrastructure"]
+        Executor["shared/executor"]
+        UI["shared/ui"]
+        Errors["shared/errors"]
+        Config["shared/config"]
+        Files["shared/files"]
+    end
+
+    CmdRoot --> CmdBootstrap
+    CmdRoot --> CmdCluster
+    CmdRoot --> CmdChart
+    CmdRoot --> CmdDev
+
+    CmdBootstrap --> SvcBootstrap
+    CmdCluster --> SvcCluster
+    CmdChart --> SvcChart
+    CmdDev --> SvcIntercept
+    CmdDev --> SvcScaffold
+
+    SvcBootstrap --> SvcCluster
+    SvcBootstrap --> SvcChart
+
+    SvcChart --> SvcInstaller
+    SvcInstaller --> SvcArgoCD
+    SvcInstaller --> SvcAppOfApps
+
+    SvcCluster --> ProvK3d
+    SvcArgoCD --> ProvHelm
+    SvcArgoCD --> ProvArgoCD
+    SvcAppOfApps --> ProvHelm
+    SvcAppOfApps --> ProvGit
+    SvcIntercept --> ProvTelepresence
+    SvcScaffold --> ProvChartDev
+    SvcScaffold --> ProvKubectl
+
+    ProvK3d --> Executor
+    ProvHelm --> Executor
+    ProvArgoCD --> Executor
+    ProvGit --> Executor
+    ProvKubectl --> Executor
+    ProvTelepresence --> Executor
+
+    SvcCluster --> UI
+    SvcChart --> UI
+    SvcChart --> Errors
+    SvcChart --> Files
+    ProvHelm --> Config
+    ProvArgoCD --> Config

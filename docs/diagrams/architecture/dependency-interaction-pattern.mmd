@@ -1,0 +1,44 @@
+graph TD
+    OpenFrameCLI["OpenFrame CLI Core"]
+
+    subgraph UILayer["UI Dependencies"]
+        Pterm["pterm (spinners, tables, colors)"]
+        Promptui["promptui (select, input)"]
+        Term["golang.org/x/term"]
+    end
+
+    subgraph K8sLayer["Kubernetes Dependencies"]
+        ClientGo["k8s.io/client-go"]
+        APIExtensions["k8s.io/apiextensions-apiserver"]
+        ArgoCDClient["argoproj/argo-cd clientset"]
+        APIMachinery["k8s.io/apimachinery"]
+    end
+
+    subgraph CLILayer["CLI Framework"]
+        Cobra["spf13/cobra"]
+    end
+
+    subgraph ConfigLayer["Config / Serialization"]
+        YamlV3["gopkg.in/yaml.v3"]
+        SigsYaml["sigs.k8s.io/yaml"]
+    end
+
+    subgraph TestLayer["Testing"]
+        Testify["stretchr/testify"]
+    end
+
+    OpenFrameCLI --> Cobra
+    OpenFrameCLI --> Pterm
+    OpenFrameCLI --> Promptui
+    OpenFrameCLI --> Term
+    OpenFrameCLI --> ClientGo
+    OpenFrameCLI --> APIExtensions
+    OpenFrameCLI --> ArgoCDClient
+    OpenFrameCLI --> APIMachinery
+    OpenFrameCLI --> YamlV3
+    OpenFrameCLI --> SigsYaml
+    OpenFrameCLI --> Testify
+
+    ArgoCDClient --> ClientGo
+    APIExtensions --> ClientGo
+    APIMachinery --> ClientGo

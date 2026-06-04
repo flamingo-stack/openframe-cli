@@ -1,47 +1,16 @@
-# Contributing to OpenFrame CLI
+# Contributing Guidelines
 
-Thank you for your interest in contributing to OpenFrame CLI! This document describes the code style conventions, branching strategy, commit message format, and PR review process.
+Thank you for contributing to OpenFrame CLI! This document describes the code style conventions, branching strategy, commit message format, and PR review process.
 
 ---
 
 ## Community First
 
-OpenFrame is a community-driven project. All discussions, questions, bug reports, and feature requests happen in the **OpenMSP Slack**:
+OpenFrame is a community-driven project. All discussions, questions, and feature requests happen in the **OpenMSP Slack**:
 
 👉 [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
 
-> We do **not** use GitHub Issues or GitHub Discussions. Please bring questions and bug reports to the Slack community at [https://www.openmsp.ai/](https://www.openmsp.ai/).
-
----
-
-## Getting Started as a Contributor
-
-### 1. Set Up Your Development Environment
-
-Review the [Development Environment Setup](./docs/development/setup/environment.md) guide to install Go 1.22+, Docker, K3D, kubectl, Helm, mkcert, and the development linting tools.
-
-### 2. Clone and Build
-
-```bash
-git clone https://github.com/flamingo-stack/openframe-cli.git
-cd openframe-cli
-go mod download
-go build -o openframe main.go
-./openframe --version
-```
-
-### 3. Run the Tests
-
-```bash
-# All unit tests
-go test ./...
-
-# With race detection
-go test -race ./...
-
-# Lint
-golangci-lint run ./...
-```
+> We do **not** use GitHub Issues or GitHub Discussions. Please bring questions, bug reports, and feature ideas to the Slack community at [https://www.openmsp.ai/](https://www.openmsp.ai/).
 
 ---
 
@@ -54,6 +23,8 @@ All Go code must be formatted with `goimports` before committing:
 ```bash
 goimports -w .
 ```
+
+The project uses the standard `gofmt` style with the additional rule that imports are grouped and organized by `goimports`.
 
 ### Naming Conventions
 
@@ -68,9 +39,9 @@ goimports -w .
 | Test files | `_test.go` suffix | `service_test.go` |
 | Mock files | `mock.go` or `_mock.go` | `mock.go` |
 
-### Layered Architecture
+### Code Organization
 
-The CLI strictly follows a layered architecture. **Never skip a layer.**
+Follow the existing layered architecture:
 
 ```text
 cmd/         → Command definitions only (flag parsing, delegation to services)
@@ -99,28 +70,20 @@ return errors.CreateValidationError("cluster-name", name, "must be alphanumeric"
 
 // For external command failures
 return errors.CreateCommandError("k3d", args, originalErr)
+
+// For git branch not found
+return &errors.BranchNotFoundError{Branch: branchName}
 ```
 
-Do not return raw `fmt.Errorf` from user-facing code paths.
+Do not return raw `fmt.Errorf` from user-facing code paths. The error handler uses type switching to display appropriate messages and troubleshooting tips.
 
 ### Interface Compliance
 
-Always add a compile-time interface assertion when implementing an interface:
+Always add compile-time interface assertion when implementing an interface:
 
 ```go
+// At the top of your implementation file, not in tests
 var _ types.ClusterLister = (*ClusterService)(nil)
-```
-
-### Command Injection Prevention
-
-Always pass external tool arguments as slices — never concatenate user input into shell strings:
-
-```go
-// CORRECT
-executor.Execute("k3d", []string{"cluster", "create", clusterName, "--agents", "2"})
-
-// WRONG — injection risk
-exec.Command("sh", "-c", "k3d cluster create " + clusterName)
 ```
 
 ---
@@ -135,7 +98,8 @@ exec.Command("sh", "-c", "k3d cluster create " + clusterName)
 | Refactor | `refactor/<short-description>` | `refactor/executor-abstraction` |
 | Chore | `chore/<short-description>` | `chore/update-dependencies` |
 
-- Use lowercase and hyphens (no underscores)
+**Rules:**
+- Use lowercase and hyphens (no underscores, no slashes after the type prefix)
 - Keep descriptions concise (2–5 words)
 - Branch from `main` for features and fixes
 
@@ -167,7 +131,9 @@ OpenFrame CLI follows the [Conventional Commits](https://www.conventionalcommits
 
 ### Scopes
 
-Use the top-level package or area name: `cluster`, `chart`, `bootstrap`, `dev`, `executor`, `ui`, `errors`, `config`, `prereqs`, `ci`
+Use the top-level package or area name as the scope:
+
+`cluster`, `chart`, `bootstrap`, `dev`, `executor`, `ui`, `errors`, `config`, `prereqs`, `ci`
 
 ### Examples
 
@@ -176,7 +142,7 @@ feat(cluster): add support for multi-node k3d clusters
 
 fix(dev): resolve WSL2 IP detection for Telepresence intercepts
 
-docs(chart): update configuration wizard documentation
+docs(chart): update wizard configuration wizard documentation
 
 test(executor): add mock response patterns for helm upgrade
 
@@ -210,7 +176,7 @@ explicitly specify --deployment-mode=saas-tenant if needed.
 
 ### PR Title
 
-Follow the same Conventional Commits format:
+Follow the same Conventional Commits format as commit messages:
 
 ```text
 feat(cluster): add cluster resize command
@@ -237,52 +203,20 @@ Any breaking changes and migration steps.
 
 ### PR Size Guidelines
 
-- **Small PRs** (< 200 lines): Preferred — easier to review and merge quickly
-- **Medium PRs** (200–500 lines): Acceptable — include a detailed description
+- **Small PRs** (< 200 lines changed): Preferred — easier to review and merge quickly
+- **Medium PRs** (200–500 lines): Acceptable — include detailed description
 - **Large PRs** (> 500 lines): Split into smaller PRs where possible
 
 ---
 
-## Writing Tests
-
-### Unit Test Pattern
-
-```go
-func TestMyNewFeature(t *testing.T) {
-    testutil.InitializeTestMode() // Disables interactive UI
-    executor := testutil.NewTestMockExecutor()
-
-    executor.SetResponse("some-tool --arg value", &executor.CommandResult{
-        ExitCode: 0,
-        Stdout:   "expected output",
-    })
-
-    svc := NewMyService(executor, false)
-    result, err := svc.DoSomething(context.Background(), "input")
-    require.NoError(t, err)
-    assert.Equal(t, "expected result", result)
-}
-```
-
-Always test failure scenarios alongside happy paths. Coverage targets:
-
-| Package | Minimum Coverage |
-|---|---|
-| `internal/cluster/` | 70% |
-| `internal/chart/` | 70% |
-| `internal/dev/` | 60% |
-| `internal/shared/` | 80% |
-| `cmd/` | 50% |
-
----
-
-## Code Review Checklist
+## Review Checklist
 
 Reviewers should check:
 
 - [ ] Code follows the layered architecture (cmd → service → provider → executor)
+- [ ] New commands delegate to services, not external tools directly
 - [ ] Error types use the shared error constructors
-- [ ] External commands use argument slices (no shell string interpolation)
+- [ ] External command invocations use the executor abstraction (no `exec.Command` directly)
 - [ ] User input is validated before use in system commands
 - [ ] New public types and functions have Go doc comments
 - [ ] Tests cover the happy path and at least one error path
@@ -292,39 +226,6 @@ Reviewers should check:
 
 ---
 
-## Security Guidelines Summary
-
-- **Never commit secrets** — credentials are always prompted at runtime or passed via environment variables
-- **Never use shell string interpolation** for external commands — always use argument slices via the `shared/executor`
-- **`InsecureTLSConfig` is only for local K3D clusters** — never apply it to production cluster connections
-- **Validate all user input** before passing to system commands using `ValidateClusterName()` and similar validators
-
-Report security vulnerabilities privately via [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) — do **not** open a public GitHub issue.
-
----
-
 ## Developer Certificate of Origin
 
 By contributing to this project, you certify that your contribution is your original work (or that you have the right to submit it) and that you agree to license it under the project's open-source license.
-
----
-
-## Quick Reference: Common Development Commands
-
-| Task | Command |
-|---|---|
-| Build binary | `go build -o openframe main.go` |
-| Run all tests | `go test ./...` |
-| Run with race detection | `go test -race ./...` |
-| Run specific test | `go test -v -run TestClusterCreate ./internal/cluster/...` |
-| Lint | `golangci-lint run ./...` |
-| Format code | `goimports -w .` |
-| Check vulnerabilities | `govulncheck ./...` |
-| Download deps | `go mod download` |
-| Tidy deps | `go mod tidy` |
-
----
-
-<div align="center">
-  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
-</div>

@@ -12,197 +12,233 @@
 
 # OpenFrame CLI
 
-OpenFrame CLI is a modern, interactive command-line tool for managing OpenFrame Kubernetes clusters and development workflows. It provides seamless cluster lifecycle management, chart installation with ArgoCD, and developer-friendly tools for service intercepts and scaffolding.
+**OpenFrame CLI** is a modern, interactive command-line tool for bootstrapping and managing [OpenFrame](https://openframe.ai) Kubernetes environments. Part of the [Flamingo](https://flamingo.run) AI-powered MSP platform, it replaces fragile shell-script workflows with a structured Go application that supports both guided wizard modes for new users and fully non-interactive CI/CD automation for production pipelines.
 
-[![OpenFrame Preview Webinar](https://img.youtube.com/vi/bINdW0CQbvY/maxresdefault.jpg)](https://www.youtube.com/watch?v=bINdW0CQbvY)
+> **In one command**, `openframe bootstrap`, you get a fully operational K3D Kubernetes cluster with ArgoCD GitOps pipelines and all OpenFrame services installed and healthy.
 
-## What is OpenFrame CLI?
+---
 
-OpenFrame CLI is part of the broader [OpenFrame](https://openframe.ai) ecosystem - an AI-powered MSP platform that replaces expensive proprietary software with open-source alternatives enhanced by intelligent automation. The CLI serves as the entry point for developers and operators to bootstrap, manage, and develop on OpenFrame environments.
+[![OpenFrame Product Walkthrough](https://img.youtube.com/vi/bINdW0CQbvY/hqdefault.jpg)](https://www.youtube.com/watch?v=bINdW0CQbvY)
 
-## Key Features
+---
 
-### 🚀 Complete Environment Bootstrapping
-- **One-command setup**: Bootstrap entire OpenFrame environments with `openframe bootstrap`
-- **Multi-mode deployment**: Support for OSS tenant, SaaS tenant, and SaaS shared modes
-- **Automated cluster creation**: Creates K3D clusters with all necessary components
-- **ArgoCD integration**: Automatic chart installation and application management
+## Features
 
-### 🔧 Cluster Management
-- **Lifecycle operations**: Create, delete, list, and monitor Kubernetes clusters
-- **K3D integration**: Lightweight Kubernetes for development and testing
-- **Status monitoring**: Real-time cluster health and resource monitoring
-- **Easy cleanup**: Remove clusters and associated resources with simple commands
+- **One-Command Bootstrap** — Full environment setup: K3D cluster + ArgoCD + app-of-apps deployment in a single `openframe bootstrap` call
+- **Interactive Wizards** — Step-by-step guided setup for clusters, charts, and developer workflows
+- **Cluster Lifecycle Management** — Create, delete, list, and inspect K3D Kubernetes clusters
+- **GitOps via ArgoCD** — Automated chart installation using the App-of-Apps pattern with health/sync polling
+- **Developer Intercepts** — Route live Kubernetes service traffic to your local machine via Telepresence
+- **Live Reload Development** — Skaffold-powered hot-reload development sessions inside the cluster
+- **CI/CD Ready** — `--non-interactive` flags for every operation, fully suitable for automation pipelines
+- **Prerequisite Checking** — Automatically validates and guides installation of required tools (Docker, kubectl, k3d, Helm, mkcert)
+- **WSL2 Support** — First-class Windows WSL2 compatibility with automatic IP detection and platform-specific optimizations
+- **Multiple Deployment Modes** — Supports `oss-tenant`, `saas-tenant`, and `saas-shared` deployment targets
 
-### 📦 Chart & Application Management
-- **Helm chart installation**: Streamlined chart deployment with dependency management
-- **ArgoCD applications**: GitOps-based application lifecycle management
-- **App-of-apps pattern**: Hierarchical application management for complex deployments
-- **Synchronization monitoring**: Track deployment progress with detailed logging
+---
 
-### 🛠 Development Tools
-- **Service intercepts**: Local development with Telepresence integration
-- **Scaffolding**: Generate boilerplate code and configurations
-- **Live debugging**: Debug services running in Kubernetes from your local environment
-- **Hot reload**: Rapid development cycles with instant feedback
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 graph TB
-    subgraph "CLI Commands"
-        Bootstrap[openframe bootstrap]
-        Cluster[openframe cluster]
-        Chart[openframe chart]
-        Dev[openframe dev]
+    subgraph CLI["CLI Entry Points"]
+        Root["openframe (root)"]
+        Bootstrap["bootstrap"]
+        Cluster["cluster"]
+        Chart["chart"]
+        Dev["dev"]
     end
-    
-    subgraph "Core Services"
-        ClusterSvc[Cluster Management]
-        ChartSvc[Chart Installation]
-        DevSvc[Development Tools]
+
+    subgraph Services["Service Layer"]
+        BootstrapSvc["bootstrap.Service"]
+        ClusterSvc["cluster.ClusterService"]
+        ChartSvc["chart.ChartService"]
+        DevSvc["dev.Service"]
     end
-    
-    subgraph "External Tools"
-        K3D[K3D Clusters]
-        Helm[Helm Charts]
-        ArgoCD[ArgoCD Apps]
-        Telepresence[Service Intercepts]
+
+    subgraph Providers["Provider Layer"]
+        K3dMgr["k3d.K3dManager"]
+        HelmMgr["helm.HelmManager"]
+        ArgoCDMgr["argocd.Manager"]
+        TelepresenceProv["telepresence.Provider"]
     end
-    
-    subgraph "Target Environment"
-        K8s[Kubernetes]
-        Apps[Applications]
-        Services[Microservices]
+
+    subgraph External["External Tools"]
+        K3D["K3D CLI"]
+        HelmCLI["Helm CLI"]
+        ArgoCD["ArgoCD API"]
+        TelepresenceCLI["Telepresence"]
+        SkaffoldCLI["Skaffold"]
     end
-    
-    Bootstrap --> ClusterSvc
-    Bootstrap --> ChartSvc
+
+    Root --> Bootstrap
+    Root --> Cluster
+    Root --> Chart
+    Root --> Dev
+
+    Bootstrap --> BootstrapSvc
     Cluster --> ClusterSvc
     Chart --> ChartSvc
     Dev --> DevSvc
-    
-    ClusterSvc --> K3D
-    ChartSvc --> Helm
-    ChartSvc --> ArgoCD
-    DevSvc --> Telepresence
-    
-    K3D --> K8s
-    Helm --> Apps
-    ArgoCD --> Apps
-    Telepresence --> Services
+
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    ClusterSvc --> K3dMgr
+    ChartSvc --> HelmMgr
+    ChartSvc --> ArgoCDMgr
+    DevSvc --> TelepresenceProv
+
+    K3dMgr --> K3D
+    HelmMgr --> HelmCLI
+    ArgoCDMgr --> ArgoCD
+    TelepresenceProv --> TelepresenceCLI
+    TelepresenceProv --> SkaffoldCLI
 ```
+
+The CLI follows a strict layered architecture: **Commands → Services → Providers → Shared Executor → External Tools**. Every workflow supports both interactive wizard-guided mode and non-interactive flag-driven mode.
+
+---
+
+## Hardware Requirements
+
+| Tier | RAM | CPU Cores | Disk Space |
+|---|---|---|---|
+| **Minimum** | 24 GB | 6 cores | 50 GB |
+| **Recommended** | 32 GB | 12 cores | 100 GB |
+
+> K3D runs Kubernetes nodes as Docker containers. Insufficient memory is the most common cause of failed bootstraps.
+
+---
 
 ## Quick Start
 
-Get OpenFrame CLI up and running in 5 minutes!
+[![Getting Started with OpenFrame](https://img.youtube.com/vi/-_56_qYvMWk/maxresdefault.jpg)](https://www.youtube.com/watch?v=-_56_qYvMWk)
 
-### System Requirements
+### Step 1: Install the OpenFrame CLI
 
-| Resource | Minimum | Recommended |
-|----------|---------|-------------|
-| **RAM** | 24GB | 32GB |
-| **CPU Cores** | 6 cores | 12 cores |
-| **Disk Space** | 50GB free | 100GB free |
+**Linux (amd64):**
 
-### Prerequisites
-
-Before installation, ensure you have:
-- [Docker](https://docs.docker.com/get-docker/) 20.10+
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) 1.25+
-- [Helm](https://helm.sh/docs/intro/install/) 3.10+
-- [K3D](https://k3d.io/v5.4.6/#installation) 5.0+
-
-### Installation
-
-Choose your platform and install OpenFrame CLI:
-
-#### Linux (AMD64)
 ```bash
-curl -fsSL https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar -xz
-sudo mv openframe /usr/local/bin/
-chmod +x /usr/local/bin/openframe
+curl -Lo openframe https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64
+chmod +x openframe
+sudo mv openframe /usr/local/bin/openframe
 ```
 
-#### macOS (Apple Silicon)
+**macOS (Apple Silicon):**
+
 ```bash
-curl -fsSL https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64.tar.gz | tar -xz
-sudo mv openframe /usr/local/bin/
-chmod +x /usr/local/bin/openframe
+curl -Lo openframe https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64
+chmod +x openframe
+sudo mv openframe /usr/local/bin/openframe
 ```
 
-#### Windows (WSL2)
-1. Download: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
-2. Extract and move `openframe.exe` to a directory in your `PATH`
-3. Open WSL2 terminal and verify access
+**Windows (AMD64):**
 
-### Bootstrap Your Environment
+1. Download [openframe-cli_windows_amd64.zip](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip)
+2. Extract the archive
+3. Move `openframe.exe` to a directory on your `$PATH`
 
-Create a complete OpenFrame environment with a single command:
+**Build from source:**
 
 ```bash
-# Verify installation
+git clone https://github.com/flamingo-stack/openframe-cli.git
+cd openframe-cli
+go build -o openframe main.go
+sudo mv openframe /usr/local/bin/openframe
+```
+
+### Step 2: Verify Installation
+
+```bash
 openframe --version
-
-# Bootstrap complete environment
-openframe bootstrap
-
-# Check cluster status
-openframe cluster status
+openframe --help
 ```
 
-The bootstrap process creates:
-- K3D Kubernetes cluster
-- ArgoCD for GitOps deployment
-- Traefik ingress controller
-- Core monitoring and logging components
+### Step 3: Bootstrap Your First Environment
 
-## Core Commands
+**Interactive mode (recommended for first-time users):**
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `openframe bootstrap` | Complete environment setup | `openframe bootstrap my-cluster` |
-| `openframe cluster create` | Create Kubernetes cluster | `openframe cluster create --nodes 3` |
-| `openframe cluster delete` | Remove existing cluster | `openframe cluster delete my-cluster` |
-| `openframe cluster status` | Show cluster information | `openframe cluster status` |
-| `openframe chart install` | Install charts with ArgoCD | `openframe chart install` |
-| `openframe dev intercept` | Start service intercepts | `openframe dev intercept my-service` |
+```bash
+openframe bootstrap
+```
+
+The wizard will guide you through cluster naming, deployment mode selection, and configuration.
+
+**Non-interactive / CI mode:**
+
+```bash
+openframe bootstrap my-cluster --deployment-mode=oss-tenant --non-interactive
+```
+
+### Step 4: Verify the Environment
+
+```bash
+openframe cluster list
+openframe cluster status my-cluster --detailed
+```
+
+---
+
+## Command Reference
+
+| Command | Description |
+|---|---|
+| `openframe bootstrap [cluster-name]` | Full environment setup: cluster + ArgoCD + app-of-apps |
+| `openframe cluster create [name]` | Create a K3D Kubernetes cluster |
+| `openframe cluster list` | List all managed clusters |
+| `openframe cluster status [name]` | Show cluster health and ArgoCD app status |
+| `openframe cluster delete [name]` | Delete a cluster |
+| `openframe cluster cleanup [name]` | Remove unused Docker resources from cluster nodes |
+| `openframe chart install [cluster-name]` | Install ArgoCD and app-of-apps on an existing cluster |
+| `openframe dev intercept [service-name]` | Intercept Kubernetes service traffic locally via Telepresence |
+| `openframe dev skaffold [cluster-name]` | Run a live-reload development session with Skaffold |
+
+---
+
+## Deployment Modes
+
+| Mode | Repository | Use Case |
+|---|---|---|
+| `oss-tenant` | `flamingo-stack/openframe-oss-tenant` | Default self-hosted OpenFrame |
+| `saas-tenant` | `flamingo-stack/openframe-saas-tenant` | SaaS tenant deployment |
+| `saas-shared` | `flamingo-stack/openframe-saas-shared` | Shared SaaS platform |
+
+---
 
 ## Technology Stack
 
-OpenFrame CLI integrates with industry-standard tools:
+| Layer | Technology |
+|---|---|
+| **Language** | Go 1.22+ |
+| **CLI Framework** | [Cobra](https://github.com/spf13/cobra) |
+| **Terminal UI** | [pterm](https://github.com/pterm/pterm), [promptui](https://github.com/manifoldco/promptui) |
+| **Kubernetes Client** | [client-go](https://github.com/kubernetes/client-go) |
+| **GitOps** | [ArgoCD](https://argoproj.github.io/cd/) via native K8s client |
+| **Cluster Provider** | [K3D](https://k3d.io) |
+| **Package Manager** | [Helm](https://helm.sh) |
+| **Dev Intercept** | [Telepresence](https://www.telepresence.io) |
+| **Live Reload** | [Skaffold](https://skaffold.dev) |
+| **Testing** | [testify](https://github.com/stretchr/testify) |
 
-- **Kubernetes**: Container orchestration with K3D for development
-- **ArgoCD**: GitOps continuous deployment
-- **Helm**: Package management for Kubernetes
-- **Telepresence**: Local development with remote services
-- **Docker**: Container runtime and image management
-- **Cobra**: Modern CLI framework with rich help and completion
+---
 
 ## Documentation
 
-📚 See the [Documentation](./docs/README.md) for comprehensive guides including:
-
-- **Getting Started**: Prerequisites, installation, and first steps
-- **Development**: Local setup, architecture, and contribution guidelines  
-- **Reference**: Technical documentation, API specs, and configuration
-- **CLI Tools**: Links to external repositories and tools
-
-## Community and Support
-
-OpenFrame is built by the community for the community:
-
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) - Primary support channel
-- **Website**: [https://flamingo.run](https://flamingo.run)
-- **OpenFrame Platform**: [https://openframe.ai](https://openframe.ai)
-
-> **Note**: We don't use GitHub Issues or Discussions. All support and community interaction happens in the OpenMSP Slack community.
-
-## License
-
-This project is licensed under the Flamingo AI Unified License v1.0 - see the [LICENSE.md](LICENSE.md) file for details.
+📚 See the [Documentation](./docs/README.md) for comprehensive guides including getting started tutorials, development setup, architecture reference, and contributing guidelines.
 
 ---
+
+## Community & Support
+
+> We do **not** use GitHub Issues or GitHub Discussions. All questions, bug reports, and feature requests are handled in the OpenMSP Slack community.
+
+- 💬 **OpenMSP Slack**: [Join here](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- 🌐 **OpenMSP Community**: [https://www.openmsp.ai/](https://www.openmsp.ai/)
+- 🌐 **OpenFrame**: [https://openframe.ai](https://openframe.ai)
+- 🌐 **Flamingo**: [https://flamingo.run](https://flamingo.run)
+
+---
+
 <div align="center">
   Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
 </div>
