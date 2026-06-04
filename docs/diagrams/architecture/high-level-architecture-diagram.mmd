@@ -1,0 +1,88 @@
+graph TB
+    subgraph CLI["CLI Layer (cmd/)"]
+        Root["root.go"]
+        BootstrapCmd["bootstrap"]
+        ClusterCmd["cluster"]
+        ChartCmd["chart"]
+        DevCmd["dev"]
+    end
+
+    subgraph Internal["Internal Services (internal/)"]
+        BootstrapSvc["bootstrap/service.go"]
+        ClusterSvc["cluster/service.go"]
+        ChartSvc["chart/services/"]
+        DevSvc["dev/services/"]
+    end
+
+    subgraph Providers["Providers"]
+        K3dProvider["cluster/providers/k3d"]
+        HelmProvider["chart/providers/helm"]
+        ArgoCDProvider["chart/providers/argocd"]
+        GitProvider["chart/providers/git"]
+        KubectlProvider["dev/providers/kubectl"]
+        TelepresenceProvider["dev/providers/telepresence"]
+    end
+
+    subgraph External["External Tools"]
+        K3D["K3D"]
+        Helm["Helm"]
+        ArgoCD["ArgoCD"]
+        Git["Git"]
+        Telepresence["Telepresence"]
+        Skaffold["Skaffold"]
+        Docker["Docker"]
+        Kubectl["kubectl"]
+    end
+
+    subgraph Shared["Shared Infrastructure (internal/shared/)"]
+        Executor["executor"]
+        Errors["errors"]
+        UI["ui"]
+        Config["config"]
+        Files["files"]
+        Flags["flags"]
+    end
+
+    subgraph Target["Target Environment"]
+        K8s["Kubernetes Cluster"]
+        Apps["ArgoCD Applications"]
+        Services["Microservices"]
+    end
+
+    Root --> BootstrapCmd
+    Root --> ClusterCmd
+    Root --> ChartCmd
+    Root --> DevCmd
+
+    BootstrapCmd --> BootstrapSvc
+    ClusterCmd --> ClusterSvc
+    ChartCmd --> ChartSvc
+    DevCmd --> DevSvc
+
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+
+    ClusterSvc --> K3dProvider
+    ChartSvc --> HelmProvider
+    ChartSvc --> ArgoCDProvider
+    ChartSvc --> GitProvider
+    DevSvc --> KubectlProvider
+    DevSvc --> TelepresenceProvider
+
+    K3dProvider --> K3D
+    HelmProvider --> Helm
+    ArgoCDProvider --> ArgoCD
+    GitProvider --> Git
+    TelepresenceProvider --> Telepresence
+    DevSvc --> Skaffold
+    K3dProvider --> Docker
+    KubectlProvider --> Kubectl
+
+    K3D --> K8s
+    Helm --> Apps
+    ArgoCD --> Apps
+    Telepresence --> Services
+
+    ClusterSvc --> Shared
+    ChartSvc --> Shared
+    DevSvc --> Shared
