@@ -1,0 +1,45 @@
+sequenceDiagram
+    participant User
+    participant DevCmd as "dev intercept cmd"
+    participant ClusterSvc as "Cluster Service"
+    participant KubectlProv as "Kubectl Provider"
+    participant InterceptUI as "Intercept UI"
+    participant InterceptSvc as "Intercept Service"
+    participant Telepresence as "Telepresence Binary"
+    participant K8sAPI as "Kubernetes API"
+
+    User->>DevCmd: openframe dev intercept
+    DevCmd->>ClusterSvc: ListClusters()
+    ClusterSvc-->>DevCmd: clusters[]
+    DevCmd->>User: Select cluster (interactive)
+    User-->>DevCmd: cluster selected
+
+    DevCmd->>KubectlProv: kubectl config use-context k3d-[name]
+    DevCmd->>KubectlProv: CheckConnection(ctx)
+    KubectlProv->>K8sAPI: kubectl cluster-info
+    K8sAPI-->>KubectlProv: OK
+
+    DevCmd->>InterceptUI: InteractiveInterceptSetup(ctx)
+    InterceptUI->>KubectlProv: GetNamespaces(ctx)
+    KubectlProv->>K8sAPI: kubectl get namespaces -o json
+    K8sAPI-->>KubectlProv: namespace list
+    InterceptUI->>User: Enter service name
+    User-->>InterceptUI: service name
+
+    InterceptUI->>KubectlProv: GetService(ctx, namespace, serviceName)
+    KubectlProv->>K8sAPI: kubectl get service -o json
+    K8sAPI-->>KubectlProv: ServiceInfo{ports}
+    InterceptUI->>User: Select Kubernetes port
+    InterceptUI->>User: Enter local port
+    User-->>InterceptUI: setup complete
+
+    DevCmd->>InterceptSvc: StartIntercept(serviceName, flags)
+    InterceptSvc->>Telepresence: telepresence connect
+    InterceptSvc->>Telepresence: telepresence intercept [svc] --port local:remote
+    Telepresence-->>InterceptSvc: intercept active
+
+    InterceptSvc->>InterceptSvc: Wait for OS signal (Ctrl+C)
+    User->>InterceptSvc: Ctrl+C
+    InterceptSvc->>Telepresence: telepresence leave [svc]
+    InterceptSvc->>Telepresence: telepresence quit
+    InterceptSvc-->>User: Intercept stopped

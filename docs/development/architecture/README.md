@@ -1,574 +1,254 @@
 # Architecture Overview
 
-OpenFrame CLI is built with a clean, layered architecture that separates concerns and provides extensibility. This guide provides a comprehensive overview of the system design, component relationships, and key architectural decisions.
+OpenFrame CLI follows a **layered clean architecture** pattern: thin Cobra command handlers delegate to service layers, which compose providers and infrastructure utilities. All external I/O (Kubernetes API, shell commands, Git) is abstracted behind interfaces to maximize testability and portability.
+
+For a deeper technical dive, see the [Reference Architecture Documentation](../../reference/architecture/overview.md).
+
+---
 
 ## High-Level Architecture
 
-OpenFrame CLI follows a layered architecture pattern with clear separation between the CLI interface, business logic, and external integrations:
-
 ```mermaid
-graph TB
-    subgraph "User Interface Layer"
-        CLI[CLI Commands]
-        UI[Interactive UI]
-        Wizard[Setup Wizards]
+graph TD
+    subgraph CLI["CLI Entry Layer (cmd/)"]
+        Root["Root Command"]
+        Bootstrap["bootstrap"]
+        Cluster["cluster"]
+        Chart["chart"]
+        Dev["dev"]
     end
-    
-    subgraph "Application Layer"
-        Bootstrap[Bootstrap Orchestrator]
-        ClusterMgr[Cluster Manager]
-        ChartMgr[Chart Manager]
-        DevTools[Development Tools]
+
+    subgraph Services["Service Layer (internal/)"]
+        BootstrapSvc["Bootstrap Service"]
+        ClusterSvc["Cluster Service"]
+        ChartSvc["Chart Service"]
+        DevSvc["Dev Services"]
     end
-    
-    subgraph "Provider Layer"
-        K3DProvider[K3D Provider]
-        HelmProvider[Helm Provider]
-        ArgoCDProvider[ArgoCD Provider]
-        TelepresenceProvider[Telepresence Provider]
-        KubectlProvider[kubectl Provider]
-        GitProvider[Git Provider]
+
+    subgraph Providers["Provider Layer"]
+        K3D["K3D Manager"]
+        HelmMgr["Helm Manager"]
+        ArgoCDMgr["ArgoCD Manager"]
+        GitRepo["Git Repository"]
+        KubectlProv["Kubectl Provider"]
+        TelepresenceProv["Telepresence Provider"]
     end
-    
-    subgraph "Infrastructure Layer"
-        Executor[Command Executor]
-        Config[Configuration]
-        Logger[Logging]
-        ErrorHandler[Error Handling]
-        FileSystem[File Operations]
+
+    subgraph Shared["Shared Infrastructure"]
+        Executor["Command Executor"]
+        UIShared["Shared UI"]
+        ErrorsShared["Error Handling"]
+        ConfigShared["Config / Paths"]
+        FilesShared["File Cleanup"]
     end
-    
-    subgraph "External Systems"
-        Docker[Docker Engine]
-        K8s[Kubernetes API]
-        Git[Git Repositories]
-        Registry[Container Registry]
-        ArgoCD[ArgoCD Server]
+
+    subgraph External["External Systems"]
+        K3dBin["k3d binary"]
+        HelmBin["helm binary"]
+        ArgoCDAPI["ArgoCD Kubernetes API"]
+        GitHubRepo["GitHub Repository"]
+        K8sAPI["Kubernetes API"]
+        TelepresenceBin["telepresence binary"]
+        SkaffoldBin["skaffold binary"]
     end
-    
-    CLI --> Bootstrap
-    CLI --> ClusterMgr
-    CLI --> ChartMgr
-    CLI --> DevTools
-    
-    Bootstrap --> ClusterMgr
-    Bootstrap --> ChartMgr
-    ClusterMgr --> K3DProvider
-    ChartMgr --> HelmProvider
-    ChartMgr --> ArgoCDProvider
-    DevTools --> TelepresenceProvider
-    DevTools --> KubectlProvider
-    
-    K3DProvider --> Executor
-    HelmProvider --> Executor
-    ArgoCDProvider --> Executor
-    TelepresenceProvider --> Executor
-    KubectlProvider --> Executor
-    GitProvider --> Executor
-    
-    K3DProvider --> Docker
-    HelmProvider --> K8s
-    ArgoCDProvider --> ArgoCD
-    TelepresenceProvider --> K8s
-    KubectlProvider --> K8s
-    GitProvider --> Git
+
+    Root --> Bootstrap
+    Root --> Cluster
+    Root --> Chart
+    Root --> Dev
+
+    Bootstrap --> BootstrapSvc
+    Cluster --> ClusterSvc
+    Chart --> ChartSvc
+    Dev --> DevSvc
+
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+
+    ClusterSvc --> K3D
+    ChartSvc --> HelmMgr
+    ChartSvc --> ArgoCDMgr
+    ChartSvc --> GitRepo
+    DevSvc --> KubectlProv
+    DevSvc --> TelepresenceProv
+
+    K3D --> Executor
+    HelmMgr --> Executor
+    GitRepo --> Executor
+    KubectlProv --> Executor
+    TelepresenceProv --> Executor
+
+    Executor --> K3dBin
+    Executor --> HelmBin
+    Executor --> TelepresenceBin
+    Executor --> SkaffoldBin
+    HelmMgr --> ArgoCDAPI
+    ArgoCDMgr --> K8sAPI
+    GitRepo --> GitHubRepo
+    KubectlProv --> K8sAPI
+
+    ClusterSvc --> UIShared
+    ChartSvc --> UIShared
+    DevSvc --> UIShared
+    ClusterSvc --> ErrorsShared
+    ChartSvc --> ErrorsShared
+    ClusterSvc --> ConfigShared
+    ChartSvc --> ConfigShared
+    ChartSvc --> FilesShared
 ```
+
+---
 
 ## Core Components
 
-### Command Layer (`cmd/`)
+| Package | Path | Responsibility |
+|---------|------|----------------|
+| **Root Command** | `cmd/root.go` | CLI entrypoint, global flags (`--verbose`, `--silent`), version info, subcommand registration |
+| **Bootstrap Command** | `cmd/bootstrap/` | Orchestrates full environment setup: cluster create → chart install in sequence |
+| **Cluster Command** | `cmd/cluster/` | Cobra subcommands for create, delete, list, status, cleanup |
+| **Chart Command** | `cmd/chart/` | Cobra subcommands for ArgoCD + app-of-apps installation |
+| **Dev Command** | `cmd/dev/` | Cobra subcommands for `intercept` (Telepresence) and `skaffold` workflows |
+| **Bootstrap Service** | `internal/bootstrap/` | Business logic to sequence cluster creation then chart installation; handles Windows WSL init |
+| **Cluster Service** | `internal/cluster/service.go` | High-level cluster lifecycle; delegates to K3D manager |
+| **K3D Manager** | `internal/cluster/providers/k3d/` | Low-level K3D cluster operations; config file generation, kubeconfig management, TLS SAN injection |
+| **Chart Service** | `internal/chart/services/` | Installation workflow: prerequisites → git clone → helm install ArgoCD → app-of-apps → ArgoCD sync wait |
+| **Helm Manager** | `internal/chart/providers/helm/` | Helm CLI wrapper; installs ArgoCD and app-of-apps charts; native K8s client fallback |
+| **ArgoCD Manager** | `internal/chart/providers/argocd/` | Watches ArgoCD `Application` CRDs via native Go client; waits for Healthy+Synced state |
+| **Git Repository** | `internal/chart/providers/git/` | Clones GitHub repos (`--depth 1`) to temp dirs for chart content |
+| **Configuration Wizard** | `internal/chart/ui/configuration/` | Multi-step interactive wizard for deployment mode, SaaS credentials, ingress, Docker registry |
+| **Intercept Service** | `internal/dev/services/intercept/` | Manages full Telepresence lifecycle: connect → intercept → wait → cleanup on signal |
+| **Scaffold Service** | `internal/dev/services/scaffold/` | Discovers `skaffold.yaml` files, bootstraps cluster, runs `skaffold dev` |
+| **Command Executor** | `internal/shared/executor/` | Abstracts `os/exec`; supports dry-run and verbose modes; WSL2 detection and recovery |
+| **Shared UI** | `internal/shared/ui/` | Logo rendering, selection prompts, table rendering, confirmation dialogs |
+| **Shared Errors** | `internal/shared/errors/` | Typed errors with retry policies and colored terminal output |
+| **Shared Config** | `internal/shared/config/` | TLS bypass utilities, credentials prompter, log directory init |
 
-The command layer implements the CLI interface using the Cobra framework:
+---
 
-| Component | Purpose | Key Features |
-|-----------|---------|--------------|
-| **Root Command** | Entry point and version management | Interactive help, global flags, subcommand routing |
-| **Bootstrap Command** | Complete environment setup | Orchestrates cluster + chart installation |
-| **Cluster Commands** | Kubernetes cluster lifecycle | Create, delete, list, status operations |
-| **Chart Commands** | Application deployment | Helm charts, ArgoCD applications |
-| **Dev Commands** | Development workflows | Service intercepts, scaffolding |
+## Layer Responsibilities
 
-### Service Layer (`internal/`)
+### 1. CLI Layer (`cmd/`)
 
-The service layer contains the core business logic:
+Thin Cobra command definitions. Responsibilities:
+- Parse CLI flags
+- Validate flag combinations
+- Delegate all business logic to the service layer
+- Handle the `--verbose` / `--silent` global flags
 
-#### Bootstrap Service (`internal/bootstrap/`)
-- **Purpose**: Orchestrates complete environment setup
-- **Key Functions**:
-  - Validates prerequisites
-  - Creates Kubernetes clusters
-  - Installs core charts (ArgoCD, Traefik)
-  - Configures GitOps workflows
+No business logic lives in `cmd/` — it is purely a wiring layer.
+
+### 2. Service Layer (`internal/*/service*.go`, `internal/*/services/`)
+
+Business logic orchestration. Responsibilities:
+- Sequence multi-step operations (e.g., cluster create → chart install)
+- Coordinate between providers
+- Manage UI feedback (spinners, progress, next-steps output)
+- Handle errors with typed error propagation
+
+### 3. Provider Layer (`internal/*/providers/`)
+
+Thin wrappers around external tools and APIs. Responsibilities:
+- Invoke external binaries via the `CommandExecutor`
+- Make Kubernetes API calls using native Go clients
+- Return strongly-typed results
+
+Each provider implements an interface so it can be replaced with a mock in tests.
+
+### 4. Shared Infrastructure (`internal/shared/`)
+
+Cross-cutting utilities used by all layers:
+- **`executor/`** — subprocess runner with WSL2 support, dry-run mode, verbose mode
+- **`ui/`** — all terminal UI primitives (pterm + promptui)
+- **`errors/`** — typed errors, retry policies, colored error display
+- **`config/`** — TLS configuration, credentials, system service initialization
+- **`files/`** — temporary file lifecycle management
+
+---
+
+## Data Flow: Bootstrap Command
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Bootstrap
-    participant Cluster
-    participant Chart
-    participant ArgoCD
-    
-    User->>Bootstrap: openframe bootstrap
-    Bootstrap->>Bootstrap: Check prerequisites
-    Bootstrap->>Cluster: Create K3D cluster
-    Cluster-->>Bootstrap: Cluster ready
-    Bootstrap->>Chart: Install ArgoCD
-    Chart-->>Bootstrap: ArgoCD installed
-    Bootstrap->>ArgoCD: Deploy app-of-apps
-    ArgoCD-->>Bootstrap: Applications synced
-    Bootstrap-->>User: Environment ready
+    participant BootstrapCmd["bootstrap cmd"]
+    participant BootstrapSvc["Bootstrap Service"]
+    participant ClusterSvc["Cluster Service"]
+    participant K3DMgr["K3D Manager"]
+    participant ChartSvc["Chart Service"]
+    participant GitProv["Git Provider"]
+    participant HelmMgr["Helm Manager"]
+    participant ArgoCDMgr["ArgoCD Manager"]
+
+    User->>BootstrapCmd: openframe bootstrap my-cluster
+    BootstrapCmd->>BootstrapSvc: Execute(cmd, args)
+    BootstrapSvc->>ClusterSvc: CreateClusterWithPrerequisites(name, verbose)
+    ClusterSvc->>K3DMgr: CreateCluster(ClusterConfig)
+    K3DMgr-->>ClusterSvc: rest.Config
+    ClusterSvc-->>BootstrapSvc: rest.Config
+
+    BootstrapSvc->>ChartSvc: InstallChartsWithConfig(InstallationRequest)
+    ChartSvc->>ChartSvc: Check prerequisites (helm, git, certs)
+    ChartSvc->>HelmMgr: InstallArgoCDWithProgress(config)
+    HelmMgr-->>ChartSvc: ArgoCD installed
+
+    ChartSvc->>GitProv: CloneChartRepository(AppOfAppsConfig)
+    GitProv-->>ChartSvc: CloneResult{TempDir, ChartPath}
+
+    ChartSvc->>HelmMgr: InstallAppOfAppsFromLocal(config)
+    HelmMgr-->>ChartSvc: App-of-apps installed
+
+    ChartSvc->>ArgoCDMgr: WaitForApplications(config)
+    ArgoCDMgr-->>ChartSvc: All applications Healthy+Synced
+
+    ChartSvc-->>BootstrapSvc: Success
+    BootstrapSvc-->>User: Environment ready
 ```
 
-#### Cluster Service (`internal/cluster/`)
-- **Purpose**: Manages Kubernetes cluster lifecycle
-- **Key Functions**:
-  - K3D cluster creation and deletion
-  - Cluster status monitoring
-  - Node management and scaling
-  - Configuration and context management
-
-#### Chart Service (`internal/chart/`)
-- **Purpose**: Manages application deployments
-- **Key Functions**:
-  - Helm chart installation
-  - ArgoCD application management
-  - GitOps workflow configuration
-  - Application synchronization monitoring
-
-#### Development Services (`internal/dev/`)
-- **Purpose**: Provides development workflow tools
-- **Key Functions**:
-  - Service intercepts with Telepresence
-  - Code scaffolding and templates
-  - Local development environment setup
-  - Debug and testing utilities
-
-### Provider Layer
-
-The provider layer abstracts external tool integrations:
-
-#### K3D Provider (`internal/cluster/providers/k3d/`)
-```go
-type Manager interface {
-    CreateCluster(config ClusterConfig) (*rest.Config, error)
-    DeleteCluster(name string) error
-    ListClusters() ([]ClusterInfo, error)
-    GetClusterStatus(name string) (*ClusterStatus, error)
-}
-```
-
-Key responsibilities:
-- Docker container management for K3D nodes
-- Kubernetes API server configuration
-- Network and port forwarding setup
-- Cluster lifecycle management
-
-#### Helm Provider (`internal/chart/providers/helm/`)
-```go
-type Manager interface {
-    InstallChart(release string, chart string, values map[string]interface{}) error
-    UpgradeChart(release string, chart string, values map[string]interface{}) error
-    UninstallChart(release string) error
-    ListReleases() ([]Release, error)
-}
-```
-
-Key responsibilities:
-- Helm repository management
-- Chart installation and upgrades
-- Release lifecycle management
-- Value overrides and templating
-
-#### ArgoCD Provider (`internal/chart/providers/argocd/`)
-```go
-type Manager interface {
-    CreateApplication(app ApplicationSpec) error
-    SyncApplication(name string) error
-    DeleteApplication(name string) error
-    WaitForSync(name string, timeout time.Duration) error
-}
-```
-
-Key responsibilities:
-- ArgoCD application CRD management
-- Git repository synchronization
-- Application health monitoring
-- Sync policy configuration
-
-### Shared Infrastructure (`internal/shared/`)
-
-Common utilities and cross-cutting concerns:
-
-#### Command Executor (`internal/shared/executor/`)
-- **Purpose**: Standardized external command execution
-- **Features**:
-  - Command building and execution
-  - Output capture and streaming
-  - Error handling and retry logic
-  - Timeout management
-  - Mock support for testing
-
-#### Configuration Management (`internal/shared/config/`)
-- **Purpose**: Application configuration and settings
-- **Features**:
-  - YAML/JSON configuration files
-  - Environment variable overrides
-  - Default value management
-  - Validation and type safety
-
-#### User Interface (`internal/shared/ui/`)
-- **Purpose**: Consistent user interaction patterns
-- **Features**:
-  - Interactive prompts and wizards
-  - Progress indicators and spinners
-  - Colored output and formatting
-  - Table rendering and alignment
-  - Error message presentation
-
-## Data Flow Architecture
-
-### Bootstrap Workflow
-
-The bootstrap process follows a carefully orchestrated sequence:
-
-```mermaid
-flowchart TD
-    A[Start Bootstrap] --> B[Check Prerequisites]
-    B --> C{Prerequisites OK?}
-    C -->|No| D[Install Missing Tools]
-    C -->|Yes| E[Validate Configuration]
-    D --> E
-    E --> F[Create K3D Cluster]
-    F --> G[Wait for Cluster Ready]
-    G --> H[Install ArgoCD]
-    H --> I[Configure Git Repositories]
-    I --> J[Deploy App-of-Apps]
-    J --> K[Wait for Application Sync]
-    K --> L{All Apps Healthy?}
-    L -->|No| M[Troubleshoot & Retry]
-    L -->|Yes| N[Bootstrap Complete]
-    M --> K
-```
-
-### Service Interaction Patterns
-
-Services interact through well-defined interfaces:
-
-```mermaid
-classDiagram
-    class BootstrapService {
-        +Execute(config BootstrapConfig) error
-        -validatePrerequisites() error
-        -createCluster() error
-        -installCharts() error
-    }
-    
-    class ClusterService {
-        +Create(name string) error
-        +Delete(name string) error
-        +Status(name string) ClusterStatus
-        +List() []ClusterInfo
-    }
-    
-    class ChartService {
-        +Install(chart ChartSpec) error
-        +List() []ChartInfo
-        +Sync(name string) error
-        +WaitForReady(name string) error
-    }
-    
-    BootstrapService --> ClusterService
-    BootstrapService --> ChartService
-    ChartService --> ArgocdProvider
-    ClusterService --> K3dProvider
-```
+---
 
 ## Key Design Decisions
 
-### 1. Layered Architecture
+### Interface-Based External I/O
 
-**Decision**: Implement strict layering with dependency injection
-**Rationale**: 
-- Clear separation of concerns
-- Easier testing through interface mocking
-- Flexibility to swap implementations
-- Maintainable and extensible codebase
-
-### 2. Provider Pattern
-
-**Decision**: Abstract external tools behind provider interfaces
-**Rationale**:
-- Support multiple Kubernetes distributions (K3D, Kind, etc.)
-- Enable testing without external dependencies
-- Simplify adding new tool integrations
-- Consistent error handling and logging
-
-### 3. Command Executor Abstraction
-
-**Decision**: Centralize external command execution
-**Rationale**:
-- Consistent error handling across all external calls
-- Unified logging and debugging capabilities
-- Simplified testing with command mocking
-- Retry logic and timeout management
-
-### 4. Interactive CLI Design
-
-**Decision**: Provide both interactive and non-interactive modes
-**Rationale**:
-- User-friendly for manual operations
-- Scriptable for automation and CI/CD
-- Progressive disclosure of complexity
-- Clear error messages and guidance
-
-### 5. GitOps-First Approach
-
-**Decision**: Default to GitOps workflows with ArgoCD
-**Rationale**:
-- Industry best practices for Kubernetes deployments
-- Declarative infrastructure management
-- Audit trails and rollback capabilities
-- Team collaboration through Git workflows
-
-## Error Handling Strategy
-
-### Error Types and Handling
-
-```mermaid
-graph TD
-    A[Error Occurs] --> B{Error Type?}
-    B -->|Validation Error| C[Show Usage Help]
-    B -->|External Tool Error| D[Parse Tool Output]
-    B -->|Network Error| E[Suggest Connectivity Check]
-    B -->|Resource Error| F[Check Resource Availability]
-    
-    C --> G[Exit with Code 1]
-    D --> H{Recoverable?}
-    E --> H
-    F --> H
-    
-    H -->|Yes| I[Retry with Backoff]
-    H -->|No| J[Show Error + Solutions]
-    
-    I --> K{Max Retries?}
-    K -->|No| A
-    K -->|Yes| J
-    
-    J --> G
-```
-
-### Error Categories
-
-| Category | Examples | Handling Strategy |
-|----------|----------|------------------|
-| **User Input** | Invalid flags, missing config | Show usage help, suggest corrections |
-| **Prerequisites** | Missing tools, permissions | Guide installation, check prerequisites |
-| **Network** | Connection timeouts, DNS issues | Retry with backoff, check connectivity |
-| **Resource** | Insufficient memory, disk space | Check resources, suggest alternatives |
-| **External Tools** | kubectl errors, helm failures | Parse tool output, provide context |
-
-## Configuration Architecture
-
-### Configuration Sources (Priority Order)
-
-1. **Command-line flags** - Highest priority
-2. **Environment variables** - Override config files  
-3. **Configuration files** - User and system configs
-4. **Default values** - Built-in sensible defaults
-
-### Configuration Structure
-
-```yaml
-# ~/.openframe/config.yaml
-openframe:
-  log_level: "info"
-  config_dir: "~/.openframe"
-  
-cluster:
-  provider: "k3d"
-  default_name: "openframe-local"
-  nodes: 1
-  
-bootstrap:
-  mode: "oss-tenant"
-  timeout: "15m"
-  interactive: true
-  
-chart:
-  timeout: "10m"
-  wait_for_ready: true
-  
-dev:
-  intercept_timeout: "5m"
-  scaffold_template_dir: "~/.openframe/templates"
-```
-
-## Testing Architecture
-
-### Test Strategy
-
-```mermaid
-graph TB
-    subgraph "Unit Tests"
-        A[Service Logic Tests]
-        B[Provider Tests with Mocks]
-        C[Utility Function Tests]
-    end
-    
-    subgraph "Integration Tests"
-        D[End-to-End Command Tests]
-        E[Provider Integration Tests]
-        F[External Tool Integration]
-    end
-    
-    subgraph "Acceptance Tests"
-        G[Complete Bootstrap Workflow]
-        H[Multi-Cluster Scenarios]
-        I[Development Workflow Tests]
-    end
-    
-    A --> D
-    B --> E
-    C --> F
-    D --> G
-    E --> H
-    F --> I
-```
-
-### Mock Strategy
-
-- **External Commands**: Mock command executor for tool interactions
-- **Kubernetes API**: Use fake clientsets for API testing
-- **File System**: Mock file operations for config testing
-- **Network**: Mock HTTP clients for external service calls
-
-## Security Architecture
-
-### Security Principles
-
-1. **Least Privilege**: Request minimal permissions necessary
-2. **Secure Defaults**: Safe configurations out of the box
-3. **Input Validation**: Sanitize all user inputs
-4. **Secret Management**: Secure handling of credentials and keys
-5. **Audit Logging**: Track security-relevant operations
-
-### Trust Boundaries
-
-```mermaid
-graph LR
-    subgraph "Trusted Zone"
-        A[OpenFrame CLI]
-        B[Local Kubernetes]
-        C[Local Docker]
-    end
-    
-    subgraph "Semi-Trusted Zone"
-        D[Container Images]
-        E[Helm Charts]
-        F[Git Repositories]
-    end
-    
-    subgraph "Untrusted Zone"
-        G[Public Internet]
-        H[External APIs]
-        I[User Input]
-    end
-    
-    A --> B
-    A --> C
-    B --> D
-    A --> E
-    A --> F
-    
-    E --> G
-    F --> G
-    A --> H
-    I --> A
-```
-
-## Performance Considerations
-
-### Optimization Strategies
-
-1. **Lazy Loading**: Load providers and tools only when needed
-2. **Concurrent Operations**: Parallel execution where safe
-3. **Caching**: Cache expensive operations (cluster status, etc.)
-4. **Resource Monitoring**: Track memory and CPU usage
-5. **Efficient Data Structures**: Use appropriate data types
-
-### Resource Management
-
-- **Memory**: Stream large outputs, avoid loading everything in memory
-- **CPU**: Use worker pools for concurrent operations
-- **Disk**: Clean up temporary files, use appropriate buffer sizes
-- **Network**: Connection pooling, request batching where possible
-
-## Extensibility Points
-
-### Adding New Commands
-
-1. **Create command file** in appropriate `cmd/` subdirectory
-2. **Implement service logic** in `internal/` package
-3. **Add provider interface** if external tool needed
-4. **Write comprehensive tests** for all components
-5. **Update documentation** and help text
-
-### Adding New Providers
-
-1. **Define provider interface** in appropriate service package
-2. **Implement provider** in `internal/*/providers/` directory
-3. **Add configuration support** for provider-specific settings
-4. **Implement comprehensive testing** including mocks
-5. **Update factory functions** to instantiate new provider
-
-### Plugin Architecture (Future)
-
-Future extensibility through plugins:
-
-```mermaid
-graph TB
-    A[OpenFrame Core] --> B[Plugin Manager]
-    B --> C[Command Plugins]
-    B --> D[Provider Plugins]
-    B --> E[UI Plugins]
-    
-    C --> F[Custom Commands]
-    D --> G[New Tool Integrations]
-    E --> H[Custom Interfaces]
-```
-
-## Migration and Upgrade Strategy
-
-### Backward Compatibility
-
-- **Configuration**: Support old config format with migration
-- **Commands**: Maintain command compatibility across versions
-- **Data**: Migrate user data automatically when needed
-- **Dependencies**: Graceful handling of version mismatches
-
-### Version Management
+All subprocess execution goes through the `CommandExecutor` interface:
 
 ```go
-type VersionInfo struct {
-    Version string    // Semantic version
-    Commit  string    // Git commit hash
-    Date    string    // Build timestamp
-    Go      string    // Go version used
+type CommandExecutor interface {
+    Execute(ctx context.Context, command string, args ...string) (*CommandResult, error)
+    ExecuteWithOptions(ctx context.Context, opts ExecuteOptions) (*CommandResult, error)
 }
 ```
 
-## Next Steps
+This means any unit test can inject a `MockCommandExecutor` that returns pre-configured responses without ever invoking `k3d`, `helm`, or `kubectl`.
 
-To deepen your understanding of OpenFrame CLI architecture:
+### Native Kubernetes Clients for ArgoCD
 
-1. **[Security Guidelines](../security/README.md)** - Learn about security implementations
-2. **[Testing Guide](../testing/README.md)** - Understand testing strategies
-3. **[Contributing Guidelines](../contributing/guidelines.md)** - Learn development processes
+Rather than shelling out to `kubectl` for ArgoCD Application polling, the CLI uses the generated ArgoCD Go clientset (`k8s.io/client-go` + ArgoCD versioned client). This provides:
+- Reliable multi-platform behavior (no subprocess path resolution issues on Windows/WSL2)
+- Type-safe Application CRD access
+- Watch/poll loops with proper context cancellation
 
-## Additional Resources
+### WSL2-Aware Execution
 
-- **[Architecture Documentation](./architecture/overview.md)** - Generated architecture docs from code
-- **Go Design Patterns**: https://golang.org/doc/effective_go
-- **Kubernetes Client Libraries**: https://kubernetes.io/docs/reference/using-api/client-libraries/
-- **Cobra CLI Framework**: https://cobra.dev/
-- **OpenMSP Community**: [Join Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+The `RealCommandExecutor` detects Windows WSL2 environments and:
+- Converts Unix paths to WSL-compatible paths where needed
+- Wraps commands with `wsl -e` prefix when necessary
+- Provides health-check and recovery utilities for the WSL2 Ubuntu distribution
+
+### Configuration Wizard Pattern
+
+The interactive configuration wizard (`internal/chart/ui/configuration/`) uses a strategy pattern — each configuration aspect (branch, Docker registry, ingress, SaaS credentials) is encapsulated in a dedicated configurator struct that implements the same workflow interface. The wizard orchestrates them in sequence.
+
+---
+
+## Key Dependencies
+
+| Library | Usage |
+|---------|-------|
+| `github.com/spf13/cobra` | CLI framework — all commands, flags, usage templates |
+| `github.com/pterm/pterm` | Rich terminal UI — spinners, tables, boxes, progress |
+| `github.com/manifoldco/promptui` | Interactive selection menus and text input |
+| `k8s.io/client-go` | Native Kubernetes API client |
+| `github.com/argoproj/argo-cd/v2` | ArgoCD generated clientset for Application CRD polling |
+| `gopkg.in/yaml.v3` | YAML parsing for helm-values.yaml and cluster configs |
+| `golang.org/x/term` | Raw terminal mode for single-keystroke prompts |
