@@ -228,10 +228,10 @@ func (t *Tracker) Complete() {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Success("Operation completed")
-		t.spinner.Stop()
+		_ = t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	// Show completion summary
@@ -253,10 +253,10 @@ func (t *Tracker) Fail(err error) {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Fail("Operation failed")
-		t.spinner.Stop()
+		_ = t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	// Show failure message
@@ -279,10 +279,10 @@ func (t *Tracker) Cancel() {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Warning("Operation cancelled")
-		t.spinner.Stop()
+		_ = t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	pterm.Warning.Printf("⏹️  %s cancelled by user\n", t.operation)
