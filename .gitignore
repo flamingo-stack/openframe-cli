@@ -9,6 +9,11 @@ coverage.html
 
 # Release artifacts
 /releases/
+# goreleaser output + cosign keyless signing artifacts (never committed)
+/dist/
+*.sig
+*.pem
+*.sbom.json
 
 # Go workspace
 *.swp

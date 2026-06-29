@@ -44,6 +44,28 @@ checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
 
+# Software Bill of Materials, one per archive (generated with syft).
+# Additive: publishes *_sbom.spdx.json alongside artifacts; binaries unchanged.
+sboms:
+  - id: archive
+    artifacts: archive
+
+# Keyless cosign signature of the checksums file (which covers every artifact
+# via its SHA256). Produces detached checksums.txt.sig + .pem — the binaries
+# themselves are NOT modified and run identically with or without verification.
+# Requires cosign on PATH and `id-token: write` in the release workflow.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+      - '--yes'
+
 changelog:
   use: github-native
   sort: asc
