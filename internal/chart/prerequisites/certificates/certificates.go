@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/pterm/pterm"
 )
 
 type CertificateInstaller struct{}
@@ -214,7 +216,9 @@ func (c *CertificateInstaller) generateCertificates() error {
 				for _, sha := range strings.Split(shas, "\n") {
 					if sha != "" {
 						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain)
-						deleteCmd.Run() // Best effort
+						if err := deleteCmd.Run(); err != nil { // best effort
+							pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
+						}
 					}
 				}
 			}
@@ -248,9 +252,13 @@ func (c *CertificateInstaller) generateCertificates() error {
 		if !commandExists("certutil") {
 			if commandExists("apt-get") {
 				updateCmd := exec.Command("sudo", "apt-get", "update", "-y")
-				updateCmd.Run()
+				if err := updateCmd.Run(); err != nil {
+					pterm.Debug.Printf("apt-get update failed (certutil install is optional): %v\n", err)
+				}
 				installCmd := exec.Command("sudo", "apt-get", "install", "-y", "libnss3-tools", "ca-certificates")
-				installCmd.Run()
+				if err := installCmd.Run(); err != nil {
+					pterm.Debug.Printf("apt-get install of certutil/ca-certificates failed (optional): %v\n", err)
+				}
 			}
 		}
 
@@ -283,7 +291,9 @@ func (c *CertificateInstaller) generateCertificates() error {
 							if len(parts) > 0 {
 								nick := parts[0]
 								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick)
-								deleteCmd.Run() // Best effort
+								if err := deleteCmd.Run(); err != nil { // best effort
+									pterm.Debug.Printf("best-effort removal of old mkcert NSS nickname %q failed: %v\n", nick, err)
+								}
 							}
 						}
 					}
@@ -296,16 +306,22 @@ func (c *CertificateInstaller) generateCertificates() error {
 		installSystemCmd.Stdin = os.Stdin
 		installSystemCmd.Stdout = os.Stdout
 		installSystemCmd.Stderr = os.Stderr
-		installSystemCmd.Run()
+		if err := installSystemCmd.Run(); err != nil {
+			pterm.Debug.Printf("mkcert -install (system,nss trust stores) failed: %v\n", err)
+		}
 
 		// Refresh trust stores
 		if commandExists("update-ca-certificates") {
 			updateCmd := exec.Command("sudo", "update-ca-certificates")
-			updateCmd.Run()
+			if err := updateCmd.Run(); err != nil {
+				pterm.Debug.Printf("update-ca-certificates failed: %v\n", err)
+			}
 		}
 		if commandExists("update-ca-trust") {
 			updateCmd := exec.Command("sudo", "update-ca-trust", "extract")
-			updateCmd.Run()
+			if err := updateCmd.Run(); err != nil {
+				pterm.Debug.Printf("update-ca-trust extract failed: %v\n", err)
+			}
 		}
 	}
 
