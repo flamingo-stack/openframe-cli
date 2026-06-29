@@ -276,7 +276,9 @@ func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, cluste
 
 	// Also remove the network
 	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s 2>/dev/null || true", clusterName)
-	_, _ = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd)
+	if _, nerr := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd); nerr != nil && m.verbose {
+		fmt.Printf("Warning: failed to remove k3d network for %s: %v\n", clusterName, nerr)
+	}
 
 	return nil
 }
@@ -295,13 +297,17 @@ func (m *K3dManager) forceCleanupDockerContainersDirect(ctx context.Context, clu
 		for _, id := range strings.Split(containerIDs, "\n") {
 			id = strings.TrimSpace(id)
 			if id != "" {
-				_, _ = m.executor.Execute(ctx, "docker", "rm", "-f", id)
+				if _, rerr := m.executor.Execute(ctx, "docker", "rm", "-f", id); rerr != nil && m.verbose {
+					fmt.Printf("Warning: failed to remove container %s: %v\n", id, rerr)
+				}
 			}
 		}
 	}
 
 	// Also remove the network
-	_, _ = m.executor.Execute(ctx, "docker", "network", "rm", fmt.Sprintf("k3d-%s", clusterName))
+	if _, nerr := m.executor.Execute(ctx, "docker", "network", "rm", fmt.Sprintf("k3d-%s", clusterName)); nerr != nil && m.verbose {
+		fmt.Printf("Warning: failed to remove k3d network for %s: %v\n", clusterName, nerr)
+	}
 
 	return nil
 }
