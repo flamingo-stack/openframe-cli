@@ -19,7 +19,7 @@ type ChartError struct {
 // Error implements the error interface
 func (e *ChartError) Error() string {
 	if e.ClusterName != "" {
-		return fmt.Sprintf("chart %s failed for %s on cluster %s: %v", 
+		return fmt.Sprintf("chart %s failed for %s on cluster %s: %v",
 			e.Operation, e.Component, e.ClusterName, e.Cause)
 	}
 	return fmt.Sprintf("chart %s failed for %s: %v", e.Operation, e.Component, e.Cause)
@@ -77,16 +77,16 @@ func (e *ChartError) WithRecovery(retryAfter time.Duration) *ChartError {
 
 // Chart Error Types
 var (
-	ErrChartNotFound        = fmt.Errorf("chart not found")
+	ErrChartNotFound         = fmt.Errorf("chart not found")
 	ErrChartAlreadyInstalled = fmt.Errorf("chart already installed")
-	ErrInvalidConfiguration = fmt.Errorf("invalid configuration")
-	ErrClusterNotReady      = fmt.Errorf("cluster not ready")
-	ErrHelmNotAvailable     = fmt.Errorf("helm not available")
-	ErrKubectlNotAvailable  = fmt.Errorf("kubectl not available")
+	ErrInvalidConfiguration  = fmt.Errorf("invalid configuration")
+	ErrClusterNotReady       = fmt.Errorf("cluster not ready")
+	ErrHelmNotAvailable      = fmt.Errorf("helm not available")
+	ErrKubectlNotAvailable   = fmt.Errorf("kubectl not available")
 	ErrInsufficientResources = fmt.Errorf("insufficient cluster resources")
-	ErrNetworkTimeout       = fmt.Errorf("network timeout")
-	ErrAuthenticationFailed = fmt.Errorf("authentication failed")
-	ErrPermissionDenied     = fmt.Errorf("permission denied")
+	ErrNetworkTimeout        = fmt.Errorf("network timeout")
+	ErrAuthenticationFailed  = fmt.Errorf("authentication failed")
+	ErrPermissionDenied      = fmt.Errorf("permission denied")
 )
 
 // InstallationError represents installation-specific errors
@@ -113,10 +113,10 @@ func (e *InstallationError) GetTroubleshootingSteps() []string {
 		"Verify cluster resources: kubectl top nodes",
 		"Check helm installation: helm version",
 	}
-	
+
 	// Add error-specific steps
 	steps = append(steps, e.Suggestions...)
-	
+
 	return steps
 }
 
@@ -134,18 +134,18 @@ func (e *InstallationError) WithSuggestions(suggestions []string) *InstallationE
 	return e
 }
 
-// ValidationError represents validation-specific errors  
+// ValidationError represents validation-specific errors
 type ValidationError struct {
 	*ChartError
-	Field       string
-	Value       string
-	Constraint  string
+	Field      string
+	Value      string
+	Constraint string
 }
 
 // Error implements error interface for ValidationError
 func (e *ValidationError) Error() string {
 	if e.Field != "" {
-		return fmt.Sprintf("validation failed for field '%s': %s (value: '%s')", 
+		return fmt.Sprintf("validation failed for field '%s': %s (value: '%s')",
 			e.Field, e.Constraint, e.Value)
 	}
 	return fmt.Sprintf("validation failed: %v", e.Cause)
@@ -170,7 +170,7 @@ type ConfigurationError struct {
 	MissingKeys []string
 }
 
-// Error implements error interface for ConfigurationError  
+// Error implements error interface for ConfigurationError
 func (e *ConfigurationError) Error() string {
 	if e.ConfigFile != "" {
 		return fmt.Sprintf("configuration error in file '%s': %v", e.ConfigFile, e.Cause)
@@ -253,18 +253,18 @@ func CombineErrors(errors []error) error {
 	if len(errors) == 0 {
 		return nil
 	}
-	
+
 	if len(errors) == 1 {
 		return errors[0]
 	}
-	
+
 	var messages []string
 	for _, err := range errors {
 		if err != nil {
 			messages = append(messages, err.Error())
 		}
 	}
-	
+
 	return fmt.Errorf("multiple errors occurred: %v", messages)
 }
 

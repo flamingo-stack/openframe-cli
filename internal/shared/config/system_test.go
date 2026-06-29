@@ -8,11 +8,11 @@ import (
 
 func TestNewSystemService(t *testing.T) {
 	service := NewSystemService()
-	
+
 	if service == nil {
 		t.Fatal("NewSystemService should not return nil")
 	}
-	
+
 	// Should have default log directory set
 	logDir := service.GetLogDirectory()
 	expectedLogDir := filepath.Join(os.TempDir(), "openframe-deployment-logs")
@@ -24,11 +24,11 @@ func TestNewSystemService(t *testing.T) {
 func TestNewSystemServiceWithOptions(t *testing.T) {
 	customLogDir := "/tmp/custom-test-logs"
 	service := NewSystemServiceWithOptions(customLogDir)
-	
+
 	if service == nil {
 		t.Fatal("NewSystemServiceWithOptions should not return nil")
 	}
-	
+
 	// Should have custom log directory set
 	logDir := service.GetLogDirectory()
 	if logDir != customLogDir {
@@ -92,12 +92,12 @@ func TestSystemService_Initialize(t *testing.T) {
 
 func TestSystemService_GetLogDirectory(t *testing.T) {
 	service := NewSystemService()
-	
+
 	logDir := service.GetLogDirectory()
 	if logDir == "" {
 		t.Error("GetLogDirectory should not return empty string")
 	}
-	
+
 	expectedLogDir := filepath.Join(os.TempDir(), "openframe-deployment-logs")
 	if logDir != expectedLogDir {
 		t.Errorf("expected log directory %q, got %q", expectedLogDir, logDir)
@@ -136,24 +136,24 @@ func TestSystemService_MultipleInitialize(t *testing.T) {
 	// Test that multiple Initialize calls are safe
 	logDir := filepath.Join(os.TempDir(), "test-multiple-init")
 	service := NewSystemServiceWithOptions(logDir)
-	
+
 	// First initialize
 	err1 := service.Initialize()
 	if err1 != nil {
 		t.Errorf("first Initialize() failed: %v", err1)
 	}
-	
+
 	// Second initialize should also succeed (directory already exists)
 	err2 := service.Initialize()
 	if err2 != nil {
 		t.Errorf("second Initialize() failed: %v", err2)
 	}
-	
+
 	// Verify directory exists
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		t.Errorf("expected log directory %q to exist", logDir)
 	}
-	
+
 	// Clean up
 	os.RemoveAll(logDir)
 }

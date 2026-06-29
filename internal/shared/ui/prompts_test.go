@@ -201,7 +201,7 @@ func TestSelectFromList_TemplateConfiguration(t *testing.T) {
 	assert.Equal(t, "\U00002192 {{ . | green }}", expectedTemplates.Selected)
 
 	// Verify the Unicode characters are correct
-	assert.Contains(t, expectedTemplates.Active, "→") // Right arrow
+	assert.Contains(t, expectedTemplates.Active, "→")   // Right arrow
 	assert.Contains(t, expectedTemplates.Selected, "→") // Right arrow
 
 	// Mock the function parameters to verify they would be used correctly
@@ -224,7 +224,7 @@ func TestGetInput_DefaultValues(t *testing.T) {
 	// Verify parameters
 	assert.Equal(t, "Enter value", label)
 	assert.Equal(t, "default", defaultValue)
-	
+
 	// Test the validation function
 	assert.NoError(t, validateFunc("valid input"))
 	assert.Error(t, validateFunc(""))
@@ -272,7 +272,7 @@ func TestGetMultiChoice_ErrorHandling(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name:     "empty items with nil defaults", 
+			name:     "empty items with nil defaults",
 			items:    []string{},
 			defaults: nil,
 			wantErr:  false,
@@ -304,7 +304,7 @@ func TestGetMultiChoice_ErrorHandling(t *testing.T) {
 					copy(results, tt.defaults)
 				}
 				assert.Equal(t, len(tt.items), len(results))
-				
+
 				// For nil vs empty slice comparison, check lengths instead of direct equality
 				if tt.defaults == nil && len(tt.items) == 0 {
 					// Both should be empty/nil - acceptable condition
@@ -312,7 +312,7 @@ func TestGetMultiChoice_ErrorHandling(t *testing.T) {
 				} else {
 					assert.Equal(t, tt.defaults, results)
 				}
-				
+
 				// Verify length consistency
 				assert.Equal(t, len(tt.items), len(tt.defaults))
 			}
@@ -342,10 +342,10 @@ func TestBoolToString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := boolToString(tt.input)
 			assert.Equal(t, tt.expected, result)
-			
+
 			// Verify result is always non-empty
 			assert.NotEmpty(t, result)
-			
+
 			// Verify result is always single character
 			assert.Len(t, result, 1)
 		})

@@ -14,7 +14,7 @@ type CommandHandler interface {
 type FlagsProvider interface {
 	// GetFlagDefinitions returns all flag definitions for the command
 	GetFlagDefinitions() []FlagDefinition
-	
+
 	// AddFlags adds all flags to the given command
 	AddFlags(cmd *cobra.Command)
 }
@@ -44,7 +44,7 @@ func (bca *BaseCommandAdapter) ExtractFlags(cmd *cobra.Command) *FlagExtractor {
 // ValidateRequired validates that required flags are present
 func (bca *BaseCommandAdapter) ValidateRequired(flags map[string]interface{}) *ValidationResult {
 	result := NewValidationResult()
-	
+
 	for name, value := range flags {
 		switch v := value.(type) {
 		case string:
@@ -59,7 +59,7 @@ func (bca *BaseCommandAdapter) ValidateRequired(flags map[string]interface{}) *V
 			}
 		}
 	}
-	
+
 	return result
 }
 
@@ -94,12 +94,12 @@ type FlagDefinition struct {
 
 // CommandMetadata contains metadata about a command
 type CommandMetadata struct {
-	Use         string
-	Short       string
-	Long        string
-	Aliases     []string
-	Examples    []string
-	Args        cobra.PositionalArgs
+	Use      string
+	Short    string
+	Long     string
+	Aliases  []string
+	Examples []string
+	Args     cobra.PositionalArgs
 }
 
 // ExampleBuilder helps build command examples
@@ -126,12 +126,12 @@ func (eb *ExampleBuilder) Build(commandName string) string {
 	if len(eb.examples) == 0 {
 		return ""
 	}
-	
+
 	result := "Examples:\n"
 	for _, example := range eb.examples {
 		result += "  " + commandName + " " + example + "\n"
 	}
-	
+
 	return result
 }
 

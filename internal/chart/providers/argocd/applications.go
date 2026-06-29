@@ -9,13 +9,13 @@ import (
 	"runtime"
 	"strings"
 
+	argocdclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
-	argocdclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -27,10 +27,10 @@ type Manager struct {
 	clusterName string // Optional cluster name for explicit context (e.g., "k3d-openframe")
 
 	// Native Kubernetes clients for direct API access (reduces kubectl dependency)
-	kubeConfig       *rest.Config
-	kubeClient       kubernetes.Interface
-	apiextClient     apiextensionsclientset.Interface
-	argocdClient     argocdclientset.Interface
+	kubeConfig         *rest.Config
+	kubeClient         kubernetes.Interface
+	apiextClient       apiextensionsclientset.Interface
+	argocdClient       argocdclientset.Interface
 	clientsInitialized bool
 
 	// StabilizationChecks is the number of consecutive all-ready polls required

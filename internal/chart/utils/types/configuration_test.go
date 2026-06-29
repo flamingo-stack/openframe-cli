@@ -68,11 +68,11 @@ func TestNgrokConfig_WithoutAllowedIPs(t *testing.T) {
 func TestNgrokConfig_RegistrationFields(t *testing.T) {
 	startTime := time.Now()
 	config := &NgrokConfig{
-		AuthToken:                 "auth_token_123",
-		APIKey:                    "api_key_456",
-		Domain:                    "example.ngrok.io",
-		RegistrationCompleted:     true,
-		RegistrationStartTime:     startTime,
+		AuthToken:             "auth_token_123",
+		APIKey:                "api_key_456",
+		Domain:                "example.ngrok.io",
+		RegistrationCompleted: true,
+		RegistrationStartTime: startTime,
 	}
 
 	assert.True(t, config.RegistrationCompleted)

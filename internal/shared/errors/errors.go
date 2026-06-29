@@ -93,7 +93,7 @@ func (eh *ErrorHandler) handleCommandError(err *CommandError) {
 	if len(err.Args) > 0 {
 		pterm.Printf("  Arguments: %v\n", err.Args)
 	}
-	
+
 	if eh.verbose {
 		pterm.Printf("  Details: %v\n", err.Err)
 	} else {
@@ -108,7 +108,7 @@ func (eh *ErrorHandler) handleBranchNotFoundError(err *BranchNotFoundError) {
 func (eh *ErrorHandler) handleGenericError(err error) {
 	// Clean up common error patterns for better user experience
 	errorMsg := err.Error()
-	
+
 	// Handle user interruptions (Ctrl+C)
 	if eh.isUserInterruption(errorMsg) {
 		fmt.Println()
@@ -116,11 +116,11 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 		os.Exit(1)
 		return
 	}
-	
+
 	// Extract meaningful error from complex error chains
 	if strings.Contains(errorMsg, "cluster create operation failed") {
 		pterm.Error.Printf("❌ Failed to create cluster\n")
-		
+
 		// Try to extract the actual k3d error and give helpful advice
 		if strings.Contains(errorMsg, "exit status 1") && strings.Contains(errorMsg, "k3d cluster create") {
 			pterm.Printf("  Issue: k3d cluster creation failed\n")
@@ -160,14 +160,14 @@ func (eh *ErrorHandler) isUserInterruption(errorMsg string) bool {
 		"user cancelled",
 		"context canceled",
 	}
-	
+
 	errorLower := strings.ToLower(errorMsg)
 	for _, pattern := range interruptions {
 		if strings.Contains(errorLower, strings.ToLower(pattern)) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -223,7 +223,7 @@ func HandleGlobalError(err error, verbose bool) error {
 	}
 
 	handler := NewErrorHandler(verbose)
-	
+
 	// Check if this is a user interruption - these should exit cleanly
 	if handler.isUserInterruption(err.Error()) {
 		fmt.Println()
@@ -231,10 +231,10 @@ func HandleGlobalError(err error, verbose bool) error {
 		os.Exit(1)
 		return nil // Won't be reached
 	}
-	
+
 	// Display the error
 	handler.HandleError(err)
-	
+
 	// Don't return the error to prevent double display
 	// Exit with code 1 to indicate failure
 	os.Exit(1)

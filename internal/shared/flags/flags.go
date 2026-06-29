@@ -51,7 +51,7 @@ func GetFlagDescription(flagName string) string {
 		"force":   "Skip confirmation prompts and proceed automatically",
 		"quiet":   "Minimize output, showing only essential information",
 	}
-	
+
 	if desc, exists := descriptions[flagName]; exists {
 		return desc
 	}

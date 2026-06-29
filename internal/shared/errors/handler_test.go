@@ -118,9 +118,9 @@ func TestHandleConfirmationErrorIntegration(t *testing.T) {
 func TestErrorMessageFormatting(t *testing.T) {
 	baseError := fmt.Errorf("connection failed")
 	context := "failed to connect to database"
-	
+
 	wrappedError := WrapConfirmationError(baseError, context)
-	
+
 	expected := "failed to connect to database: connection failed"
 	assert.Equal(t, expected, wrappedError.Error(), "Error should be properly wrapped with context")
 }
@@ -130,7 +130,7 @@ func TestNilErrorHandling(t *testing.T) {
 	// HandleConfirmationError with nil should return false
 	result := HandleConfirmationError(nil)
 	assert.False(t, result, "HandleConfirmationError should return false for nil error")
-	
+
 	// WrapConfirmationError with nil should return nil
 	wrapped := WrapConfirmationError(nil, "some context")
 	assert.Nil(t, wrapped, "WrapConfirmationError should return nil for nil error")
@@ -172,7 +172,7 @@ func TestEdgeCases(t *testing.T) {
 			if tt.name == "error message that contains 'interrupted' but isn't exact match" {
 				assert.False(t, isInterrupted, "Should not treat partial matches as interruptions")
 			}
-			
+
 			// Test wrapping
 			wrapped := WrapConfirmationError(tt.err, tt.context)
 			if tt.err.Error() == "interrupted" {

@@ -16,16 +16,16 @@ type InterceptFlags struct {
 
 // ScaffoldFlags holds all flags for the scaffold command
 type ScaffoldFlags struct {
-	Image           string // Docker image to use for the service
-	Port            int    // Port to forward from the service
-	Namespace       string // Kubernetes namespace to deploy to
-	SyncLocal       string // Local directory to sync to the container
-	SyncRemote      string // Remote directory to sync files to
-	ConfigMap       string // ConfigMap to mount in the container
-	Secret          string // Secret to mount in the container
-	ClusterName     string // Cluster name to use
-	SkipBootstrap   bool   // Skip bootstrapping cluster
-	HelmValuesFile  string // Custom Helm values file for bootstrap
+	Image          string // Docker image to use for the service
+	Port           int    // Port to forward from the service
+	Namespace      string // Kubernetes namespace to deploy to
+	SyncLocal      string // Local directory to sync to the container
+	SyncRemote     string // Remote directory to sync files to
+	ConfigMap      string // ConfigMap to mount in the container
+	Secret         string // Secret to mount in the container
+	ClusterName    string // Cluster name to use
+	SkipBootstrap  bool   // Skip bootstrapping cluster
+	HelmValuesFile string // Custom Helm values file for bootstrap
 }
 
 // AddGlobalFlags adds global flags to the dev command

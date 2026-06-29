@@ -12,15 +12,15 @@ func TestDependency_IsAvailable(t *testing.T) {
 		Name:     "echo command",
 		CheckCmd: []string{"echo", "test"},
 	}
-	
+
 	assert.True(t, dep.IsAvailable())
-	
+
 	// Test with a command that shouldn't exist
 	dep = &Dependency{
 		Name:     "nonexistent command",
 		CheckCmd: []string{"this-command-does-not-exist"},
 	}
-	
+
 	assert.False(t, dep.IsAvailable())
 }
 
@@ -31,7 +31,7 @@ func TestDependency_RequireOrSkip(t *testing.T) {
 		CheckCmd:   []string{"echo", "test"},
 		InstallMsg: "Install echo",
 	}
-	
+
 	// Should not skip
 	assert.NotPanics(t, func() {
 		dep.RequireOrSkip(t, "skip message")
@@ -43,7 +43,7 @@ func TestPredefinedDependencies(t *testing.T) {
 	assert.NotNil(t, Docker)
 	assert.Equal(t, "Docker not running", Docker.Name)
 	assert.Equal(t, []string{"docker", "info"}, Docker.CheckCmd)
-	
+
 	assert.NotNil(t, K3d)
 	assert.Equal(t, "k3d not available", K3d.Name)
 }

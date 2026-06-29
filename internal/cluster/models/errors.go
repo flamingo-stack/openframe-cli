@@ -25,9 +25,9 @@ func (e ErrProviderNotFound) Error() string {
 
 // ErrInvalidClusterConfig indicates the cluster configuration is invalid
 type ErrInvalidClusterConfig struct {
-	Field   string
-	Value   interface{}
-	Reason  string
+	Field  string
+	Value  interface{}
+	Reason string
 }
 
 func (e ErrInvalidClusterConfig) Error() string {

@@ -111,7 +111,7 @@ func (d *DockerInstaller) installMacOS() error {
 	cmd := exec.Command("brew", "install", "--cask", "docker")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install Docker Desktop: %w", err)
 	}
@@ -142,7 +142,7 @@ func (d *DockerInstaller) installLinux() error {
 
 func (d *DockerInstaller) installUbuntu() error {
 	fmt.Println("Installing Docker on Ubuntu/Debian...")
-	
+
 	commands := [][]string{
 		{"sudo", "apt", "update"},
 		{"sudo", "apt", "install", "-y", "apt-transport-https", "ca-certificates", "curl", "gnupg", "lsb-release"},
@@ -195,7 +195,7 @@ func (d *DockerInstaller) installUbuntu() error {
 
 func (d *DockerInstaller) installRedHat() error {
 	fmt.Println("Installing Docker on CentOS/RHEL...")
-	
+
 	commands := [][]string{
 		{"sudo", "yum", "install", "-y", "yum-utils"},
 		{"sudo", "yum-config-manager", "--add-repo", "https://download.docker.com/linux/centos/docker-ce.repo"},
@@ -225,7 +225,7 @@ func (d *DockerInstaller) installRedHat() error {
 
 func (d *DockerInstaller) installFedora() error {
 	fmt.Println("Installing Docker on Fedora...")
-	
+
 	commands := [][]string{
 		{"sudo", "dnf", "install", "-y", "dnf-plugins-core"},
 		{"sudo", "dnf", "config-manager", "--add-repo", "https://download.docker.com/linux/fedora/docker-ce.repo"},
@@ -255,7 +255,7 @@ func (d *DockerInstaller) installFedora() error {
 
 func (d *DockerInstaller) installArch() error {
 	fmt.Println("Installing Docker on Arch Linux...")
-	
+
 	commands := [][]string{
 		{"sudo", "pacman", "-S", "--noconfirm", "docker"},
 		{"sudo", "systemctl", "enable", "docker"},
@@ -605,7 +605,7 @@ func startDockerLinux() error {
 		}
 		return nil
 	}
-	
+
 	// Try service command (older systems)
 	if commandExists("service") {
 		cmd := exec.Command("sudo", "service", "docker", "start")
@@ -614,7 +614,7 @@ func startDockerLinux() error {
 		}
 		return nil
 	}
-	
+
 	return fmt.Errorf("unable to start Docker daemon: no supported init system found")
 }
 

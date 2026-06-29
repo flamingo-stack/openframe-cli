@@ -61,10 +61,10 @@ type ClusterService interface {
 type ProviderRegistry interface {
 	// RegisterProvider adds a provider for a specific cluster type
 	RegisterProvider(clusterType ClusterType, provider ClusterProvider)
-	
+
 	// GetProvider returns the provider for a given cluster type
 	GetProvider(clusterType ClusterType) (ClusterProvider, error)
-	
+
 	// GetAllProviders returns all registered providers
 	GetAllProviders() map[ClusterType]ClusterProvider
 }

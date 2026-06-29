@@ -82,7 +82,7 @@ func (k *KubectlInstaller) installMacOS() error {
 	cmd := exec.Command("brew", "install", "kubectl")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install kubectl: %w", err)
 	}

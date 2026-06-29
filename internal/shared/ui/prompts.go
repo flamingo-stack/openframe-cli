@@ -32,14 +32,14 @@ func ConfirmDeletion(resourceType, resourceName string) (bool, error) {
 
 // ConfirmAction prompts the user to confirm an action with friendly UX:
 // - Enter = yes (default)
-// - y = yes (immediate, no Enter needed)  
+// - y = yes (immediate, no Enter needed)
 // - n = no (immediate, no Enter needed)
 func ConfirmAction(message string) (bool, error) {
 	fmt.Printf("%s (Y/n): ", pterm.Bold.Sprint(message))
-	
+
 	// Get the file descriptor for stdin
 	fd := int(os.Stdin.Fd())
-	
+
 	// Check if stdin is a terminal
 	if !term.IsTerminal(fd) {
 		// Fallback for non-terminal input (like pipes/tests)
@@ -51,13 +51,13 @@ func ConfirmAction(message string) (bool, error) {
 		input = strings.ToLower(strings.TrimSpace(input))
 		return input == "" || input == "y" || input == "yes", nil
 	}
-	
+
 	// Save the current terminal state
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return false, err
 	}
-	
+
 	// Read single character
 	buf := make([]byte, 1)
 	for {
@@ -66,9 +66,9 @@ func ConfirmAction(message string) (bool, error) {
 			term.Restore(fd, oldState)
 			return false, err
 		}
-		
+
 		char := buf[0]
-		
+
 		switch char {
 		case '\r', '\n': // Enter key
 			term.Restore(fd, oldState)
@@ -86,7 +86,7 @@ func ConfirmAction(message string) (bool, error) {
 			term.Restore(fd, oldState)
 			fmt.Println()
 			return false, fmt.Errorf("interrupted")
-		// Ignore other characters and continue reading
+			// Ignore other characters and continue reading
 		}
 	}
 }

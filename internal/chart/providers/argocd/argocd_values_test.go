@@ -46,7 +46,7 @@ func TestGetArgoCDValues(t *testing.T) {
 
 func TestGetArgoCDValuesStructure(t *testing.T) {
 	values := GetArgoCDValues()
-	
+
 	// Count lines to ensure we have the expected structure
 	lines := strings.Split(values, "\n")
 	if len(lines) < 80 {

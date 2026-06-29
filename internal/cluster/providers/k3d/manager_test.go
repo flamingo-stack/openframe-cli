@@ -129,12 +129,12 @@ func TestCreateDefaultClusterManager(t *testing.T) {
 
 func TestK3dManager_CreateCluster(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         models.ClusterConfig
-		setupMock      func(*MockExecutor)
+		name            string
+		config          models.ClusterConfig
+		setupMock       func(*MockExecutor)
 		setupKubeconfig bool
-		expectedError  string
-		expectedArgs   []string
+		expectedError   string
+		expectedArgs    []string
 	}{
 		{
 			name: "successful cluster creation",

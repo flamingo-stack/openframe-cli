@@ -7,9 +7,9 @@ import (
 
 // Dependency represents a dependency required for integration tests
 type Dependency struct {
-	Name        string
-	CheckCmd    []string
-	InstallMsg  string
+	Name       string
+	CheckCmd   []string
+	InstallMsg string
 }
 
 // IsAvailable checks if a dependency is available
@@ -36,19 +36,19 @@ var (
 		CheckCmd:   []string{"docker", "info"},
 		InstallMsg: "Start Docker daemon to run actual cluster tests.",
 	}
-	
+
 	K3d = &Dependency{
 		Name:       "k3d not available",
 		CheckCmd:   []string{"k3d", "version"},
 		InstallMsg: "Install k3d to run actual cluster tests.",
 	}
-	
+
 	Kubectl = &Dependency{
 		Name:       "kubectl not available",
 		CheckCmd:   []string{"kubectl", "version", "--client"},
 		InstallMsg: "Install kubectl to run actual cluster tests.",
 	}
-	
+
 	Helm = &Dependency{
 		Name:       "helm not available",
 		CheckCmd:   []string{"helm", "version"},

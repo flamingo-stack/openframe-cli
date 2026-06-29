@@ -10,7 +10,7 @@ import (
 
 func TestInterceptFlags_DefaultValues(t *testing.T) {
 	flags := &InterceptFlags{}
-	
+
 	// Test default values
 	assert.Equal(t, 0, flags.Port, "Port should default to 0")
 	assert.Equal(t, "", flags.Namespace, "Namespace should default to empty string")
@@ -33,7 +33,7 @@ func TestInterceptFlags_WithValues(t *testing.T) {
 		Replace:        true,
 		RemotePortName: "http",
 	}
-	
+
 	// Test all values are set correctly
 	assert.Equal(t, 8080, flags.Port)
 	assert.Equal(t, "production", flags.Namespace)
@@ -47,7 +47,7 @@ func TestInterceptFlags_WithValues(t *testing.T) {
 
 func TestScaffoldFlags_DefaultValues(t *testing.T) {
 	flags := &ScaffoldFlags{}
-	
+
 	// Test default values
 	assert.Equal(t, "", flags.Image, "Image should default to empty string")
 	assert.Equal(t, 0, flags.Port, "Port should default to 0")
@@ -63,18 +63,18 @@ func TestScaffoldFlags_DefaultValues(t *testing.T) {
 
 func TestScaffoldFlags_WithValues(t *testing.T) {
 	flags := &ScaffoldFlags{
-		Image:           "my-app:v1.0.0",
-		Port:            9090,
-		Namespace:       "staging",
-		SyncLocal:       "./src",
-		SyncRemote:      "/app/src",
-		ConfigMap:       "my-config",
-		Secret:          "my-secret",
-		ClusterName:     "dev-cluster",
-		SkipBootstrap:   true,
-		HelmValuesFile:  "values.yaml",
+		Image:          "my-app:v1.0.0",
+		Port:           9090,
+		Namespace:      "staging",
+		SyncLocal:      "./src",
+		SyncRemote:     "/app/src",
+		ConfigMap:      "my-config",
+		Secret:         "my-secret",
+		ClusterName:    "dev-cluster",
+		SkipBootstrap:  true,
+		HelmValuesFile: "values.yaml",
 	}
-	
+
 	// Test all values are set correctly
 	assert.Equal(t, "my-app:v1.0.0", flags.Image)
 	assert.Equal(t, 9090, flags.Port)
@@ -92,31 +92,31 @@ func TestAddGlobalFlags(t *testing.T) {
 	cmd := &cobra.Command{
 		Use: "test",
 	}
-	
+
 	// Test that AddGlobalFlags doesn't panic
 	assert.NotPanics(t, func() {
 		AddGlobalFlags(cmd)
 	}, "AddGlobalFlags should not panic")
-	
+
 	// Test that flags are added
 	_, err := cmd.PersistentFlags().GetBool("verbose")
 	assert.NoError(t, err, "verbose flag should exist")
-	
+
 	_, err = cmd.PersistentFlags().GetBool("silent")
 	assert.NoError(t, err, "silent flag should exist")
-	
+
 	_, err = cmd.PersistentFlags().GetBool("dry-run")
 	assert.NoError(t, err, "dry-run flag should exist")
-	
+
 	// Test flag defaults
 	verbose, err := cmd.PersistentFlags().GetBool("verbose")
 	assert.NoError(t, err)
 	assert.False(t, verbose, "verbose should default to false")
-	
+
 	silent, err := cmd.PersistentFlags().GetBool("silent")
 	assert.NoError(t, err)
 	assert.False(t, silent, "silent should default to false")
-	
+
 	dryRun, err := cmd.PersistentFlags().GetBool("dry-run")
 	assert.NoError(t, err)
 	assert.False(t, dryRun, "dry-run should default to false")
@@ -130,7 +130,7 @@ func TestFlags_EdgeCases(t *testing.T) {
 		assert.NotNil(t, flags.Header, "Header slice should not be nil")
 		assert.Len(t, flags.Header, 0, "Header slice should be empty")
 	})
-	
+
 	t.Run("InterceptFlags with single header", func(t *testing.T) {
 		flags := &InterceptFlags{
 			Header: []string{"single=header"},
@@ -138,14 +138,14 @@ func TestFlags_EdgeCases(t *testing.T) {
 		assert.Len(t, flags.Header, 1, "Header slice should have one element")
 		assert.Equal(t, "single=header", flags.Header[0])
 	})
-	
+
 	t.Run("ScaffoldFlags with zero port", func(t *testing.T) {
 		flags := &ScaffoldFlags{
 			Port: 0,
 		}
 		assert.Equal(t, 0, flags.Port, "Port can be zero")
 	})
-	
+
 	t.Run("ScaffoldFlags with negative port", func(t *testing.T) {
 		flags := &ScaffoldFlags{
 			Port: -1,
@@ -160,19 +160,19 @@ func TestFlags_StringRepresentation(t *testing.T) {
 			Port:      8080,
 			Namespace: "default",
 		}
-		
+
 		// Test that the struct can be used in string formatting
 		str := fmt.Sprintf("%+v", flags)
 		assert.Contains(t, str, "Port:8080", "String representation should contain Port")
 		assert.Contains(t, str, "Namespace:default", "String representation should contain Namespace")
 	})
-	
+
 	t.Run("ScaffoldFlags string format", func(t *testing.T) {
 		flags := &ScaffoldFlags{
 			Image: "test:latest",
 			Port:  9000,
 		}
-		
+
 		// Test that the struct can be used in string formatting
 		str := fmt.Sprintf("%+v", flags)
 		assert.Contains(t, str, "Image:test:latest", "String representation should contain Image")

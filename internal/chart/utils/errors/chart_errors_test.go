@@ -60,9 +60,9 @@ func TestChartError_ErrorWithCluster(t *testing.T) {
 func TestChartError_WithCluster(t *testing.T) {
 	cause := errors.New("test error")
 	chartErr := NewChartError("installation", "ArgoCD", cause)
-	
+
 	result := chartErr.WithCluster("test-cluster")
-	
+
 	assert.Equal(t, chartErr, result) // Should return same instance
 	assert.Equal(t, "test-cluster", chartErr.ClusterName)
 }
@@ -71,9 +71,9 @@ func TestChartError_WithRecovery(t *testing.T) {
 	cause := errors.New("test error")
 	chartErr := NewChartError("installation", "ArgoCD", cause)
 	retryAfter := 45 * time.Second
-	
+
 	result := chartErr.WithRecovery(retryAfter)
-	
+
 	assert.Equal(t, chartErr, result) // Should return same instance
 	assert.True(t, chartErr.Recoverable)
 	assert.Equal(t, retryAfter, chartErr.RetryAfter)
@@ -112,7 +112,7 @@ func TestInstallationError_Error(t *testing.T) {
 func TestInstallationError_GetTroubleshootingSteps(t *testing.T) {
 	cause := errors.New("installation failed")
 	instErr := NewInstallationError("ArgoCD", "helm-install", cause)
-	
+
 	steps := instErr.GetTroubleshootingSteps()
 	assert.NotEmpty(t, steps)
 	assert.Contains(t, steps[0], "kubectl cluster-info")
@@ -124,12 +124,12 @@ func TestInstallationError_WithSuggestions(t *testing.T) {
 	cause := errors.New("installation failed")
 	instErr := NewInstallationError("ArgoCD", "helm-install", cause)
 	suggestions := []string{"Check network connectivity", "Verify permissions"}
-	
+
 	result := instErr.WithSuggestions(suggestions)
-	
+
 	assert.Equal(t, instErr, result)
 	assert.Equal(t, suggestions, instErr.Suggestions)
-	
+
 	steps := instErr.GetTroubleshootingSteps()
 	assert.Contains(t, steps, "Check network connectivity")
 	assert.Contains(t, steps, "Verify permissions")
@@ -172,9 +172,9 @@ func TestConfigurationError_WithMissingKeys(t *testing.T) {
 	cause := errors.New("missing keys")
 	configErr := NewConfigurationError("values.yaml", "database", cause)
 	missingKeys := []string{"host", "port", "password"}
-	
+
 	result := configErr.WithMissingKeys(missingKeys)
-	
+
 	assert.Equal(t, configErr, result)
 	assert.Equal(t, missingKeys, configErr.GetMissingKeys())
 }

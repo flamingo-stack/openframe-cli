@@ -76,7 +76,7 @@ func (j *JqInstaller) installMacOS() error {
 	cmd := exec.Command("brew", "install", "jq")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install jq: %w", err)
 	}
@@ -102,7 +102,7 @@ func (j *JqInstaller) installLinux() error {
 
 func (j *JqInstaller) installUbuntu() error {
 	fmt.Println("Installing jq on Ubuntu/Debian...")
-	
+
 	if err := j.runCommand("sudo", "apt", "-y", "install", "jq"); err != nil {
 		return fmt.Errorf("failed to install jq: %w", err)
 	}
@@ -113,7 +113,7 @@ func (j *JqInstaller) installUbuntu() error {
 
 func (j *JqInstaller) installRedHat() error {
 	fmt.Println("Installing jq on CentOS/RHEL...")
-	
+
 	if err := j.runCommand("sudo", "yum", "-y", "install", "jq"); err != nil {
 		return fmt.Errorf("failed to install jq: %w", err)
 	}
@@ -124,7 +124,7 @@ func (j *JqInstaller) installRedHat() error {
 
 func (j *JqInstaller) installFedora() error {
 	fmt.Println("Installing jq on Fedora...")
-	
+
 	commands := [][]string{
 		{"sudo", "dnf", "install", "-y", "jq"},
 	}
@@ -141,7 +141,7 @@ func (j *JqInstaller) installFedora() error {
 
 func (j *JqInstaller) installArch() error {
 	fmt.Println("Installing jq on Arch Linux...")
-	
+
 	commands := [][]string{
 		{"sudo", "pacman", "-S", "--noconfirm", "jq"},
 	}
@@ -158,7 +158,7 @@ func (j *JqInstaller) installArch() error {
 
 func (j *JqInstaller) installLinuxDirect() error {
 	fmt.Println("Installing jq directly from GitHub releases...")
-	
+
 	// Download jq binary directly
 	arch := "amd64"
 	if runtime.GOARCH == "386" {
@@ -166,7 +166,7 @@ func (j *JqInstaller) installLinuxDirect() error {
 	} else if runtime.GOARCH == "arm64" {
 		arch = "arm64"
 	}
-	
+
 	downloadCmd := fmt.Sprintf("sudo curl -L https://github.com/stedolan/jq/releases/latest/download/jq-linux-%s -o /usr/local/bin/jq", arch)
 	if err := j.runShellCommand(downloadCmd); err != nil {
 		return fmt.Errorf("failed to download jq: %w", err)
@@ -205,7 +205,7 @@ func (j *JqInstaller) isDebianLike() bool {
 	return strings.Contains(string(output), "debian")
 }
 
-// isRhelLike checks if the system is RHEL-based using the user's method  
+// isRhelLike checks if the system is RHEL-based using the user's method
 func (j *JqInstaller) isRhelLike() bool {
 	cmd := exec.Command("grep", "ID_LIKE", "/etc/os-release")
 	output, err := cmd.Output()

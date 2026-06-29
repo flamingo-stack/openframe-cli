@@ -22,12 +22,12 @@ import (
 	"github.com/pterm/pterm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -37,11 +37,11 @@ import (
 // HelmManager handles Helm operations
 type HelmManager struct {
 	executor      executor.CommandExecutor
-	kubeConfig    *rest.Config                      // Stores the cluster connection config
-	dynamicClient dynamic.Interface                 // Dynamic client for programmatic resource management
-	kubeClient    kubernetes.Interface              // Typed client for Deployment checks
-	crdClient     apiextensionsclient.Interface     // CRD client for checking CRD existence
-	verbose       bool                              // Enable verbose logging
+	kubeConfig    *rest.Config                  // Stores the cluster connection config
+	dynamicClient dynamic.Interface             // Dynamic client for programmatic resource management
+	kubeClient    kubernetes.Interface          // Typed client for Deployment checks
+	crdClient     apiextensionsclient.Interface // CRD client for checking CRD existence
+	verbose       bool                          // Enable verbose logging
 }
 
 // NewHelmManager creates a new Helm manager with the given rest.Config
@@ -1239,7 +1239,7 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 	}
 
 	// Wait settings - increased for slow CI environments
-	maxRetries := 40           // 40 retries * 3 seconds = 120 seconds max (2 minutes)
+	maxRetries := 40 // 40 retries * 3 seconds = 120 seconds max (2 minutes)
 	retryInterval := 3 * time.Second
 	initialDelay := 5 * time.Second // Give Kubernetes time to create resources after Helm completes
 
@@ -1711,4 +1711,3 @@ func (h *HelmManager) debugWSLKubeconfig(ctx context.Context, verbose bool) {
 
 	pterm.Info.Println("=== End WSL Kubeconfig Debug ===")
 }
-

@@ -77,11 +77,11 @@ func TestServiceInfo_Structure(t *testing.T) {
 	assert.Equal(t, "default", serviceInfo.Namespace)
 	assert.Equal(t, "ClusterIP", serviceInfo.Type)
 	assert.Len(t, serviceInfo.Ports, 2)
-	
+
 	// Verify first port
 	assert.Equal(t, "http", serviceInfo.Ports[0].Name)
 	assert.Equal(t, int32(8080), serviceInfo.Ports[0].Port)
-	
+
 	// Verify second port
 	assert.Equal(t, "metrics", serviceInfo.Ports[1].Name)
 	assert.Equal(t, int32(9090), serviceInfo.Ports[1].Port)
@@ -91,12 +91,12 @@ func TestServiceInfo_Structure(t *testing.T) {
 func TestKubernetesClient_GetNamespaces(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockKubernetesClient)
-	
+
 	expectedNamespaces := []string{"default", "kube-system", "production"}
 	mockClient.On("GetNamespaces", ctx).Return(expectedNamespaces, nil)
 
 	namespaces, err := mockClient.GetNamespaces(ctx)
-	
+
 	assert.NoError(t, err)
 	assert.Equal(t, expectedNamespaces, namespaces)
 	mockClient.AssertExpectations(t)
@@ -105,11 +105,11 @@ func TestKubernetesClient_GetNamespaces(t *testing.T) {
 func TestKubernetesClient_ValidateNamespace_Success(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockKubernetesClient)
-	
+
 	mockClient.On("ValidateNamespace", ctx, "default").Return(nil)
 
 	err := mockClient.ValidateNamespace(ctx, "default")
-	
+
 	assert.NoError(t, err)
 	mockClient.AssertExpectations(t)
 }
@@ -117,11 +117,11 @@ func TestKubernetesClient_ValidateNamespace_Success(t *testing.T) {
 func TestKubernetesClient_ValidateNamespace_NotFound(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockKubernetesClient)
-	
+
 	mockClient.On("ValidateNamespace", ctx, "nonexistent").Return(assert.AnError)
 
 	err := mockClient.ValidateNamespace(ctx, "nonexistent")
-	
+
 	assert.Error(t, err)
 	mockClient.AssertExpectations(t)
 }
@@ -130,7 +130,7 @@ func TestKubernetesClient_ValidateNamespace_NotFound(t *testing.T) {
 func TestServiceClient_GetServices(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockServiceClient)
-	
+
 	expectedServices := []ServiceInfo{
 		{
 			Name:      "web-service",
@@ -149,11 +149,11 @@ func TestServiceClient_GetServices(t *testing.T) {
 			},
 		},
 	}
-	
+
 	mockClient.On("GetServices", ctx, "default").Return(expectedServices, nil)
 
 	services, err := mockClient.GetServices(ctx, "default")
-	
+
 	assert.NoError(t, err)
 	assert.Len(t, services, 2)
 	assert.Equal(t, "web-service", services[0].Name)
@@ -164,7 +164,7 @@ func TestServiceClient_GetServices(t *testing.T) {
 func TestServiceClient_GetService_Success(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockServiceClient)
-	
+
 	expectedService := &ServiceInfo{
 		Name:      "test-service",
 		Namespace: "default",
@@ -173,11 +173,11 @@ func TestServiceClient_GetService_Success(t *testing.T) {
 			{Name: "http", Port: 8080, TargetPort: "8080", Protocol: "TCP"},
 		},
 	}
-	
+
 	mockClient.On("GetService", ctx, "default", "test-service").Return(expectedService, nil)
 
 	service, err := mockClient.GetService(ctx, "default", "test-service")
-	
+
 	assert.NoError(t, err)
 	assert.NotNil(t, service)
 	assert.Equal(t, "test-service", service.Name)
@@ -189,11 +189,11 @@ func TestServiceClient_GetService_Success(t *testing.T) {
 func TestServiceClient_GetService_NotFound(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockServiceClient)
-	
+
 	mockClient.On("GetService", ctx, "default", "nonexistent-service").Return(nil, assert.AnError)
 
 	service, err := mockClient.GetService(ctx, "default", "nonexistent-service")
-	
+
 	assert.Error(t, err)
 	assert.Nil(t, service)
 	mockClient.AssertExpectations(t)
@@ -202,11 +202,11 @@ func TestServiceClient_GetService_NotFound(t *testing.T) {
 func TestServiceClient_ValidateService_Success(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockServiceClient)
-	
+
 	mockClient.On("ValidateService", ctx, "default", "test-service").Return(nil)
 
 	err := mockClient.ValidateService(ctx, "default", "test-service")
-	
+
 	assert.NoError(t, err)
 	mockClient.AssertExpectations(t)
 }
@@ -214,11 +214,11 @@ func TestServiceClient_ValidateService_Success(t *testing.T) {
 func TestServiceClient_ValidateService_NotFound(t *testing.T) {
 	ctx := context.Background()
 	mockClient := new(MockServiceClient)
-	
+
 	mockClient.On("ValidateService", ctx, "default", "nonexistent-service").Return(assert.AnError)
 
 	err := mockClient.ValidateService(ctx, "default", "nonexistent-service")
-	
+
 	assert.Error(t, err)
 	mockClient.AssertExpectations(t)
 }
@@ -241,7 +241,7 @@ func TestServiceInfo_WithMultiplePorts(t *testing.T) {
 	assert.Equal(t, "production", serviceInfo.Namespace)
 	assert.Equal(t, "LoadBalancer", serviceInfo.Type)
 	assert.Len(t, serviceInfo.Ports, 4)
-	
+
 	// Verify all ports are correctly structured
 	portNames := []string{"http", "https", "metrics", "health"}
 	for i, expectedName := range portNames {
@@ -297,7 +297,7 @@ func TestInterfaceCompliance(t *testing.T) {
 	// Verify that our mock implementations satisfy the interfaces
 	var _ KubernetesClient = (*MockKubernetesClient)(nil)
 	var _ ServiceClient = (*MockServiceClient)(nil)
-	
+
 	// This test will fail to compile if the interfaces are not properly implemented
 	assert.True(t, true, "Interface compliance verified at compile time")
 }

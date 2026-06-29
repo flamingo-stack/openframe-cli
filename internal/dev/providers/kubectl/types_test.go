@@ -31,7 +31,7 @@ func TestServiceJSON_UnmarshalJSON(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "test-service", service.Metadata.Name)
 		assert.Equal(t, "default", service.Metadata.Namespace)
@@ -69,17 +69,17 @@ func TestServiceJSON_UnmarshalJSON(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "multi-port-service", service.Metadata.Name)
 		assert.Equal(t, "NodePort", service.Spec.Type)
 		assert.Equal(t, 2, len(service.Spec.Ports))
-		
+
 		// First port
 		assert.Equal(t, "http", service.Spec.Ports[0].Name)
 		assert.Equal(t, int32(80), service.Spec.Ports[0].Port)
 		assert.Equal(t, "TCP", service.Spec.Ports[0].Protocol)
-		
+
 		// Second port
 		assert.Equal(t, "https", service.Spec.Ports[1].Name)
 		assert.Equal(t, int32(443), service.Spec.Ports[1].Port)
@@ -106,7 +106,7 @@ func TestServiceJSON_UnmarshalJSON(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "numeric-target-service", service.Metadata.Name)
 		assert.Equal(t, int32(9000), service.Spec.Ports[0].Port)
@@ -133,7 +133,7 @@ func TestServiceJSON_UnmarshalJSON(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "unnamed-port-service", service.Metadata.Name)
 		assert.Equal(t, "", service.Spec.Ports[0].Name) // Empty name
@@ -185,15 +185,15 @@ func TestServiceListJSON_UnmarshalJSON(t *testing.T) {
 
 		var serviceList serviceListJSON
 		err := json.Unmarshal([]byte(jsonInput), &serviceList)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(serviceList.Items))
-		
+
 		// First service
 		assert.Equal(t, "service-1", serviceList.Items[0].Metadata.Name)
 		assert.Equal(t, "ClusterIP", serviceList.Items[0].Spec.Type)
 		assert.Equal(t, "http", serviceList.Items[0].Spec.Ports[0].Name)
-		
+
 		// Second service
 		assert.Equal(t, "service-2", serviceList.Items[1].Metadata.Name)
 		assert.Equal(t, "NodePort", serviceList.Items[1].Spec.Type)
@@ -207,7 +207,7 @@ func TestServiceListJSON_UnmarshalJSON(t *testing.T) {
 
 		var serviceList serviceListJSON
 		err := json.Unmarshal([]byte(jsonInput), &serviceList)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(serviceList.Items))
 	})
@@ -217,7 +217,7 @@ func TestServiceListJSON_UnmarshalJSON(t *testing.T) {
 
 		var serviceList serviceListJSON
 		err := json.Unmarshal([]byte(jsonInput), &serviceList)
-		
+
 		assert.Error(t, err)
 	})
 }
@@ -252,7 +252,7 @@ func TestServiceJSON_RealWorldExamples(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "webapp", service.Metadata.Name)
 		assert.Equal(t, "production", service.Metadata.Namespace)
@@ -281,7 +281,7 @@ func TestServiceJSON_RealWorldExamples(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "postgres", service.Metadata.Name)
 		assert.Equal(t, "database", service.Metadata.Namespace)
@@ -317,7 +317,7 @@ func TestServiceJSON_RealWorldExamples(t *testing.T) {
 
 		var service serviceJSON
 		err := json.Unmarshal([]byte(jsonInput), &service)
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "headless-svc", service.Metadata.Name)
 		assert.Equal(t, 2, len(service.Spec.Ports))

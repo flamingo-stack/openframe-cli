@@ -7,7 +7,7 @@ import (
 
 func TestNewDockerInstaller(t *testing.T) {
 	installer := NewDockerInstaller()
-	
+
 	if installer == nil {
 		t.Error("Expected Docker installer to be created")
 	}
@@ -16,11 +16,11 @@ func TestNewDockerInstaller(t *testing.T) {
 func TestDockerInstaller_GetInstallHelp(t *testing.T) {
 	installer := NewDockerInstaller()
 	help := installer.GetInstallHelp()
-	
+
 	if help == "" {
 		t.Error("Install help should not be empty")
 	}
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		if !containsSubstring(help, "brew") && !containsSubstring(help, "https://") {
@@ -84,13 +84,13 @@ func TestDockerInstaller_Install(t *testing.T) {
 
 // Helper function to check if a string contains a substring
 func containsSubstring(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		   func() bool {
-			   for i := 0; i <= len(str)-len(substr); i++ {
-				   if str[i:i+len(substr)] == substr {
-					   return true
-				   }
-			   }
-			   return false
-		   }()
+	return len(str) >= len(substr) &&
+		func() bool {
+			for i := 0; i <= len(str)-len(substr); i++ {
+				if str[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}()
 }

@@ -49,10 +49,10 @@ func TestMainIntegration(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
-			
+
 			err := cmd.Run()
 			output := stdout.String() + stderr.String()
-			
+
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {

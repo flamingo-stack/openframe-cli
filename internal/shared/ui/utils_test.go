@@ -47,7 +47,7 @@ func TestFormatAge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := FormatAge(tt.createdAt)
-			
+
 			// For time-sensitive tests, we need some tolerance
 			if tt.name == "zero time" {
 				if result != tt.expected {
@@ -55,17 +55,17 @@ func TestFormatAge(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// For non-zero times, just check that we get a reasonable format
 			if len(result) == 0 {
 				t.Errorf("FormatAge() returned empty string")
 				return
 			}
-			
+
 			// Check that it ends with the expected unit
 			expectedUnit := tt.expected[len(tt.expected)-1:]
 			actualUnit := result[len(result)-1:]
-			
+
 			if actualUnit != expectedUnit {
 				t.Errorf("FormatAge() unit = %v, want %v (full result: %v)", actualUnit, expectedUnit, result)
 			}
@@ -80,7 +80,7 @@ func TestFormatAgeEdgeCases(t *testing.T) {
 	if result[len(result)-1:] != "s" {
 		t.Errorf("FormatAge() for very recent time should end with 's', got %v", result)
 	}
-	
+
 	// Test that future times don't panic (though this shouldn't happen in practice)
 	future := time.Now().Add(1 * time.Hour)
 	result = FormatAge(future)

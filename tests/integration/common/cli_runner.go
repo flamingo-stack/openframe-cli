@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	cliBinary string
+	cliBinary   string
 	projectRoot string
 )
 
@@ -29,30 +29,30 @@ func InitializeCLI() error {
 			}
 		}
 	}
-	
+
 	root := GetProjectRoot()
 	projectRoot = root
-	
+
 	// Ensure build directory exists
 	buildDir := filepath.Join(root, "build")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("failed to create build directory: %w", err)
 	}
-	
+
 	cliBinary = filepath.Join(buildDir, "openframe")
-	
+
 	buildCmd := exec.Command("go", "build", "-o", cliBinary, ".")
 	buildCmd.Dir = root
-	
+
 	if err := buildCmd.Run(); err != nil {
 		return fmt.Errorf("failed to build CLI binary: %w", err)
 	}
-	
+
 	// Verify the binary was created and is executable
 	if _, err := os.Stat(cliBinary); err != nil {
 		return fmt.Errorf("CLI binary not found after build: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -69,10 +69,10 @@ func GetProjectRoot() string {
 	if projectRoot != "" {
 		return projectRoot
 	}
-	
+
 	// Get the current working directory and find project root
 	wd, _ := os.Getwd()
-	
+
 	// Navigate up to find the directory containing go.mod
 	for {
 		goModPath := filepath.Join(wd, "go.mod")
@@ -88,7 +88,7 @@ func GetProjectRoot() string {
 		}
 		wd = parent
 	}
-	
+
 	// Fallback: if we can't find go.mod, try a more explicit approach
 	// This handles cases where tests are run from different working directories
 	wd, _ = os.Getwd()
@@ -97,7 +97,7 @@ func GetProjectRoot() string {
 		projectRoot = filepath.Clean(filepath.Join(wd, "..", "..", ".."))
 		return projectRoot
 	}
-	
+
 	projectRoot = wd
 	return wd
 }
@@ -117,22 +117,22 @@ func RunCLI(args ...string) *CLIResult {
 			Error: fmt.Errorf("CLI binary not initialized, call InitializeCLI() first"),
 		}
 	}
-	
+
 	// Check if binary exists and is executable
 	if _, err := os.Stat(cliBinary); err != nil {
 		return &CLIResult{
-			Error: fmt.Errorf("CLI binary not found at %s: %w", cliBinary, err),
+			Error:  fmt.Errorf("CLI binary not found at %s: %w", cliBinary, err),
 			Stderr: fmt.Sprintf("CLI binary not found at %s: %v", cliBinary, err),
 		}
 	}
-	
+
 	cmd := exec.Command(cliBinary, args...)
 	cmd.Env = os.Environ()
-	
+
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
@@ -147,20 +147,20 @@ func RunCLI(args ...string) *CLIResult {
 			}
 		}
 	}
-	
+
 	result := &CLIResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 		Error:    err,
 	}
-	
+
 	// Debug: If we have an empty output but no error, something is wrong
 	if result.Stdout == "" && result.Stderr == "" && result.Error == nil {
 		result.Error = fmt.Errorf("command executed but produced no output")
 		result.Stderr = "command executed but produced no output"
 	}
-	
+
 	return result
 }
 
@@ -184,7 +184,7 @@ func (r *CLIResult) ErrorMessage() string {
 	if r.Stderr == "" {
 		return ""
 	}
-	
+
 	lines := strings.Split(r.Stderr, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -192,7 +192,7 @@ func (r *CLIResult) ErrorMessage() string {
 			return line
 		}
 	}
-	
+
 	// If no "Error: " prefix found, return first non-empty line
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -200,6 +200,6 @@ func (r *CLIResult) ErrorMessage() string {
 			return line
 		}
 	}
-	
+
 	return r.Stderr
 }

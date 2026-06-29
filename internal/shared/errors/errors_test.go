@@ -141,7 +141,7 @@ func TestNewErrorHandler(t *testing.T) {
 
 func TestErrorHandler_HandleError_Nil(t *testing.T) {
 	handler := NewErrorHandler(false)
-	
+
 	// Should not panic with nil error
 	assert.NotPanics(t, func() {
 		handler.HandleError(nil)
@@ -509,7 +509,6 @@ func TestErrorHandler_NilHandling(t *testing.T) {
 		})
 	}
 }
-
 
 // Benchmark tests
 func BenchmarkValidationError_Error(b *testing.B) {

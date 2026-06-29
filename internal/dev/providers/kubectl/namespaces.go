@@ -32,22 +32,22 @@ func (p *Provider) FindResourceNamespace(ctx context.Context, serviceName string
 	if serviceName == "" {
 		return "default", nil
 	}
-	
+
 	// Search for deployments with matching name
 	if namespace := p.searchResourceByType(ctx, "deployment", serviceName); namespace != "" {
 		return namespace, nil
 	}
-	
+
 	// Search for statefulsets with matching name
 	if namespace := p.searchResourceByType(ctx, "statefulset", serviceName); namespace != "" {
 		return namespace, nil
 	}
-	
+
 	// Search for pods with matching name prefix
 	if namespace := p.searchResourceByType(ctx, "pod", serviceName); namespace != "" {
 		return namespace, nil
 	}
-	
+
 	// Default to "default" namespace if no resources found
 	return "default", nil
 }

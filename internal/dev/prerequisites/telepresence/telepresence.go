@@ -29,10 +29,10 @@ func IsTelepresenceRunning() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if root daemon is running in the output
-	return strings.Contains(string(output), `"running":true`) && 
-		   strings.Contains(string(output), `root_daemon`)
+	return strings.Contains(string(output), `"running":true`) &&
+		strings.Contains(string(output), `root_daemon`)
 }
 
 func telepresenceInstallHelp() string {
@@ -62,7 +62,7 @@ func (t *TelepresenceInstaller) GetInstallHelp() string {
 
 func (t *TelepresenceInstaller) Install() error {
 	var err error
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		err = t.installMacOS()
@@ -73,16 +73,16 @@ func (t *TelepresenceInstaller) Install() error {
 	default:
 		return fmt.Errorf("automatic Telepresence installation not supported on %s", runtime.GOOS)
 	}
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	// Initialize telepresence daemon to handle sudo requirement upfront
 	if err := t.initializeTelepresence(); err != nil {
 		return fmt.Errorf("failed to initialize telepresence: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (t *TelepresenceInstaller) installMacOS() error {
 	// Install silently without showing homebrew output
 	cmd := exec.Command("brew", "install", "telepresenceio/telepresence/telepresence-oss")
 	// Don't show stdout/stderr - let the spinner handle progress indication
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install Telepresence: %w", err)
 	}
@@ -104,7 +104,7 @@ func (t *TelepresenceInstaller) installMacOS() error {
 
 func (t *TelepresenceInstaller) installLinux() error {
 	fmt.Println("Installing Telepresence on Linux...")
-	
+
 	// Use the official installation script
 	if commandExists("curl") {
 		return t.installLinuxCurl()
@@ -173,16 +173,16 @@ func (t *TelepresenceInstaller) initializeTelepresence() error {
 	// Suppress output to avoid showing connection details
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	
+
 	// Allow this to fail - the goal is just to initialize the daemon
 	cmd.Run()
-	
+
 	// Immediately quit to clean up
 	quitCmd := exec.Command("telepresence", "quit")
 	quitCmd.Stdout = nil
 	quitCmd.Stderr = nil
 	quitCmd.Run()
-	
+
 	return nil
 }
 

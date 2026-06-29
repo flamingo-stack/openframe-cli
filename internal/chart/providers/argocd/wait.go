@@ -211,7 +211,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	repoServerRecoveryAttempts := 0
 	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
 	lastRepoServerDiagnostic := time.Time{}
-	repoServerDiagnosticInterval := 2 * time.Minute // Reduced from 3 min for faster CI recovery
+	repoServerDiagnosticInterval := 2 * time.Minute  // Reduced from 3 min for faster CI recovery
 	appsWithRepoServerIssues := make(map[string]int) // Track consecutive failures per app
 	lastRepoServerResourceCheck := time.Now()
 	repoServerResourceCheckInterval := 30 * time.Second // Reduced from 1 min for faster issue detection
@@ -718,7 +718,12 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 													var sts appsv1.StatefulSet
 													if err := json.Unmarshal([]byte(stsStatusResult.Stdout), &sts); err == nil {
 														pterm.Info.Printf("      Replicas: %d desired, %d ready, %d current\n",
-															func() int32 { if sts.Spec.Replicas != nil { return *sts.Spec.Replicas }; return 1 }(),
+															func() int32 {
+																if sts.Spec.Replicas != nil {
+																	return *sts.Spec.Replicas
+																}
+																return 1
+															}(),
 															sts.Status.ReadyReplicas, sts.Status.CurrentReplicas)
 														if len(sts.Status.Conditions) > 0 {
 															for _, cond := range sts.Status.Conditions {

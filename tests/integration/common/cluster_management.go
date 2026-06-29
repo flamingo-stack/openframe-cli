@@ -44,10 +44,10 @@ func StopTestCluster(name string) error {
 func CleanupTestCluster(name string) {
 	// Use k3d directly for faster cleanup - skip CLI overhead
 	DeleteTestCluster(name)
-	
+
 	// Wait briefly for Docker resources to be released
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Ensure any remaining Docker resources for this cluster are cleaned up
 	cleanupClusterSpecificResources(name)
 }
@@ -60,7 +60,7 @@ func CleanupAllTestClusters() {
 	if err != nil {
 		return
 	}
-	
+
 	// Parse cluster names and delete test clusters
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	deletedAny := false
@@ -70,7 +70,7 @@ func CleanupAllTestClusters() {
 			continue
 		}
 		clusterName := fields[0] // First field is cluster name
-		if clusterName != "" && (strings.Contains(clusterName, "test") || 
+		if clusterName != "" && (strings.Contains(clusterName, "test") ||
 			strings.Contains(clusterName, "cleanup") ||
 			strings.Contains(clusterName, "integration") ||
 			strings.Contains(clusterName, "collision") ||
@@ -86,12 +86,12 @@ func CleanupAllTestClusters() {
 			deletedAny = true
 		}
 	}
-	
+
 	// If we deleted any clusters, wait for Docker to settle
 	if deletedAny {
 		time.Sleep(500 * time.Millisecond)
 	}
-	
+
 	// Also clean up any leftover Docker networks and containers
 	cleanupDockerResources()
 }
@@ -103,7 +103,7 @@ func cleanupDockerResources() {
 	if output, err := cmd.Output(); err == nil {
 		networks := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, network := range networks {
-			if network != "" && (strings.Contains(network, "test") || 
+			if network != "" && (strings.Contains(network, "test") ||
 				strings.Contains(network, "collision") ||
 				strings.Contains(network, "interrupt") ||
 				strings.Contains(network, "stress") ||
@@ -113,13 +113,13 @@ func cleanupDockerResources() {
 			}
 		}
 	}
-	
+
 	// Clean up leftover k3d containers
 	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-", "--format", "{{.Names}}")
 	if output, err := cmd.Output(); err == nil {
 		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, container := range containers {
-			if container != "" && (strings.Contains(container, "test") || 
+			if container != "" && (strings.Contains(container, "test") ||
 				strings.Contains(container, "collision") ||
 				strings.Contains(container, "interrupt") ||
 				strings.Contains(container, "stress") ||
@@ -129,7 +129,7 @@ func cleanupDockerResources() {
 			}
 		}
 	}
-	
+
 	// Clean up any leftover k3d registries that might conflict
 	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-.*-registry", "--format", "{{.Names}}")
 	if output, err := cmd.Output(); err == nil {
@@ -147,7 +147,7 @@ func cleanupClusterSpecificResources(clusterName string) {
 	// Remove specific cluster network
 	networkName := fmt.Sprintf("k3d-%s", clusterName)
 	exec.Command("docker", "network", "rm", networkName).Run()
-	
+
 	// Remove specific cluster containers
 	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}")
 	if output, err := cmd.Output(); err == nil {
