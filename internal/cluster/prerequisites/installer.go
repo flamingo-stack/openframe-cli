@@ -282,7 +282,7 @@ func (i *Installer) showManualInstructions() {
 		}
 	}
 
-	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+	_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 }
 
 func (i *Installer) showDockerStartInstructions() {

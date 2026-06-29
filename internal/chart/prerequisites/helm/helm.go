@@ -246,7 +246,7 @@ sudo chmod +x /usr/local/bin/helm-wrapper.sh
 
 	// Create a batch file wrapper that calls the helper script
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
+	_ = os.MkdirAll(wrapperDir, 0755)
 
 	wrapperPath := wrapperDir + "\\helm.bat"
 
@@ -275,7 +275,7 @@ if ($currentPath -notlike "*$binDir*") {
 	pathCmd := exec.Command("powershell", "-Command", addPathScript)
 	pathCmd.Stdout = os.Stdout
 	pathCmd.Stderr = os.Stderr
-	pathCmd.Run() // Ignore errors
+	_ = pathCmd.Run() // Ignore errors
 
 	// Update PATH for current process so helm can be found immediately
 	currentPath := os.Getenv("PATH")

@@ -220,7 +220,7 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 				}
 			}
 
-			pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+			_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 			os.Exit(1)
 		}
 	}

@@ -310,7 +310,7 @@ func (k *K3dInstaller) createK3dWrapper() error {
 
 	// Create a batch file wrapper that calls k3d in WSL2
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
+	_ = os.MkdirAll(wrapperDir, 0755)
 
 	wrapperPath := wrapperDir + "\\k3d.bat"
 	wrapperContent := `@echo off
@@ -337,7 +337,7 @@ if ($currentPath -notlike "*$binDir*") {
 	cmd := exec.Command("powershell", "-Command", addPathScript)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Run() // Ignore errors
+	_ = cmd.Run() // Ignore errors
 
 	// Update PATH for current process so k3d can be found immediately
 	currentPath := os.Getenv("PATH")
