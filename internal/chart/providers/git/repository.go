@@ -31,31 +31,55 @@ func (r *Repository) CloneChartRepository(ctx context.Context, config *models.Ap
 		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 
-	// Use the repository URL directly (public repository)
-	cloneURL := config.GitHubRepo
+	// Separate any embedded credential from the URL so the token never reaches
+	// the git command line (audit I1). For private repos it is supplied via a
+	// 0600 credentials file and the `store` helper instead.
+	auth := extractGitAuth(config.GitHubRepo)
+
+	opts := executor.ExecuteOptions{Command: "git"}
+	var args []string
+	if line, ok := auth.credentialLine(); ok {
+		credFile, cleanup, cerr := writeGitCredentials(line)
+		if cerr != nil {
+			r.Cleanup(tempDir)
+			return nil, fmt.Errorf("failed to set up git credentials: %w", cerr)
+		}
+		defer cleanup()
+		// Reset inherited helpers (-c credential.helper=) then use only our
+		// file-based store helper. The token is in the file, not in argv.
+		args = append(args,
+			"-c", "credential.helper=",
+			"-c", "credential.helper=store --file="+credFile,
+		)
+		opts.Env = map[string]string{"GIT_TERMINAL_PROMPT": "0"}
+	}
 
 	// Clone with depth 1 and optimizations for speed
-	cloneArgs := []string{
+	args = append(args,
 		"clone",
 		"--depth", "1",
 		"--single-branch",
 		"--no-tags",
 		"--branch", config.GitHubBranch,
-		cloneURL,
+		auth.cleanURL,
 		tempDir,
-	}
+	)
+	opts.Args = args
 
-	result, err := r.executor.Execute(ctx, "git", cloneArgs...)
+	result, err := r.executor.ExecuteWithOptions(ctx, opts)
 	if err != nil {
 		r.Cleanup(tempDir)
+		// Mask the token in any surfaced output as defense-in-depth.
+		errMsg := maskToken(err.Error(), auth.token)
 		// Check for branch not found error
 		if result != nil && result.Stderr != "" {
-			if strings.Contains(result.Stderr, "Remote branch") && strings.Contains(result.Stderr, "not found") {
+			stderr := maskToken(result.Stderr, auth.token)
+			if strings.Contains(stderr, "Remote branch") && strings.Contains(stderr, "not found") {
 				return nil, fmt.Errorf("branch '%s' does not exist in repository. Please check if the branch name is correct or use 'main' branch", config.GitHubBranch)
 			}
-			return nil, fmt.Errorf("failed to clone repository: %w\nGit output: %s", err, result.Stderr)
+			return nil, fmt.Errorf("failed to clone repository: %s\nGit output: %s", errMsg, stderr)
 		}
-		return nil, fmt.Errorf("failed to clone repository: %w", err)
+		return nil, fmt.Errorf("failed to clone repository: %s", errMsg)
 	}
 
 	// Build the path to the chart within the cloned repository

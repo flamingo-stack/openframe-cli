@@ -22,6 +22,7 @@ type Service struct {
 	currentNamespace  string
 	originalNamespace string
 	signalChannel     chan os.Signal
+	cleanupDone       chan struct{}
 	isIntercepting    bool
 }
 
@@ -38,6 +39,7 @@ func NewService(exec executor.CommandExecutor, verbose bool) *Service {
 		executor:       exec,
 		verbose:        verbose,
 		signalChannel:  make(chan os.Signal, 1),
+		cleanupDone:    make(chan struct{}),
 		isIntercepting: false,
 	}
 }
@@ -170,14 +172,14 @@ func (s *Service) showInterceptInstructions(serviceName string, flags *models.In
 	pterm.Success.Printf("Intercepting %s. Press Ctrl+C to stop...\n", serviceName)
 }
 
-// waitForInterrupt keeps the process alive until interrupted
+// waitForInterrupt keeps the process alive until the signal handler has run
+// cleanup. It waits on cleanupDone (NOT the raw signal channel) so that the
+// signal is delivered to exactly one consumer — the previous design had both
+// this function and the handler goroutine racing to read s.signalChannel, so a
+// lost race meant cleanup never ran and the intercept leaked.
 func (s *Service) waitForInterrupt() error {
-	// Wait for signal to be received
-	select {
-	case <-s.signalChannel:
-		// Signal received, cleanup will be handled by the signal handler
-		return nil
-	}
+	<-s.cleanupDone
+	return nil
 }
 
 // StopIntercept manually stops an intercept (alternative to Ctrl+C)

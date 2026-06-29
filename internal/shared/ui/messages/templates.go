@@ -3,7 +3,7 @@ package messages
 // NOTE: This package uses a template system where formatting arguments are passed to
 // Show* methods which then format them through FormatMessage(). The go vet tool
 // doesn't understand this indirection and reports "no formatting directives" warnings.
-// These warnings are false positives - the formatting is handled correctly by the 
+// These warnings are false positives - the formatting is handled correctly by the
 // template system. The functionality works as intended.
 
 import (
@@ -48,62 +48,76 @@ func NewTemplates() *Templates {
 				"next_steps":         "🚀 Next Steps:",
 			},
 			SuccessMessage: {
-				"operation_complete": "✅ %s completed successfully!",
-				"installation_complete": "✅ %s installation completed successfully!",
-				"step_complete":      "✅ %s completed (%s)",
-				"credentials_provided": "✅ Credentials provided",
-				"validation_passed":  "✅ %s validation passed",
+				"operation_complete":     "✅ %s completed successfully!",
+				"installation_complete":  "✅ %s installation completed successfully!",
+				"step_complete":          "✅ %s completed (%s)",
+				"credentials_provided":   "✅ Credentials provided",
+				"validation_passed":      "✅ %s validation passed",
 				"connection_established": "✅ Connection to %s established",
 			},
 			WarningMessage: {
 				"operation_cancelled": "No %s selected. %s cancelled.",
-				"step_skipped":       "⏭️  %s skipped: %s",
-				"partial_success":    "⚠️  %s completed with warnings",
-				"deprecated_feature": "⚠️  %s is deprecated, consider using %s instead",
+				"step_skipped":        "⏭️  %s skipped: %s",
+				"partial_success":     "⚠️  %s completed with warnings",
+				"deprecated_feature":  "⚠️  %s is deprecated, consider using %s instead",
 			},
 			ErrorMessage: {
-				"operation_failed":   "❌ %s failed: %v",
-				"step_failed":        "❌ %s failed: %v (%s)",
+				"operation_failed":    "❌ %s failed: %v",
+				"step_failed":         "❌ %s failed: %v (%s)",
 				"installation_failed": "❌ %s installation failed: %v",
-				"validation_failed":  "❌ %s validation failed: %v",
-				"connection_failed":  "❌ Failed to connect to %s: %v",
-				"not_found":          "❌ %s '%s' not found",
-				"invalid_input":      "❌ Invalid %s: %s",
-				"permission_denied":  "❌ Permission denied for %s: %v",
-				"timeout":            "❌ %s timed out after %s",
+				"validation_failed":   "❌ %s validation failed: %v",
+				"connection_failed":   "❌ Failed to connect to %s: %v",
+				"not_found":           "❌ %s '%s' not found",
+				"invalid_input":       "❌ Invalid %s: %s",
+				"permission_denied":   "❌ Permission denied for %s: %v",
+				"timeout":             "❌ %s timed out after %s",
 			},
 			ProgressMessage: {
-				"bootstrapping":      "⏳ Waiting %s for %s to bootstrap...",
-				"health_check":       "⏳ Waiting for %s to be healthy and ready...",
-				"sync_check":         "⏳ Waiting for %s to sync...",
-				"resource_ready":     "⏳ Waiting for %s resources to be ready...",
+				"bootstrapping":  "⏳ Waiting %s for %s to bootstrap...",
+				"health_check":   "⏳ Waiting for %s to be healthy and ready...",
+				"sync_check":     "⏳ Waiting for %s to sync...",
+				"resource_ready": "⏳ Waiting for %s resources to be ready...",
 			},
 			CompletionMessage: {
-				"troubleshooting":    "🔧 Troubleshooting steps:",
-				"summary":            "📊 %s Summary:",
-				"duration":           "Total Duration: %s",
-				"statistics":         "Steps: %d completed, %d failed, %d skipped, %d total",
+				"troubleshooting": "🔧 Troubleshooting steps:",
+				"summary":         "📊 %s Summary:",
+				"duration":        "Total Duration: %s",
+				"statistics":      "Steps: %d completed, %d failed, %d skipped, %d total",
 			},
 		},
 	}
 }
 
-// FormatMessage formats a message using the specified template
+// FormatMessage formats a message using the specified template.
+//
+// NOTE: the second parameter is a template *key* (looked up in t.templates),
+// not a printf format string. The fallback below deliberately does NOT pass
+// `template` as a format string to fmt.Sprintf — doing so makes `go vet`'s
+// printf analyzer infer this function (and every Show*/render* wrapper that
+// forwards to it) as a printf wrapper, producing false-positive
+// "no formatting directives" warnings at all call sites. Keeping the dynamic
+// format string in the `format` local (the map value) confines printf
+// inference to that single, legitimate Sprintf call.
 func (t *Templates) FormatMessage(msgType MessageType, template string, args ...interface{}) string {
 	if templates, exists := t.templates[msgType]; exists {
 		if format, exists := templates[template]; exists {
 			return fmt.Sprintf(format, args...)
 		}
 	}
-	// Fallback to basic formatting
-	return fmt.Sprintf(template, args...)
+	// Fallback: template key not found. Render the key followed by any args
+	// without using the key itself as a format string.
+	if len(args) == 0 {
+		return template
+	}
+	return strings.TrimRight(template+": "+fmt.Sprintln(args...), "\n")
 }
 
 // renderMessage is a generic message renderer that bypasses go vet checks
+//
 //nolint:govet
 func (t *Templates) renderMessage(msgType MessageType, template string, args ...interface{}) {
 	message := t.FormatMessage(msgType, template, args...)
-	
+
 	switch msgType {
 	case InfoMessage:
 		pterm.Info.Println(message)
@@ -199,7 +213,7 @@ func (t *Templates) ShowStepFailed(stepName string, err error, duration time.Dur
 func (t *Templates) ShowInstallationComplete(component string, nextSteps []string) {
 	t.renderMessage(SuccessMessage, "installation_complete", component) //nolint:govet
 	fmt.Println()
-	
+
 	if len(nextSteps) > 0 {
 		t.renderInfo("next_steps")
 		for i, step := range nextSteps {
@@ -281,7 +295,7 @@ func (ct *CustomTemplates) FormatMessage(msgType MessageType, template string, a
 			return fmt.Sprintf(format, args...)
 		}
 	}
-	
+
 	// Fall back to standard templates
 	return ct.Templates.FormatMessage(msgType, template, args...)
 }

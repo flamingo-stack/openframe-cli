@@ -318,14 +318,33 @@ func (s *ClusterService) cleanupHelmReleases(ctx context.Context, verbose bool, 
 	return nil
 }
 
-// cleanupKubernetesResources removes resources from common namespaces
+// protectedNamespaces must never be deleted by cleanup, regardless of --force.
+// Deleting any of these can render the cluster unrecoverable or destroy
+// unrelated workloads (audit I7/M3).
+var protectedNamespaces = map[string]struct{}{
+	"kube-system":     {},
+	"kube-public":     {},
+	"kube-node-lease": {},
+	"default":         {},
+}
+
+// isProtectedNamespace reports whether ns must never be deleted.
+func isProtectedNamespace(ns string) bool {
+	_, ok := protectedNamespaces[ns]
+	return ok
+}
+
+// cleanupKubernetesResources removes resources from namespaces created by
+// OpenFrame components. It never touches protected/system namespaces.
 func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, verbose bool, force bool) error {
-	// List of namespaces commonly used by installed components
-	namespaces := []string{"argocd", "openframe", "kube-system"}
+	// Namespaces created by OpenFrame component installs. System namespaces are
+	// intentionally absent and are additionally guarded below.
+	namespaces := []string{"argocd", "openframe"}
 
 	for _, namespace := range namespaces {
-		// Skip kube-system for safety unless force is enabled
-		if namespace == "kube-system" && !force {
+		// Defense-in-depth: never delete a protected namespace, even if one is
+		// added to the list above by mistake or via --force.
+		if isProtectedNamespace(namespace) {
 			continue
 		}
 

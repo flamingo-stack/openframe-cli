@@ -10,16 +10,24 @@ import (
 	"github.com/pterm/pterm"
 )
 
-// setupCleanupHandler sets up signal handling for graceful cleanup
+// setupCleanupHandler sets up signal handling for graceful cleanup.
+//
+// The handler goroutine is the sole consumer of the signal: it runs cleanup
+// and then closes cleanupDone, which is what waitForInterrupt blocks on. This
+// avoids the previous race where waitForInterrupt and this goroutine both read
+// the signal channel. It also stops signal delivery after the first signal so a
+// second Ctrl-C falls through to the default (force-quit) behavior.
 func (s *Service) setupCleanupHandler(serviceName string) {
 	signal.Notify(s.signalChannel, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-s.signalChannel
+		signal.Stop(s.signalChannel)
 		if s.verbose {
 			pterm.Info.Println("Received interrupt signal, cleaning up...")
 		}
 		s.cleanup()
+		close(s.cleanupDone)
 	}()
 }
 
@@ -31,7 +39,7 @@ func (s *Service) cleanup() {
 
 	// Show immediate response to Ctrl+C
 	pterm.Info.Println("Stopping intercept...")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -63,5 +71,8 @@ func (s *Service) cleanup() {
 	}
 
 	pterm.Success.Println("Intercept stopped")
-	os.Exit(0)
+	// NOTE: do NOT os.Exit here. This runs inside a library/signal-handler
+	// goroutine; exiting would skip deferred cleanup elsewhere in the process.
+	// Control returns to waitForInterrupt (via cleanupDone) and unwinds normally
+	// so main() decides the exit code.
 }

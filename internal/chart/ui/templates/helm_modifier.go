@@ -257,8 +257,10 @@ func (h *HelmValuesModifier) WriteValues(values map[string]interface{}, helmValu
 		return fmt.Errorf("failed to marshal updated helm values: %w", err)
 	}
 
-	// Write updated values back to file
-	if err := os.WriteFile(helmValuesPath, updatedData, 0644); err != nil {
+	// Write updated values back to file with owner-only permissions (0600):
+	// the values may contain secrets (SaaS repository PAT, docker registry
+	// password), so the file must not be world-readable (audit I2).
+	if err := os.WriteFile(helmValuesPath, updatedData, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated helm values file: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -22,10 +23,10 @@ const (
 
 // WSLError represents an error specific to WSL operations
 type WSLError struct {
-	Operation   string
-	ExitCode    int
-	Stderr      string
-	Suggestion  string
+	Operation  string
+	ExitCode   int
+	Stderr     string
+	Suggestion string
 }
 
 func (e *WSLError) Error() string {
@@ -329,18 +330,18 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 	// Create the command with wrapped command/args
 	cmd := exec.CommandContext(ctx, command, args...)
-	
+
 	// Set working directory if specified
 	if options.Dir != "" {
 		cmd.Dir = options.Dir
 	}
-	
+
 	// Set environment variables if specified
 	if len(options.Env) > 0 {
 		// Start with current environment and add custom variables
 		cmd.Env = append(os.Environ(), e.buildEnvStrings(options.Env)...)
 	}
-	
+
 	// Apply timeout if specified
 	if options.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -357,13 +358,12 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			cmd.Env = append(os.Environ(), e.buildEnvStrings(options.Env)...)
 		}
 	}
-	
-	
+
 	// Execute the command
 	stdout, err := cmd.Output()
 	result.Duration = time.Since(start)
 	result.Stdout = string(stdout)
-	
+
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			result.ExitCode = exitError.ExitCode()
@@ -413,9 +413,9 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 		return result, fmt.Errorf("command failed: %s (exit code: %d): %w", fullCommand, result.ExitCode, err)
 	}
-	
+
 	result.ExitCode = 0
-	
+
 	// Log success in verbose mode
 	if e.verbose {
 		fmt.Printf("Command completed successfully: %s (took %v)\n", fullCommand, result.Duration)
@@ -433,35 +433,96 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 	return envStrings
 }
 
-// shellEscape escapes an argument for safe use when passing to WSL
-// WSL passes arguments directly to the target command, so we only need to handle
-// characters that could confuse the WSL argument parser itself (spaces, quotes, backslashes)
-// We should NOT escape characters like {}, $, etc. that are part of command syntax (e.g., jsonpath)
-func shellEscape(arg string) string {
-	// Only escape if the argument contains spaces, quotes, or backslashes
-	// These are the characters that WSL argument parsing cares about
-	needsEscape := false
-	for _, ch := range arg {
-		if ch == ' ' || ch == '"' || ch == '\'' || ch == '\\' {
-			needsEscape = true
-			break
-		}
-	}
+// wslUserPattern allows only safe POSIX-ish usernames. Anything else falls back
+// to the default, so a hostile WSL_USER value cannot influence command construction.
+var wslUserPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]*$`)
 
-	if !needsEscape {
-		return arg
+// sanitizeWSLUser returns a safe WSL username, defaulting to "runner".
+func sanitizeWSLUser(user string) string {
+	if user == "" || !wslUserPattern.MatchString(user) {
+		return "runner"
 	}
-
-	// For arguments with spaces or quotes, wrap in double quotes
-	// and escape internal double quotes and backslashes
-	escaped := strings.ReplaceAll(arg, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-	return "\"" + escaped + "\""
+	return user
 }
 
-// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2
-// This avoids issues with batch file wrappers not preserving special characters
-// and ensures all Kubernetes tools run in the same environment
+// filterFlag removes "--flag value" and "--flag=value" occurrences from args.
+func filterFlag(args []string, flag string) []string {
+	out := make([]string, 0, len(args))
+	skip := false
+	for _, a := range args {
+		if skip {
+			skip = false
+			continue
+		}
+		if a == flag {
+			skip = true
+			continue
+		}
+		if strings.HasPrefix(a, flag+"=") {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// The WSL wrapper scripts below are CONSTANT: no argument is ever interpolated
+// into them. The target tool and its arguments are passed as positional
+// parameters after the script (… bash -c <script> bash <HOME> <tool> <args…>)
+// and reach the program via "$@"/exec, so the shell never re-parses them.
+//
+// This is the structural fix for the previous design, which concatenated
+// (incompletely escaped) arguments into the script string and allowed command
+// injection via $(...) / ; / | embedded in arguments. $1 carries HOME (also a
+// positional, so even an exotic home path is inert).
+const helmWSLScript = `set -e
+export HOME="$1"; shift
+mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data
+export HELM_CACHE_HOME=/tmp/helm/cache
+export HELM_CONFIG_HOME=/tmp/helm/config
+export HELM_DATA_HOME=/tmp/helm/data
+if [ -f "$HOME/.kube/config" ]; then cp "$HOME/.kube/config" "$HOME/.kube/config.openframe.bak" 2>/dev/null || true; sed "s|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g" "$HOME/.kube/config" > "$HOME/.kube/config.openframe.tmp" 2>/dev/null && mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config" || true; fi
+"$@" 2>&1`
+
+const kubectlWSLScript = `set -e
+export HOME="$1"; shift
+if [ -f "$HOME/.kube/config" ]; then cp "$HOME/.kube/config" "$HOME/.kube/config.openframe.bak" 2>/dev/null || true; sed "s|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g" "$HOME/.kube/config" > "$HOME/.kube/config.openframe.tmp" 2>/dev/null && mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config" || true; fi
+exec "$@"`
+
+// buildWSLCommand wraps kubectl, helm, and k3d so they run inside WSL2 Ubuntu.
+// It is a pure function (no OS calls) so it can be unit-tested on any platform.
+//
+// Tool arguments are ALWAYS passed as discrete argv elements — never spliced
+// into a shell string — so values containing shell metacharacters are inert.
+func buildWSLCommand(command string, args []string, wslUser string) (string, []string) {
+	user := sanitizeWSLUser(wslUser)
+	home := "/home/" + user
+	base := []string{"-d", "Ubuntu", "-u", user}
+
+	switch command {
+	case "k3d":
+		// k3d needs Docker access; run via sudo -E (preserves env like KUBECONFIG).
+		out := append([]string{}, base...)
+		out = append(out, "sudo", "-E", "k3d")
+		return "wsl", append(out, args...)
+	case "helm":
+		filtered := filterFlag(args, "--kube-context")
+		out := append([]string{}, base...)
+		out = append(out, "bash", "-c", helmWSLScript, "bash", home, "helm")
+		return "wsl", append(out, filtered...)
+	case "kubectl":
+		filtered := filterFlag(args, "--context")
+		out := append([]string{}, base...)
+		out = append(out, "bash", "-c", kubectlWSLScript, "bash", home, "kubectl")
+		return "wsl", append(out, filtered...)
+	default:
+		return command, args
+	}
+}
+
+// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2.
+// On non-Windows platforms it is a no-op. The actual command construction lives in
+// buildWSLCommand (a pure, testable seam).
 func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
 	// Only wrap on Windows
 	if runtime.GOOS != "windows" {
@@ -473,126 +534,5 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		return command, args
 	}
 
-	// Determine WSL user - try to detect from environment or use default
-	wslUser := os.Getenv("WSL_USER")
-	if wslUser == "" {
-		// Default to "runner" for CI environments, but could be configured
-		wslUser = "runner"
-	}
-
-	// Escape arguments that contain special characters for shell interpretation
-	escapedArgs := make([]string, len(args))
-	for i, arg := range args {
-		escapedArgs[i] = shellEscape(arg)
-	}
-
-	// For k3d, we need Docker access which requires elevated permissions
-	// Use 'sudo -E' to run k3d with necessary permissions while preserving environment
-	// The -E flag preserves environment variables like KUBECONFIG
-	if command == "k3d" {
-		// Build command with sudo -E prefix
-		newArgs := make([]string, 0, len(escapedArgs)+6)
-		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "sudo", "-E", command)
-		newArgs = append(newArgs, escapedArgs...)
-		return "wsl", newArgs
-	}
-
-	// For helm, run directly via WSL with environment variables set
-	// This is more reliable than using a wrapper script, as passing arguments through
-	// 'bash /script.sh arg1 arg2' can fail in some WSL/CI environments
-	// We use bash -c to first create the helm directories, then run helm with proper env vars
-	//
-	// NOTE: Docker runs INSIDE WSL2 Ubuntu (not Docker Desktop), so k3d is accessible
-	// via 127.0.0.1 from within WSL. We only need to rewrite 0.0.0.0 to 127.0.0.1.
-	if command == "helm" {
-		// Filter out --kube-context arguments on Windows/WSL
-		// The kubeconfig's current context is already set correctly by k3d, and the
-		// sed rewrite ensures the server address is correct. Using --kube-context
-		// forces helm to look up the context's server address, which may not match
-		// the rewritten address if the context was stored before the rewrite.
-		// By removing --kube-context, helm uses the current context which works reliably.
-		filteredArgs := make([]string, 0, len(escapedArgs))
-		skipNext := false
-		for _, arg := range escapedArgs {
-			if skipNext {
-				skipNext = false
-				continue
-			}
-			if arg == "--kube-context" {
-				skipNext = true // Skip the next argument (the context name)
-				continue
-			}
-			// Also handle --kube-context=value format
-			if strings.HasPrefix(arg, "--kube-context=") {
-				continue
-			}
-			filteredArgs = append(filteredArgs, arg)
-		}
-
-		// Build the helm command with filtered arguments
-		helmCmd := "helm"
-		for _, arg := range filteredArgs {
-			helmCmd += " " + arg
-		}
-
-		// Create directories and run helm in a single bash command
-		// This ensures directories exist before helm tries to use them
-		// We use 2>&1 to redirect stderr to stdout so error messages are captured
-		// through the WSL/bash chain (otherwise stderr from helm gets lost)
-		//
-		// The kubeconfig may have 0.0.0.0 as the server address, which doesn't work.
-		// Rewrite it to 127.0.0.1 since Docker runs inside WSL2 Ubuntu.
-		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
-			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
-			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
-			"export HELM_DATA_HOME=/tmp/helm/data && " +
-			"export HOME=/home/" + wslUser + " && " +
-			// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
-			"if [ -f ~/.kube/config ]; then " +
-			"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
-			"fi && " +
-			helmCmd + " 2>&1"
-
-		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
-		return "wsl", newArgs
-	}
-
-	// For kubectl, run via bash with proper HOME set
-	// Docker runs INSIDE WSL2 Ubuntu, so k3d is accessible via 127.0.0.1
-	// We only need to rewrite 0.0.0.0 to 127.0.0.1 (not to the gateway IP)
-	//
-	// Filter out --context arguments on Windows/WSL for the same reason as helm:
-	// the current context is already correct, and explicit context lookup may use stale server addresses.
-	filteredKubectlArgs := make([]string, 0, len(escapedArgs))
-	skipNextKubectl := false
-	for _, arg := range escapedArgs {
-		if skipNextKubectl {
-			skipNextKubectl = false
-			continue
-		}
-		if arg == "--context" {
-			skipNextKubectl = true // Skip the next argument (the context name)
-			continue
-		}
-		// Also handle --context=value format
-		if strings.HasPrefix(arg, "--context=") {
-			continue
-		}
-		filteredKubectlArgs = append(filteredKubectlArgs, arg)
-	}
-
-	kubectlCmd := "kubectl"
-	for _, arg := range filteredKubectlArgs {
-		kubectlCmd += " " + arg
-	}
-
-	bashScript := "export HOME=/home/" + wslUser + " && " +
-		// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
-		"if [ -f ~/.kube/config ]; then " +
-		"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
-		"fi && " +
-		kubectlCmd
-
-	newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
-	return "wsl", newArgs
+	return buildWSLCommand(command, args, os.Getenv("WSL_USER"))
 }
