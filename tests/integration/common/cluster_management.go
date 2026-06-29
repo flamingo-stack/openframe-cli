@@ -43,7 +43,7 @@ func StopTestCluster(name string) error {
 // CleanupTestCluster ensures a test cluster is cleaned up (optimized)
 func CleanupTestCluster(name string) {
 	// Use k3d directly for faster cleanup - skip CLI overhead
-	DeleteTestCluster(name)
+	_ = DeleteTestCluster(name)
 
 	// Wait briefly for Docker resources to be released
 	time.Sleep(200 * time.Millisecond)
@@ -109,7 +109,7 @@ func cleanupDockerResources() {
 				strings.Contains(network, "stress") ||
 				strings.Contains(network, "multi") ||
 				strings.Contains(network, "integration")) {
-				exec.Command("docker", "network", "rm", network).Run()
+				_ = exec.Command("docker", "network", "rm", network).Run()
 			}
 		}
 	}
@@ -125,7 +125,7 @@ func cleanupDockerResources() {
 				strings.Contains(container, "stress") ||
 				strings.Contains(container, "multi") ||
 				strings.Contains(container, "integration")) {
-				exec.Command("docker", "rm", "-f", container).Run()
+				_ = exec.Command("docker", "rm", "-f", container).Run()
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func cleanupDockerResources() {
 		registries := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, registry := range registries {
 			if registry != "" {
-				exec.Command("docker", "rm", "-f", registry).Run()
+				_ = exec.Command("docker", "rm", "-f", registry).Run()
 			}
 		}
 	}
@@ -146,7 +146,7 @@ func cleanupDockerResources() {
 func cleanupClusterSpecificResources(clusterName string) {
 	// Remove specific cluster network
 	networkName := fmt.Sprintf("k3d-%s", clusterName)
-	exec.Command("docker", "network", "rm", networkName).Run()
+	_ = exec.Command("docker", "network", "rm", networkName).Run()
 
 	// Remove specific cluster containers
 	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}")
@@ -154,7 +154,7 @@ func cleanupClusterSpecificResources(clusterName string) {
 		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, container := range containers {
 			if container != "" {
-				exec.Command("docker", "rm", "-f", container).Run()
+				_ = exec.Command("docker", "rm", "-f", container).Run()
 			}
 		}
 	}

@@ -242,8 +242,12 @@ func (s *Service) ensureCorrectNamespace(ctx context.Context, targetNamespace st
 			pterm.Info.Printf("Switching Telepresence from %s to %s\n", currentNamespace, targetNamespace)
 		}
 
-		// Quit and reconnect to new namespace (like bash script)
-		s.executor.Execute(timeoutCtx, "telepresence", "quit")
+		// Quit and reconnect to new namespace (like bash script). A quit failure
+		// is non-fatal here (the reconnect below is checked and will surface a
+		// real problem), but log it under verbose for diagnosis.
+		if _, qerr := s.executor.Execute(timeoutCtx, "telepresence", "quit"); qerr != nil && s.verbose {
+			pterm.Warning.Printf("telepresence quit before namespace switch failed: %v\n", qerr)
+		}
 
 		_, err = s.executor.Execute(timeoutCtx, "telepresence", "connect", "--namespace", targetNamespace)
 		if err != nil {

@@ -89,8 +89,8 @@ func (p *Provider) InstallChartsWithContext(ctx context.Context, clusterName, he
 		go func() {
 			time.Sleep(100 * time.Millisecond)
 			// Send a targeted signal to interrupt ongoing kubectl/helm operations
-			exec.Command("pkill", "-f", "kubectl.*applications").Run()
-			exec.Command("pkill", "-f", "helm.*install").Run()
+			_ = exec.Command("pkill", "-f", "kubectl.*applications").Run()
+			_ = exec.Command("pkill", "-f", "helm.*install").Run()
 		}()
 
 		return nil // Return success to allow skaffold to proceed
