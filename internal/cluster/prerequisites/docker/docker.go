@@ -337,7 +337,7 @@ func (d *DockerInstaller) ensureWSL2() error {
 
 	// Set WSL2 as default version
 	cmd = exec.Command("wsl", "--set-default-version", "2")
-	cmd.Run() // Ignore errors, might already be set
+	_ = cmd.Run() // Ignore errors, might already be set
 
 	return nil
 }
@@ -517,7 +517,7 @@ func (d *DockerInstaller) createDockerWrapper() error {
 
 	// Create a batch file wrapper that calls docker in WSL2
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
+	_ = os.MkdirAll(wrapperDir, 0755) // failure is surfaced by the wrapper WriteFile below
 
 	wrapperPath := wrapperDir + "\\docker.bat"
 	wrapperContent := `@echo off
@@ -544,7 +544,7 @@ if ($currentPath -notlike "*$binDir*") {
 	cmd := exec.Command("powershell", "-Command", addPathScript)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Run() // Ignore errors
+	_ = cmd.Run() // Ignore errors
 
 	fmt.Printf("✓ Docker wrapper created at: %s\n", wrapperPath)
 	fmt.Println("Note: You may need to restart your terminal for PATH changes to take effect")
