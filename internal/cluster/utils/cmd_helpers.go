@@ -1,6 +1,7 @@
 package utils
 
 import (
+	stderrors "errors"
 	"strings"
 	"sync"
 
@@ -63,7 +64,8 @@ func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) 
 		err := runFunc(cmd, args)
 		if err != nil {
 			// Check if error has already been handled by global error handler
-			if alreadyHandledErr, isAlreadyHandled := err.(*errors.AlreadyHandledError); isAlreadyHandled {
+			var alreadyHandledErr *errors.AlreadyHandledError
+			if stderrors.As(err, &alreadyHandledErr) {
 				// Error has already been displayed by HandleGlobalError
 				// Return the original error so test framework can detect failure
 				return alreadyHandledErr.OriginalError

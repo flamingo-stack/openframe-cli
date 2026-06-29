@@ -67,13 +67,16 @@ func (eh *ErrorHandler) HandleError(err error) {
 		return
 	}
 
-	switch e := err.(type) {
-	case *ValidationError:
-		eh.handleValidationError(e)
-	case *CommandError:
-		eh.handleCommandError(e)
-	case *BranchNotFoundError:
-		eh.handleBranchNotFoundError(e)
+	var validationErr *ValidationError
+	var commandErr *CommandError
+	var branchErr *BranchNotFoundError
+	switch {
+	case stderrors.As(err, &validationErr):
+		eh.handleValidationError(validationErr)
+	case stderrors.As(err, &commandErr):
+		eh.handleCommandError(commandErr)
+	case stderrors.As(err, &branchErr):
+		eh.handleBranchNotFoundError(branchErr)
 	default:
 		eh.handleGenericError(err)
 	}

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -648,7 +649,8 @@ func (w *InstallationWorkflow) performInstallation(ctx context.Context, config c
 	err := installer.InstallChartsWithContext(ctx, config)
 	if err != nil {
 		// Check if this is a branch not found error
-		if _, ok := err.(*sharedErrors.BranchNotFoundError); ok {
+		var bnfErr *sharedErrors.BranchNotFoundError
+		if stderrors.As(err, &bnfErr) {
 			return err // Return as-is, don't wrap
 		}
 		return errors.WrapAsChartError("installation", "chart", err).WithCluster(config.ClusterName)

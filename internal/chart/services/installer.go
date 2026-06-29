@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	stderrors "errors"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
@@ -31,7 +32,8 @@ func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.
 	if config.HasAppOfApps() {
 		if err := i.appOfAppsService.Install(ctx, config); err != nil {
 			// Check if this is a branch not found error
-			if _, ok := err.(*sharedErrors.BranchNotFoundError); ok {
+			var bnfErr *sharedErrors.BranchNotFoundError
+			if stderrors.As(err, &bnfErr) {
 				return err // Return as-is, don't wrap
 			}
 			return errors.WrapAsChartError("installation", "app-of-apps", err).WithCluster(config.ClusterName)

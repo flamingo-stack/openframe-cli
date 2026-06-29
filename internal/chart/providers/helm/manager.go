@@ -3,6 +3,7 @@ package helm
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -842,7 +843,8 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	// Log WSL errors for debugging
 	if err != nil {
 		// Check if this is a WSL-specific error
-		if wslErr, ok := err.(*executor.WSLError); ok {
+		var wslErr *executor.WSLError
+		if stderrors.As(err, &wslErr) {
 			if h.verbose {
 				pterm.Warning.Printf("WSL error during path conversion: %s\n", wslErr.Error())
 				pterm.Info.Printf("Falling back to manual path conversion\n")
