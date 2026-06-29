@@ -205,7 +205,7 @@ func (e *ConfigurationError) WithMissingKeys(keys []string) *ConfigurationError 
 func IsTimeout(err error) bool {
 	var chartErr *ChartError
 	if stderrors.As(err, &chartErr) {
-		return chartErr.Cause == ErrNetworkTimeout
+		return stderrors.Is(chartErr.Cause, ErrNetworkTimeout)
 	}
 	return false
 }

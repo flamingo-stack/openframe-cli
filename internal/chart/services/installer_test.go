@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -221,7 +222,8 @@ func TestInstaller_InstallCharts_RecoverableError(t *testing.T) {
 	// Check that error is NOT recoverable (WaitForApplications failures should not trigger reinstallation)
 	// ArgoCD and app-of-apps are already installed, so retrying would reinstall them unnecessarily.
 	// WaitForApplications has its own internal retry logic.
-	chartErr, ok := err.(*errors.ChartError)
+	var chartErr *errors.ChartError
+	ok := stderrors.As(err, &chartErr)
 	assert.True(t, ok, "Expected ChartError")
 	assert.False(t, chartErr.IsRecoverable(), "Expected non-recoverable error - waiting failures should not trigger reinstallation")
 }
@@ -269,7 +271,8 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 				ClusterName: "test-cluster",
 			},
 			checkError: func(t *testing.T, err error) {
-				chartErr, ok := err.(*errors.ChartError)
+				var chartErr *errors.ChartError
+				ok := stderrors.As(err, &chartErr)
 				assert.True(t, ok)
 				assert.Equal(t, "ArgoCD", chartErr.Component)
 				assert.Equal(t, "installation", chartErr.Operation)
@@ -290,7 +293,8 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 				},
 			},
 			checkError: func(t *testing.T, err error) {
-				chartErr, ok := err.(*errors.ChartError)
+				var chartErr *errors.ChartError
+				ok := stderrors.As(err, &chartErr)
 				assert.True(t, ok)
 				assert.Equal(t, "app-of-apps", chartErr.Component)
 				assert.Equal(t, "installation", chartErr.Operation)
@@ -315,7 +319,8 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 				// WaitForApplications failures should NOT trigger reinstallation
 				// ArgoCD and app-of-apps are already installed, and WaitForApplications
 				// has its own internal retry logic.
-				chartErr, ok := err.(*errors.ChartError)
+				var chartErr *errors.ChartError
+				ok := stderrors.As(err, &chartErr)
 				assert.True(t, ok)
 				assert.Equal(t, "ArgoCD applications", chartErr.Component)
 				assert.Equal(t, "waiting", chartErr.Operation)
