@@ -3,7 +3,6 @@ package chart
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,7 +157,7 @@ func (p *Provider) createDevHelmValuesFile(baseValuesFile string, outputFile str
 
 	// Try to load existing helm-values.yaml first if it exists
 	if _, err := os.Stat(outputFile); err == nil {
-		data, err := ioutil.ReadFile(outputFile)
+		data, err := os.ReadFile(outputFile)
 		if err != nil {
 			return fmt.Errorf("failed to read existing helm values: %w", err)
 		}
@@ -175,7 +174,7 @@ func (p *Provider) createDevHelmValuesFile(baseValuesFile string, outputFile str
 			return err
 		}
 
-		data, err := ioutil.ReadFile(baseValuesFile)
+		data, err := os.ReadFile(baseValuesFile)
 		if err != nil {
 			return fmt.Errorf("failed to read base helm values: %w", err)
 		}
@@ -213,7 +212,7 @@ func (p *Provider) createDevHelmValuesFile(baseValuesFile string, outputFile str
 	}
 
 	// Write to the output file
-	if err := ioutil.WriteFile(outputFile, yamlData, 0644); err != nil {
+	if err := os.WriteFile(outputFile, yamlData, 0644); err != nil {
 		return fmt.Errorf("failed to write helm values: %w", err)
 	}
 
