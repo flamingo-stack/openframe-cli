@@ -48,7 +48,9 @@ func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartServi
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	if err := configService.Initialize(); err != nil {
+		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+	}
 
 	// Create HelmManager with the rest.Config
 	helmManager, err := helm.NewHelmManager(chartExec, kubeConfig, verbose)
@@ -76,7 +78,9 @@ func NewChartServiceDeferred(dryRun, verbose bool) (*ChartService, error) {
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	if err := configService.Initialize(); err != nil {
+		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+	}
 
 	return &ChartService{
 		executor:       chartExec,
@@ -291,7 +295,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Check if cancelled by signal (CTRL-C)
 	if interrupted || ctx.Err() != nil {
 		// User interrupted - clean up temporary files silently
-		w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
+		_ = w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
 		return fmt.Errorf("installation cancelled by user")
 	}
 
@@ -435,7 +439,7 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 	}
 
 	if interrupted || ctx.Err() != nil {
-		w.fileCleanup.RestoreFiles(false)
+		_ = w.fileCleanup.RestoreFiles(false)
 		return fmt.Errorf("installation cancelled by user")
 	}
 
