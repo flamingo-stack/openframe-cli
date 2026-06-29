@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -367,7 +368,8 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 	result.Stdout = string(stdout)
 
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			result.ExitCode = exitError.ExitCode()
 			result.Stderr = string(exitError.Stderr)
 		} else {

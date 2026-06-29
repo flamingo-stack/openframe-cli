@@ -1,6 +1,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
 	"strings"
@@ -205,14 +206,14 @@ func CreateCommandError(command string, args []string, err error) *CommandError 
 
 // IsValidationError checks if an error is a validation error
 func IsValidationError(err error) bool {
-	_, ok := err.(*ValidationError)
-	return ok
+	var target *ValidationError
+	return stderrors.As(err, &target)
 }
 
 // IsCommandError checks if an error is a command error
 func IsCommandError(err error) bool {
-	_, ok := err.(*CommandError)
-	return ok
+	var target *CommandError
+	return stderrors.As(err, &target)
 }
 
 // HandleGlobalError provides a global error handling entry point

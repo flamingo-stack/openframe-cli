@@ -1,6 +1,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"fmt"
 	"time"
 )
@@ -202,7 +203,8 @@ func (e *ConfigurationError) WithMissingKeys(keys []string) *ConfigurationError 
 
 // IsTimeout checks if an error is timeout-related
 func IsTimeout(err error) bool {
-	if chartErr, ok := err.(*ChartError); ok {
+	var chartErr *ChartError
+	if stderrors.As(err, &chartErr) {
 		return chartErr.Cause == ErrNetworkTimeout
 	}
 	return false
@@ -210,7 +212,8 @@ func IsTimeout(err error) bool {
 
 // IsRecoverable checks if an error is recoverable
 func IsRecoverable(err error) bool {
-	if chartErr, ok := err.(*ChartError); ok {
+	var chartErr *ChartError
+	if stderrors.As(err, &chartErr) {
 		return chartErr.IsRecoverable()
 	}
 	return false
@@ -218,7 +221,8 @@ func IsRecoverable(err error) bool {
 
 // GetRetryDelay gets the retry delay for recoverable errors
 func GetRetryDelay(err error) time.Duration {
-	if chartErr, ok := err.(*ChartError); ok && chartErr.IsRecoverable() {
+	var chartErr *ChartError
+	if stderrors.As(err, &chartErr) && chartErr.IsRecoverable() {
 		return chartErr.GetRetryAfter()
 	}
 	return 0
@@ -226,7 +230,8 @@ func GetRetryDelay(err error) time.Duration {
 
 // WrapAsChartError wraps a generic error as a chart error
 func WrapAsChartError(operation, component string, err error) *ChartError {
-	if chartErr, ok := err.(*ChartError); ok {
+	var chartErr *ChartError
+	if stderrors.As(err, &chartErr) {
 		return chartErr
 	}
 	return NewChartError(operation, component, err)
@@ -270,6 +275,6 @@ func CombineErrors(errors []error) error {
 
 // IsSkippedInstallation checks if an error is a skipped installation
 func IsSkippedInstallation(err error) bool {
-	_, ok := err.(*SkippedInstallationError)
-	return ok
+	var target *SkippedInstallationError
+	return stderrors.As(err, &target)
 }
