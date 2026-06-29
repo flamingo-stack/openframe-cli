@@ -1287,7 +1287,7 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		if err == nil && result != nil && result.Stdout != "" {
 			var deploymentList appsv1.DeploymentList
 			if jsonErr := json.Unmarshal([]byte(result.Stdout), &deploymentList); jsonErr != nil {
-				lastErr = fmt.Errorf("failed to parse deployments JSON: %v", jsonErr)
+				lastErr = fmt.Errorf("failed to parse deployments JSON: %w", jsonErr)
 				if verbose {
 					pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): JSON parse error\n", i+1, maxRetries)
 				}
@@ -1308,7 +1308,7 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 				}
 			}
 		} else {
-			lastErr = fmt.Errorf("kubectl deployments error: %v", err)
+			lastErr = fmt.Errorf("kubectl deployments error: %w", err)
 			if verbose {
 				pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): kubectl deployments error\n", i+1, maxRetries)
 			}
@@ -1326,7 +1326,7 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 		if err == nil && result != nil && result.Stdout != "" {
 			var statefulSetList appsv1.StatefulSetList
 			if jsonErr := json.Unmarshal([]byte(result.Stdout), &statefulSetList); jsonErr != nil {
-				lastErr = fmt.Errorf("failed to parse statefulsets JSON: %v", jsonErr)
+				lastErr = fmt.Errorf("failed to parse statefulsets JSON: %w", jsonErr)
 				if verbose {
 					pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): StatefulSet JSON parse error\n", i+1, maxRetries)
 				}
@@ -1347,7 +1347,7 @@ func (h *HelmManager) waitForArgoCDDeploymentsKubectl(ctx context.Context, clust
 				}
 			}
 		} else {
-			lastErr = fmt.Errorf("kubectl statefulsets error: %v", err)
+			lastErr = fmt.Errorf("kubectl statefulsets error: %w", err)
 			if verbose {
 				pterm.Debug.Printf("Waiting for workloads (attempt %d/%d): kubectl statefulsets error\n", i+1, maxRetries)
 			}

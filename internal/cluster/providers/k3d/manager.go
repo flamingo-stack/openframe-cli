@@ -234,7 +234,7 @@ func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType
 			}
 			if cleanupErr := m.forceCleanupDockerContainers(ctx, name); cleanupErr != nil {
 				// Return original error if cleanup also fails
-				return models.NewClusterOperationError("delete", name, fmt.Errorf("failed to delete cluster %s (cleanup also failed: %v): %w", name, cleanupErr, err))
+				return models.NewClusterOperationError("delete", name, fmt.Errorf("failed to delete cluster %s (cleanup also failed: %w): %w", name, cleanupErr, err))
 			}
 			// Cleanup succeeded, cluster is removed
 			if m.verbose {
