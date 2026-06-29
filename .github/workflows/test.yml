@@ -20,6 +20,29 @@ concurrency:
 # =============================================================================
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: golangci-lint
+        # Informational for now: the repo has a known backlog of findings from
+        # the security audit. Surface results without failing the pipeline;
+        # flip continue-on-error off once the backlog is cleared.
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          version: latest
+
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -58,3 +81,11 @@ jobs:
 
       - name: Run unit tests
         run: make test-unit
+
+      - name: Run unit tests with race detector (informational)
+        # Linux only (race detector needs CGO/gcc). Informational: a pre-existing
+        # data race in pterm's spinner trips -race in the cluster package; this
+        # surfaces races without failing the pipeline.
+        if: matrix.os == 'linux'
+        continue-on-error: true
+        run: make test-race
