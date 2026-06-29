@@ -129,7 +129,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil && spinner.IsActive {
-			spinner.Stop()
+			_ = spinner.Stop()
 			spinnerStopped = true
 		}
 	}
@@ -893,7 +893,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				if consecutiveAllReady >= stabilizationChecks {
 					spinnerMutex.Lock()
 					if !spinnerStopped && spinner != nil && spinner.IsActive {
-						spinner.Stop()
+						_ = spinner.Stop()
 						spinnerStopped = true
 					}
 					spinnerMutex.Unlock()
@@ -1739,7 +1739,9 @@ func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string)
 			if appName != "" {
 				refreshArgs := m.getKubectlArgs("-n", "argocd", "patch", "application", appName,
 					"--type", "merge", "-p", `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
-				m.executor.Execute(ctx, "kubectl", refreshArgs...)
+				if _, err := m.executor.Execute(ctx, "kubectl", refreshArgs...); err != nil {
+					pterm.Debug.Printf("best-effort refresh of application %s failed: %v\n", appName, err)
+				}
 			}
 			return true
 		}
