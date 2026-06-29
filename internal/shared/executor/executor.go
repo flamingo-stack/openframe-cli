@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 )
 
 // WSL error exit codes
@@ -322,7 +324,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 	// Handle dry-run mode
 	if e.dryRun {
 		if e.verbose {
-			fmt.Printf("Would run: %s\n", fullCommand)
+			fmt.Printf("Would run: %s\n", redact.Redact(fullCommand))
 		}
 		result.Duration = time.Since(start)
 		return result, nil
@@ -374,9 +376,9 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 		// Log error in verbose mode
 		if e.verbose {
-			fmt.Printf("Command failed: %s (exit code: %d)\n", fullCommand, result.ExitCode)
+			fmt.Printf("Command failed: %s (exit code: %d)\n", redact.Redact(fullCommand), result.ExitCode)
 			if result.Stderr != "" {
-				fmt.Printf("Stderr: %s\n", result.Stderr)
+				fmt.Printf("Stderr: %s\n", redact.Redact(result.Stderr))
 			}
 		}
 
@@ -418,7 +420,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 	// Log success in verbose mode
 	if e.verbose {
-		fmt.Printf("Command completed successfully: %s (took %v)\n", fullCommand, result.Duration)
+		fmt.Printf("Command completed successfully: %s (took %v)\n", redact.Redact(fullCommand), result.Duration)
 	}
 
 	return result, nil

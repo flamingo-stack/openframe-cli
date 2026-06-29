@@ -23,6 +23,7 @@ import (
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/files"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
@@ -606,6 +607,8 @@ func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequ
 
 		// Inject authentication token for private SaaS repositories (both Shared and Tenant)
 		if (*chartConfig.DeploymentMode == types.DeploymentModeSaaSShared || *chartConfig.DeploymentMode == types.DeploymentModeSaaS) && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
+			// Register the token so it is scrubbed from any verbose/debug command logging.
+			redact.RegisterSecret(chartConfig.SaaSConfig.RepositoryPassword)
 			// Replace https:// with https://x-access-token:TOKEN@
 			// This format is required for GitHub PAT authentication in non-interactive mode
 			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
