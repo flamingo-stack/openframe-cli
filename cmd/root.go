@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flamingo-stack/openframe-cli/cmd/app"
 	"github.com/flamingo-stack/openframe-cli/cmd/bootstrap"
-	"github.com/flamingo-stack/openframe-cli/cmd/chart"
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -63,7 +63,7 @@ operation for automation and power users.`,
 
 	// Add subcommands
 	rootCmd.AddCommand(getClusterCmd())
-	rootCmd.AddCommand(getChartCmd())
+	rootCmd.AddCommand(getAppCmd())
 	rootCmd.AddCommand(getBootstrapCmd())
 
 	// Add global flags following cluster pattern
@@ -125,9 +125,9 @@ func getClusterCmd() *cobra.Command {
 	return cluster.GetClusterCmd()
 }
 
-// getChartCmd returns the chart command
-func getChartCmd() *cobra.Command {
-	return chart.GetChartCmd()
+// getAppCmd returns the app command (formerly "chart"; "chart" remains an alias)
+func getAppCmd() *cobra.Command {
+	return app.GetAppCmd()
 }
 
 // getBootstrapCmd returns the bootstrap command

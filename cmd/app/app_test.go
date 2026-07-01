@@ -1,4 +1,4 @@
-package chart
+package app
 
 import (
 	"testing"
@@ -14,15 +14,18 @@ func init() {
 func TestChartRootCommand(t *testing.T) {
 	// Test the root chart command - using basic structure test since TestClusterCommand
 	// is designed specifically for cluster commands
-	cmd := GetChartCmd()
+	cmd := GetAppCmd()
 
 	// Test basic structure
-	assert.Equal(t, "chart", cmd.Name(), "Command name should match")
+	assert.Equal(t, "app", cmd.Name(), "Command name should match")
 	assert.NotEmpty(t, cmd.Short, "Command should have short description")
 	assert.NotEmpty(t, cmd.Long, "Command should have long description")
-	assert.NotNil(t, cmd.RunE, "Chart root command should have RunE function")
+	assert.NotNil(t, cmd.RunE, "App root command should have RunE function")
+
+	// "chart" is retained as a backward-compatible alias
+	assert.Contains(t, cmd.Aliases, "chart", "chart must remain an alias")
 
 	// Test that help contains expected content
-	assert.Contains(t, cmd.Short, "Manage Helm charts")
-	assert.Contains(t, cmd.Long, "chart lifecycle management")
+	assert.Contains(t, cmd.Short, "OpenFrame application")
+	assert.Contains(t, cmd.Long, "Install the OpenFrame application")
 }

@@ -1,4 +1,4 @@
-package chart
+package app
 
 import (
 	"fmt"
