@@ -3,9 +3,12 @@ package app
 import (
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/app/target"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -66,12 +69,44 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 		NonInteractive: flags.NonInteractive,
 	}
 
+	// Bare interactive install (`openframe app install`, no cluster name): let the
+	// user pick a kube-context and validate the cluster is reachable/ready before
+	// installing (req 16/27). Every other invocation keeps its existing behavior:
+	// a named cluster, --non-interactive, or --dry-run all skip this.
+	if !flags.NonInteractive && !flags.DryRun && len(args) == 0 {
+		sel := target.NewSelector(target.UIPrompter{}, recommendedRequirements())
+		res, serr := sel.Select(cmd.Context())
+		if serr != nil {
+			return sharedErrors.HandleGlobalError(serr, verbose)
+		}
+		if !res.ResourcesSufficient {
+			pterm.Warning.Printf("Cluster %q is smaller than recommended (~%d cores / %dGB RAM). Continuing anyway.\n",
+				res.Context, recommendedCPUCores, recommendedMemGB)
+		}
+		pterm.Info.Printf("Installing OpenFrame into context %q\n", res.Context)
+		req.KubeConfig = res.Config
+	}
+
 	err = services.InstallChartsWithConfig(req)
 	if err != nil {
 		// Use shared error handler for consistent error display
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
 	return nil
+}
+
+const (
+	recommendedCPUCores = 6
+	recommendedMemGB    = 24
+)
+
+// recommendedRequirements is the advisory minimum cluster capacity for OpenFrame
+// (per the README system requirements). Falling short only warns; it never blocks.
+func recommendedRequirements() k8s.Requirements {
+	return k8s.Requirements{
+		CPUMillis: recommendedCPUCores * 1000,
+		MemBytes:  int64(recommendedMemGB) << 30,
+	}
 }
 
 // InstallFlags contains all flags needed for chart installation

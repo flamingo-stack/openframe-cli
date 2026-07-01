@@ -49,10 +49,11 @@ func NewSelector(prompter k8s.Prompter, req k8s.Requirements) *Selector {
 
 // Result is a validated install target.
 type Result struct {
-	Context   string
-	Config    *rest.Config
-	Health    k8s.Health
-	Resources k8s.Resources
+	Context             string
+	Config              *rest.Config
+	Health              k8s.Health
+	Resources           k8s.Resources
+	ResourcesSufficient bool // false → the cluster is smaller than recommended (advisory)
 }
 
 // Select runs the full flow: pick a context, build its client, and confirm the
@@ -87,15 +88,18 @@ func (s *Selector) Select(ctx context.Context) (Result, error) {
 		return Result{}, fmt.Errorf("cluster %q has no ready nodes yet — wait for it to come up and try again", chosen)
 	}
 
-	res, ok, err := checker.CheckResources(ctx, s.Requirements)
+	// Resource sufficiency is advisory: report it so the caller can warn the
+	// user, but don't block the install on a borderline cluster.
+	res, sufficient, err := checker.CheckResources(ctx, s.Requirements)
 	if err != nil {
 		return Result{}, err
 	}
-	if !ok {
-		return Result{}, fmt.Errorf(
-			"cluster %q is too small: it needs about %d milli-CPU and %d bytes of memory, but only %d milli-CPU and %d bytes are available",
-			chosen, s.Requirements.CPUMillis, s.Requirements.MemBytes, res.AllocatableCPUMillis, res.AllocatableMemBytes)
-	}
 
-	return Result{Context: chosen, Config: cfg, Health: health, Resources: res}, nil
+	return Result{
+		Context:             chosen,
+		Config:              cfg,
+		Health:              health,
+		Resources:           res,
+		ResourcesSufficient: sufficient,
+	}, nil
 }

@@ -71,11 +71,12 @@ func TestSelect_NoReadyNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "no ready nodes")
 }
 
-func TestSelect_InsufficientResources(t *testing.T) {
+func TestSelect_InsufficientResourcesIsAdvisory(t *testing.T) {
 	s := selectorWith(t, fakeChecker{health: healthy(), ok: false, res: k8s.Resources{AllocatableCPUMillis: 1000, AllocatableMemBytes: 1 << 30}})
-	_, err := s.Select(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "too small")
+	res, err := s.Select(context.Background())
+	require.NoError(t, err, "insufficient resources must not block — only warn")
+	assert.False(t, res.ResourcesSufficient, "caller can warn based on this flag")
+	assert.Equal(t, "ctx-a", res.Context)
 }
 
 func TestSelect_ContextLoadError(t *testing.T) {
