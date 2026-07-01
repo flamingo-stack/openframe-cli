@@ -549,24 +549,6 @@ ports:
 	return tmpFile.Name(), nil
 }
 
-// isTestCluster determines if a cluster name indicates it's a test cluster
-func (m *K3dManager) isTestCluster(name string) bool {
-	testPatterns := []string{
-		"test", "cleanup", "status", "list", "delete", "create",
-		"multi", "single", "default_config", "with_type", "manual",
-	}
-
-	for _, pattern := range testPatterns {
-		if strings.Contains(name, pattern) {
-			return true
-		}
-	}
-
-	return len(name) > timestampSuffixLen &&
-		name[len(name)-timestampSuffixLen:] != name &&
-		strings.ContainsAny(name[len(name)-timestampSuffixLen:], "0123456789")
-}
-
 // PortConfig holds the allocated ports for a k3d cluster
 type PortConfig struct {
 	API   int

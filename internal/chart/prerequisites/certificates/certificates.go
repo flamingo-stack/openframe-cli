@@ -335,12 +335,6 @@ func (c *CertificateInstaller) generateCertificates() error {
 	return nil
 }
 
-func (c *CertificateInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
 func (c *CertificateInstaller) runShellCommand(command string) error {
 	cmd := exec.Command("bash", "-c", command)
 	// Completely silence output during installation

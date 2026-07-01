@@ -1693,27 +1693,6 @@ func (m *Manager) checkRepoServerHealth(ctx context.Context, verbose bool) *Repo
 	return nil
 }
 
-// checkRepoServerResources checks resource usage of the repo-server
-func (m *Manager) checkRepoServerResources(ctx context.Context) (memoryUsage string, cpuUsage string, err error) {
-	// Try to get resource usage via kubectl top
-	topArgs := m.getKubectlArgs("top", "pods", "-n", "argocd", "-l", "app.kubernetes.io/name=argocd-repo-server", "--no-headers")
-	topResult, err := m.executor.Execute(ctx, "kubectl", topArgs...)
-	if err != nil || topResult == nil || topResult.ExitCode != 0 {
-		return "", "", fmt.Errorf("metrics not available")
-	}
-
-	// Parse output: NAME CPU(cores) MEMORY(bytes)
-	lines := strings.Split(strings.TrimSpace(topResult.Stdout), "\n")
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			return fields[2], fields[1], nil // memory, cpu
-		}
-	}
-
-	return "", "", fmt.Errorf("could not parse metrics output")
-}
-
 // triggerRepoServerRecovery attempts to recover from repo-server issues
 func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string) bool {
 	// Delete the repo-server pod to force a restart

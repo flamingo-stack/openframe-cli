@@ -187,35 +187,6 @@ install_k3d
 	return nil
 }
 
-func (k *K3dInstaller) installBinary() error {
-	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "amd64"
-	} else if arch == "arm64" {
-		arch = "arm64"
-	} else {
-		return fmt.Errorf("unsupported architecture: %s", arch)
-	}
-
-	// Get latest release version
-	versionCmd := "curl -s https://api.github.com/repos/k3d-io/k3d/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\\1/'"
-
-	commands := []string{
-		fmt.Sprintf("VERSION=$(%s)", versionCmd),
-		fmt.Sprintf("curl -Lo k3d https://github.com/k3d-io/k3d/releases/download/${VERSION}/k3d-linux-%s", arch),
-		"chmod +x k3d",
-		"sudo mv k3d /usr/local/bin/",
-	}
-
-	for _, cmd := range commands {
-		if err := k.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
-	}
-
-	return nil
-}
-
 func (k *K3dInstaller) installWindows() error {
 	fmt.Println("Installing k3d inside WSL2...")
 

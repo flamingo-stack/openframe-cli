@@ -251,15 +251,3 @@ func containsPath(pathEnv, dir string) bool {
 	}
 	return false
 }
-
-func (h *HelmInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
-func (h *HelmInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
-	// Completely silence output during installation
-	return cmd.Run()
-}
