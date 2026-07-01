@@ -8,6 +8,7 @@ type ClusterType string
 const (
 	ClusterTypeK3d ClusterType = "k3d"
 	ClusterTypeGKE ClusterType = "gke"
+	ClusterTypeEKS ClusterType = "eks"
 )
 
 // ClusterConfig holds cluster configuration
