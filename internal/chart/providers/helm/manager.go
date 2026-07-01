@@ -982,7 +982,7 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 // while server and repo-server remain as Deployments.
 func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool) error {
 	if h.kubeClient == nil {
-		return fmt.Errorf("Kubernetes core client not initialized")
+		return fmt.Errorf("kubernetes core client not initialized")
 	}
 
 	// Wait for API port to be available before making API calls
@@ -1436,7 +1436,7 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 	// The JSON output will be an empty array "[]" if no releases found
 	output := strings.TrimSpace(result.Stdout)
 	if output == "" || output == "[]" {
-		return fmt.Errorf("Helm release '%s' not found in namespace '%s' - helm list returned empty", releaseName, namespace)
+		return fmt.Errorf("helm release '%s' not found in namespace '%s' - helm list returned empty", releaseName, namespace)
 	}
 
 	// Also run helm status for more details
@@ -1452,7 +1452,7 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 		Env:     h.getHelmEnv(),
 	})
 	if err != nil {
-		return fmt.Errorf("Helm release exists but status check failed: %w", err)
+		return fmt.Errorf("helm release exists but status check failed: %w", err)
 	}
 
 	if verbose {
@@ -1660,7 +1660,7 @@ func (h *HelmManager) debugWSLKubeconfig(ctx context.Context, verbose bool) {
 	}
 
 	// Check if kubeconfig exists
-	checkCmd := fmt.Sprintf("ls -la ~/.kube/config 2>&1 || echo 'Kubeconfig not found'")
+	checkCmd := "ls -la ~/.kube/config 2>&1 || echo 'Kubeconfig not found'"
 	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "wsl",
 		Args:    []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", checkCmd},

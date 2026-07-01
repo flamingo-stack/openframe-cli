@@ -112,6 +112,8 @@ func TestClusterInfo(t *testing.T) {
 				Status: status,
 			}
 
+			assert.Equal(t, "test-cluster", info.Name)
+			assert.Equal(t, ClusterTypeK3d, info.Type)
 			assert.Equal(t, status, info.Status)
 		}
 	})
@@ -152,6 +154,8 @@ func TestNodeInfo(t *testing.T) {
 				Role:   "worker",
 			}
 
+			assert.Equal(t, "test-node", node.Name)
+			assert.Equal(t, "worker", node.Role)
 			assert.Equal(t, status, node.Status)
 		}
 	})
@@ -166,6 +170,8 @@ func TestNodeInfo(t *testing.T) {
 				Role:   role,
 			}
 
+			assert.Equal(t, "test-node", node.Name)
+			assert.Equal(t, "ready", node.Status)
 			assert.Equal(t, role, node.Role)
 		}
 	})

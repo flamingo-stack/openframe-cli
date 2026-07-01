@@ -25,8 +25,8 @@ func ApplyInsecureTLSConfig(config *rest.Config) *rest.Config {
 
 	// 2. Clear CA data to prevent certificate validation conflicts
 	// The CA data would otherwise be used to verify the server certificate
-	config.TLSClientConfig.CAData = nil
-	config.TLSClientConfig.CAFile = ""
+	config.CAData = nil
+	config.CAFile = ""
 
 	// 3. Clear any custom transport that might conflict with client-go's handling
 	// This ensures client-go builds the transport itself with the auth data intact

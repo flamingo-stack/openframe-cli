@@ -37,7 +37,7 @@ func TestCreateFlags(t *testing.T) {
 		assert.Equal(t, 0, flags.NodeCount)
 		assert.Empty(t, flags.K8sVersion)
 		assert.False(t, flags.SkipWizard)
-		assert.False(t, flags.GlobalFlags.Verbose)
+		assert.False(t, flags.Verbose)
 	})
 
 	t.Run("creates create flags with set values", func(t *testing.T) {
@@ -61,8 +61,8 @@ func TestCreateFlags(t *testing.T) {
 			ClusterType: "k3d",
 		}
 
-		assert.True(t, flags.GlobalFlags.Verbose)
-		assert.True(t, flags.GlobalFlags.DryRun)
+		assert.True(t, flags.Verbose)
+		assert.True(t, flags.DryRun)
 		assert.Equal(t, "k3d", flags.ClusterType)
 	})
 }
@@ -72,7 +72,7 @@ func TestListFlags(t *testing.T) {
 		flags := &ListFlags{}
 
 		assert.False(t, flags.Quiet)
-		assert.False(t, flags.GlobalFlags.Verbose)
+		assert.False(t, flags.Verbose)
 	})
 
 	t.Run("creates list flags with set values", func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestStatusFlags(t *testing.T) {
 
 		assert.False(t, flags.Detailed)
 		assert.False(t, flags.NoApps)
-		assert.False(t, flags.GlobalFlags.Verbose)
+		assert.False(t, flags.Verbose)
 	})
 
 	t.Run("creates status flags with set values", func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestDeleteFlags(t *testing.T) {
 		flags := &DeleteFlags{}
 
 		assert.False(t, flags.GlobalFlags.Force)
-		assert.False(t, flags.GlobalFlags.Verbose)
+		assert.False(t, flags.Verbose)
 	})
 
 	t.Run("inherits global flags", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestCleanupFlags(t *testing.T) {
 	t.Run("creates cleanup flags with default values", func(t *testing.T) {
 		flags := &CleanupFlags{}
 
-		assert.False(t, flags.GlobalFlags.Verbose)
+		assert.False(t, flags.Verbose)
 	})
 }
 

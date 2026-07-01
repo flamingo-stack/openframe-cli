@@ -186,7 +186,7 @@ func TestCreateClusterError(t *testing.T) {
 func TestTypeAliases(t *testing.T) {
 	t.Run("cluster type aliases work correctly", func(t *testing.T) {
 		// Test that the type aliases are correctly set up
-		var ct models.ClusterType = models.ClusterTypeK3d
+		var ct = models.ClusterTypeK3d
 		assert.Equal(t, "k3d", string(ct))
 
 		ct = models.ClusterTypeGKE

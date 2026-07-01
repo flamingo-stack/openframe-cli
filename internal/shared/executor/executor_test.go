@@ -89,7 +89,7 @@ func TestNewRealCommandExecutor(t *testing.T) {
 			assert.NotNil(t, executor)
 
 			// Verify it implements the interface
-			var _ CommandExecutor = executor
+			var _ = executor
 		})
 	}
 }
@@ -281,7 +281,7 @@ func TestRealCommandExecutor_Execute_ContextCancellation(t *testing.T) {
 
 // Test interface compliance
 func TestCommandExecutorInterface(t *testing.T) {
-	var _ CommandExecutor = NewRealCommandExecutor(false, false)
+	var _ = NewRealCommandExecutor(false, false)
 }
 
 func TestExecuteOptions(t *testing.T) {

@@ -75,7 +75,7 @@ func (h *HelmInstaller) Install() error {
 
 func (h *HelmInstaller) installMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic helm installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic helm installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	fmt.Println("Installing helm via Homebrew...")

@@ -75,7 +75,7 @@ func (k *KubectlInstaller) Install() error {
 
 func (k *KubectlInstaller) installMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic kubectl installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic kubectl installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	fmt.Println("Installing kubectl via Homebrew...")

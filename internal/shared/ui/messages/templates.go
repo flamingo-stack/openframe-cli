@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pterm/pterm"
 )
@@ -110,6 +111,16 @@ func (t *Templates) FormatMessage(msgType MessageType, template string, args ...
 		return template
 	}
 	return strings.TrimRight(template+": "+fmt.Sprintln(args...), "\n")
+}
+
+// capitalizeFirst upper-cases the first rune of a single-word label.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 // renderMessage is a generic message renderer that bypasses go vet checks
@@ -238,7 +249,7 @@ func (t *Templates) ShowResourceNotFound(resourceType, resourceName string) {
 
 // ShowOperationCancelled shows a standardized cancellation message
 func (t *Templates) ShowOperationCancelled(resource, operation string) {
-	t.renderMessage(WarningMessage, "operation_cancelled", resource, strings.Title(operation)) //nolint:govet
+	t.renderMessage(WarningMessage, "operation_cancelled", resource, capitalizeFirst(operation)) //nolint:govet
 }
 
 // ShowValidationError shows a standardized validation error

@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -161,5 +162,15 @@ func (s *Selector) showNoClusterMessage() {
 
 // showOperationCancelled displays a cancellation message
 func (s *Selector) showOperationCancelled() {
-	pterm.Info.Printf("No cluster selected. %s cancelled.\n", strings.Title(s.operation))
+	pterm.Info.Printf("No cluster selected. %s cancelled.\n", capitalizeFirst(s.operation))
+}
+
+// capitalizeFirst upper-cases the first rune of a single-word label.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }

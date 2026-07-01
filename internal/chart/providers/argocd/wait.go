@@ -63,12 +63,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}()
 
 	// Check if we should start the spinner (skip if context is cancelled or expiring soon)
-	shouldSkipSpinner := false
+	shouldSkipSpinner := localCtx.Err() != nil
 
 	// Check if context is cancelled
-	if localCtx.Err() != nil {
-		shouldSkipSpinner = true
-	}
 
 	// Check if original context is cancelled
 	if ctx.Err() != nil {
@@ -361,7 +358,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			currentHealthyCount := 0
 			currentlyReady := 0
 			healthyApps := make([]string, 0)
-			syncedApps := make([]string, 0)
 			notReadyApps := make([]string, 0)
 
 			for _, app := range apps {
@@ -369,10 +365,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				if app.Health == "Healthy" {
 					currentHealthyCount++
 					healthyApps = append(healthyApps, app.Name)
-				}
-
-				if app.Sync == "Synced" {
-					syncedApps = append(syncedApps, app.Name)
 				}
 
 				// Count currently ready apps (both healthy and synced)

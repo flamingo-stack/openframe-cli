@@ -170,7 +170,7 @@ func TestSelectCluster(t *testing.T) {
 
 		_, err := SelectCluster(clusters, "Select a cluster")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "No clusters found")
+		assert.Contains(t, err.Error(), "no clusters found")
 	})
 
 	t.Run("creates items for selection when clusters provided", func(t *testing.T) {

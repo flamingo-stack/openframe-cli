@@ -75,7 +75,7 @@ func (k *K3dInstaller) Install() error {
 
 func (k *K3dInstaller) installMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic k3d installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic k3d installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	cmd := exec.Command("brew", "install", "k3d")

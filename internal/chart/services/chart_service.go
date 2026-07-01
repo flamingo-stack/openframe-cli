@@ -19,7 +19,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
-	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -32,7 +31,7 @@ import (
 // ChartService handles high-level chart operations
 type ChartService struct {
 	executor       executor.CommandExecutor
-	clusterService utilTypes.ClusterLister
+	clusterService types.ClusterLister
 	configService  *config.Service
 	operationsUI   *chartUI.OperationsUI
 	displayService *chartUI.DisplayService
@@ -107,11 +106,11 @@ func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose b
 }
 
 // Install performs the complete chart installation process
-func (cs *ChartService) Install(req utilTypes.InstallationRequest) error {
+func (cs *ChartService) Install(req types.InstallationRequest) error {
 	return cs.InstallWithContext(context.Background(), req)
 }
 
-func (cs *ChartService) InstallWithContext(ctx context.Context, req utilTypes.InstallationRequest) error {
+func (cs *ChartService) InstallWithContext(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -135,7 +134,7 @@ func (cs *ChartService) InstallWithContext(ctx context.Context, req utilTypes.In
 
 // InstallWithContextDeferred performs installation with deferred HelmManager initialization
 // This is used when KubeConfig is not available upfront (e.g., standalone chart install)
-func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req utilTypes.InstallationRequest) error {
+func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -160,16 +159,16 @@ func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req util
 // InstallationWorkflow orchestrates the installation process
 type InstallationWorkflow struct {
 	chartService   *ChartService
-	clusterService utilTypes.ClusterLister
+	clusterService types.ClusterLister
 	fileCleanup    *files.FileCleanup
 }
 
 // Execute runs the installation workflow
-func (w *InstallationWorkflow) Execute(req utilTypes.InstallationRequest) error {
+func (w *InstallationWorkflow) Execute(req types.InstallationRequest) error {
 	return w.ExecuteWithContext(context.Background(), req)
 }
 
-func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req utilTypes.InstallationRequest) error {
+func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req types.InstallationRequest) error {
 	// Set up signal handling for graceful cleanup on interruption
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -267,9 +266,8 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Step 4: Regenerate certificates after configuration and cluster selection
 	// Skip certificate regeneration in non-interactive mode
 	if !req.NonInteractive {
-		if err := w.regenerateCertificates(); err != nil {
-			// Non-fatal - continue anyway as logged in the method
-		}
+		// Non-fatal: failures are logged inside the method, continue regardless.
+		_ = w.regenerateCertificates()
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}
@@ -313,7 +311,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 
 // ExecuteWithContextDeferred runs the installation workflow with deferred HelmManager initialization
 // This is used when KubeConfig is not available upfront (e.g., standalone chart install)
-func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req utilTypes.InstallationRequest) error {
+func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req types.InstallationRequest) error {
 	// Set up signal handling for graceful cleanup on interruption
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -414,9 +412,8 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 
 	// Step 4: Regenerate certificates
 	if !req.NonInteractive {
-		if err := w.regenerateCertificates(); err != nil {
-			// Non-fatal
-		}
+		// Non-fatal: failures are logged inside the method, continue regardless.
+		_ = w.regenerateCertificates()
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}
@@ -573,7 +570,7 @@ func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr s
 }
 
 // buildConfiguration constructs the installation configuration
-func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
+func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
 	configBuilder := config.NewBuilder(w.chartService.operationsUI)
 
 	// Determine repository URL based on deployment mode
@@ -666,7 +663,7 @@ func InstallChartsWithDefaults(args []string, force, dryRun, verbose bool) error
 
 // InstallChartsWithDefaultsContext installs charts with default GitHub configuration and context support
 func InstallChartsWithDefaultsContext(ctx context.Context, args []string, force, dryRun, verbose bool) error {
-	return InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
+	return InstallChartsWithConfigContext(ctx, types.InstallationRequest{
 		Args:         args,
 		Force:        force,
 		DryRun:       dryRun,
@@ -679,13 +676,13 @@ func InstallChartsWithDefaultsContext(ctx context.Context, args []string, force,
 
 // InstallChartsWithConfig installs charts with the given configuration
 // This is the common installation logic used by all flows
-func InstallChartsWithConfig(req utilTypes.InstallationRequest) error {
+func InstallChartsWithConfig(req types.InstallationRequest) error {
 	return InstallChartsWithConfigContext(context.Background(), req)
 }
 
 // InstallChartsWithConfigContext installs charts with the given configuration and context support
 // If KubeConfig is nil, it will be obtained after cluster selection (for standalone chart install)
-func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.InstallationRequest) error {
+func InstallChartsWithConfigContext(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():

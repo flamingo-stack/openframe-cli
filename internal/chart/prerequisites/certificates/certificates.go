@@ -108,7 +108,7 @@ func (c *CertificateInstaller) installMkcert() error {
 
 func (c *CertificateInstaller) installMkcertMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic mkcert installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic mkcert installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	cmd := exec.Command("brew", "install", "mkcert")

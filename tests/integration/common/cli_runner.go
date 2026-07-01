@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -136,7 +137,8 @@ func RunCLI(args ...string) *CLIResult {
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			exitCode = exitError.ExitCode()
 		} else {
 			// If it's not an ExitError, it might be a more serious issue

@@ -41,20 +41,20 @@ func TestFlagContainer_SyncGlobalFlags(t *testing.T) {
 		container.SyncGlobalFlags()
 
 		// Verify that all command flags have the global values
-		assert.Equal(t, container.Global.Verbose, container.Create.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Create.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Create.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Create.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.List.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.List.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.List.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.List.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Status.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Status.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Status.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Status.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Delete.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Delete.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Delete.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Delete.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Cleanup.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Cleanup.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Cleanup.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Cleanup.DryRun)
 	})
 
 	t.Run("handles nil global flags", func(t *testing.T) {
@@ -121,10 +121,10 @@ func TestFlagContainer_TestManager(t *testing.T) {
 func TestDomainTypes(t *testing.T) {
 	t.Run("domain types work correctly", func(t *testing.T) {
 		// Test that domain types are accessible
-		var clusterType models.ClusterType = models.ClusterTypeK3d
+		var clusterType = models.ClusterTypeK3d
 		assert.Equal(t, models.ClusterTypeK3d, clusterType)
 
-		var domainType models.ClusterType = models.ClusterTypeGKE
+		var domainType = models.ClusterTypeGKE
 		assert.Equal(t, models.ClusterTypeGKE, domainType)
 	})
 

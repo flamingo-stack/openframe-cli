@@ -101,7 +101,7 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 // SelectCluster provides interactive cluster selection
 func SelectCluster(clusters []models.ClusterInfo, message string) (models.ClusterInfo, error) {
 	if len(clusters) == 0 {
-		return models.ClusterInfo{}, errors.New("No clusters found")
+		return models.ClusterInfo{}, errors.New("no clusters found")
 	}
 
 	items := make([]string, len(clusters))

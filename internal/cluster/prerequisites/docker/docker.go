@@ -104,7 +104,7 @@ func (d *DockerInstaller) Install() error {
 
 func (d *DockerInstaller) installMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic Docker installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic Docker installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	fmt.Println("Installing Docker Desktop via Homebrew...")
@@ -641,7 +641,7 @@ func startDockerInWSL() error {
 	// Check if Ubuntu WSL distribution exists
 	cmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "ok")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Ubuntu WSL distribution not available: %w", err)
+		return fmt.Errorf("no Ubuntu WSL distribution available: %w", err)
 	}
 
 	// Start Docker daemon using the start-docker.sh script or directly
