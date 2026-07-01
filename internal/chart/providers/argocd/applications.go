@@ -9,17 +9,29 @@ import (
 	"runtime"
 	"strings"
 
-	argocdclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// applicationGVR is the GroupVersionResource for ArgoCD Application CRDs.
+// We access Applications via the dynamic client (unstructured) instead of the
+// argo-cd Go module: argo-cd is not importable as a library (its go.mod uses a
+// local `replace => ./gitops-engine`), and the dynamic client keeps us
+// compatible with any deployed ArgoCD version.
+var applicationGVR = schema.GroupVersionResource{
+	Group:    "argoproj.io",
+	Version:  "v1alpha1",
+	Resource: "applications",
+}
 
 // Manager handles ArgoCD-specific operations
 type Manager struct {
@@ -30,7 +42,7 @@ type Manager struct {
 	kubeConfig         *rest.Config
 	kubeClient         kubernetes.Interface
 	apiextClient       apiextensionsclientset.Interface
-	argocdClient       argocdclientset.Interface
+	dynamicClient      dynamic.Interface
 	clientsInitialized bool
 
 	// StabilizationChecks is the number of consecutive all-ready polls required
@@ -85,12 +97,12 @@ func NewManagerWithConfig(exec executor.CommandExecutor, config *rest.Config) (*
 	}
 	m.apiextClient = apiextClient
 
-	// Create ArgoCD client
-	argocdClient, err := argocdclientset.NewForConfig(config)
+	// Create dynamic client (for ArgoCD Application CRDs)
+	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ArgoCD client: %w", err)
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
-	m.argocdClient = argocdClient
+	m.dynamicClient = dynamicClient
 
 	m.clientsInitialized = true
 	return m, nil
@@ -153,12 +165,12 @@ func (m *Manager) initKubernetesClients() error {
 	}
 	m.apiextClient = apiextClient
 
-	// Create ArgoCD client
-	argocdClient, err := argocdclientset.NewForConfig(config)
+	// Create dynamic client (for ArgoCD Application CRDs)
+	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return fmt.Errorf("failed to create ArgoCD client: %w", err)
+		return fmt.Errorf("failed to create dynamic client: %w", err)
 	}
-	m.argocdClient = argocdClient
+	m.dynamicClient = dynamicClient
 
 	m.clientsInitialized = true
 	return nil
@@ -214,7 +226,9 @@ type argoAppList struct {
 	Items []argoApp `json:"items"`
 }
 
-// argoApp represents the minimal ArgoCD application structure for JSON parsing
+// argoApp represents the minimal ArgoCD application structure for JSON parsing.
+// It is populated either from `kubectl get applications -o json` or from the
+// dynamic client's unstructured objects (via a JSON round-trip).
 type argoApp struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -236,6 +250,11 @@ type argoApp struct {
 			Phase   string `json:"phase"`
 			Message string `json:"message"`
 		} `json:"operationState"`
+		// Resources are the child resources planned/managed by an app (used to
+		// count Applications created by the app-of-apps).
+		Resources []struct {
+			Kind string `json:"kind"`
+		} `json:"resources"`
 		ReconciledAt string `json:"reconciledAt"`
 	} `json:"status"`
 	Spec struct {
@@ -245,6 +264,60 @@ type argoApp struct {
 			TargetRevision string `json:"targetRevision"`
 		} `json:"source"`
 	} `json:"spec"`
+}
+
+// argoAppFromObject converts a dynamic-client unstructured object into an
+// argoApp via a JSON round-trip, so the native and kubectl paths share the
+// exact same field extraction.
+func argoAppFromObject(obj map[string]interface{}) (argoApp, error) {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return argoApp{}, err
+	}
+	var a argoApp
+	if err := json.Unmarshal(data, &a); err != nil {
+		return argoApp{}, err
+	}
+	return a, nil
+}
+
+// applicationFromArgoApp maps the parsed JSON structure to the public
+// Application type (shared by the dynamic-client and kubectl paths).
+func applicationFromArgoApp(item argoApp) Application {
+	health := item.Status.Health.Status
+	sync := item.Status.Sync.Status
+	if health == "" {
+		health = "Unknown"
+	}
+	if sync == "" {
+		sync = "Unknown"
+	}
+
+	condition := ""
+	conditionType := ""
+	for _, cond := range item.Status.Conditions {
+		if cond.Message != "" {
+			condition = cond.Message
+			conditionType = cond.Type
+			break // Take the first condition message
+		}
+	}
+
+	return Application{
+		Name:             item.Metadata.Name,
+		Health:           health,
+		HealthMessage:    item.Status.Health.Message,
+		Sync:             sync,
+		SyncRevision:     item.Status.Sync.Revision,
+		Condition:        condition,
+		ConditionType:    conditionType,
+		OperationPhase:   item.Status.OperationState.Phase,
+		OperationMessage: item.Status.OperationState.Message,
+		RepoURL:          item.Spec.Source.RepoURL,
+		Path:             item.Spec.Source.Path,
+		TargetRevision:   item.Spec.Source.TargetRevision,
+		ReconciledAt:     item.Status.ReconciledAt,
+	}
 }
 
 // getTotalExpectedApplications tries to determine the total number of applications that will be created
@@ -271,36 +344,38 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
 	}
 
-	if m.argocdClient == nil {
+	if m.dynamicClient == nil {
 		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
 	}
 
-	// --- Primary Method: Native ArgoCD Client ---
+	apps := m.dynamicClient.Resource(applicationGVR).Namespace("argocd")
+
+	// --- Primary Method: Native dynamic client ---
 
 	// Method 1: Get app-of-apps and count Application resources from its status
-	app, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").Get(ctx, "app-of-apps", metav1.GetOptions{})
-	if err == nil {
-		appCount := 0
-		for _, res := range app.Status.Resources {
-			if res.Kind == "Application" {
-				appCount++
+	if obj, err := apps.Get(ctx, "app-of-apps", metav1.GetOptions{}); err == nil {
+		if app, cerr := argoAppFromObject(obj.Object); cerr == nil {
+			appCount := 0
+			for _, res := range app.Status.Resources {
+				if res.Kind == "Application" {
+					appCount++
+				}
 			}
-		}
-		if appCount > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via native client)\n", appCount)
+			if appCount > 0 {
+				if config.Verbose {
+					pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via native client)\n", appCount)
+				}
+				return appCount
 			}
-			return appCount
 		}
 	}
 
 	// Method 2: List all applications directly via native client
-	appList, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").List(ctx, metav1.ListOptions{})
-	if err == nil && len(appList.Items) > 0 {
+	if list, err := apps.List(ctx, metav1.ListOptions{}); err == nil && len(list.Items) > 0 {
 		// Count all apps except app-of-apps itself
 		count := 0
-		for _, a := range appList.Items {
-			if a.Name != "app-of-apps" {
+		for _, item := range list.Items {
+			if item.GetName() != "app-of-apps" {
 				count++
 			}
 		}
@@ -359,8 +434,8 @@ func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, co
 	return 0
 }
 
-// parseApplications gets ArgoCD applications and their status using native ArgoCD client
-// This reduces reliance on external kubectl binary
+// parseApplications gets ArgoCD applications and their status using the native
+// dynamic client. This reduces reliance on the external kubectl binary.
 func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
 	// On Windows/WSL2, always use kubectl fallback because:
 	// - The native Go client connects to 127.0.0.1:6550 from Windows
@@ -378,12 +453,12 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 		return m.parseApplicationsViaKubectl(ctx, verbose)
 	}
 
-	if m.argocdClient == nil {
+	if m.dynamicClient == nil {
 		return m.parseApplicationsViaKubectl(ctx, verbose)
 	}
 
-	// Use native ArgoCD client to list applications
-	appList, err := m.argocdClient.ArgoprojV1alpha1().Applications("argocd").List(ctx, metav1.ListOptions{})
+	// Use the dynamic client to list Application CRDs
+	list, err := m.dynamicClient.Resource(applicationGVR).Namespace("argocd").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to list Argo CD applications via native client: %v\n", err)
@@ -391,71 +466,16 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 		return []Application{}, fmt.Errorf("native ArgoCD client list failed: %w", err)
 	}
 
-	apps := make([]Application, 0, len(appList.Items))
-
-	for _, argoApp := range appList.Items {
-		health := "Unknown"
-		sync := "Unknown"
-		condition := ""
-		conditionType := ""
-
-		// Safely extract Health and Sync status from the Go struct
-		if argoApp.Status.Health.Status != "" {
-			health = string(argoApp.Status.Health.Status)
-		}
-		if argoApp.Status.Sync.Status != "" {
-			sync = string(argoApp.Status.Sync.Status)
-		}
-
-		// Extract condition messages (especially errors)
-		for _, cond := range argoApp.Status.Conditions {
-			if cond.Message != "" {
-				condition = cond.Message
-				conditionType = cond.Type
-				break // Take the first condition message
+	apps := make([]Application, 0, len(list.Items))
+	for i := range list.Items {
+		item, cerr := argoAppFromObject(list.Items[i].Object)
+		if cerr != nil {
+			if verbose {
+				pterm.Warning.Printf("Failed to parse application %q: %v\n", list.Items[i].GetName(), cerr)
 			}
+			continue
 		}
-
-		// Extract operation state
-		operationPhase := ""
-		operationMessage := ""
-		if argoApp.Status.OperationState != nil {
-			operationPhase = string(argoApp.Status.OperationState.Phase)
-			operationMessage = argoApp.Status.OperationState.Message
-		}
-
-		// Extract source info
-		repoURL := ""
-		path := ""
-		targetRevision := ""
-		if argoApp.Spec.Source != nil {
-			repoURL = argoApp.Spec.Source.RepoURL
-			path = argoApp.Spec.Source.Path
-			targetRevision = argoApp.Spec.Source.TargetRevision
-		}
-
-		// Extract reconciliation time
-		reconciledAt := ""
-		if argoApp.Status.ReconciledAt != nil {
-			reconciledAt = argoApp.Status.ReconciledAt.String()
-		}
-
-		app := Application{
-			Name:             argoApp.Name,
-			Health:           health,
-			HealthMessage:    argoApp.Status.Health.Message,
-			Sync:             sync,
-			SyncRevision:     argoApp.Status.Sync.Revision,
-			Condition:        condition,
-			ConditionType:    conditionType,
-			OperationPhase:   operationPhase,
-			OperationMessage: operationMessage,
-			RepoURL:          repoURL,
-			Path:             path,
-			TargetRevision:   targetRevision,
-			ReconciledAt:     reconciledAt,
-		}
-		apps = append(apps, app)
+		apps = append(apps, applicationFromArgoApp(item))
 	}
 
 	return apps, nil
@@ -514,42 +534,7 @@ func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool)
 
 	apps := make([]Application, 0, len(appList.Items))
 	for _, item := range appList.Items {
-		health := item.Status.Health.Status
-		sync := item.Status.Sync.Status
-		condition := ""
-		conditionType := ""
-
-		if health == "" {
-			health = "Unknown"
-		}
-		if sync == "" {
-			sync = "Unknown"
-		}
-
-		// Extract condition messages (especially errors)
-		for _, cond := range item.Status.Conditions {
-			if cond.Message != "" {
-				condition = cond.Message
-				conditionType = cond.Type
-				break // Take the first condition message
-			}
-		}
-
-		apps = append(apps, Application{
-			Name:             item.Metadata.Name,
-			Health:           health,
-			HealthMessage:    item.Status.Health.Message,
-			Sync:             sync,
-			SyncRevision:     item.Status.Sync.Revision,
-			Condition:        condition,
-			ConditionType:    conditionType,
-			OperationPhase:   item.Status.OperationState.Phase,
-			OperationMessage: item.Status.OperationState.Message,
-			RepoURL:          item.Spec.Source.RepoURL,
-			Path:             item.Spec.Source.Path,
-			TargetRevision:   item.Spec.Source.TargetRevision,
-			ReconciledAt:     item.Status.ReconciledAt,
-		})
+		apps = append(apps, applicationFromArgoApp(item))
 	}
 
 	return apps, nil
