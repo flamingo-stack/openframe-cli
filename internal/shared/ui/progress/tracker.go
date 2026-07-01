@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 )
 
@@ -15,7 +16,7 @@ type Tracker struct {
 	steps       []Step
 	currentStep int
 	startTime   time.Time
-	spinner     *pterm.SpinnerPrinter
+	spinner     *uispinner.Spinner
 	progressBar *pterm.ProgressbarPrinter
 	mu          sync.Mutex
 	completed   bool
@@ -83,9 +84,8 @@ func (t *Tracker) Start() {
 	defer t.mu.Unlock()
 
 	t.startTime = time.Now()
-	t.spinner, _ = pterm.DefaultSpinner.
-		WithText(fmt.Sprintf("Starting %s...", t.operation)).
-		Start()
+	t.spinner = uispinner.New()
+	t.spinner.Start(fmt.Sprintf("Starting %s...", t.operation))
 }
 
 // StartStep begins execution of a specific step
@@ -228,7 +228,7 @@ func (t *Tracker) Complete() {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Success("Operation completed")
-		_ = t.spinner.Stop()
+		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
 		_, _ = t.progressBar.Stop()
@@ -253,7 +253,7 @@ func (t *Tracker) Fail(err error) {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Fail("Operation failed")
-		_ = t.spinner.Stop()
+		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
 		_, _ = t.progressBar.Stop()
@@ -279,7 +279,7 @@ func (t *Tracker) Cancel() {
 	// Stop spinner and progress bar
 	if t.spinner != nil {
 		t.spinner.Warning("Operation cancelled")
-		_ = t.spinner.Stop()
+		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
 		_, _ = t.progressBar.Stop()
