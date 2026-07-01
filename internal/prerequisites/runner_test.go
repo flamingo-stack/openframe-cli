@@ -71,6 +71,20 @@ func TestRun_WindowsNeverAutoInstalls(t *testing.T) {
 	assert.False(t, *state, "installer must NOT run on Windows")
 }
 
+func TestCheck_ReportsWithoutInstalling(t *testing.T) {
+	present, _ := prereq("docker", true, true, false)
+	missing, state := prereq("k3d", false, true, false)
+	r := Runner{OS: "linux"} // even where auto-install is supported, Check must not install
+	res := r.Check(Set{Items: []Prerequisite{present, missing}})
+
+	assert.Equal(t, []string{"docker"}, res.Satisfied)
+	require.Len(t, res.Missing, 1)
+	assert.Equal(t, "k3d", res.Missing[0].Name)
+	assert.Equal(t, "https://docs/k3d", res.Missing[0].DocsURL)
+	assert.False(t, *state, "Check must never run the installer")
+	assert.False(t, res.OK())
+}
+
 func TestRun_MissingWithoutInstallerIsManual(t *testing.T) {
 	missing, _ := prereq("docker", false, false, false) // not installable
 	r := Runner{OS: "linux"}

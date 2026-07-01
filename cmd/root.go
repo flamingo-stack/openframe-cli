@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/cmd/app"
 	"github.com/flamingo-stack/openframe-cli/cmd/bootstrap"
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
+	"github.com/flamingo-stack/openframe-cli/cmd/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/spf13/cobra"
@@ -65,6 +66,7 @@ operation for automation and power users.`,
 	rootCmd.AddCommand(getClusterCmd())
 	rootCmd.AddCommand(getAppCmd())
 	rootCmd.AddCommand(getBootstrapCmd())
+	rootCmd.AddCommand(getPrerequisitesCmd())
 
 	// Add global flags following cluster pattern
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
@@ -133,4 +135,9 @@ func getAppCmd() *cobra.Command {
 // getBootstrapCmd returns the bootstrap command
 func getBootstrapCmd() *cobra.Command {
 	return bootstrap.GetBootstrapCmd()
+}
+
+// getPrerequisitesCmd returns the prerequisites command
+func getPrerequisitesCmd() *cobra.Command {
+	return prerequisites.GetPrerequisitesCmd()
 }

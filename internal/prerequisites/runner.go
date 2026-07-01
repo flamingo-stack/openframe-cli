@@ -36,6 +36,20 @@ func (r Runner) AutoInstalls() bool {
 	}
 }
 
+// Check reports which prerequisites are satisfied WITHOUT installing anything.
+// Use it for `prerequisites check`; use Run to actually install.
+func (r Runner) Check(set Set) Result {
+	var res Result
+	for _, item := range set.Items {
+		if satisfied(item) {
+			res.Satisfied = append(res.Satisfied, item.Name)
+		} else {
+			res.Missing = append(res.Missing, MissingItem{Name: item.Name, DocsURL: item.DocsURL})
+		}
+	}
+	return res
+}
+
 // Run checks every prerequisite in the set and, on supported OSes, installs the
 // missing ones. It never returns an error itself — inspect Result.OK() /
 // Result.Missing to decide whether to proceed.
