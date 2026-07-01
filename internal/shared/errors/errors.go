@@ -147,6 +147,10 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 			// Show only the essential error message
 			pterm.Printf("  Error: %s\n", errorMsg)
 		}
+		// Add a plain-language next step for common failures (req 30).
+		if hint := friendlyHint(err); hint != "" {
+			pterm.Info.Printf("💡 %s\n", hint)
+		}
 	}
 }
 
