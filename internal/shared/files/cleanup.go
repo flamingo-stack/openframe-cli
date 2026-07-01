@@ -170,7 +170,7 @@ func (fc *FileCleanup) restoreFile(backup FileBackup, verbose bool) error {
 	if backup.FileExisted {
 		if backup.ContentOnly {
 			// Restore from memory
-			if err := os.WriteFile(backup.OriginalPath, backup.OriginalContent, 0644); err != nil {
+			if err := os.WriteFile(backup.OriginalPath, backup.OriginalContent, 0600); err != nil {
 				return fmt.Errorf("failed to restore file from memory: %w", err)
 			}
 		} else {
@@ -238,7 +238,7 @@ func (fc *FileCleanup) copyFile(src, dst string) error {
 	defer sourceFile.Close()
 
 	// Create destination directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 		return err
 	}
 

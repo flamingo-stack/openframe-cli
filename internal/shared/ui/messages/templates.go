@@ -48,7 +48,7 @@ func NewTemplates() *Templates {
 				"waiting":            "⏳ Waiting for %s",
 				"next_steps":         "🚀 Next Steps:",
 			},
-			SuccessMessage: {
+			SuccessMessage: { // #nosec G101 -- UI message templates, not credentials
 				"operation_complete":     "✅ %s completed successfully!",
 				"installation_complete":  "✅ %s installation completed successfully!",
 				"step_complete":          "✅ %s completed (%s)",

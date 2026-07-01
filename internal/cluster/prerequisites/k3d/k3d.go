@@ -281,14 +281,14 @@ func (k *K3dInstaller) createK3dWrapper() error {
 
 	// Create a batch file wrapper that calls k3d in WSL2
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	_ = os.MkdirAll(wrapperDir, 0755)
+	_ = os.MkdirAll(wrapperDir, 0750)
 
 	wrapperPath := wrapperDir + "\\k3d.bat"
 	wrapperContent := `@echo off
 wsl -d Ubuntu k3d %*
 `
 
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil {
+	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 -- wrapper script must be executable
 		return fmt.Errorf("failed to create k3d wrapper: %w", err)
 	}
 
@@ -314,7 +314,7 @@ if ($currentPath -notlike "*$binDir*") {
 	currentPath := os.Getenv("PATH")
 	if !containsPath(currentPath, wrapperDir) {
 		newPath := currentPath + ";" + wrapperDir
-		os.Setenv("PATH", newPath)
+		_ = os.Setenv("PATH", newPath)
 		fmt.Printf("Updated current process PATH to include: %s\n", wrapperDir)
 	}
 

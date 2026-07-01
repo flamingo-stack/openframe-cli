@@ -36,7 +36,7 @@ func (s *SystemService) Initialize() error {
 
 // setupLogDirectory creates the logging directory structure
 func (s *SystemService) setupLogDirectory() error {
-	if err := os.MkdirAll(s.logDir, 0755); err != nil {
+	if err := os.MkdirAll(s.logDir, 0750); err != nil {
 		return fmt.Errorf("failed to setup log directory %s: %w", s.logDir, err)
 	}
 	return nil

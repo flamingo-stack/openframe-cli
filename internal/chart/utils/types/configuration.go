@@ -79,7 +79,7 @@ type IngressConfig struct {
 }
 
 // NgrokRegistrationURLs contains the URLs for Ngrok registration and documentation
-var NgrokRegistrationURLs = struct {
+var NgrokRegistrationURLs = struct { // #nosec G101 -- public ngrok documentation URLs, not credentials
 	SignUp        string
 	Dashboard     string
 	APIKeyDocs    string

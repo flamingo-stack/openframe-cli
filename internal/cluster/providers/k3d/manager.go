@@ -542,7 +542,7 @@ ports:
 	defer tmpFile.Close()
 
 	if _, err := tmpFile.WriteString(configContent); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", err
 	}
 
@@ -658,7 +658,7 @@ func (m *K3dManager) isPortAvailable(port int) bool {
 		return true
 	}
 	// Connection succeeded means something is listening
-	conn.Close()
+	_ = conn.Close()
 	return false
 }
 
@@ -1097,7 +1097,7 @@ func (m *K3dManager) waitForTCPPort(ctx context.Context, host string, port strin
 		dialer := net.Dialer{Timeout: 2 * time.Second}
 		conn, err := dialer.DialContext(ctx, "tcp", address)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			if m.verbose {
 				fmt.Printf("✓ TCP port %s is open\n", address)
 			}

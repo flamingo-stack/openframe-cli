@@ -142,7 +142,7 @@ func (h *HelmManager) getHelmEnv() map[string]string {
 	// On Windows, the directories are created inside WSL by the wrapper script
 	if runtime.GOOS != "windows" {
 		for _, dir := range helmDirs {
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, 0750); err != nil {
 				pterm.Debug.Printf("failed to pre-create helm dir %s: %v\n", dir, err)
 			}
 		}
@@ -223,7 +223,7 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
 	valuesFilePath := tmpFile.Name()
@@ -447,7 +447,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
 	valuesFilePath := tmpFile.Name()
@@ -1393,7 +1393,7 @@ func (h *HelmManager) waitForAPIPort(ctx context.Context, timeout time.Duration)
 	return wait.PollUntilContextTimeout(ctx, 1*time.Second, timeout, false, func(ctx context.Context) (bool, error) {
 		conn, err := dialer.DialContext(ctx, "tcp", apiAddress)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			pterm.Success.Printf("API port %s is open\n", apiAddress)
 			return true, nil // Port is open!
 		}

@@ -246,7 +246,7 @@ sudo chmod +x /usr/local/bin/helm-wrapper.sh
 
 	// Create a batch file wrapper that calls the helper script
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	_ = os.MkdirAll(wrapperDir, 0755)
+	_ = os.MkdirAll(wrapperDir, 0750)
 
 	wrapperPath := wrapperDir + "\\helm.bat"
 
@@ -255,7 +255,7 @@ sudo chmod +x /usr/local/bin/helm-wrapper.sh
 wsl -d Ubuntu /usr/local/bin/helm-wrapper.sh %*
 `
 
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil {
+	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 -- wrapper script must be executable
 		return fmt.Errorf("failed to create helm wrapper: %w", err)
 	}
 
@@ -281,7 +281,7 @@ if ($currentPath -notlike "*$binDir*") {
 	currentPath := os.Getenv("PATH")
 	if !containsPath(currentPath, wrapperDir) {
 		newPath := currentPath + ";" + wrapperDir
-		os.Setenv("PATH", newPath)
+		_ = os.Setenv("PATH", newPath)
 		fmt.Printf("Updated current process PATH to include: %s\n", wrapperDir)
 	}
 

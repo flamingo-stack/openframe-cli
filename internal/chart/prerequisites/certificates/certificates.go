@@ -126,7 +126,7 @@ func (c *CertificateInstaller) installMkcertLinux() error {
 	}
 
 	binDir := filepath.Join(homeDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return fmt.Errorf("failed to create bin directory: %w", err)
 	}
 
@@ -139,7 +139,7 @@ func (c *CertificateInstaller) installMkcertLinux() error {
 	}
 
 	// Make executable
-	if err := os.Chmod(mkcertPath, 0755); err != nil {
+	if err := os.Chmod(mkcertPath, 0755); err != nil { // #nosec G302 -- downloaded binary must be executable
 		return fmt.Errorf("failed to make mkcert executable: %w", err)
 	}
 
@@ -153,7 +153,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 	}
 
 	certDir := filepath.Join(homeDir, ".config", "openframe", "certs")
-	if err := os.MkdirAll(certDir, 0755); err != nil {
+	if err := os.MkdirAll(certDir, 0750); err != nil {
 		return fmt.Errorf("failed to create certificate directory: %w", err)
 	}
 

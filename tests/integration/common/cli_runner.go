@@ -36,7 +36,7 @@ func InitializeCLI() error {
 
 	// Ensure build directory exists
 	buildDir := filepath.Join(root, "build")
-	if err := os.MkdirAll(buildDir, 0755); err != nil {
+	if err := os.MkdirAll(buildDir, 0750); err != nil {
 		return fmt.Errorf("failed to create build directory: %w", err)
 	}
 
@@ -60,7 +60,7 @@ func InitializeCLI() error {
 // CleanupCLI removes the test CLI binary
 func CleanupCLI() {
 	if cliBinary != "" {
-		os.Remove(cliBinary)
+		_ = os.Remove(cliBinary)
 		cliBinary = ""
 	}
 }

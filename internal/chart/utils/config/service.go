@@ -57,7 +57,7 @@ func (s *Service) Initialize() error {
 	// Ensure certificate directory exists
 	certDir := s.GetCertificateDirectory()
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(certDir, 0755); err != nil {
+		if err := os.MkdirAll(certDir, 0750); err != nil {
 			return err
 		}
 	}
