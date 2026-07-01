@@ -7,7 +7,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/cmd/bootstrap"
 	"github.com/flamingo-stack/openframe-cli/cmd/chart"
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
-	"github.com/flamingo-stack/openframe-cli/cmd/dev"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/spf13/cobra"
@@ -36,7 +35,7 @@ func GetRootCmd(versionInfo VersionInfo) *cobra.Command {
 func buildRootCommand(versionInfo VersionInfo) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "openframe",
-		Short: "OpenFrame CLI - Kubernetes cluster bootstrapping and development tools",
+		Short: "OpenFrame CLI - Kubernetes cluster bootstrapping and chart deployment",
 		Long: `OpenFrame CLI - Interactive Kubernetes Platform Bootstrapper
 
 OpenFrame CLI replaces the shell scripts with a modern, interactive terminal UI
@@ -47,7 +46,6 @@ Key Features:
   - Interactive Wizard - Step-by-step guided setup
   - Cluster Management - K3d, Kind, and cloud provider support
   - Helm Integration - App-of-Apps pattern with ArgoCD
-  - Developer Tools - Telepresence intercepts and scaffold deployments
   - Prerequisite Checking - Validates tools before running
 
 The CLI provides both interactive modes for new users and flag-based
@@ -67,7 +65,6 @@ operation for automation and power users.`,
 	rootCmd.AddCommand(getClusterCmd())
 	rootCmd.AddCommand(getChartCmd())
 	rootCmd.AddCommand(getBootstrapCmd())
-	rootCmd.AddCommand(getDevCmd())
 
 	// Add global flags following cluster pattern
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
@@ -136,9 +133,4 @@ func getChartCmd() *cobra.Command {
 // getBootstrapCmd returns the bootstrap command
 func getBootstrapCmd() *cobra.Command {
 	return bootstrap.GetBootstrapCmd()
-}
-
-// getDevCmd returns the dev command
-func getDevCmd() *cobra.Command {
-	return dev.GetDevCmd()
 }
