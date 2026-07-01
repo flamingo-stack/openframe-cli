@@ -82,10 +82,9 @@ jobs:
       - name: Run unit tests
         run: make test-unit
 
-      - name: Run unit tests with race detector (informational)
-        # Linux only (race detector needs CGO/gcc). Informational: a pre-existing
-        # data race in pterm's spinner trips -race in the cluster package; this
-        # surfaces races without failing the pipeline.
+      - name: Run unit tests with race detector
+        # Linux only (race detector needs CGO/gcc). Now a blocking gate: the
+        # codebase is race-clean (the pterm spinner was replaced with a
+        # synchronized wrapper in internal/shared/ui/spinner).
         if: matrix.os == 'linux'
-        continue-on-error: true
         run: make test-race
