@@ -9,6 +9,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -20,7 +21,7 @@ import (
 // ClusterService provides cluster configuration and management operations
 // This handles cluster lifecycle operations and configuration management
 type ClusterService struct {
-	manager    *k3d.K3dManager
+	manager    provider.Provider
 	executor   executor.CommandExecutor
 	suppressUI bool // Suppress interactive UI elements for automation
 }
@@ -55,7 +56,7 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 }
 
 // NewClusterServiceWithOptions creates a cluster service with custom options
-func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager *k3d.K3dManager) *ClusterService {
+func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager provider.Provider) *ClusterService {
 	return &ClusterService{
 		manager:  manager,
 		executor: exec,

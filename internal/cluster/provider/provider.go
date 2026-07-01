@@ -38,6 +38,8 @@ type Provider interface {
 	StartCluster(ctx context.Context, name string, clusterType models.ClusterType) error
 	// ListClusters returns the clusters managed by this provider.
 	ListClusters(ctx context.Context) ([]models.ClusterInfo, error)
+	// ListAllClusters returns all clusters visible to this provider.
+	ListAllClusters(ctx context.Context) ([]models.ClusterInfo, error)
 	// GetClusterStatus returns detailed status for a single cluster.
 	GetClusterStatus(ctx context.Context, name string) (models.ClusterInfo, error)
 	// DetectClusterType reports what kind of cluster a given name is.
