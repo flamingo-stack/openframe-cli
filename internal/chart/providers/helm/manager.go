@@ -20,6 +20,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -290,9 +291,9 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
 func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config config.ChartInstallConfig) error {
 	// Show progress for each step only if not in silent/non-interactive mode
-	var spinner *pterm.SpinnerPrinter
+	var spinner *uispinner.Spinner
 	if !config.Silent && !config.NonInteractive {
-		spinner, _ = pterm.DefaultSpinner.Start("Installing ArgoCD...")
+		spinner = uispinner.Start("Installing ArgoCD...")
 	} else {
 		pterm.Info.Println("Installing ArgoCD...")
 	}
@@ -307,7 +308,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Ignore if already exists
 		if !strings.Contains(err.Error(), "already exists") {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			return fmt.Errorf("failed to add ArgoCD repository: %w", err)
 		}
@@ -321,7 +322,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	})
 	if err != nil {
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
@@ -359,7 +360,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			select {
 			case <-ctx.Done():
 				if spinner != nil {
-					_ = spinner.Stop()
+					spinner.Stop()
 				}
 				return ctx.Err()
 			case <-time.After(time.Duration(retryDelay) * time.Second):
@@ -370,7 +371,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 	if lastErr != nil {
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 		return fmt.Errorf("failed to connect to cluster after %d retries: %w", maxRetries, lastErr)
 	}
@@ -387,7 +388,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Verify clients are initialized (should be set in constructor)
 		if h.dynamicClient == nil {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			return fmt.Errorf("dynamic client not initialized; ensure HelmManager was created with valid rest.Config")
 		}
@@ -402,7 +403,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		for _, crdUrl := range crdUrls {
 			if err := h.applyManifestFromURL(ctx, crdUrl); err != nil {
 				if spinner != nil {
-					_ = spinner.Stop()
+					spinner.Stop()
 				}
 				return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
 			}
@@ -420,7 +421,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			}
 			if err := h.waitForArgoCDCRD(ctx, config.Verbose); err != nil {
 				if spinner != nil {
-					_ = spinner.Stop()
+					spinner.Stop()
 				}
 				return fmt.Errorf("failed waiting for ArgoCD CRDs to become available: %w", err)
 			}
@@ -433,7 +434,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
 	if err != nil {
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 		return fmt.Errorf("failed to create temporary values file: %w", err)
 	}
@@ -442,7 +443,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Write the ArgoCD values to the temporary file
 	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 		return fmt.Errorf("failed to write values to temporary file: %w", err)
 	}
@@ -454,7 +455,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		valuesFilePath, err = h.convertWindowsPathToWSL(tmpFile.Name())
 		if err != nil {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			return fmt.Errorf("failed to convert values file path for WSL: %w", err)
 		}
@@ -476,7 +477,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	if !config.DryRun {
 		if err := h.ensureArgoCDNamespace(ctx, config.ClusterName, config.Verbose); err != nil {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			return fmt.Errorf("failed to ensure argocd namespace exists: %w", err)
 		}
@@ -523,13 +524,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			return ctx.Err() // Return context cancellation directly without extra messaging
 		}
 
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 
 		// Show diagnostic information about ArgoCD pods
@@ -564,7 +565,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Verify the Helm release was actually created by checking helm list
 	if err := h.verifyHelmRelease(ctx, "argo-cd", "argocd", config.ClusterName, config.Verbose); err != nil {
 		if spinner != nil {
-			_ = spinner.Stop()
+			spinner.Stop()
 		}
 		return fmt.Errorf("ArgoCD Helm install completed but release verification failed: %w", err)
 	}
@@ -580,7 +581,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	if h.kubeClient != nil && runtime.GOOS != "windows" {
 		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			// Check if the error is due to context cancellation (CTRL-C)
 			if ctx.Err() == context.Canceled {
@@ -601,7 +602,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
 			if spinner != nil {
-				_ = spinner.Stop()
+				spinner.Stop()
 			}
 			if ctx.Err() == context.Canceled {
 				return ctx.Err()
@@ -613,7 +614,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	if spinner != nil {
-		_ = spinner.Stop()
+		spinner.Stop()
 	}
 
 	return nil

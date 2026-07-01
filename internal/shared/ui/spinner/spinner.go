@@ -45,6 +45,14 @@ type Spinner struct {
 	doneCh chan struct{}
 }
 
+// Start creates a spinner and immediately starts it with the given text — the
+// one-line equivalent of New() followed by Start().
+func Start(text string) *Spinner {
+	s := New()
+	s.Start(text)
+	return s
+}
+
 // New returns a Spinner that writes to stdout (animated only on a real terminal).
 func New() *Spinner {
 	s := NewWithWriter(os.Stdout)
