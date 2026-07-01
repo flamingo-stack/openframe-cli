@@ -14,6 +14,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -110,12 +111,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}
 
 	// Start pterm spinner only if not in silent/non-interactive mode
-	var spinner *pterm.SpinnerPrinter
+	var spinner *uispinner.Spinner
 	if !config.Silent {
-		spinner, _ = pterm.DefaultSpinner.
-			WithRemoveWhenDone(false).
-			WithShowTimer(true).
-			Start("Installing ArgoCD applications...")
+		spinner = uispinner.New().WithTimer()
+		spinner.Start("Installing ArgoCD applications...")
 	} else {
 		// In non-interactive mode, just show a simple info message
 		pterm.Info.Println("Installing ArgoCD applications...")
@@ -128,8 +127,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	stopSpinner := func() {
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
-		if !spinnerStopped && spinner != nil && spinner.IsActive {
-			_ = spinner.Stop()
+		if !spinnerStopped && spinner != nil {
+			spinner.Stop()
 			spinnerStopped = true
 		}
 	}
@@ -225,7 +224,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// Check timeout
 			if time.Since(startTime) > timeout {
 				spinnerMutex.Lock()
-				if !spinnerStopped && spinner != nil && spinner.IsActive {
+				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
 					spinnerStopped = true
 				}
@@ -405,7 +404,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 				// Update spinner message with current status
 				spinnerMutex.Lock()
-				if !spinnerStopped && spinner != nil && spinner.IsActive {
+				if !spinnerStopped && spinner != nil {
 					progress := ""
 					if totalApps > 0 {
 						progressPercent := float64(currentlyReady) / float64(totalApps) * 100
@@ -892,8 +891,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 				if consecutiveAllReady >= stabilizationChecks {
 					spinnerMutex.Lock()
-					if !spinnerStopped && spinner != nil && spinner.IsActive {
-						_ = spinner.Stop()
+					if !spinnerStopped && spinner != nil {
+						spinner.Stop()
 						spinnerStopped = true
 					}
 					spinnerMutex.Unlock()

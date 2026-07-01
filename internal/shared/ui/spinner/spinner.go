@@ -38,11 +38,20 @@ type Spinner struct {
 	interval time.Duration
 	frames   []string
 
-	mu     sync.Mutex
-	text   string
-	active bool
-	stopCh chan struct{}
-	doneCh chan struct{}
+	showTimer bool
+
+	mu        sync.Mutex
+	text      string
+	active    bool
+	startedAt time.Time
+	stopCh    chan struct{}
+	doneCh    chan struct{}
+}
+
+// WithTimer makes the spinner show elapsed time next to its text.
+func (s *Spinner) WithTimer() *Spinner {
+	s.showTimer = true
+	return s
 }
 
 // Start creates a spinner and immediately starts it with the given text — the
@@ -83,6 +92,7 @@ func (s *Spinner) Start(text string) {
 	}
 	s.text = text
 	s.active = true
+	s.startedAt = time.Now()
 	s.stopCh = make(chan struct{})
 	s.doneCh = make(chan struct{})
 	s.mu.Unlock()
@@ -126,9 +136,14 @@ func (s *Spinner) animate() {
 		case <-ticker.C:
 			s.mu.Lock()
 			text := s.text
+			started := s.startedAt
 			s.mu.Unlock()
 			if s.isTTY {
-				fmt.Fprintf(s.out, "\r%s %s ", s.frames[i%len(s.frames)], text)
+				if s.showTimer {
+					fmt.Fprintf(s.out, "\r%s %s (%s) ", s.frames[i%len(s.frames)], text, time.Since(started).Round(time.Second))
+				} else {
+					fmt.Fprintf(s.out, "\r%s %s ", s.frames[i%len(s.frames)], text)
+				}
 			}
 		}
 	}
