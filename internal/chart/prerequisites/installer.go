@@ -12,6 +12,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/memory"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 )
 
@@ -55,19 +56,20 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 		}
 
 		// Create a spinner for the installation process
-		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
+		sp := spinner.New()
+		sp.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
 
 		if err := i.installToolNonInteractive(tool, nonInteractive); err != nil {
 			// In non-interactive mode, log error but continue with next tool
 			if nonInteractive {
-				spinner.Warning(fmt.Sprintf("Skipped %s: %v", tool, err))
+				sp.Warning(fmt.Sprintf("Skipped %s: %v", tool, err))
 				continue
 			}
-			spinner.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
+			sp.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
 			return fmt.Errorf("failed to install %s: %w", tool, err)
 		}
 
-		spinner.Success(fmt.Sprintf("%s installed successfully", tool))
+		sp.Success(fmt.Sprintf("%s installed successfully", tool))
 	}
 
 	// Verify all tools are now installed
@@ -232,16 +234,17 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 // This should be used for the install command only
 func (i *Installer) RegenerateCertificatesOnly() error {
 	certInstaller := certificates.NewCertificateInstaller()
-	spinner, _ := pterm.DefaultSpinner.Start("Refreshing certificates...")
+	sp := spinner.New()
+	sp.Start("Refreshing certificates...")
 	if err := certInstaller.ForceRegenerate(); err != nil {
 		if strings.Contains(err.Error(), "user cancelled") {
-			spinner.Warning("Certificate trust skipped (deployment would be unsecure)")
+			sp.Warning("Certificate trust skipped (deployment would be unsecure)")
 		} else {
-			spinner.Warning(fmt.Sprintf("Could not refresh certificates: %v", err))
+			sp.Warning(fmt.Sprintf("Could not refresh certificates: %v", err))
 		}
 		// Non-fatal - continue anyway
 	} else {
-		spinner.Info("Certificates refreshed")
+		sp.Info("Certificates refreshed")
 	}
 
 	return nil

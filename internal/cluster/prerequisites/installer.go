@@ -13,6 +13,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 )
 
@@ -37,14 +38,15 @@ func (i *Installer) InstallMissingPrerequisites() error {
 
 	for idx, tool := range missing {
 		// Create a spinner for the installation process
-		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(missing), tool))
+		sp := spinner.New()
+		sp.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(missing), tool))
 
 		if err := i.installTool(tool); err != nil {
-			spinner.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
+			sp.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
 			return fmt.Errorf("failed to install %s: %w", tool, err)
 		}
 
-		spinner.Success(fmt.Sprintf("%s installed successfully", tool))
+		sp.Success(fmt.Sprintf("%s installed successfully", tool))
 	}
 
 	// Verify all tools are now installed
@@ -63,14 +65,15 @@ func (i *Installer) installSpecificTools(tools []string) error {
 
 	for idx, tool := range tools {
 		// Create a spinner for the installation process
-		spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
+		sp := spinner.New()
+		sp.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(tools), tool))
 
 		if err := i.installTool(tool); err != nil {
-			spinner.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
+			sp.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
 			return fmt.Errorf("failed to install %s: %w", tool, err)
 		}
 
-		spinner.Success(fmt.Sprintf("%s installed successfully", tool))
+		sp.Success(fmt.Sprintf("%s installed successfully", tool))
 	}
 
 	// Verify only the installed tools are actually installed (don't check Docker running state)
@@ -219,14 +222,15 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 				return nil
 			}
 
-			spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
+			sp := spinner.New()
+			sp.Start("Waiting for Docker to start...")
 			if err := docker.WaitForDocker(); err != nil {
-				spinner.Warning("Docker failed to start automatically")
+				sp.Warning("Docker failed to start automatically")
 				pterm.Info.Println("Please ensure Docker is running before cluster operations.")
 				// Don't exit in non-interactive mode
 				return nil
 			}
-			spinner.Success("Docker started successfully")
+			sp.Success("Docker started successfully")
 		} else {
 			// Interactive mode - prompt user
 			pterm.Warning.Println("Docker is not running.")
@@ -243,13 +247,14 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 					pterm.Info.Println("Please start Docker Desktop manually and try again.")
 					os.Exit(1)
 				}
-				spinner, _ := pterm.DefaultSpinner.Start("Waiting for Docker to start...")
+				sp := spinner.New()
+				sp.Start("Waiting for Docker to start...")
 				if err := docker.WaitForDocker(); err != nil {
-					spinner.Fail("Docker failed to start")
+					sp.Fail("Docker failed to start")
 					pterm.Info.Println("Please start Docker Desktop manually and try again.")
 					os.Exit(1)
 				}
-				spinner.Success("Docker started successfully")
+				sp.Success("Docker started successfully")
 			} else {
 				i.showDockerStartInstructions()
 				os.Exit(1)

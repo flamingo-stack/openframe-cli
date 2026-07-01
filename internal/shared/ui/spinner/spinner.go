@@ -25,6 +25,8 @@ const (
 	styleNone finalStyle = iota
 	styleSuccess
 	styleFail
+	styleWarning
+	styleInfo
 )
 
 var defaultFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -96,6 +98,12 @@ func (s *Spinner) Success(text string) { s.finish(text, styleSuccess) }
 // Fail stops the spinner and prints a styled failure line (pterm ERROR box).
 func (s *Spinner) Fail(text string) { s.finish(text, styleFail) }
 
+// Warning stops the spinner and prints a styled warning line (pterm WARNING box).
+func (s *Spinner) Warning(text string) { s.finish(text, styleWarning) }
+
+// Info stops the spinner and prints a styled info line (pterm INFO box).
+func (s *Spinner) Info(text string) { s.finish(text, styleInfo) }
+
 // animate is the single writer of frames; it reads text under the mutex and
 // exits promptly when signalled, closing doneCh so Stop can join.
 func (s *Spinner) animate() {
@@ -143,6 +151,10 @@ func (s *Spinner) finish(text string, style finalStyle) {
 		pterm.Success.WithWriter(s.out).Println(text)
 	case styleFail:
 		pterm.Error.WithWriter(s.out).Println(text)
+	case styleWarning:
+		pterm.Warning.WithWriter(s.out).Println(text)
+	case styleInfo:
+		pterm.Info.WithWriter(s.out).Println(text)
 	case styleNone:
 		if text != "" {
 			pterm.Info.WithWriter(s.out).Println(text)
