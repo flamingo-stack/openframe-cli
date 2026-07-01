@@ -9,11 +9,13 @@ import (
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
+
+// defaultClusterName is used when the user doesn't name the cluster.
+const defaultClusterName = "openframe-dev"
 
 // Service provides bootstrap functionality
 type Service struct{}
@@ -48,18 +50,8 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate deployment mode
-	if deploymentMode != "" {
-		validModes := []string{"oss-tenant", "saas-tenant", "saas-shared"}
-		isValid := false
-		for _, mode := range validModes {
-			if deploymentMode == mode {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			return fmt.Errorf("invalid deployment mode: %s. Valid options: oss-tenant, saas-tenant, saas-shared", deploymentMode)
-		}
+	if err := utilTypes.ValidateDeploymentMode(deploymentMode); err != nil {
+		return err
 	}
 
 	// Validate non-interactive requires deployment mode
@@ -91,8 +83,10 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	}
 
 	// Normalize cluster name (use default if empty)
-	config := s.buildClusterConfig(clusterName)
-	actualClusterName := config.Name
+	actualClusterName := clusterName
+	if actualClusterName == "" {
+		actualClusterName = defaultClusterName
+	}
 
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
 	kubeConfig, err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive)
@@ -117,20 +111,6 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Use the wrapper function that includes prerequisite checks
 	return cluster.CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, nonInteractive)
-}
-
-// buildClusterConfig builds a cluster configuration from the cluster name
-func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
-	if clusterName == "" {
-		clusterName = "openframe-dev" // default name
-	}
-
-	return models.ClusterConfig{
-		Name:       clusterName,
-		Type:       models.ClusterTypeK3d,
-		K8sVersion: "",
-		NodeCount:  4,
-	}
 }
 
 // installChartWithMode installs charts with deployment mode flags

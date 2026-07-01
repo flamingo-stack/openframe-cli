@@ -154,18 +154,8 @@ func extractInstallFlags(cmd *cobra.Command) (*InstallFlags, error) {
 	}
 
 	// Validate deployment mode
-	if flags.DeploymentMode != "" {
-		validModes := []string{"oss-tenant", "saas-tenant", "saas-shared"}
-		isValid := false
-		for _, mode := range validModes {
-			if flags.DeploymentMode == mode {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			return nil, fmt.Errorf("invalid deployment mode: %s. Valid options: oss-tenant, saas-tenant, saas-shared", flags.DeploymentMode)
-		}
+	if err := types.ValidateDeploymentMode(flags.DeploymentMode); err != nil {
+		return nil, err
 	}
 
 	// Validate non-interactive requires deployment mode

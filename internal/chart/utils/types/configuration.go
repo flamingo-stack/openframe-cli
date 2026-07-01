@@ -1,6 +1,28 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// ValidDeploymentModes are the accepted --deployment-mode flag values.
+var ValidDeploymentModes = []string{"oss-tenant", "saas-tenant", "saas-shared"}
+
+// ValidateDeploymentMode returns an error if mode is non-empty and not one of
+// the accepted deployment modes. An empty mode is allowed (interactive selection
+// or defaulting).
+func ValidateDeploymentMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	for _, m := range ValidDeploymentModes {
+		if mode == m {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid deployment mode: %s. Valid options: %s", mode, strings.Join(ValidDeploymentModes, ", "))
+}
 
 // DockerRegistryConfig holds Docker registry settings
 type DockerRegistryConfig struct {
