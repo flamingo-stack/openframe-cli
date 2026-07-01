@@ -14,6 +14,7 @@ import (
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
@@ -112,9 +113,10 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 	}
 
 	// Cluster doesn't exist, proceed with creation
-	var spinner *pterm.SpinnerPrinter
+	var sp *spinner.Spinner
 	if !s.suppressUI {
-		spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
+		sp = spinner.New()
+		sp.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
 	} else {
 		// In non-interactive mode, just show a simple info message
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
@@ -122,14 +124,14 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 
 	restConfig, err := s.manager.CreateCluster(ctx, config)
 	if err != nil {
-		if spinner != nil {
-			spinner.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
+		if sp != nil {
+			sp.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
 		}
 		return nil, err
 	}
 
-	if spinner != nil {
-		spinner.Success(fmt.Sprintf("Cluster '%s' created successfully", config.Name))
+	if sp != nil {
+		sp.Success(fmt.Sprintf("Cluster '%s' created successfully", config.Name))
 	} else {
 		pterm.Success.Printf("Cluster '%s' created successfully\n", config.Name)
 	}
@@ -150,23 +152,24 @@ func (s *ClusterService) DeleteCluster(name string, clusterType models.ClusterTy
 	ctx := context.Background()
 
 	// Show deletion progress
-	var spinner *pterm.SpinnerPrinter
+	var sp *spinner.Spinner
 	if !s.suppressUI {
-		spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
+		sp = spinner.New()
+		sp.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
 	} else {
 		pterm.Info.Printf("Deleting %s cluster '%s'...\n", clusterType, name)
 	}
 
 	err := s.manager.DeleteCluster(ctx, name, clusterType, force)
 	if err != nil {
-		if spinner != nil {
-			spinner.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
+		if sp != nil {
+			sp.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
 		}
 		return err
 	}
 
-	if spinner != nil {
-		spinner.Stop() // Stop spinner without message - UI layer will show success
+	if sp != nil {
+		sp.Stop() // Stop spinner without message - UI layer will show success
 	}
 
 	// Don't show summary here - let the UI layer handle it
