@@ -19,6 +19,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
+	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
@@ -48,6 +49,9 @@ type HelmManager struct {
 	// manifestHTTPClient fetches manifests (e.g. ArgoCD CRDs). Nil means the
 	// default 30s client; tests inject an httptest client. See httpClient().
 	manifestHTTPClient *http.Client
+	// manifestRetry is the retry policy for manifest fetches. Nil means the
+	// default (a few attempts with exponential backoff); tests inject a fast one.
+	manifestRetry sharedErrors.RetryPolicy
 }
 
 // httpClient returns the client used to fetch manifests, defaulting to a 30s
@@ -58,6 +62,25 @@ func (h *HelmManager) httpClient() *http.Client {
 	}
 	return &http.Client{Timeout: 30 * time.Second}
 }
+
+// manifestRetryPolicy returns the retry policy for manifest fetches, defaulting
+// to 3 attempts with exponential backoff when none is injected.
+func (h *HelmManager) manifestRetryPolicy() sharedErrors.RetryPolicy {
+	if h.manifestRetry != nil {
+		return h.manifestRetry
+	}
+	return sharedErrors.NewExponentialBackoffPolicy(3, 2*time.Second)
+}
+
+// retriableManifestError marks a manifest-fetch failure as transient (network
+// error or 5xx) so the retry policy will retry it. 4xx responses are returned
+// as plain errors and are not retried.
+type retriableManifestError struct{ err error }
+
+func (e retriableManifestError) Error() string              { return e.err.Error() }
+func (e retriableManifestError) Unwrap() error              { return e.err }
+func (retriableManifestError) IsRecoverable() bool          { return true }
+func (retriableManifestError) GetRetryAfter() time.Duration { return 0 }
 
 // NewHelmManager creates a new Helm manager with the given rest.Config
 // The config is used to create the Kubernetes client for native API operations
@@ -900,8 +923,33 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 	return h.applyManifestYAML(ctx, manifestBytes)
 }
 
-// fetchManifest downloads a manifest from url using the manager's HTTP client.
+// fetchManifest downloads a manifest from url, retrying transient failures
+// (network errors, timeouts, 5xx) with exponential backoff. A tight per-request
+// timeout that trips on a network blip — the failure the OSS-tenant e2e hit — is
+// now retried instead of aborting the whole install.
 func (h *HelmManager) fetchManifest(ctx context.Context, url string) ([]byte, error) {
+	var manifestBytes []byte
+	exec := sharedErrors.NewRetryExecutor(h.manifestRetryPolicy())
+	if h.verbose {
+		exec = exec.WithRetryCallback(sharedErrors.VerboseRetryCallback())
+	}
+	err := exec.Execute(ctx, func() error {
+		b, ferr := h.fetchManifestOnce(ctx, url)
+		if ferr != nil {
+			return ferr
+		}
+		manifestBytes = b
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return manifestBytes, nil
+}
+
+// fetchManifestOnce performs a single manifest download. Transient failures are
+// wrapped as retriableManifestError; 4xx responses are returned as-is.
+func (h *HelmManager) fetchManifestOnce(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -909,10 +957,13 @@ func (h *HelmManager) fetchManifest(ctx context.Context, url string) ([]byte, er
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manifest from %s: %w", url, err)
+		return nil, retriableManifestError{fmt.Errorf("failed to fetch manifest from %s: %w", url, err)}
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 500 {
+		return nil, retriableManifestError{fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)
 	}

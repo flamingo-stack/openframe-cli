@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -84,11 +86,76 @@ func TestFetchManifest_Timeout(t *testing.T) {
 
 	client := srv.Client()
 	client.Timeout = 50 * time.Millisecond
-	h := &HelmManager{manifestHTTPClient: client}
+	// Single fast attempt so the test does not wait on retry backoff.
+	h := &HelmManager{manifestHTTPClient: client, manifestRetry: sharedErrors.NewExponentialBackoffPolicy(1, time.Millisecond)}
 
 	_, err := h.fetchManifest(context.Background(), srv.URL)
 	if err == nil || !strings.Contains(err.Error(), "failed to fetch manifest") {
 		t.Fatalf("expected a fetch timeout error, got %v", err)
+	}
+}
+
+// fastRetry is a quick policy (a few attempts, ~no delay) for deterministic
+// retry tests.
+func fastRetry(attempts int) sharedErrors.RetryPolicy {
+	return sharedErrors.NewExponentialBackoffPolicy(attempts, time.Millisecond)
+}
+
+func TestFetchManifest_RetriesTransientThenSucceeds(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&hits, 1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable) // 503 → transient, retried
+			return
+		}
+		_, _ = w.Write([]byte("ok: true\n"))
+	}))
+	defer srv.Close()
+
+	h := &HelmManager{manifestHTTPClient: srv.Client(), manifestRetry: fastRetry(3)}
+	got, err := h.fetchManifest(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("expected success after retries, got %v", err)
+	}
+	if string(got) != "ok: true\n" {
+		t.Fatalf("body = %q", got)
+	}
+	if n := atomic.LoadInt32(&hits); n != 3 {
+		t.Fatalf("expected 3 attempts (2 fail + 1 ok), got %d", n)
+	}
+}
+
+func TestFetchManifest_DoesNotRetry404(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusNotFound) // 4xx → not retried
+	}))
+	defer srv.Close()
+
+	h := &HelmManager{manifestHTTPClient: srv.Client(), manifestRetry: fastRetry(3)}
+	if _, err := h.fetchManifest(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected a 404 error")
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Fatalf("404 must not be retried; expected 1 attempt, got %d", n)
+	}
+}
+
+func TestFetchManifest_ExhaustsRetries(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusBadGateway) // 502 → transient every time
+	}))
+	defer srv.Close()
+
+	h := &HelmManager{manifestHTTPClient: srv.Client(), manifestRetry: fastRetry(3)}
+	if _, err := h.fetchManifest(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected an error after exhausting retries")
+	}
+	if n := atomic.LoadInt32(&hits); n != 3 {
+		t.Fatalf("expected 3 attempts, got %d", n)
 	}
 }
 
