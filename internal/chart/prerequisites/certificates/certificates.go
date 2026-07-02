@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/pterm/pterm"
 )
 
@@ -44,16 +45,7 @@ func areCertificatesGenerated() bool {
 }
 
 func certificateInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "Certificates: mkcert will be installed via Homebrew and certificates generated automatically"
-	case "linux":
-		return "Certificates: mkcert will be downloaded and certificates generated automatically"
-	case "windows":
-		return "Certificates: Please install mkcert manually from https://github.com/FiloSottile/mkcert and run 'mkcert localhost 127.0.0.1'"
-	default:
-		return "Certificates: Please install mkcert from https://github.com/FiloSottile/mkcert"
-	}
+	return platform.InstallHint("certificates")
 }
 
 func NewCertificateInstaller() *CertificateInstaller {

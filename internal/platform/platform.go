@@ -90,6 +90,12 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "helm: Download from https://helm.sh/docs/intro/install/",
 		Default: "helm: Please install helm from https://helm.sh/docs/intro/install/",
 	},
+	"certificates": {
+		Darwin:  "Certificates: mkcert will be installed via Homebrew and certificates generated automatically",
+		Linux:   "Certificates: mkcert will be downloaded and certificates generated automatically",
+		Windows: "Certificates: Please install mkcert manually from https://github.com/FiloSottile/mkcert and run 'mkcert localhost 127.0.0.1'",
+		Default: "Certificates: Please install mkcert from https://github.com/FiloSottile/mkcert",
+	},
 }
 
 // InstallHint returns installation guidance for the named tool on the current
