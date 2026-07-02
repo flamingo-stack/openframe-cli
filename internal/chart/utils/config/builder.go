@@ -49,7 +49,7 @@ func (b *Builder) getBranchForDeploymentMode(helmValuesPath string, deploymentMo
 	}
 
 	// Read the YAML file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		return ""
 	}
@@ -92,7 +92,7 @@ func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
 	}
 
 	// Read the YAML file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		// If we can't read the file, return empty string (will use default)
 		return ""

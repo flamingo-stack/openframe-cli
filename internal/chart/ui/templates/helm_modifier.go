@@ -24,7 +24,7 @@ func (h *HelmValuesModifier) LoadExistingValues(helmValuesPath string) (map[stri
 	}
 
 	// Read file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		return nil, fmt.Errorf("failed to read helm values file: %w", err)
 	}

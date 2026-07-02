@@ -246,7 +246,7 @@ sudo chmod +x /usr/local/bin/helm-wrapper.sh
 
 	// Create a batch file wrapper that calls the helper script
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	_ = os.MkdirAll(wrapperDir, 0750)
+	_ = os.MkdirAll(wrapperDir, 0750) // #nosec G703 -- wrapper dir path from USERPROFILE env + constant name, runs as invoking user
 
 	wrapperPath := wrapperDir + "\\helm.bat"
 
@@ -255,7 +255,7 @@ sudo chmod +x /usr/local/bin/helm-wrapper.sh
 wsl -d Ubuntu /usr/local/bin/helm-wrapper.sh %*
 `
 
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 -- wrapper script must be executable
+	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 G703 -- wrapper path from USERPROFILE env + constant name; script must be executable
 		return fmt.Errorf("failed to create helm wrapper: %w", err)
 	}
 

@@ -517,14 +517,15 @@ func (d *DockerInstaller) createDockerWrapper() error {
 
 	// Create a batch file wrapper that calls docker in WSL2
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	_ = os.MkdirAll(wrapperDir, 0750) // failure is surfaced by the wrapper WriteFile below
+	// #nosec G703 -- wrapper dir path from USERPROFILE env + constant name, runs as invoking user; failure is surfaced by the wrapper WriteFile below
+	_ = os.MkdirAll(wrapperDir, 0750)
 
 	wrapperPath := wrapperDir + "\\docker.bat"
 	wrapperContent := `@echo off
 wsl -d Ubuntu docker %*
 `
 
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 -- wrapper script must be executable
+	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 G703 -- wrapper path from USERPROFILE env + constant name; script must be executable
 		return fmt.Errorf("failed to create docker wrapper: %w", err)
 	}
 

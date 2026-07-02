@@ -281,14 +281,14 @@ func (k *K3dInstaller) createK3dWrapper() error {
 
 	// Create a batch file wrapper that calls k3d in WSL2
 	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	_ = os.MkdirAll(wrapperDir, 0750)
+	_ = os.MkdirAll(wrapperDir, 0750) // #nosec G703 -- wrapper dir path from USERPROFILE env + constant name, runs as invoking user
 
 	wrapperPath := wrapperDir + "\\k3d.bat"
 	wrapperContent := `@echo off
 wsl -d Ubuntu k3d %*
 `
 
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 -- wrapper script must be executable
+	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil { // #nosec G306 G703 -- wrapper path from USERPROFILE env + constant name; script must be executable
 		return fmt.Errorf("failed to create k3d wrapper: %w", err)
 	}
 

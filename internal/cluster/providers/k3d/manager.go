@@ -104,7 +104,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	defer os.Remove(configFile)
 
 	if m.verbose {
-		if configContent, err := os.ReadFile(configFile); err == nil {
+		if configContent, err := os.ReadFile(configFile); err == nil { // #nosec G304 -- reads a temp config file this process just created
 			fmt.Printf("DEBUG: Config file content for %s:\n%s\n", config.Name, string(configContent))
 		}
 	}

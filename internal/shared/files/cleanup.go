@@ -57,7 +57,7 @@ func (fc *FileCleanup) BackupFile(filePath string, useMemoryOnly bool) error {
 
 		if useMemoryOnly {
 			// Store content in memory
-			content, err := os.ReadFile(filePath)
+			content, err := os.ReadFile(filePath) // #nosec G304 -- backs up a program-tracked file, read as invoking user
 			if err != nil {
 				return fmt.Errorf("failed to read file for backup: %w", err)
 			}
@@ -231,7 +231,7 @@ func (fc *FileCleanup) SetCleanupOnSuccessOnly(enabled bool) {
 
 // copyFile copies a file from src to dst
 func (fc *FileCleanup) copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
+	sourceFile, err := os.Open(src) // #nosec G304 -- copies a program-tracked backup file
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func (fc *FileCleanup) copyFile(src, dst string) error {
 		return err
 	}
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.Create(dst) // #nosec G304 -- restores to a program-tracked backup path
 	if err != nil {
 		return err
 	}
