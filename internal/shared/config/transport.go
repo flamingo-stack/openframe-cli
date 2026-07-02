@@ -1,6 +1,10 @@
 package config
 
 import (
+	"net"
+	"net/url"
+	"strings"
+
 	"k8s.io/client-go/rest"
 )
 
@@ -18,6 +22,14 @@ import (
 func ApplyInsecureTLSConfig(config *rest.Config) *rest.Config {
 	if config == nil {
 		return nil
+	}
+
+	// Only bypass TLS verification for LOCAL clusters (k3d/kind on the
+	// loopback/host interface). For any other server — a cluster reached via
+	// --context, a remote/production cluster — honor the kubeconfig's TLS
+	// settings instead of silently disabling verification.
+	if !isLocalAPIServer(config.Host) {
+		return config
 	}
 
 	// 1. Force TLS bypass - this tells client-go to skip server certificate verification
@@ -41,6 +53,32 @@ func ApplyInsecureTLSConfig(config *rest.Config) *rest.Config {
 	// These are used by client-go to authenticate to the API server
 
 	return config
+}
+
+// isLocalAPIServer reports whether serverURL points at a cluster running on
+// this host — loopback (127.0.0.0/8, ::1), the unspecified address 0.0.0.0
+// (used by k3d), localhost, host.docker.internal, or a *.local name. Anything
+// else (a real hostname or routable IP) is treated as remote.
+func isLocalAPIServer(serverURL string) bool {
+	host := serverURL
+	if u, err := url.Parse(serverURL); err == nil && u.Host != "" {
+		host = u.Hostname()
+	} else if h, _, err := net.SplitHostPort(serverURL); err == nil {
+		host = h
+	}
+	host = strings.ToLower(host)
+
+	switch host {
+	case "localhost", "0.0.0.0", "host.docker.internal", "::1":
+		return true
+	}
+	if strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
 }
 
 // ApplyInsecureTransport is an alias for ApplyInsecureTLSConfig for backward compatibility.
