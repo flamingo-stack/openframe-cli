@@ -23,7 +23,8 @@ sync/health, summarizes overall readiness, and prints how to sign in.
 Examples:
   openframe app status
   openframe app status --context k3d-openframe-dev`,
-		RunE: runStatusCommand,
+		RunE:        runStatusCommand,
+		Annotations: map[string]string{"readonly": "true"},
 	}
 	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
 	addOutputFlag(cmd)

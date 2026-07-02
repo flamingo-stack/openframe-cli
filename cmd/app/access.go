@@ -25,7 +25,8 @@ password, and the command to open the ArgoCD UI locally.
 Examples:
   openframe app access
   openframe app access --context k3d-openframe-dev`,
-		RunE: runAccessCommand,
+		RunE:        runAccessCommand,
+		Annotations: map[string]string{"readonly": "true"},
 	}
 	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
 	addOutputFlag(cmd)

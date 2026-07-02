@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/spf13/cobra"
+)
 
 func TestStatusCommand_Wiring(t *testing.T) {
 	cmd := getStatusCmd()
@@ -43,6 +47,26 @@ func TestUninstallCommand_Wiring(t *testing.T) {
 	}
 	if yes := cmd.Flags().Lookup("yes"); yes == nil || yes.Shorthand != "y" {
 		t.Error("--yes should have the -y shorthand")
+	}
+}
+
+func TestReadOnlyCommandsSkipPrereqGate(t *testing.T) {
+	// status and access must be annotated read-only so PersistentPreRunE skips
+	// the interactive prerequisite install gate (which could hang a script).
+	for name, mk := range map[string]func() *cobra.Command{"status": getStatusCmd, "access": getAccessCmd} {
+		if mk().Annotations["readonly"] != "true" {
+			t.Errorf("%s command must be annotated readonly=true", name)
+		}
+	}
+	// install is NOT read-only (it needs helm/kubectl).
+	if getInstallCmd().Annotations["readonly"] == "true" {
+		t.Error("install must not be marked read-only")
+	}
+}
+
+func TestInstallCommandHasContextFlag(t *testing.T) {
+	if getInstallCmd().Flags().Lookup("context") == nil {
+		t.Fatal("install is missing the --context flag")
 	}
 }
 

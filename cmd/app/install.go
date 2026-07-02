@@ -74,11 +74,21 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
 	}
 
+	// Explicit --context targets a specific cluster directly (scriptable, skips
+	// interactive selection). Its rest.Config is resolved here at the command layer.
+	if contextName, _ := cmd.Flags().GetString("context"); contextName != "" {
+		cfg, cerr := k8s.RestConfigForContext(k8s.DefaultKubeconfigPath(), contextName)
+		if cerr != nil {
+			return sharedErrors.HandleGlobalError(fmt.Errorf("could not use context %q: %w", contextName, cerr), verbose)
+		}
+		req.KubeConfig = cfg
+	}
+
 	// Bare interactive install (`openframe app install`, no cluster name): let the
 	// user pick a kube-context and validate the cluster is reachable/ready before
 	// installing (req 16/27). Every other invocation keeps its existing behavior:
-	// a named cluster, --non-interactive, or --dry-run all skip this.
-	if !flags.NonInteractive && !flags.DryRun && len(args) == 0 {
+	// a named cluster, --non-interactive, --dry-run, or --context all skip this.
+	if req.KubeConfig == nil && !flags.NonInteractive && !flags.DryRun && len(args) == 0 {
 		sel := target.NewSelector(target.UIPrompter{}, recommendedRequirements())
 		res, serr := sel.Select(cmd.Context())
 		if serr != nil {
@@ -198,4 +208,5 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
 	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
+	cmd.Flags().String("context", "", "Kube-context to install into (skips interactive selection)")
 }

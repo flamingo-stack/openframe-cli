@@ -34,6 +34,13 @@ Examples:
 			if cmd.Use != "app" {
 				ui.ShowLogoWithContext(cmd.Context())
 			}
+			// Read-only commands (status, access) talk to an existing cluster via
+			// client-go and never install local tooling, so they skip the
+			// interactive prerequisite gate — which could otherwise prompt to
+			// install helm/k3d and hang a script.
+			if cmd.Annotations["readonly"] == "true" {
+				return nil
+			}
 			return prerequisites.NewInstaller().CheckAndInstall()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
