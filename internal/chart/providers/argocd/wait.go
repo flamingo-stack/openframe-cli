@@ -540,14 +540,20 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 								for _, app := range stuckApps {
 									pterm.Info.Printf("\n--- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
 
-									// Get namespace using explicit context
-									nsArgs := m.getKubectlArgs("-n", "argocd", "get", "app", app.Name, "-o", "jsonpath={.spec.destination.namespace}")
+									// Get namespace using explicit context.
+									// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
+									nsArgs := m.getKubectlArgs("-n", "argocd", "get", "app", app.Name, "-o", "json")
 									nsResult, err := m.executor.Execute(localCtx, "kubectl", nsArgs...)
 									if err != nil || nsResult == nil || nsResult.Stdout == "" {
 										pterm.Warning.Printf("Could not get namespace for %s\n", app.Name)
 										continue
 									}
-									ns := strings.TrimSpace(nsResult.Stdout)
+									var nsApp argoApp
+									if err := json.Unmarshal([]byte(nsResult.Stdout), &nsApp); err != nil || nsApp.Spec.Destination.Namespace == "" {
+										pterm.Warning.Printf("Could not get namespace for %s\n", app.Name)
+										continue
+									}
+									ns := nsApp.Spec.Destination.Namespace
 
 									// Get all pods as JSON to avoid Windows WSL escaping issues with jsonpath
 									allPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", "json")

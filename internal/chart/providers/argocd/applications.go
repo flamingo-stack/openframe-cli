@@ -263,6 +263,9 @@ type argoApp struct {
 			Path           string `json:"path"`
 			TargetRevision string `json:"targetRevision"`
 		} `json:"source"`
+		Destination struct {
+			Namespace string `json:"namespace"`
+		} `json:"destination"`
 	} `json:"spec"`
 }
 
@@ -397,17 +400,26 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 // getTotalExpectedApplicationsViaKubectl is the fallback method using kubectl commands
 func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, config config.ChartInstallConfig) int {
-	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl
+	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl.
+	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
 	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "jsonpath={.status.resources[?(@.kind=='Application')].name}")...)
+		"-o", "json")...)
 
 	if err == nil && manifestResult.Stdout != "" {
-		resources := strings.Fields(manifestResult.Stdout)
-		if len(resources) > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via kubectl)\n", len(resources))
+		var appOfApps argoApp
+		if err := json.Unmarshal([]byte(manifestResult.Stdout), &appOfApps); err == nil {
+			planned := 0
+			for _, res := range appOfApps.Status.Resources {
+				if res.Kind == "Application" {
+					planned++
+				}
 			}
-			return len(resources)
+			if planned > 0 {
+				if config.Verbose {
+					pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via kubectl)\n", planned)
+				}
+				return planned
+			}
 		}
 	}
 

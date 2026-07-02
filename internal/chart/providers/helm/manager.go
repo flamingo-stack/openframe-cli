@@ -1207,17 +1207,21 @@ func (h *HelmManager) ensureArgoCDNamespaceKubectl(ctx context.Context, clusterN
 		default:
 		}
 
-		statusArgs := append(baseArgs, "get", "namespace", namespace, "-o", "jsonpath={.status.phase}")
+		// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
+		statusArgs := append(baseArgs, "get", "namespace", namespace, "-o", "json")
 		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 			Command: "kubectl",
 			Args:    statusArgs,
 		})
 
-		if err == nil && result != nil && strings.TrimSpace(result.Stdout) == "Active" {
-			if verbose {
-				pterm.Success.Println("Namespace argocd is Active")
+		if err == nil && result != nil && result.Stdout != "" {
+			var ns corev1.Namespace
+			if jerr := json.Unmarshal([]byte(result.Stdout), &ns); jerr == nil && ns.Status.Phase == corev1.NamespaceActive {
+				if verbose {
+					pterm.Success.Println("Namespace argocd is Active")
+				}
+				return nil
 			}
-			return nil
 		}
 
 		time.Sleep(500 * time.Millisecond)
