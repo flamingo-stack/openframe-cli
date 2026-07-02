@@ -30,7 +30,7 @@ Examples:
 		RunE: runUninstallCommand,
 	}
 	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
-	cmd.Flags().Bool("yes", false, "Skip the confirmation prompt (for automation)")
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt (for automation)")
 	cmd.Flags().Bool("delete-namespace", false, "Also delete the argocd namespace")
 	return cmd
 }

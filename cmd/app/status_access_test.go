@@ -41,6 +41,9 @@ func TestUninstallCommand_Wiring(t *testing.T) {
 			t.Errorf("uninstall command is missing the --%s flag", f)
 		}
 	}
+	if yes := cmd.Flags().Lookup("yes"); yes == nil || yes.Shorthand != "y" {
+		t.Error("--yes should have the -y shorthand")
+	}
 }
 
 func TestAppCommand_RegistersStatusAndAccess(t *testing.T) {
