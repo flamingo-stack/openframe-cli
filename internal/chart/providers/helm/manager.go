@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,68 +17,27 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
-	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/yaml"
 )
 
 // HelmManager handles Helm operations
 type HelmManager struct {
 	executor      executor.CommandExecutor
-	kubeConfig    *rest.Config                  // Stores the cluster connection config
-	dynamicClient dynamic.Interface             // Dynamic client for programmatic resource management
-	kubeClient    kubernetes.Interface          // Typed client for Deployment checks
-	crdClient     apiextensionsclient.Interface // CRD client for checking CRD existence
-	verbose       bool                          // Enable verbose logging
-
-	// manifestHTTPClient fetches manifests (e.g. ArgoCD CRDs). Nil means the
-	// default 30s client; tests inject an httptest client. See httpClient().
-	manifestHTTPClient *http.Client
-	// manifestRetry is the retry policy for manifest fetches. Nil means the
-	// default (a few attempts with exponential backoff); tests inject a fast one.
-	manifestRetry sharedErrors.RetryPolicy
+	kubeConfig    *rest.Config         // Stores the cluster connection config
+	dynamicClient dynamic.Interface    // Dynamic client for programmatic resource management
+	kubeClient    kubernetes.Interface // Typed client for Deployment checks
+	verbose       bool                 // Enable verbose logging
 }
-
-// httpClient returns the client used to fetch manifests, defaulting to a 30s
-// client when none is injected.
-func (h *HelmManager) httpClient() *http.Client {
-	if h.manifestHTTPClient != nil {
-		return h.manifestHTTPClient
-	}
-	return &http.Client{Timeout: 30 * time.Second}
-}
-
-// manifestRetryPolicy returns the retry policy for manifest fetches, defaulting
-// to 3 attempts with exponential backoff when none is injected.
-func (h *HelmManager) manifestRetryPolicy() sharedErrors.RetryPolicy {
-	if h.manifestRetry != nil {
-		return h.manifestRetry
-	}
-	return sharedErrors.NewExponentialBackoffPolicy(3, 2*time.Second)
-}
-
-// retriableManifestError marks a manifest-fetch failure as transient (network
-// error or 5xx) so the retry policy will retry it. 4xx responses are returned
-// as plain errors and are not retried.
-type retriableManifestError struct{ err error }
-
-func (e retriableManifestError) Error() string              { return e.err.Error() }
-func (e retriableManifestError) Unwrap() error              { return e.err }
-func (retriableManifestError) IsRecoverable() bool          { return true }
-func (retriableManifestError) GetRetryAfter() time.Duration { return 0 }
 
 // NewHelmManager creates a new Helm manager with the given rest.Config
 // The config is used to create the Kubernetes client for native API operations
@@ -133,22 +90,6 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 		}, nil
 	}
 
-	// Create CRD client for checking CRD existence
-	crdClient, err := apiextensionsclient.NewForConfig(config)
-	if err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to create CRD client: %v\n", err)
-		}
-		// Still return with other clients available
-		return &HelmManager{
-			executor:      exec,
-			kubeConfig:    config,
-			dynamicClient: dynamicClient,
-			kubeClient:    coreClient,
-			verbose:       verbose,
-		}, nil
-	}
-
 	if verbose {
 		pterm.Debug.Println("HelmManager initialized with native Go Kubernetes clients")
 	}
@@ -158,7 +99,6 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 		kubeConfig:    config,
 		dynamicClient: dynamicClient,
 		kubeClient:    coreClient,
-		crdClient:     crdClient,
 		verbose:       verbose,
 	}, nil
 }
@@ -299,7 +239,6 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--wait",
 		"--timeout", "7m",
 		"-f", valuesFilePath,
-		"--set", "crds.install=false",
 	}
 
 	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
@@ -431,59 +370,9 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to connect to cluster after %d retries: %w", maxRetries, lastErr)
 	}
 
-	// Install ArgoCD CRDs unless skipped
-	// CRITICAL: CRDs must be installed and verified BEFORE Helm upgrade runs
-	// This eliminates the race condition where Helm tries to create CRD-based resources
-	// before the CRD definitions are available to the API server
-	if !config.SkipCRDs {
-		if config.Verbose {
-			pterm.Info.Println("Installing ArgoCD CRDs using native Go client...")
-		}
-
-		// Verify clients are initialized (should be set in constructor)
-		if h.dynamicClient == nil {
-			if spinner != nil {
-				spinner.Stop()
-			}
-			return fmt.Errorf("dynamic client not initialized; ensure HelmManager was created with valid rest.Config")
-		}
-
-		// Install CRDs programmatically using client-go dynamic client
-		crdUrls := []string{
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v3.4.4/manifests/crds/application-crd.yaml",
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v3.4.4/manifests/crds/applicationset-crd.yaml",
-			"https://raw.githubusercontent.com/argoproj/argo-cd/v3.4.4/manifests/crds/appproject-crd.yaml",
-		}
-
-		for _, crdUrl := range crdUrls {
-			if err := h.applyManifestFromURL(ctx, crdUrl); err != nil {
-				if spinner != nil {
-					spinner.Stop()
-				}
-				return fmt.Errorf("failed to install ArgoCD CRDs: %w", err)
-			}
-		}
-
-		if config.Verbose {
-			pterm.Success.Println("ArgoCD CRDs applied successfully via API")
-		}
-
-		// Wait for CRDs to be available BEFORE running Helm
-		// This ensures the Kubernetes API server recognizes the CRD types
-		if h.crdClient != nil {
-			if config.Verbose {
-				pterm.Info.Println("Waiting for ArgoCD CRDs to be available...")
-			}
-			if err := h.waitForArgoCDCRD(ctx, config.Verbose); err != nil {
-				if spinner != nil {
-					spinner.Stop()
-				}
-				return fmt.Errorf("failed waiting for ArgoCD CRDs to become available: %w", err)
-			}
-		}
-	} else if config.Verbose {
-		pterm.Info.Println("Skipping ArgoCD CRDs installation (--skip-crds)")
-	}
+	// ArgoCD CRDs are installed by the Helm chart itself (crds.install=true, the
+	// chart default), so they always match the chart's ArgoCD version. No separate
+	// CRD fetch/apply is needed.
 
 	// Create a temporary file with ArgoCD values
 	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
@@ -549,7 +438,6 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		"--wait",
 		"--timeout", "7m",
 		"-f", valuesFilePath,
-		"--set", "crds.install=false",
 	}
 
 	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
@@ -932,140 +820,6 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 	return path, nil
 }
 
-// applyManifestFromURL fetches a multi-document YAML manifest and applies its resources
-// using the dynamic client. This is used for CRD installation without relying on kubectl.
-func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) error {
-	manifestBytes, err := h.fetchManifest(ctx, url)
-	if err != nil {
-		return err
-	}
-	return h.applyManifestYAML(ctx, manifestBytes)
-}
-
-// fetchManifest downloads a manifest from url, retrying transient failures
-// (network errors, timeouts, 5xx) with exponential backoff. A tight per-request
-// timeout that trips on a network blip — the failure the OSS-tenant e2e hit — is
-// now retried instead of aborting the whole install.
-func (h *HelmManager) fetchManifest(ctx context.Context, url string) ([]byte, error) {
-	var manifestBytes []byte
-	exec := sharedErrors.NewRetryExecutor(h.manifestRetryPolicy())
-	if h.verbose {
-		exec = exec.WithRetryCallback(sharedErrors.VerboseRetryCallback())
-	}
-	err := exec.Execute(ctx, func() error {
-		b, ferr := h.fetchManifestOnce(ctx, url)
-		if ferr != nil {
-			return ferr
-		}
-		manifestBytes = b
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return manifestBytes, nil
-}
-
-// fetchManifestOnce performs a single manifest download. Transient failures are
-// wrapped as retriableManifestError; 4xx responses are returned as-is.
-func (h *HelmManager) fetchManifestOnce(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := h.httpClient().Do(req)
-	if err != nil {
-		return nil, retriableManifestError{fmt.Errorf("failed to fetch manifest from %s: %w", url, err)}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 500 {
-		return nil, retriableManifestError{fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)
-	}
-
-	manifestBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest body: %w", err)
-	}
-	return manifestBytes, nil
-}
-
-// applyManifestYAML splits a multi-document YAML manifest and applies each
-// resource with the dynamic client (create, falling back to update on conflict).
-func (h *HelmManager) applyManifestYAML(ctx context.Context, manifestBytes []byte) error {
-	// Split the manifest into individual documents (resources)
-	resources := strings.Split(string(manifestBytes), "---")
-
-	if h.dynamicClient == nil {
-		return fmt.Errorf("dynamic client not initialized; cannot apply manifest")
-	}
-
-	for _, resourceYAML := range resources {
-		if strings.TrimSpace(resourceYAML) == "" {
-			continue // Skip empty documents
-		}
-
-		// 3. Unmarshal YAML into an unstructured object
-		var unstructuredObj unstructured.Unstructured
-		if err := yaml.Unmarshal([]byte(resourceYAML), &unstructuredObj); err != nil {
-			return fmt.Errorf("failed to unmarshal YAML resource: %w", err)
-		}
-
-		// Skip if resource is empty after unmarshalling (e.g., just comments)
-		if unstructuredObj.Object == nil {
-			continue
-		}
-
-		// 4. Determine GroupVersionResource (GVR) for the dynamic client
-		gvk := unstructuredObj.GroupVersionKind()
-		gvr := schema.GroupVersionResource{
-			Group:    gvk.Group,
-			Version:  gvk.Version,
-			Resource: strings.ToLower(gvk.Kind) + "s", // Heuristic: pluralize Kind
-		}
-
-		// 5. Apply the resource (try Create first, then handle conflict with Update)
-		namespace := unstructuredObj.GetNamespace()
-
-		var resourceInterface dynamic.ResourceInterface
-		if namespace == "" {
-			// For cluster-scoped resources (like CRDs)
-			resourceInterface = h.dynamicClient.Resource(gvr)
-		} else {
-			// For namespaced resources
-			resourceInterface = h.dynamicClient.Resource(gvr).Namespace(namespace)
-		}
-
-		// Attempt to create the resource
-		_, err := resourceInterface.Create(ctx, &unstructuredObj, metav1.CreateOptions{})
-
-		// If creation fails due to conflict (already exists), attempt to update (replace)
-		if err != nil && strings.Contains(err.Error(), "already exists") {
-			// Get the existing resource to obtain its resourceVersion
-			existing, getErr := resourceInterface.Get(ctx, unstructuredObj.GetName(), metav1.GetOptions{})
-			if getErr != nil {
-				return fmt.Errorf("failed to get existing resource %s/%s: %w", gvk.Kind, unstructuredObj.GetName(), getErr)
-			}
-			unstructuredObj.SetResourceVersion(existing.GetResourceVersion())
-			_, err = resourceInterface.Update(ctx, &unstructuredObj, metav1.UpdateOptions{})
-		}
-
-		if err != nil {
-			return fmt.Errorf("failed to apply resource %s/%s: %w", gvk.Kind, unstructuredObj.GetName(), err)
-		}
-
-		if h.verbose {
-			pterm.Debug.Printf("Applied resource: %s/%s\n", gvk.Kind, unstructuredObj.GetName())
-		}
-	}
-
-	return nil
-}
-
 // waitForArgoCDDeployments waits for ArgoCD workloads to be created in the cluster
 // This addresses the race condition where Helm's --wait returns before Kubernetes
 // has actually created the Deployment/StatefulSet objects (common in k3d/CI environments)
@@ -1145,39 +899,6 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 		}
 
 		return false, nil // Keep polling
-	})
-}
-
-// waitForArgoCDCRD waits for the ArgoCD Application CRD to be created
-// This ensures the Helm chart has fully installed the CRDs before checking for deployments
-func (h *HelmManager) waitForArgoCDCRD(ctx context.Context, verbose bool) error {
-	if h.crdClient == nil {
-		return nil // Skip if CRD client is not available
-	}
-
-	timeout := 30 * time.Second      // 30 seconds for CRD to appear
-	retryInterval := 1 * time.Second // Check every second
-
-	if verbose {
-		pterm.Info.Println("Waiting for ArgoCD Application CRD to appear...")
-	}
-
-	return wait.PollUntilContextTimeout(ctx, retryInterval, timeout, false, func(ctx context.Context) (bool, error) {
-		_, err := h.crdClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, "applications.argoproj.io", metav1.GetOptions{})
-		if err == nil {
-			if verbose {
-				pterm.Success.Println("ArgoCD Application CRD found.")
-			}
-			return true, nil
-		}
-		if k8serrors.IsNotFound(err) {
-			return false, nil // Keep polling
-		}
-		// Log transient errors but keep polling
-		if verbose {
-			pterm.Debug.Printf("Transient error checking CRD: %v\n", err)
-		}
-		return false, nil
 	})
 }
 
