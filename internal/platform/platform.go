@@ -86,8 +86,8 @@ var toolDocs = map[string]InstallDocs{
 	},
 	"helm": {
 		Darwin:  "helm: Run 'brew install helm' or download from https://helm.sh/docs/intro/install/",
-		Linux:   "helm: Install using your package manager or from https://helm.sh/docs/intro/install/",
-		Windows: "helm: Download from https://helm.sh/docs/intro/install/",
+		Linux:   "helm: Install via your package manager, run 'curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash', or download from https://helm.sh/docs/intro/install/",
+		Windows: "helm: Download from https://helm.sh/docs/intro/install/ or install via chocolatey 'choco install kubernetes-helm'",
 		Default: "helm: Please install helm from https://helm.sh/docs/intro/install/",
 	},
 	"certificates": {
