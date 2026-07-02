@@ -6,8 +6,10 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/app/target"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
@@ -67,6 +69,9 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 		CertDir:        flags.CertDir,
 		DeploymentMode: flags.DeploymentMode,
 		NonInteractive: flags.NonInteractive,
+		// Inject cluster access from the command layer (composition root) so the
+		// app subsystem stays isolated from cluster-creation code (req 18/19).
+		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
 	}
 
 	// Bare interactive install (`openframe app install`, no cluster name): let the

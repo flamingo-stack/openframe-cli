@@ -25,6 +25,17 @@ type ClusterLister interface {
 	ListClusters() ([]clusterDomain.ClusterInfo, error)
 }
 
+// ClusterAccess provides the read-only cluster capabilities the app subsystem
+// needs — listing clusters and resolving a rest.Config for one — WITHOUT
+// depending on cluster-creation code. Keeping the app (chart) subsystem behind
+// this interface isolates it from the cluster subsystem (req 18/19); the
+// concrete implementation is injected by the composition root (cmd / bootstrap),
+// which is allowed to import both.
+type ClusterAccess interface {
+	ClusterLister
+	GetRestConfig(name string) (*rest.Config, error)
+}
+
 // HelmProvider manages Helm chart operations
 type HelmProvider interface {
 	InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error
@@ -146,4 +157,9 @@ type InstallationRequest struct {
 	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
 	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
 	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
+	// ClusterAccess resolves clusters and their rest.Config for the install
+	// target. Injected by the composition root so the app subsystem never imports
+	// cluster-creation code (req 18/19). Required for interactive/named-cluster
+	// installs; may be nil when KubeConfig is supplied directly.
+	ClusterAccess ClusterAccess
 }

@@ -10,6 +10,7 @@ import (
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
@@ -127,6 +128,9 @@ func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonIn
 		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
+		// Inject cluster access from the orchestrator (composition root) so the
+		// app subsystem stays isolated from cluster-creation code (req 18/19).
+		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
 	})
 }
 

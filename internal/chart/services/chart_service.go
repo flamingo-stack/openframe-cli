@@ -19,7 +19,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/files"
@@ -31,7 +30,7 @@ import (
 // ChartService handles high-level chart operations
 type ChartService struct {
 	executor       executor.CommandExecutor
-	clusterService types.ClusterLister
+	clusterService types.ClusterAccess
 	configService  *config.Service
 	operationsUI   *chartUI.OperationsUI
 	displayService *chartUI.DisplayService
@@ -41,9 +40,8 @@ type ChartService struct {
 
 // NewChartService creates a new chart service with the given rest.Config
 // The config is used to create the Kubernetes client for native API operations
-func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartService, error) {
-	// Create executors
-	clusterExec := executor.NewRealCommandExecutor(false, verbose)
+func NewChartService(clusterAccess types.ClusterAccess, kubeConfig *rest.Config, dryRun, verbose bool) (*ChartService, error) {
+	// Create executor
 	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
 
 	// Initialize configuration service
@@ -60,7 +58,7 @@ func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartServi
 
 	return &ChartService{
 		executor:       chartExec,
-		clusterService: cluster.NewClusterService(clusterExec),
+		clusterService: clusterAccess,
 		configService:  configService,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
@@ -71,9 +69,8 @@ func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartServi
 
 // NewChartServiceDeferred creates a chart service without initializing HelmManager
 // The HelmManager will be initialized later after cluster selection
-func NewChartServiceDeferred(dryRun, verbose bool) (*ChartService, error) {
-	// Create executors
-	clusterExec := executor.NewRealCommandExecutor(false, verbose)
+func NewChartServiceDeferred(clusterAccess types.ClusterAccess, dryRun, verbose bool) (*ChartService, error) {
+	// Create executor
 	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
 
 	// Initialize configuration service
@@ -84,7 +81,7 @@ func NewChartServiceDeferred(dryRun, verbose bool) (*ChartService, error) {
 
 	return &ChartService{
 		executor:       chartExec,
-		clusterService: cluster.NewClusterService(clusterExec),
+		clusterService: clusterAccess,
 		configService:  configService,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
@@ -159,7 +156,7 @@ func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req type
 // InstallationWorkflow orchestrates the installation process
 type InstallationWorkflow struct {
 	chartService   *ChartService
-	clusterService types.ClusterLister
+	clusterService types.ClusterAccess
 	fileCleanup    *files.FileCleanup
 }
 
@@ -388,13 +385,10 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return err
 	}
 
-	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager
-	// This is the key difference from the regular workflow
-	clusterSvc, ok := w.clusterService.(*cluster.ClusterService)
-	if !ok {
-		return fmt.Errorf("cannot get rest.Config: cluster service is not a ClusterService")
-	}
-	kubeConfig, err := clusterSvc.GetRestConfig(clusterName)
+	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager.
+	// Resolved through the injected ClusterAccess interface so this workflow does
+	// not depend on the concrete cluster service (req 18/19).
+	kubeConfig, err := w.clusterService.GetRestConfig(clusterName)
 	if err != nil {
 		return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, err)
 	}
@@ -707,16 +701,20 @@ func InstallChartsWithConfigContext(ctx context.Context, req types.InstallationR
 	// Otherwise, defer to the chart service to get it after cluster selection
 	if req.KubeConfig != nil {
 		// Create a chart service with the KubeConfig and perform the installation with context
-		chartService, err := NewChartService(req.KubeConfig, req.DryRun, req.Verbose)
+		chartService, err := NewChartService(req.ClusterAccess, req.KubeConfig, req.DryRun, req.Verbose)
 		if err != nil {
 			return fmt.Errorf("failed to create chart service: %w", err)
 		}
 		return chartService.InstallWithContext(ctx, req)
 	}
 
-	// No KubeConfig provided - use deferred initialization
-	// This creates a minimal chart service that will get the config after cluster selection
-	chartService, err := NewChartServiceDeferred(req.DryRun, req.Verbose)
+	// No KubeConfig provided - use deferred initialization. This path selects a
+	// cluster and resolves its rest.Config, so it needs cluster access injected
+	// by the caller (req 18/19 keeps this out of internal/cluster).
+	if req.ClusterAccess == nil {
+		return fmt.Errorf("cluster access is required to install without an explicit kubeconfig")
+	}
+	chartService, err := NewChartServiceDeferred(req.ClusterAccess, req.DryRun, req.Verbose)
 	if err != nil {
 		return fmt.Errorf("failed to create chart service: %w", err)
 	}
