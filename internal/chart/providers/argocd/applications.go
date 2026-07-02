@@ -446,6 +446,35 @@ func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, co
 	return 0
 }
 
+// ListApplications returns the ArgoCD applications currently in the cluster
+// along with their health and sync status.
+func (m *Manager) ListApplications(ctx context.Context, verbose bool) ([]Application, error) {
+	return m.parseApplications(ctx, verbose)
+}
+
+// AdminPassword returns the initial ArgoCD admin password read from the
+// argocd-initial-admin-secret. It errors if the secret is absent (ArgoCD not
+// installed, or the secret was rotated/removed).
+func (m *Manager) AdminPassword(ctx context.Context) (string, error) {
+	if m.kubeClient == nil {
+		if err := m.initKubernetesClients(); err != nil {
+			return "", err
+		}
+	}
+	if m.kubeClient == nil {
+		return "", fmt.Errorf("kubernetes client not available")
+	}
+	secret, err := m.kubeClient.CoreV1().Secrets("argocd").Get(ctx, "argocd-initial-admin-secret", metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("reading argocd-initial-admin-secret: %w", err)
+	}
+	pw, ok := secret.Data["password"]
+	if !ok || len(pw) == 0 {
+		return "", fmt.Errorf("argocd-initial-admin-secret has no password field")
+	}
+	return string(pw), nil
+}
+
 // parseApplications gets ArgoCD applications and their status using the native
 // dynamic client. This reduces reliance on the external kubectl binary.
 func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
