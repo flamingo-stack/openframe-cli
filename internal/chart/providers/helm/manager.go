@@ -44,6 +44,19 @@ type HelmManager struct {
 	kubeClient    kubernetes.Interface          // Typed client for Deployment checks
 	crdClient     apiextensionsclient.Interface // CRD client for checking CRD existence
 	verbose       bool                          // Enable verbose logging
+
+	// manifestHTTPClient fetches manifests (e.g. ArgoCD CRDs). Nil means the
+	// default 30s client; tests inject an httptest client. See httpClient().
+	manifestHTTPClient *http.Client
+}
+
+// httpClient returns the client used to fetch manifests, defaulting to a 30s
+// client when none is injected.
+func (h *HelmManager) httpClient() *http.Client {
+	if h.manifestHTTPClient != nil {
+		return h.manifestHTTPClient
+	}
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // NewHelmManager creates a new Helm manager with the given rest.Config
@@ -880,29 +893,41 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 // applyManifestFromURL fetches a multi-document YAML manifest and applies its resources
 // using the dynamic client. This is used for CRD installation without relying on kubectl.
 func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) error {
-	// 1. Fetch the YAML manifest content
+	manifestBytes, err := h.fetchManifest(ctx, url)
+	if err != nil {
+		return err
+	}
+	return h.applyManifestYAML(ctx, manifestBytes)
+}
+
+// fetchManifest downloads a manifest from url using the manager's HTTP client.
+func (h *HelmManager) fetchManifest(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := h.httpClient().Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to fetch manifest from %s: %w", url, err)
+		return nil, fmt.Errorf("failed to fetch manifest from %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)
+		return nil, fmt.Errorf("failed to fetch manifest: received status code %d from %s", resp.StatusCode, url)
 	}
 
 	manifestBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read manifest body: %w", err)
+		return nil, fmt.Errorf("failed to read manifest body: %w", err)
 	}
+	return manifestBytes, nil
+}
 
-	// 2. Split the manifest into individual documents (resources)
+// applyManifestYAML splits a multi-document YAML manifest and applies each
+// resource with the dynamic client (create, falling back to update on conflict).
+func (h *HelmManager) applyManifestYAML(ctx context.Context, manifestBytes []byte) error {
+	// Split the manifest into individual documents (resources)
 	resources := strings.Split(string(manifestBytes), "---")
 
 	if h.dynamicClient == nil {
@@ -946,7 +971,7 @@ func (h *HelmManager) applyManifestFromURL(ctx context.Context, url string) erro
 		}
 
 		// Attempt to create the resource
-		_, err = resourceInterface.Create(ctx, &unstructuredObj, metav1.CreateOptions{})
+		_, err := resourceInterface.Create(ctx, &unstructuredObj, metav1.CreateOptions{})
 
 		// If creation fails due to conflict (already exists), attempt to update (replace)
 		if err != nil && strings.Contains(err.Error(), "already exists") {
