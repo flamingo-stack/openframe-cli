@@ -28,12 +28,17 @@ Examples:
 		RunE: runAccessCommand,
 	}
 	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
+	addOutputFlag(cmd)
 	return cmd
 }
 
 func runAccessCommand(cmd *cobra.Command, _ []string) error {
 	verbose := getVerboseFlag(cmd)
 	contextName, _ := cmd.Flags().GetString("context")
+	format, err := outputFormat(cmd)
+	if err != nil {
+		return sharedErrors.HandleGlobalError(err, verbose)
+	}
 
 	mgr, err := newArgoCDManager(contextName, verbose)
 	if err != nil {
@@ -46,6 +51,12 @@ func runAccessCommand(cmd *cobra.Command, _ []string) error {
 			fmt.Errorf("could not read the ArgoCD admin password — is OpenFrame installed? (%w)", err), verbose)
 	}
 
+	if format == "json" {
+		return printJSON(struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}{Username: "admin", Password: password})
+	}
 	printAccess(password)
 	return nil
 }

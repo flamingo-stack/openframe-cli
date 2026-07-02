@@ -26,12 +26,17 @@ Examples:
 		RunE: runStatusCommand,
 	}
 	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
+	addOutputFlag(cmd)
 	return cmd
 }
 
 func runStatusCommand(cmd *cobra.Command, _ []string) error {
 	verbose := getVerboseFlag(cmd)
 	contextName, _ := cmd.Flags().GetString("context")
+	format, err := outputFormat(cmd)
+	if err != nil {
+		return sharedErrors.HandleGlobalError(err, verbose)
+	}
 
 	cfg, err := resolveRestConfig(contextName)
 	if err != nil {
@@ -52,8 +57,49 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 		return sharedErrors.HandleGlobalError(fmt.Errorf("could not read platform status: %w", err), verbose)
 	}
 
+	if format == "json" {
+		return printJSON(statusToJSON(rep))
+	}
 	renderStatus(rep)
 	return nil
+}
+
+// statusAppJSON is the machine-readable shape of a single application.
+type statusAppJSON struct {
+	Name   string `json:"name"`
+	Sync   string `json:"sync"`
+	Health string `json:"health"`
+}
+
+// statusJSON is the machine-readable shape of `app status`.
+type statusJSON struct {
+	Reachable    bool            `json:"reachable"`
+	NodesReady   int             `json:"nodesReady"`
+	NodesTotal   int             `json:"nodesTotal"`
+	Ready        bool            `json:"ready"`
+	Summary      string          `json:"summary"`
+	Total        int             `json:"total"`
+	Synced       int             `json:"synced"`
+	Healthy      int             `json:"healthy"`
+	Applications []statusAppJSON `json:"applications"`
+}
+
+func statusToJSON(rep appstatus.Report) statusJSON {
+	apps := make([]statusAppJSON, 0, len(rep.Apps))
+	for _, a := range rep.Apps {
+		apps = append(apps, statusAppJSON{Name: a.Name, Sync: a.Sync, Health: a.Health})
+	}
+	return statusJSON{
+		Reachable:    rep.Health.Reachable,
+		NodesReady:   rep.Health.NodesReady,
+		NodesTotal:   rep.Health.NodesTotal,
+		Ready:        rep.Ready(),
+		Summary:      rep.Summary(),
+		Total:        rep.Total,
+		Synced:       rep.Synced,
+		Healthy:      rep.Healthy,
+		Applications: apps,
+	}
 }
 
 func renderStatus(rep appstatus.Report) {

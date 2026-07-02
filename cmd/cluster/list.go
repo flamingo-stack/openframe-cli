@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -43,6 +44,7 @@ Examples:
 	if globalFlags != nil && globalFlags.List != nil {
 		models.AddListFlags(listCmd, globalFlags.List)
 	}
+	listCmd.Flags().StringP("output", "o", "text", "Output format: text or json")
 
 	return listCmd
 }
@@ -56,7 +58,45 @@ func runListClusters(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list clusters: %w", err)
 	}
 
-	// Use the service to display the clusters
-	globalFlags := utils.GetGlobalFlags()
-	return service.DisplayClusterList(clusters, globalFlags.List.Quiet, globalFlags.Global.Verbose)
+	switch out, _ := cmd.Flags().GetString("output"); out {
+	case "json":
+		return printClustersJSON(clusters)
+	case "", "text":
+		globalFlags := utils.GetGlobalFlags()
+		return service.DisplayClusterList(clusters, globalFlags.List.Quiet, globalFlags.Global.Verbose)
+	default:
+		return fmt.Errorf("invalid --output %q (want \"text\" or \"json\")", out)
+	}
+}
+
+// clusterJSON is the machine-readable shape of a cluster.
+type clusterJSON struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	NodeCount  int    `json:"nodeCount"`
+	K8sVersion string `json:"k8sVersion,omitempty"`
+}
+
+func clustersToJSON(clusters []models.ClusterInfo) []clusterJSON {
+	out := make([]clusterJSON, 0, len(clusters))
+	for _, c := range clusters {
+		out = append(out, clusterJSON{
+			Name:       c.Name,
+			Type:       string(c.Type),
+			Status:     c.Status,
+			NodeCount:  c.NodeCount,
+			K8sVersion: c.K8sVersion,
+		})
+	}
+	return out
+}
+
+func printClustersJSON(clusters []models.ClusterInfo) error {
+	b, err := json.MarshalIndent(clustersToJSON(clusters), "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding JSON: %w", err)
+	}
+	fmt.Println(string(b))
+	return nil
 }

@@ -30,7 +30,8 @@ func TestMain(m *testing.M) {
 //   - skipped when Docker or k3d are unavailable,
 //   - the test cluster is always torn down via t.Cleanup.
 //
-// Run it explicitly with a generous timeout, e.g.:
+// Run it explicitly with a timeout that EXCEEDS bootstrap's internal app sync
+// wait (40m), otherwise the test is killed before the platform converges:
 //
 //	go test -run TestBootstrapOSSTenantHappyPath -timeout 40m ./tests/integration/bootstrap/
 func TestBootstrapOSSTenantHappyPath(t *testing.T) {
