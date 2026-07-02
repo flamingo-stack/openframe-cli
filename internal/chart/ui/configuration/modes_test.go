@@ -3,6 +3,7 @@ package configuration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
@@ -20,10 +21,11 @@ func TestConfigurationWizard_ConfigureWithDefaults_OSS(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, values)
 
-	// Test temporary file creation
+	// Test temporary file creation — unique name (not the old fixed filename).
 	tempFile, err := modifier.CreateTemporaryValuesFile(values)
 	assert.NoError(t, err)
-	assert.Equal(t, "helm-values-tmp.yaml", tempFile)
+	assert.Contains(t, tempFile, "helm-values-tmp-")
+	assert.True(t, strings.HasSuffix(tempFile, ".yaml"))
 
 	// Clean up temporary file
 	defer os.Remove(tempFile)
