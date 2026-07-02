@@ -226,6 +226,25 @@ func (h *HelmManager) IsChartInstalled(ctx context.Context, releaseName, namespa
 	return false, nil
 }
 
+// UninstallRelease removes a Helm release from a namespace. Missing releases are
+// treated as success (--ignore-not-found). kubeContext, when non-empty, targets
+// a specific kube-context (matching how installs pin the context).
+func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespace, kubeContext string) error {
+	args := []string{"uninstall", releaseName, "-n", namespace, "--ignore-not-found", "--wait"}
+	if kubeContext != "" {
+		args = append(args, "--kube-context", kubeContext)
+	}
+	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+	})
+	if err != nil {
+		return fmt.Errorf("helm uninstall %s: %w", releaseName, err)
+	}
+	return nil
+}
+
 // InstallArgoCD installs ArgoCD using Helm with exact commands specified
 func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error {
 	// Add ArgoCD Helm repository

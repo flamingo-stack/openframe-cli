@@ -41,5 +41,6 @@ Examples:
 	cmd.AddCommand(getInstallCmd())
 	cmd.AddCommand(getStatusCmd())
 	cmd.AddCommand(getAccessCmd())
+	cmd.AddCommand(getUninstallCmd())
 	return cmd
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -473,6 +474,57 @@ func (m *Manager) AdminPassword(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("argocd-initial-admin-secret has no password field")
 	}
 	return string(pw), nil
+}
+
+// DeleteApplications deletes every ArgoCD Application in the argocd namespace
+// and returns the count deleted. Deleting the Application CRs (with ArgoCD's
+// resources finalizer) is what cascades removal of the workloads they manage, so
+// this must run while ArgoCD is still installed. It is a no-op when there are no
+// applications.
+func (m *Manager) DeleteApplications(ctx context.Context) (int, error) {
+	if m.dynamicClient == nil {
+		if err := m.initKubernetesClients(); err != nil {
+			return 0, err
+		}
+	}
+	if m.dynamicClient == nil {
+		return 0, fmt.Errorf("dynamic client not available")
+	}
+
+	res := m.dynamicClient.Resource(applicationGVR).Namespace("argocd")
+	list, err := res.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return 0, nil // the CRD/namespace is already gone
+		}
+		return 0, fmt.Errorf("listing applications: %w", err)
+	}
+
+	deleted := 0
+	for i := range list.Items {
+		name := list.Items[i].GetName()
+		if derr := res.Delete(ctx, name, metav1.DeleteOptions{}); derr != nil && !apierrors.IsNotFound(derr) {
+			return deleted, fmt.Errorf("deleting application %q: %w", name, derr)
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+// DeleteNamespace deletes a namespace, treating "not found" as success.
+func (m *Manager) DeleteNamespace(ctx context.Context, name string) error {
+	if m.kubeClient == nil {
+		if err := m.initKubernetesClients(); err != nil {
+			return err
+		}
+	}
+	if m.kubeClient == nil {
+		return fmt.Errorf("kubernetes client not available")
+	}
+	if err := m.kubeClient.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting namespace %q: %w", name, err)
+	}
+	return nil
 }
 
 // parseApplications gets ArgoCD applications and their status using the native

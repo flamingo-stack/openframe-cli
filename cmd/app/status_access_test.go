@@ -28,9 +28,24 @@ func TestAccessCommand_Wiring(t *testing.T) {
 	}
 }
 
+func TestUninstallCommand_Wiring(t *testing.T) {
+	cmd := getUninstallCmd()
+	if cmd.Use != "uninstall" {
+		t.Fatalf("Use = %q, want uninstall", cmd.Use)
+	}
+	if cmd.RunE == nil {
+		t.Fatal("uninstall command has no RunE")
+	}
+	for _, f := range []string{"context", "yes", "delete-namespace"} {
+		if cmd.Flags().Lookup(f) == nil {
+			t.Errorf("uninstall command is missing the --%s flag", f)
+		}
+	}
+}
+
 func TestAppCommand_RegistersStatusAndAccess(t *testing.T) {
 	app := GetAppCmd()
-	want := map[string]bool{"install": false, "status": false, "access": false}
+	want := map[string]bool{"install": false, "status": false, "access": false, "uninstall": false}
 	for _, sub := range app.Commands() {
 		if _, ok := want[sub.Name()]; ok {
 			want[sub.Name()] = true
