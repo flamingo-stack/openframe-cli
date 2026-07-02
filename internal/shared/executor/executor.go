@@ -332,7 +332,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 	}
 
 	// Create the command with wrapped command/args
-	cmd := exec.CommandContext(ctx, command, args...)
+	cmd := exec.CommandContext(ctx, command, args...) // #nosec G204 -- central executor: explicit argv (no shell); callers pass internal tool names + controlled args
 
 	// Set working directory if specified
 	if options.Dir != "" {
@@ -350,7 +350,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
-		cmd = exec.CommandContext(ctx, command, args...)
+		cmd = exec.CommandContext(ctx, command, args...) // #nosec G204 -- central executor: explicit argv (no shell); callers pass internal tool names + controlled args
 
 		// Reapply directory and env since we recreated the command
 		if options.Dir != "" {

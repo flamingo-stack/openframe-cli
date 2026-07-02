@@ -42,7 +42,7 @@ func InitializeCLI() error {
 
 	cliBinary = filepath.Join(buildDir, "openframe")
 
-	buildCmd := exec.Command("go", "build", "-o", cliBinary, ".")
+	buildCmd := exec.Command("go", "build", "-o", cliBinary, ".") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	buildCmd.Dir = root
 
 	if err := buildCmd.Run(); err != nil {
@@ -127,7 +127,7 @@ func RunCLI(args ...string) *CLIResult {
 		}
 	}
 
-	cmd := exec.Command(cliBinary, args...)
+	cmd := exec.Command(cliBinary, args...) // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	cmd.Env = os.Environ()
 
 	var stdout, stderr strings.Builder

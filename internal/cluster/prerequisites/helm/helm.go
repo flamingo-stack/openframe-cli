@@ -189,7 +189,7 @@ sudo mv /tmp/helm-wrapper.sh /usr/local/bin/helm-wrapper.sh
 sudo chmod +x /usr/local/bin/helm-wrapper.sh
 `, helperScript)
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd)
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -224,7 +224,7 @@ if ($currentPath -notlike "*$binDir*") {
 }
 `, wrapperDir)
 
-	pathCmd := exec.Command("powershell", "-Command", addPathScript)
+	pathCmd := exec.Command("powershell", "-Command", addPathScript) // #nosec G204 G702 -- shell string built from constant/program-derived values, not untrusted input
 	pathCmd.Stdout = os.Stdout
 	pathCmd.Stderr = os.Stderr
 	_ = pathCmd.Run() // Ignore errors

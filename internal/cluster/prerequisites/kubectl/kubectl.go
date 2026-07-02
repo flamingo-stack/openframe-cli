@@ -222,7 +222,7 @@ sudo mv /tmp/kubectl-wrapper.sh /usr/local/bin/kubectl-wrapper.sh
 sudo chmod +x /usr/local/bin/kubectl-wrapper.sh
 `, helperScript)
 
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd)
+	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", writeCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -257,7 +257,7 @@ if ($currentPath -notlike "*$binDir*") {
 }
 `, wrapperDir)
 
-	pathCmd := exec.Command("powershell", "-Command", addPathScript)
+	pathCmd := exec.Command("powershell", "-Command", addPathScript) // #nosec G204 G702 -- shell string built from constant/program-derived values, not untrusted input
 	pathCmd.Stdout = os.Stdout
 	pathCmd.Stderr = os.Stderr
 	_ = pathCmd.Run() // Ignore errors
@@ -286,7 +286,7 @@ func containsPath(pathEnv, dir string) bool {
 }
 
 func (k *KubectlInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
+	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }

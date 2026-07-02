@@ -542,7 +542,7 @@ if ($currentPath -notlike "*$binDir*") {
 }
 `, wrapperDir)
 
-	cmd := exec.Command("powershell", "-Command", addPathScript)
+	cmd := exec.Command("powershell", "-Command", addPathScript) // #nosec G204 G702 -- shell string built from constant/program-derived values, not untrusted input
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run() // Ignore errors
@@ -554,13 +554,13 @@ if ($currentPath -notlike "*$binDir*") {
 }
 
 func (d *DockerInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 G702 -- explicit argv, no shell; command and args are internal, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }
 
 func (d *DockerInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
+	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }

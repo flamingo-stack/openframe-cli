@@ -131,12 +131,12 @@ func (i *Installer) runCommand(name string, args ...string) error {
 	// Handle shell commands with pipes
 	if strings.Contains(strings.Join(args, " "), "|") {
 		fullCmd := name + " " + strings.Join(args, " ")
-		cmd := exec.Command("bash", "-c", fullCmd)
+		cmd := exec.Command("bash", "-c", fullCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 		// Completely silence output during installation
 		return cmd.Run()
 	}
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }

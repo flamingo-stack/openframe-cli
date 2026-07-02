@@ -17,7 +17,7 @@ func (d *Dependency) IsAvailable() bool {
 	if len(d.CheckCmd) == 0 {
 		return false
 	}
-	cmd := exec.Command(d.CheckCmd[0], d.CheckCmd[1:]...)
+	cmd := exec.Command(d.CheckCmd[0], d.CheckCmd[1:]...) // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	return cmd.Run() == nil
 }
 

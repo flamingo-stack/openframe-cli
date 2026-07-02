@@ -208,14 +208,14 @@ func (c *CertificateInstaller) generateCertificates() error {
 		if keychain != "" && fileExists(keychain) {
 			// Remove old mkcert certificates from keychain
 			findCmd := fmt.Sprintf(`security find-certificate -a -c "mkcert" -Z "%s" | awk '/SHA-1 hash:/ {print $3}'`, keychain)
-			shaCmd := exec.Command("bash", "-c", findCmd)
+			shaCmd := exec.Command("bash", "-c", findCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 			shaOutput, _ := shaCmd.Output()
 
 			if len(shaOutput) > 0 {
 				shas := strings.TrimSpace(string(shaOutput))
 				for _, sha := range strings.Split(shas, "\n") {
 					if sha != "" {
-						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain)
+						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 						if err := deleteCmd.Run(); err != nil { // best effort
 							pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
 						}
@@ -225,14 +225,14 @@ func (c *CertificateInstaller) generateCertificates() error {
 
 			// Add mkcert CA to login keychain (silently unless password needed)
 			rootCAPem := filepath.Join(caRoot, "rootCA.pem")
-			trustCmd := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem)
+			trustCmd := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 			// First try silently
 			output, err := trustCmd.CombinedOutput()
 			if err != nil {
 				outputStr := string(output)
 				if strings.Contains(outputStr, "User interaction is not allowed") {
 					// Need user interaction - run interactively
-					trustCmd = exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem)
+					trustCmd = exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 					trustCmd.Stdin = os.Stdin
 					trustCmd.Stdout = os.Stdout
 					trustCmd.Stderr = os.Stderr
@@ -281,7 +281,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 			for _, dbPath := range nssDBPaths {
 				certDBPath := filepath.Join(dbPath, "cert9.db")
 				if fileExists(certDBPath) {
-					listCmd := exec.Command("certutil", "-L", "-d", "sql:"+dbPath)
+					listCmd := exec.Command("certutil", "-L", "-d", "sql:"+dbPath) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 					output, _ := listCmd.Output()
 
 					lines := strings.Split(string(output), "\n")
@@ -290,7 +290,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 							parts := strings.Fields(line)
 							if len(parts) > 0 {
 								nick := parts[0]
-								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick)
+								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 								if err := deleteCmd.Run(); err != nil { // best effort
 									pterm.Debug.Printf("best-effort removal of old mkcert NSS nickname %q failed: %v\n", nick, err)
 								}
@@ -326,7 +326,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 	}
 
 	// Generate localhost certificates (silently)
-	generateCmd := exec.Command("bash", "-c",
+	generateCmd := exec.Command("bash", "-c", // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 		fmt.Sprintf("cd '%s' && mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1 >/dev/null 2>&1", certDir))
 	if err := generateCmd.Run(); err != nil {
 		return fmt.Errorf("failed to generate certificates: %w", err)
@@ -336,7 +336,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 }
 
 func (c *CertificateInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
+	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }
