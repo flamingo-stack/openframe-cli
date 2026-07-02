@@ -36,14 +36,6 @@ type ClusterAccess interface {
 	GetRestConfig(name string) (*rest.Config, error)
 }
 
-// HelmProvider manages Helm chart operations
-type HelmProvider interface {
-	InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error
-	InstallAppOfAppsFromLocal(ctx context.Context, config config.ChartInstallConfig, certFile, keyFile string) error
-	IsChartInstalled(ctx context.Context, releaseName, namespace string) (bool, error)
-	GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error)
-}
-
 // GitProvider manages Git repository operations
 type GitProvider interface {
 	CloneChartRepository(ctx context.Context, config *models.AppOfAppsConfig) (*git.CloneResult, error)

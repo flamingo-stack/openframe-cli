@@ -185,52 +185,10 @@ func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespa
 	return nil
 }
 
-// InstallArgoCD installs ArgoCD using Helm with exact commands specified
-func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error {
-	// Add ArgoCD Helm repository
-	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    []string{"repo", "add", "argo", "https://argoproj.github.io/argo-helm"},
-		Env:     h.getHelmEnv(),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add ArgoCD repository: %w", err)
-	}
-
-	// Update repositories
-	_, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    []string{"repo", "update"},
-		Env:     h.getHelmEnv(),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to update Helm repositories: %w", err)
-	}
-
-	// Create a temporary file with ArgoCD values
-	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary values file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
-		return fmt.Errorf("failed to write values to temporary file: %w", err)
-	}
-	_ = tmpFile.Close()
-
-	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
-	valuesFilePath := tmpFile.Name()
-	if runtime.GOOS == "windows" {
-		valuesFilePath, err = h.convertWindowsPathToWSL(tmpFile.Name())
-		if err != nil {
-			return fmt.Errorf("failed to convert values file path for WSL: %w", err)
-		}
-	}
-
-	// Install ArgoCD with upgrade --install
-	// CRDs are handled separately via native Go client, so we tell Helm to skip them
+// argoCDInstallArgs builds the `helm upgrade --install argo-cd` argument list.
+// Pure and testable — the CRDs are installed by the chart itself
+// (crds.install=true), so no crds flag is passed.
+func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []string {
 	args := []string{
 		"upgrade", "--install", "argo-cd", "argo/argo-cd",
 		"--version=10.1.0",
@@ -240,46 +198,13 @@ func (h *HelmManager) InstallArgoCD(ctx context.Context, config config.ChartInst
 		"--timeout", "7m",
 		"-f", valuesFilePath,
 	}
-
-	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
-	if config.ClusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
-		args = append(args, "--kube-context", contextName)
+	if cfg.ClusterName != "" {
+		args = append(args, "--kube-context", fmt.Sprintf("k3d-%s", cfg.ClusterName))
 	}
-
-	if config.DryRun {
+	if cfg.DryRun {
 		args = append(args, "--dry-run")
 	}
-
-	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    args,
-		Env:     h.getHelmEnv(),
-	})
-	if err != nil {
-		// Check if the error is due to context cancellation (CTRL-C)
-		if ctx.Err() == context.Canceled {
-			return ctx.Err() // Return context cancellation directly without extra messaging
-		}
-
-		// Show diagnostic information about ArgoCD pods
-		h.showArgoCDDiagnostics(ctx, config.ClusterName)
-
-		// Include stdout and stderr output for better debugging
-		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both
-		if result != nil {
-			output := result.Stderr
-			if output == "" {
-				output = result.Stdout
-			}
-			if output != "" {
-				return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, output)
-			}
-		}
-		return fmt.Errorf("failed to install ArgoCD: %w", err)
-	}
-
-	return nil
+	return args
 }
 
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
@@ -427,33 +352,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 	}
 
-	// Install ArgoCD with upgrade --install
-	// CRDs are handled separately via native Go client, so we tell Helm to skip them
-	// This prevents the race condition where Helm tries to install CRDs that we already installed
-	args := []string{
-		"upgrade", "--install", "argo-cd", "argo/argo-cd",
-		"--version=10.1.0",
-		"--namespace", "argocd",
-		"--create-namespace",
-		"--wait",
-		"--timeout", "7m",
-		"-f", valuesFilePath,
-	}
+	// Install ArgoCD with upgrade --install. CRDs are installed by the chart
+	// itself (crds.install=true).
+	args := argoCDInstallArgs(config, valuesFilePath)
 
-	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
-	if config.ClusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
-		args = append(args, "--kube-context", contextName)
+	if config.DryRun && config.Verbose {
+		pterm.Info.Println("Running in dry-run mode...")
 	}
-
-	if config.DryRun {
-		args = append(args, "--dry-run")
-		if config.Verbose {
-			pterm.Info.Println("Running in dry-run mode...")
-		}
-	}
-
-	// Show command being executed
 	if config.Verbose {
 		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
 	}
