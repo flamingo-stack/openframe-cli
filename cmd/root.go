@@ -9,6 +9,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/cmd/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/spf13/cobra"
 )
@@ -117,6 +118,13 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 	service := config.NewSystemService()
 	if err := service.Initialize(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initialization failed: %v\n", err)
+	}
+
+	// Ensure the CLI-managed bin dir (where verified tool binaries are
+	// installed) is on this process's PATH, so tools installed by earlier
+	// runs are found without editing the user's shell configuration.
+	if binDir, err := download.UserBinDir(); err == nil {
+		download.PrependToPath(binDir)
 	}
 
 	return rootCmd.Execute()

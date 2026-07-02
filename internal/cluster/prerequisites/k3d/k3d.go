@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
+	"github.com/pterm/pterm"
 )
 
 type K3dInstaller struct{}
@@ -97,23 +100,23 @@ func (k *K3dInstaller) installLinux() error {
 	} else if commandExists("pacman") {
 		return k.installArch()
 	} else {
-		return k.installScript()
+		return k.installVerified()
 	}
 }
 
 func (k *K3dInstaller) installUbuntu() error {
 	// k3d doesn't have official apt repository, so use the install script
-	return k.installScript()
+	return k.installVerified()
 }
 
 func (k *K3dInstaller) installRedHat() error {
 	// k3d doesn't have official yum repository, so use the install script
-	return k.installScript()
+	return k.installVerified()
 }
 
 func (k *K3dInstaller) installFedora() error {
 	// k3d doesn't have official dnf repository, so use the install script
-	return k.installScript()
+	return k.installVerified()
 }
 
 func (k *K3dInstaller) installArch() error {
@@ -131,59 +134,31 @@ func (k *K3dInstaller) installArch() error {
 	}
 
 	// Fall back to install script
-	return k.installScript()
+	return k.installVerified()
 }
 
-func (k *K3dInstaller) installScript() error {
-	// Use the official k3d install script with retry logic and fallback version
-	// The official install script can fail with 504 errors from GitHub
-	installCmd := `
-FALLBACK_VERSION="v5.7.5"
-
-install_k3d() {
-    local max_retries=3
-    local retry_delay=5
-
-    for i in $(seq 1 $max_retries); do
-        # Try the official install script first
-        if curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash 2>/dev/null; then
-            return 0
-        fi
-
-        # Try direct binary download with specific version as fallback
-        local version
-        version=$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/k3d-io/k3d/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
-
-        if [ -z "$version" ]; then
-            version="$FALLBACK_VERSION"
-        fi
-
-        local arch="amd64"
-        if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
-            arch="arm64"
-        fi
-
-        local download_url="https://github.com/k3d-io/k3d/releases/download/${version}/k3d-linux-${arch}"
-        if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/k3d "$download_url" && chmod +x /tmp/k3d && sudo mv /tmp/k3d /usr/local/bin/k3d; then
-            return 0
-        fi
-
-        if [ $i -lt $max_retries ]; then
-            sleep $retry_delay
-            retry_delay=$((retry_delay * 2))
-        fi
-    done
-
-    return 1
-}
-
-install_k3d
-`
-
-	if err := k.runShellCommand(installCmd); err != nil {
-		return fmt.Errorf("failed to install k3d via script: %w", err)
+// installVerified downloads the pinned k3d binary, verifies its SHA256, and
+// installs it into the CLI-managed user bin directory (~/.openframe/bin) with
+// no sudo. This replaces the previous unverified "curl | bash" / "curl -o
+// /tmp/k3d && sudo mv" install (audit I5/M1).
+func (k *K3dInstaller) installVerified() error {
+	binDir, err := download.UserBinDir()
+	if err != nil {
+		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	fmt.Printf("Downloading verified k3d %s...\n", download.K3d.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.K3d, binDir)
+	if err != nil {
+		return fmt.Errorf("verified k3d install failed: %w", err)
+	}
+
+	download.PrependToPath(binDir)
+	pterm.Success.Printf("Installed verified k3d %s to %s\n", download.K3d.Version, path)
+	pterm.Info.Printf("To use k3d directly in your shell, add %s to PATH: export PATH=\"%s:$PATH\"\n", binDir, binDir)
 	return nil
 }
 
@@ -339,8 +314,3 @@ func (k *K3dInstaller) runCommand(name string, args ...string) error {
 	return cmd.Run()
 }
 
-func (k *K3dInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
-}

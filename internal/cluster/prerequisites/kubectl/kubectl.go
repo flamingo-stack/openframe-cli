@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
+	"github.com/pterm/pterm"
 )
 
 type KubectlInstaller struct{}
@@ -96,54 +99,28 @@ func (k *KubectlInstaller) installLinux() error {
 	return k.installBinary()
 }
 
+// installBinary downloads the pinned kubectl binary, verifies its SHA256, and
+// installs it into the CLI-managed user bin directory (~/.openframe/bin) with
+// no sudo. This replaces the previous unverified "curl -o /tmp/kubectl && sudo
+// mv" install (audit I5/M1).
 func (k *KubectlInstaller) installBinary() error {
-	arch := runtime.GOARCH
-	if arch != "amd64" && arch != "arm64" {
-		return fmt.Errorf("unsupported architecture: %s", arch)
+	binDir, err := download.UserBinDir()
+	if err != nil {
+		return err
 	}
 
-	// Use a shell script with retry logic and fallback version
-	installCmd := fmt.Sprintf(`
-FALLBACK_VERSION="v1.31.0"
-ARCH="%s"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
-install_kubectl() {
-    local max_retries=3
-    local retry_delay=5
-
-    for i in $(seq 1 $max_retries); do
-        # Try to get the latest stable version
-        local version
-        version=$(curl -fsSL --retry 3 --retry-delay 2 https://dl.k8s.io/release/stable.txt 2>/dev/null || echo "")
-
-        if [ -z "$version" ]; then
-            version="$FALLBACK_VERSION"
-        fi
-
-        local download_url="https://dl.k8s.io/release/${version}/bin/linux/${ARCH}/kubectl"
-
-        if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/kubectl "$download_url" && \
-           chmod +x /tmp/kubectl && \
-           sudo mv /tmp/kubectl /usr/local/bin/kubectl; then
-            return 0
-        fi
-
-        if [ $i -lt $max_retries ]; then
-            sleep $retry_delay
-            retry_delay=$((retry_delay * 2))
-        fi
-    done
-
-    return 1
-}
-
-install_kubectl
-`, arch)
-
-	if err := k.runShellCommand(installCmd); err != nil {
-		return fmt.Errorf("failed to install kubectl via binary download: %w", err)
+	fmt.Printf("Downloading verified kubectl %s...\n", download.Kubectl.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Kubectl, binDir)
+	if err != nil {
+		return fmt.Errorf("verified kubectl install failed: %w", err)
 	}
 
+	download.PrependToPath(binDir)
+	pterm.Success.Printf("Installed verified kubectl %s to %s\n", download.Kubectl.Version, path)
+	pterm.Info.Printf("To use kubectl directly in your shell, add %s to PATH: export PATH=\"%s:$PATH\"\n", binDir, binDir)
 	return nil
 }
 
@@ -285,8 +262,3 @@ func containsPath(pathEnv, dir string) bool {
 	return false
 }
 
-func (k *KubectlInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
-}
