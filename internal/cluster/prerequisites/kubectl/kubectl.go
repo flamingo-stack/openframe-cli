@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/pterm/pterm"
 )
@@ -39,16 +40,7 @@ func isKubectlInstalled() bool {
 }
 
 func kubectlInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "kubectl: Run 'brew install kubectl' or download from https://kubernetes.io/docs/tasks/tools/install-kubectl-macos/"
-	case "linux":
-		return "kubectl: Install using your package manager or from https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/"
-	case "windows":
-		return "kubectl: Download from https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/"
-	default:
-		return "kubectl: Please install kubectl from https://kubernetes.io/docs/tasks/tools/"
-	}
+	return platform.InstallHint("kubectl")
 }
 
 func NewKubectlInstaller() *KubectlInstaller {

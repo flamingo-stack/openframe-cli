@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 )
 
 type HelmInstaller struct{}
@@ -36,16 +38,7 @@ func isHelmInstalled() bool {
 }
 
 func helmInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "helm: Run 'brew install helm' or download from https://helm.sh/docs/intro/install/"
-	case "linux":
-		return "helm: Install using your package manager or from https://helm.sh/docs/intro/install/"
-	case "windows":
-		return "helm: Download from https://helm.sh/docs/intro/install/"
-	default:
-		return "helm: Please install helm from https://helm.sh/docs/intro/install/"
-	}
+	return platform.InstallHint("helm")
 }
 
 func NewHelmInstaller() *HelmInstaller {

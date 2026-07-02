@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/pterm/pterm"
 )
@@ -39,16 +40,7 @@ func isK3dInstalled() bool {
 }
 
 func k3dInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "k3d: Run 'brew install k3d' or download from https://k3d.io/v5.4.6/#installation"
-	case "linux":
-		return "k3d: Run 'curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash' or download from https://k3d.io/v5.4.6/#installation"
-	case "windows":
-		return "k3d: Download from https://github.com/k3d-io/k3d/releases or use chocolatey 'choco install k3d'"
-	default:
-		return "k3d: Please install k3d from https://k3d.io/v5.4.6/#installation"
-	}
+	return platform.InstallHint("k3d")
 }
 
 func NewK3dInstaller() *K3dInstaller {

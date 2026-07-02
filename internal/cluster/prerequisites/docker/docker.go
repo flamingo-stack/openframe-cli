@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 )
 
 type DockerInstaller struct{}
@@ -65,16 +67,7 @@ func IsDockerInstalledButNotRunning() bool {
 }
 
 func dockerInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "Docker: Install Docker Desktop from https://docker.com/products/docker-desktop or run 'brew install --cask docker'"
-	case "linux":
-		return "Docker: Install using your package manager or from https://docs.docker.com/engine/install/"
-	case "windows":
-		return "Docker: Install Docker Desktop from https://docker.com/products/docker-desktop"
-	default:
-		return "Docker: Please install Docker from https://docker.com/"
-	}
+	return platform.InstallHint("docker")
 }
 
 func NewDockerInstaller() *DockerInstaller {
