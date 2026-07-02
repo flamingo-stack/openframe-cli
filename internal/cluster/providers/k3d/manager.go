@@ -1455,11 +1455,6 @@ func CreateClusterManagerWithExecutor(exec executor.CommandExecutor) *K3dManager
 	return NewK3dManager(exec, false)
 }
 
-// CreateDefaultClusterManager creates a K3D cluster manager with all default configuration
-// Deprecated: Use CreateClusterManagerWithExecutor instead with a proper executor.
-func CreateDefaultClusterManager() *K3dManager {
-	panic("CreateDefaultClusterManager is deprecated - use CreateClusterManagerWithExecutor with proper executor")
-}
 
 // increaseInotifyLimits increases the inotify limits on the host system
 // This is critical for applications like MeshCentral that use many file watchers

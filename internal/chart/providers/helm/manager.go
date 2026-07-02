@@ -729,10 +729,10 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 // This addresses the race condition where Helm's --wait returns before Kubernetes
 // has actually created the Deployment/StatefulSet objects (common in k3d/CI environments)
 //
-// NOTE: CRDs are now installed and verified BEFORE Helm runs (see InstallArgoCDWithProgress),
-// so this function focuses only on verifying the workloads exist.
+// NOTE: CRDs are installed by the Argo CD Helm chart itself (crds.install=true);
+// this function only verifies the workloads exist.
 //
-// ArgoCD v3.x (Helm chart 8.x) deploys the application-controller as a StatefulSet,
+// ArgoCD v3.x (Helm chart 10.x) deploys the application-controller as a StatefulSet,
 // while server and repo-server remain as Deployments.
 func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool) error {
 	if h.kubeClient == nil {

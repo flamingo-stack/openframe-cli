@@ -119,14 +119,6 @@ func TestCreateClusterManagerWithExecutor(t *testing.T) {
 	})
 }
 
-func TestCreateDefaultClusterManager(t *testing.T) {
-	t.Run("panics as expected", func(t *testing.T) {
-		assert.Panics(t, func() {
-			CreateDefaultClusterManager()
-		})
-	})
-}
-
 func TestK3dManager_CreateCluster(t *testing.T) {
 	tests := []struct {
 		name            string
