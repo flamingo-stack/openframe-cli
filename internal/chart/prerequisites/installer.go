@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/certificates"
-	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/git"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/memory"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
@@ -105,12 +104,6 @@ func (i *Installer) installTool(tool string) error {
 // installToolNonInteractive installs a single tool with optional non-interactive mode
 func (i *Installer) installToolNonInteractive(tool string, nonInteractive bool) error {
 	switch strings.ToLower(tool) {
-	case "git":
-		checker := git.NewGitChecker()
-		if checker.IsInstalled() {
-			return nil // Already installed
-		}
-		return fmt.Errorf("git is not installed. %s", checker.GetInstallInstructions())
 	case "helm":
 		installer := helm.NewHelmInstaller()
 		return installer.Install()
@@ -206,7 +199,6 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 
 			// Get instructions for all prerequisites
 			allInstructions := []string{
-				git.NewGitChecker().GetInstallInstructions(),
 				helm.NewHelmInstaller().GetInstallHelp(),
 				memory.NewMemoryChecker().GetInstallHelp(),
 				certificates.NewCertificateInstaller().GetInstallHelp(),

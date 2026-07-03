@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/certificates"
-	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/git"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/memory"
 )
@@ -23,12 +22,6 @@ type Requirement struct {
 func NewPrerequisiteChecker() *PrerequisiteChecker {
 	return &PrerequisiteChecker{
 		requirements: []Requirement{
-			{
-				Name:        "Git",
-				Command:     "git",
-				IsInstalled: func() bool { return git.NewGitChecker().IsInstalled() },
-				InstallHelp: func() string { return git.NewGitChecker().GetInstallInstructions() },
-			},
 			{
 				Name:        "Helm",
 				Command:     "helm",

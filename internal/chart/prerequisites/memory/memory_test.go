@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"runtime"
 	"testing"
 )
 
@@ -66,30 +65,17 @@ func TestMemoryChecker_Install(t *testing.T) {
 
 func TestGetTotalMemoryMB(t *testing.T) {
 	checker := NewMemoryChecker()
-	memory := checker.getTotalMemoryMB()
+	mem := checker.getTotalMemoryMB()
 
-	// Should return a reasonable value (at least 1GB) on most systems
-	if memory < 1024 && memory != 0 {
-		t.Errorf("Expected memory to be at least 1GB or 0 (if detection failed), got %d MB", memory)
+	// pbnjay/memory reads real physical RAM via a syscall, so any machine
+	// running the test suite must report a positive, sane amount (>= 256MB).
+	if mem < 256 {
+		t.Errorf("expected total memory >= 256MB from the syscall, got %d MB", mem)
 	}
 
-	// Test platform-specific methods
-	switch runtime.GOOS {
-	case "darwin":
-		macMemory := checker.getMacOSMemory()
-		if macMemory != memory {
-			t.Errorf("Platform-specific method should match getTotalMemoryMB: %d vs %d", macMemory, memory)
-		}
-	case "linux":
-		linuxMemory := checker.getLinuxMemory()
-		if linuxMemory != memory {
-			t.Errorf("Platform-specific method should match getTotalMemoryMB: %d vs %d", linuxMemory, memory)
-		}
-	case "windows":
-		winMemory := checker.getWindowsMemory()
-		if winMemory != memory {
-			t.Errorf("Platform-specific method should match getTotalMemoryMB: %d vs %d", winMemory, memory)
-		}
+	// Stable across calls (no shell-out flakiness).
+	if again := checker.getTotalMemoryMB(); again != mem {
+		t.Errorf("total memory must be stable across calls: %d vs %d", mem, again)
 	}
 }
 

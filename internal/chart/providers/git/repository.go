@@ -2,28 +2,29 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
-	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
-// Repository handles git operations for chart repositories
-type Repository struct {
-	executor executor.CommandExecutor
+// Repository handles git operations for chart repositories using go-git — no
+// external `git` binary, and private-repo tokens are supplied in memory only
+// (never in the URL, argv, or an on-disk credentials file).
+type Repository struct{}
+
+// NewRepository creates a new git repository handler.
+func NewRepository() *Repository {
+	return &Repository{}
 }
 
-// NewRepository creates a new git repository handler
-func NewRepository(exec executor.CommandExecutor) *Repository {
-	return &Repository{
-		executor: exec,
-	}
-}
-
-// CloneChartRepository clones a GitHub repository to a temporary directory with depth 1
+// CloneChartRepository clones a GitHub repository to a temporary directory with
+// a shallow, single-branch checkout.
 func (r *Repository) CloneChartRepository(ctx context.Context, config *models.AppOfAppsConfig) (*CloneResult, error) {
 	// Create a temporary directory
 	tempDir, err := os.MkdirTemp("", "openframe-chart-*")
@@ -31,55 +32,26 @@ func (r *Repository) CloneChartRepository(ctx context.Context, config *models.Ap
 		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 
-	// Separate any embedded credential from the URL so the token never reaches
-	// the git command line (audit I1). For private repos it is supplied via a
-	// 0600 credentials file and the `store` helper instead.
+	// Separate any embedded credential from the URL so the token is passed only
+	// via the in-memory auth method (audit I1) — never in the URL, argv, or a
+	// credentials file on disk.
 	auth := extractGitAuth(config.GitHubRepo)
 
-	opts := executor.ExecuteOptions{Command: "git"}
-	var args []string
-	if line, ok := auth.credentialLine(); ok {
-		credFile, cleanup, cerr := writeGitCredentials(line)
-		if cerr != nil {
-			r.Cleanup(tempDir)
-			return nil, fmt.Errorf("failed to set up git credentials: %w", cerr)
-		}
-		defer cleanup()
-		// Reset inherited helpers (-c credential.helper=) then use only our
-		// file-based store helper. The token is in the file, not in argv.
-		args = append(args,
-			"-c", "credential.helper=",
-			"-c", "credential.helper=store --file="+credFile,
-		)
-		opts.Env = map[string]string{"GIT_TERMINAL_PROMPT": "0"}
-	}
-
-	// Clone with depth 1 and optimizations for speed
-	args = append(args,
-		"clone",
-		"--depth", "1",
-		"--single-branch",
-		"--no-tags",
-		"--branch", config.GitHubBranch,
-		auth.cleanURL,
-		tempDir,
-	)
-	opts.Args = args
-
-	result, err := r.executor.ExecuteWithOptions(ctx, opts)
+	_, err = gogit.PlainCloneContext(ctx, tempDir, false, &gogit.CloneOptions{
+		URL:           auth.cleanURL,
+		Auth:          auth.buildAuth(),
+		ReferenceName: plumbing.NewBranchReferenceName(config.GitHubBranch),
+		SingleBranch:  true,
+		Depth:         1,
+		Tags:          gogit.NoTags,
+	})
 	if err != nil {
 		r.Cleanup(tempDir)
-		// Mask the token in any surfaced output as defense-in-depth.
-		errMsg := maskToken(err.Error(), auth.token)
-		// Check for branch not found error
-		if result != nil && result.Stderr != "" {
-			stderr := maskToken(result.Stderr, auth.token)
-			if strings.Contains(stderr, "Remote branch") && strings.Contains(stderr, "not found") {
-				return nil, fmt.Errorf("branch '%s' does not exist in repository. Please check if the branch name is correct or use 'main' branch", config.GitHubBranch)
-			}
-			return nil, fmt.Errorf("failed to clone repository: %s\nGit output: %s", errMsg, stderr)
+		if isBranchNotFound(err) {
+			return nil, fmt.Errorf("branch '%s' does not exist in repository. Please check if the branch name is correct or use 'main' branch", config.GitHubBranch)
 		}
-		return nil, fmt.Errorf("failed to clone repository: %s", errMsg)
+		// Mask the token in any surfaced output as defense-in-depth.
+		return nil, fmt.Errorf("failed to clone repository: %s", maskToken(err.Error(), auth.token))
 	}
 
 	// Build the path to the chart within the cloned repository
@@ -95,6 +67,18 @@ func (r *Repository) CloneChartRepository(ctx context.Context, config *models.Ap
 		TempDir:   tempDir,
 		ChartPath: chartPath,
 	}, nil
+}
+
+// isBranchNotFound reports whether err is go-git's "requested branch does not
+// exist on the remote" condition, so callers can surface a friendly message.
+func isBranchNotFound(err error) bool {
+	var noRef gogit.NoMatchingRefSpecError
+	if errors.As(err, &noRef) || errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "couldn't find remote ref") ||
+		strings.Contains(msg, "reference not found")
 }
 
 // Cleanup removes the temporary directory

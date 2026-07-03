@@ -63,7 +63,7 @@ func NewChartService(clusterAccess types.ClusterAccess, kubeConfig *rest.Config,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
 		helmManager:    helmManager,
-		gitRepository:  git.NewRepository(chartExec),
+		gitRepository:  git.NewRepository(),
 	}, nil
 }
 
@@ -86,7 +86,7 @@ func NewChartServiceDeferred(clusterAccess types.ClusterAccess, dryRun, verbose 
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
 		helmManager:    nil, // Will be initialized after cluster selection
-		gitRepository:  git.NewRepository(chartExec),
+		gitRepository:  git.NewRepository(),
 	}, nil
 }
 

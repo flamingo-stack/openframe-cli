@@ -2,10 +2,9 @@ package memory
 
 import (
 	"fmt"
-	"os/exec"
-	"runtime"
-	"strconv"
-	"strings"
+	"math"
+
+	sysmem "github.com/pbnjay/memory"
 )
 
 type MemoryChecker struct{}
@@ -34,84 +33,14 @@ func (m *MemoryChecker) HasSufficientMemory() bool {
 	return totalMemory >= RecommendedMemoryMB
 }
 
+// getTotalMemoryMB returns total physical RAM in MB, read cross-platform via a
+// syscall (no sysctl/cat/powershell shell-outs). Returns 0 if unavailable.
 func (m *MemoryChecker) getTotalMemoryMB() int {
-	switch runtime.GOOS {
-	case "darwin":
-		return m.getMacOSMemory()
-	case "linux":
-		return m.getLinuxMemory()
-	case "windows":
-		return m.getWindowsMemory()
-	default:
-		return 0
+	mb := sysmem.TotalMemory() / (1024 * 1024)
+	if mb > uint64(math.MaxInt) {
+		return math.MaxInt
 	}
-}
-
-func (m *MemoryChecker) getMacOSMemory() int {
-	// Get physical memory
-	cmd := exec.Command("sysctl", "hw.memsize")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-
-	// Parse output: "hw.memsize: 34359738368"
-	parts := strings.Split(string(output), ":")
-	if len(parts) != 2 {
-		return 0
-	}
-
-	memBytes, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-	if err != nil {
-		return 0
-	}
-
-	// Convert bytes to MB
-	return int(memBytes / 1024 / 1024)
-}
-
-func (m *MemoryChecker) getLinuxMemory() int {
-	// Read /proc/meminfo
-	cmd := exec.Command("cat", "/proc/meminfo")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "MemTotal:") {
-			// Parse line: "MemTotal:       16777216 kB"
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				memKB, err := strconv.ParseInt(fields[1], 10, 64)
-				if err != nil {
-					return 0
-				}
-				// Convert kB to MB
-				return int(memKB / 1024)
-			}
-		}
-	}
-
-	return 0
-}
-
-func (m *MemoryChecker) getWindowsMemory() int {
-	// Use PowerShell to get total physical memory
-	cmd := exec.Command("powershell", "-Command", "Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty TotalPhysicalMemory")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-
-	memBytes, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
-	if err != nil {
-		return 0
-	}
-
-	// Convert bytes to MB
-	return int(memBytes / 1024 / 1024)
+	return int(mb)
 }
 
 func (m *MemoryChecker) GetMemoryInfo() (int, int, bool) {
