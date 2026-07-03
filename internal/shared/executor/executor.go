@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -276,6 +277,7 @@ type ExecuteOptions struct {
 	Dir     string            // Working directory
 	Env     map[string]string // Environment variables
 	Timeout time.Duration     // Execution timeout
+	Stdin   []byte            // Data piped to the process stdin (e.g. `helm -f -`); nil = no stdin
 }
 
 // RealCommandExecutor implements CommandExecutor using actual system commands
@@ -360,6 +362,12 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			// Start with current environment and add custom variables
 			cmd.Env = append(os.Environ(), e.buildEnvStrings(options.Env)...)
 		}
+	}
+
+	// Pipe stdin data if provided (e.g. helm reading values from `-f -`).
+	// Set once here so it survives the timeout-driven command recreation above.
+	if len(options.Stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(options.Stdin)
 	}
 
 	// Execute the command

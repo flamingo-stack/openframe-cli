@@ -200,6 +200,24 @@ func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []s
 	return args
 }
 
+// installArgoCDHelm runs `helm upgrade --install argo-cd ... -f -`, feeding the
+// embedded ArgoCD values via stdin so nothing is written to the user's
+// filesystem (and there is no path to convert for WSL). Split out from
+// InstallArgoCDWithProgress so the stdin / no-temp-file contract is unit-testable
+// without the post-install verification and deployment waits.
+func (h *HelmManager) installArgoCDHelm(ctx context.Context, cfg config.ChartInstallConfig) (*executor.CommandResult, error) {
+	args := argoCDInstallArgs(cfg, "-")
+	if cfg.Verbose {
+		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
+	}
+	return h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+		Command: "helm",
+		Args:    args,
+		Env:     h.getHelmEnv(),
+		Stdin:   []byte(argocd.GetArgoCDValues()),
+	})
+}
+
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
 func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config config.ChartInstallConfig) error {
 	// Show progress for each step only if not in silent/non-interactive mode
@@ -292,45 +310,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// chart default), so they always match the chart's ArgoCD version. No separate
 	// CRD fetch/apply is needed.
 
-	// Create a temporary file with ArgoCD values
-	tmpFile, err := os.CreateTemp("", "argocd-values-*.yaml")
-	if err != nil {
-		if spinner != nil {
-			spinner.Stop()
-		}
-		return fmt.Errorf("failed to create temporary values file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	// Write the ArgoCD values to the temporary file
-	if _, err := tmpFile.WriteString(argocd.GetArgoCDValues()); err != nil {
-		if spinner != nil {
-			spinner.Stop()
-		}
-		return fmt.Errorf("failed to write values to temporary file: %w", err)
-	}
-	_ = tmpFile.Close()
-
-	// Convert Windows path to WSL path if needed (for Helm running in WSL2)
-	valuesFilePath := tmpFile.Name()
-	if runtime.GOOS == "windows" {
-		valuesFilePath, err = h.convertWindowsPathToWSL(tmpFile.Name())
-		if err != nil {
-			if spinner != nil {
-				spinner.Stop()
-			}
-			return fmt.Errorf("failed to convert values file path for WSL: %w", err)
-		}
-	}
-
 	// Installation details are now silent - just show in verbose mode
 	if config.Verbose {
 		pterm.Info.Printf("   Version: 10.1.0\n")
 		pterm.Info.Printf("   Namespace: argocd\n")
-		pterm.Info.Printf("   Values file (Windows): %s\n", tmpFile.Name())
-		if runtime.GOOS == "windows" {
-			pterm.Info.Printf("   Values file (WSL): %s\n", valuesFilePath)
-		}
+		pterm.Info.Println("   Values: piped via stdin (-f -)")
 	}
 
 	// Explicitly create and verify the argocd namespace exists BEFORE Helm install
@@ -345,22 +329,11 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 	}
 
-	// Install ArgoCD with upgrade --install. CRDs are installed by the chart
-	// itself (crds.install=true).
-	args := argoCDInstallArgs(config, valuesFilePath)
-
 	if config.DryRun && config.Verbose {
 		pterm.Info.Println("Running in dry-run mode...")
 	}
-	if config.Verbose {
-		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
-	}
 
-	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    args,
-		Env:     h.getHelmEnv(),
-	})
+	result, err := h.installArgoCDHelm(ctx, config)
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {

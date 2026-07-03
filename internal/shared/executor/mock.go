@@ -13,9 +13,10 @@ import (
 // distinguish "passed $(x) as one literal arg" from "built a shell string",
 // which a flattened log cannot tell apart.
 type RecordedCommand struct {
-	Name string
-	Args []string
-	Env  map[string]string
+	Name  string
+	Args  []string
+	Env   map[string]string
+	Stdin []byte // data the caller piped to stdin (e.g. helm `-f -`), nil if none
 }
 
 // String renders the command as a single line for human-readable assertions.
@@ -99,9 +100,10 @@ func (m *MockCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 	// Log the command both ways: flattened (legacy) and structured.
 	m.commands = append(m.commands, fullCommand)
 	m.recorded = append(m.recorded, RecordedCommand{
-		Name: options.Command,
-		Args: append([]string(nil), options.Args...), // defensive copy
-		Env:  copyEnv(options.Env),
+		Name:  options.Command,
+		Args:  append([]string(nil), options.Args...), // defensive copy
+		Env:   copyEnv(options.Env),
+		Stdin: append([]byte(nil), options.Stdin...), // defensive copy
 	})
 
 	// Check if we should simulate failure
@@ -161,9 +163,10 @@ func (m *MockCommandExecutor) Commands() []RecordedCommand {
 	out := make([]RecordedCommand, len(m.recorded))
 	for i, rc := range m.recorded {
 		out[i] = RecordedCommand{
-			Name: rc.Name,
-			Args: append([]string(nil), rc.Args...),
-			Env:  copyEnv(rc.Env),
+			Name:  rc.Name,
+			Args:  append([]string(nil), rc.Args...),
+			Env:   copyEnv(rc.Env),
+			Stdin: append([]byte(nil), rc.Stdin...),
 		}
 	}
 	return out
