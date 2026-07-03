@@ -20,16 +20,28 @@ func TestShouldForward_OffWindowsIsFalse(t *testing.T) {
 	}
 }
 
-func TestBuildForwardArgv(t *testing.T) {
-	got := buildForwardArgv("Ubuntu", "openframe", []string{"bootstrap", "--deployment-mode=oss-tenant"})
-	want := []string{"-d", "Ubuntu", "--", "openframe", "bootstrap", "--deployment-mode=oss-tenant"}
+func TestWSLArgvWith(t *testing.T) {
+	// With an explicit distro selector.
+	got := wslArgvWith([]string{"-d", "Ubuntu-24.04"}, "openframe", "bootstrap", "--deployment-mode=oss-tenant")
+	want := []string{"-d", "Ubuntu-24.04", "--", "openframe", "bootstrap", "--deployment-mode=oss-tenant"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}
 
-	// No user args → still a valid invocation.
-	if got := buildForwardArgv("Ubuntu", "openframe", nil); !reflect.DeepEqual(got, []string{"-d", "Ubuntu", "--", "openframe"}) {
-		t.Fatalf("empty-args argv = %v", got)
+	// Default distro (nil selector) → no -d, just `-- <cmd>`.
+	if got := wslArgvWith(nil, "openframe"); !reflect.DeepEqual(got, []string{"--", "openframe"}) {
+		t.Fatalf("default-distro argv = %v", got)
+	}
+}
+
+func TestWSLDistroArgs(t *testing.T) {
+	t.Setenv(distroEnv, "")
+	if got := wslDistroArgs(); got != nil {
+		t.Errorf("unset OPENFRAME_WSL_DISTRO must yield nil (default distro), got %v", got)
+	}
+	t.Setenv(distroEnv, "Ubuntu-22.04")
+	if got := wslDistroArgs(); !reflect.DeepEqual(got, []string{"-d", "Ubuntu-22.04"}) {
+		t.Errorf("set OPENFRAME_WSL_DISTRO must select it, got %v", got)
 	}
 }
 
@@ -101,7 +113,7 @@ func TestExitCodeOf(t *testing.T) {
 
 func TestNotInstalledError_HasGuidance(t *testing.T) {
 	msg := notInstalledError().Error()
-	for _, want := range []string{"not installed inside WSL", "wsl -d Ubuntu", disableEnv, localBinaryEnv} {
+	for _, want := range []string{"not installed inside WSL", disableEnv, localBinaryEnv, distroEnv} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("guidance missing %q:\n%s", want, msg)
 		}

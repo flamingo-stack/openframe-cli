@@ -86,7 +86,9 @@ jobs:
             # stream it into WSL's ~/.openframe/bin via stdin — no Windows→WSL
             # path translation, which is where the launcher looks for it.
             GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
-            wsl -d Ubuntu -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
+            # Install into the WSL *default* distro (the launcher targets the same
+            # one) — the runner's distro is not necessarily named "Ubuntu".
+            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
           fi
           ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 

@@ -125,7 +125,7 @@ func localInstallScript(windowsPath string) string {
 // installLocalBinaryInWSL copies the Linux binary at the given Windows path into
 // WSL. Thin exec wrapper around the tested localInstallScript.
 func installLocalBinaryInWSL(windowsPath string) error {
-	cmd := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", localInstallScript(windowsPath)) // #nosec G204 -- path is single-quoted into a self-contained script
+	cmd := exec.Command("wsl", wslArgv("bash", "-lc", localInstallScript(windowsPath))...) // #nosec G204 -- path is single-quoted into a self-contained script
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("installing local openframe binary into WSL failed: %w\n%s", err, string(out))
 	}
@@ -141,7 +141,7 @@ func installOpenframeInWSL(version, goarch string) error {
 		releaseAssetURL(version, "checksums.txt"),
 		archive,
 	)
-	cmd := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", script) // #nosec G204 -- script built from constant-derived release URLs, no user input
+	cmd := exec.Command("wsl", wslArgv("bash", "-lc", script)...) // #nosec G204 -- script built from constant-derived release URLs, no user input
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("installing openframe inside WSL failed: %w\n%s", err, string(out))
 	}

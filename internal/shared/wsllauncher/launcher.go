@@ -19,14 +19,39 @@ import (
 )
 
 const (
-	// Distro is the WSL distribution OpenFrame runs inside.
-	Distro = "Ubuntu"
+	// distroEnv overrides which WSL distribution OpenFrame uses. When unset, the
+	// WSL *default* distribution is used (no `-d` flag). Hardcoding a name like
+	// "Ubuntu" breaks on hosts whose distro is registered as "Ubuntu-24.04",
+	// "Ubuntu-22.04", etc. (WSL_E_DISTRO_NOT_FOUND).
+	distroEnv = "OPENFRAME_WSL_DISTRO"
 	// BinaryInWSL is the OpenFrame executable name expected on the PATH in WSL.
 	BinaryInWSL = "openframe"
 	// disableEnv, when set, bypasses forwarding and runs natively on Windows
 	// (unsupported; provided as a debugging escape hatch).
 	disableEnv = "OPENFRAME_NO_WSL_FORWARD"
 )
+
+// wslDistroArgs returns the `-d <distro>` selector when OPENFRAME_WSL_DISTRO is
+// set, else nil so the WSL default distribution is targeted.
+func wslDistroArgs() []string {
+	if d := strings.TrimSpace(os.Getenv(distroEnv)); d != "" {
+		return []string{"-d", d}
+	}
+	return nil
+}
+
+// wslArgvWith builds the argv for `wsl <distroArgs> -- <cmd...>`. Pure/testable.
+func wslArgvWith(distroArgs []string, cmd ...string) []string {
+	out := append([]string{}, distroArgs...)
+	out = append(out, "--")
+	return append(out, cmd...)
+}
+
+// wslArgv builds the wsl argv for the configured distribution (the WSL default
+// unless OPENFRAME_WSL_DISTRO is set).
+func wslArgv(cmd ...string) []string {
+	return wslArgvWith(wslDistroArgs(), cmd...)
+}
 
 // forwardedEnvVars are host (Windows) environment variables shared into WSL via
 // WSLENV so credentials/config reach the Linux process.
@@ -59,21 +84,14 @@ func Forward(version string, args []string) (int, error) {
 	if err != nil || bin == "" {
 		return 1, notInstalledError()
 	}
-	cmd := exec.Command("wsl", buildForwardArgv(Distro, bin, args)...) // #nosec G204 -- fixed distro; bin is resolved from a fixed lookup, user args are the CLI's own args
+	forwardArgv := append([]string{bin}, args...)
+	cmd := exec.Command("wsl", wslArgv(forwardArgv...)...) // #nosec G204 -- bin is resolved from a fixed lookup; user args are the CLI's own args
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = withWSLEnv(os.Environ(), os.LookupEnv)
 	// The child's own output already surfaced any failure; propagate its code.
 	return exitCodeOf(cmd.Run()), nil
-}
-
-// buildForwardArgv builds the argv for `wsl -d <distro> -- <binary> <args...>`.
-// The `--` guarantees the remaining tokens are treated as the command line, not
-// wsl flags.
-func buildForwardArgv(distro, binary string, args []string) []string {
-	out := []string{"-d", distro, "--", binary}
-	return append(out, args...)
 }
 
 // withWSLEnv returns env with WSLENV extended so the forwarded vars that are
@@ -151,7 +169,7 @@ const wslBinaryLookupScript = "command -v " + BinaryInWSL + ` 2>/dev/null || pri
 // WSL (PATH-resolved or the install dir). The path is not guaranteed to exist —
 // callers verify it is runnable.
 func resolveWSLBinaryPath() (string, error) {
-	out, err := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", wslBinaryLookupScript).Output() // #nosec G204 -- fixed distro; script is a constant
+	out, err := exec.Command("wsl", wslArgv("bash", "-lc", wslBinaryLookupScript)...).Output() // #nosec G204 -- script is a constant
 	if err != nil {
 		return "", err
 	}
@@ -167,11 +185,19 @@ func verifyOpenframeInWSL() error {
 	if err != nil || bin == "" {
 		return notInstalledError()
 	}
-	check := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", "test -x "+shellSingleQuote(bin)) // #nosec G204 -- fixed distro; bin single-quoted
+	check := exec.Command("wsl", wslArgv("bash", "-lc", "test -x "+shellSingleQuote(bin))...) // #nosec G204 -- bin single-quoted
 	if check.Run() != nil {
 		return notInstalledError()
 	}
 	return nil
+}
+
+// distroLabel describes the targeted WSL distribution for user-facing messages.
+func distroLabel() string {
+	if d := strings.TrimSpace(os.Getenv(distroEnv)); d != "" {
+		return d
+	}
+	return "the default distro"
 }
 
 func notInstalledError() error {
@@ -183,11 +209,13 @@ release is auto-installed into WSL automatically; for a dev/local build point
 
     set %s=C:\path\to\openframe-linux-amd64   (PowerShell: $env:%s="...")
 
-Or install it manually inside WSL:
+Or install it manually inside WSL, then re-run:
 
-    wsl -d %s
+    wsl
     # place the openframe linux binary on your PATH
 
+If your WSL distro is not the default one, select it with %s=<name>
+(list them with: wsl -l -q).
 Set %s=1 to bypass and run natively on Windows (unsupported)`,
-		Distro, localBinaryEnv, localBinaryEnv, localBinaryEnv, Distro, disableEnv)
+		distroLabel(), localBinaryEnv, localBinaryEnv, localBinaryEnv, distroEnv, disableEnv)
 }
