@@ -2,12 +2,18 @@ package wsllauncher
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
 
 // releaseRepo is the GitHub repository releases are published to.
 const releaseRepo = "flamingo-stack/openframe-cli"
+
+// localBinaryEnv, when set to the Windows path of a Linux openframe binary,
+// installs that binary into WSL instead of downloading a release. Intended for
+// dev/CI where there is no published release to fetch.
+const localBinaryEnv = "OPENFRAME_WSL_BINARY"
 
 // isReleaseVersion reports whether version looks like a real published release
 // (not a dev/snapshot build), so we know a Linux artifact exists to download.
@@ -74,16 +80,48 @@ func ensureOpenframeInWSL(version, goarch string) error {
 	if verifyOpenframeInWSL() == nil {
 		return nil
 	}
-	if !isReleaseVersion(version) {
-		return notInstalledError()
+
+	// Dev/CI: install an explicit local Linux binary into WSL (no release needed).
+	if src := os.Getenv(localBinaryEnv); strings.TrimSpace(src) != "" {
+		if installLocalBinaryInWSL(src) == nil && verifyOpenframeInWSL() == nil {
+			return nil
+		}
+		// Fall through to the release path / instructions on failure.
 	}
-	if err := installOpenframeInWSL(version, goarch); err != nil {
-		return notInstalledError()
+
+	if isReleaseVersion(version) {
+		if installOpenframeInWSL(version, goarch) == nil && verifyOpenframeInWSL() == nil {
+			return nil
+		}
 	}
-	// Re-verify: the install put it under ~/.openframe/bin, which a login shell
-	// (bash -lc) resolves via PATH.
-	if verifyOpenframeInWSL() != nil {
-		return notInstalledError()
+
+	return notInstalledError()
+}
+
+// shellSingleQuote safely single-quotes s for embedding in a bash script.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// localInstallScript returns a bash script (run inside WSL) that copies a Linux
+// openframe binary — given by its Windows path — into ~/.openframe/bin. `wslpath`
+// converts the Windows path to a WSL path. Pure and testable.
+func localInstallScript(windowsPath string) string {
+	return strings.Join([]string{
+		"set -e",
+		`BIN_DIR="$HOME/.openframe/bin"`,
+		`mkdir -p "$BIN_DIR"`,
+		`SRC="$(wslpath -u ` + shellSingleQuote(windowsPath) + `)"`,
+		`install -m 0755 "$SRC" "$BIN_DIR/openframe"`,
+	}, "\n")
+}
+
+// installLocalBinaryInWSL copies the Linux binary at the given Windows path into
+// WSL. Thin exec wrapper around the tested localInstallScript.
+func installLocalBinaryInWSL(windowsPath string) error {
+	cmd := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", localInstallScript(windowsPath)) // #nosec G204 -- path is single-quoted into a self-contained script
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("installing local openframe binary into WSL failed: %w\n%s", err, string(out))
 	}
 	return nil
 }

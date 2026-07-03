@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -310,8 +309,7 @@ func (e *RealCommandExecutor) Execute(ctx context.Context, name string, args ...
 func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options ExecuteOptions) (*CommandResult, error) {
 	start := time.Now()
 
-	// Wrap command for Windows if needed (kubectl/helm via WSL)
-	command, args := e.wrapCommandForWindows(options.Command, options.Args)
+	command, args := options.Command, options.Args
 
 	// Build full command string for logging (use original command for readability)
 	fullCommand := options.Command
@@ -445,96 +443,3 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 	return envStrings
 }
 
-// wslUserPattern allows only safe POSIX-ish usernames. Anything else falls back
-// to the default, so a hostile WSL_USER value cannot influence command construction.
-var wslUserPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]*$`)
-
-// sanitizeWSLUser returns a safe WSL username, defaulting to "runner".
-func sanitizeWSLUser(user string) string {
-	if user == "" || !wslUserPattern.MatchString(user) {
-		return "runner"
-	}
-	return user
-}
-
-// filterFlag removes "--flag value" and "--flag=value" occurrences from args.
-func filterFlag(args []string, flag string) []string {
-	out := make([]string, 0, len(args))
-	skip := false
-	for _, a := range args {
-		if skip {
-			skip = false
-			continue
-		}
-		if a == flag {
-			skip = true
-			continue
-		}
-		if strings.HasPrefix(a, flag+"=") {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
-
-// The WSL wrapper scripts below are CONSTANT: no argument is ever interpolated
-// into them. The target tool and its arguments are passed as positional
-// parameters after the script (… bash -c <script> bash <HOME> <tool> <args…>)
-// and reach the program via "$@"/exec, so the shell never re-parses them.
-//
-// This is the structural fix for the previous design, which concatenated
-// (incompletely escaped) arguments into the script string and allowed command
-// injection via $(...) / ; / | embedded in arguments. $1 carries HOME (also a
-// positional, so even an exotic home path is inert).
-const helmWSLScript = `set -e
-export HOME="$1"; shift
-mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data
-export HELM_CACHE_HOME=/tmp/helm/cache
-export HELM_CONFIG_HOME=/tmp/helm/config
-export HELM_DATA_HOME=/tmp/helm/data
-if [ -f "$HOME/.kube/config" ]; then cp "$HOME/.kube/config" "$HOME/.kube/config.openframe.bak" 2>/dev/null || true; sed "s|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g" "$HOME/.kube/config" > "$HOME/.kube/config.openframe.tmp" 2>/dev/null && mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config" || true; fi
-"$@" 2>&1`
-
-// buildWSLCommand wraps helm and k3d so they run inside WSL2 Ubuntu.
-// It is a pure function (no OS calls) so it can be unit-tested on any platform.
-//
-// Tool arguments are ALWAYS passed as discrete argv elements — never spliced
-// into a shell string — so values containing shell metacharacters are inert.
-func buildWSLCommand(command string, args []string, wslUser string) (string, []string) {
-	user := sanitizeWSLUser(wslUser)
-	home := "/home/" + user
-	base := []string{"-d", "Ubuntu", "-u", user}
-
-	switch command {
-	case "k3d":
-		// k3d needs Docker access; run via sudo -E (preserves env like KUBECONFIG).
-		out := append([]string{}, base...)
-		out = append(out, "sudo", "-E", "k3d")
-		return "wsl", append(out, args...)
-	case "helm":
-		filtered := filterFlag(args, "--kube-context")
-		out := append([]string{}, base...)
-		out = append(out, "bash", "-c", helmWSLScript, "bash", home, "helm")
-		return "wsl", append(out, filtered...)
-	default:
-		return command, args
-	}
-}
-
-// wrapCommandForWindows wraps helm and k3d commands to run directly in WSL2.
-// On non-Windows platforms it is a no-op. The actual command construction lives in
-// buildWSLCommand (a pure, testable seam).
-func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
-	// Only wrap on Windows
-	if runtime.GOOS != "windows" {
-		return command, args
-	}
-
-	// Only wrap helm and k3d commands
-	if command != "helm" && command != "k3d" {
-		return command, args
-	}
-
-	return buildWSLCommand(command, args, os.Getenv("WSL_USER"))
-}

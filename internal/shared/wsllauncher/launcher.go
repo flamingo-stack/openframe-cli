@@ -146,12 +146,17 @@ func verifyOpenframeInWSL() error {
 func notInstalledError() error {
 	return fmt.Errorf(`OpenFrame is not installed inside WSL (%s)
 
-On Windows the cluster runs in WSL2 and OpenFrame must run there too. Install
-the Linux build inside your WSL distro and put it on your PATH, then re-run:
+On Windows the cluster runs in WSL2 and OpenFrame must run there too. A tagged
+release is auto-installed into WSL automatically; for a dev/local build point
+%s at the Linux binary you built and re-run:
+
+    set %s=C:\path\to\openframe-linux-amd64   (PowerShell: $env:%s="...")
+
+Or install it manually inside WSL:
 
     wsl -d %s
-    # inside WSL: download the openframe linux binary and place it on your PATH
+    # place the openframe linux binary on your PATH
 
 Set %s=1 to bypass and run natively on Windows (unsupported)`,
-		Distro, Distro, disableEnv)
+		Distro, localBinaryEnv, localBinaryEnv, localBinaryEnv, Distro, disableEnv)
 }
