@@ -14,6 +14,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 	"github.com/spf13/cobra"
 )
 
@@ -115,6 +116,17 @@ func Execute() error {
 
 // ExecuteWithVersion runs the root command with specified version info
 func ExecuteWithVersion(versionInfo VersionInfo) error {
+	// On Windows, re-run the whole CLI inside WSL — the cluster and the native
+	// Kubernetes client live there (Option 1). The Linux build inside WSL does
+	// not forward, so this happens at most once.
+	if wsllauncher.ShouldForward() {
+		code, err := wsllauncher.Forward(os.Args[1:])
+		if err != nil {
+			return err
+		}
+		os.Exit(code)
+	}
+
 	rootCmd := GetRootCmd(versionInfo)
 
 	// Initialize configuration using service layer
