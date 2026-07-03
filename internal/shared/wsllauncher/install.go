@@ -82,11 +82,17 @@ func ensureOpenframeInWSL(version, goarch string) error {
 	}
 
 	// Dev/CI: install an explicit local Linux binary into WSL (no release needed).
+	// When the caller opted in via OPENFRAME_WSL_BINARY, surface exactly why the
+	// install/verify failed instead of the generic "not installed" guidance —
+	// otherwise the real error (bad path, wrong arch, wslpath) is swallowed.
 	if src := os.Getenv(localBinaryEnv); strings.TrimSpace(src) != "" {
-		if installLocalBinaryInWSL(src) == nil && verifyOpenframeInWSL() == nil {
-			return nil
+		if err := installLocalBinaryInWSL(src); err != nil {
+			return fmt.Errorf("%s=%s: %w", localBinaryEnv, src, err)
 		}
-		// Fall through to the release path / instructions on failure.
+		if err := verifyOpenframeInWSL(); err != nil {
+			return fmt.Errorf("installed %s into WSL from %s but it is not runnable there — is it a linux/%s binary? (%w)", BinaryInWSL, src, goarch, err)
+		}
+		return nil
 	}
 
 	if isReleaseVersion(version) {

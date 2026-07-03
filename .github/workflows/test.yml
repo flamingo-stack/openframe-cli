@@ -82,11 +82,11 @@ jobs:
             # The Windows binary re-runs the whole CLI inside WSL2, where the
             # cluster and the Kubernetes client live. That needs a *Linux*
             # openframe binary in WSL. `make build` is a dev version with no
-            # published release to auto-download, so build the Linux binary here
-            # and point the launcher at it (it wslpath-converts this Windows path
-            # and installs it into ~/.openframe/bin inside WSL).
+            # published release to auto-download, so build the Linux binary and
+            # stream it into WSL's ~/.openframe/bin via stdin — no Windows→WSL
+            # path translation, which is where the launcher looks for it.
             GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
-            export OPENFRAME_WSL_BINARY="$(pwd -W)/openframe-linux-amd64"
+            wsl -d Ubuntu -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
           fi
           ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
 
