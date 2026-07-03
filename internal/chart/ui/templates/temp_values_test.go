@@ -8,21 +8,11 @@ import (
 )
 
 // TestCreateTemporaryValuesFile_UniqueAndPrivate verifies the temp values file
-// (which can hold registry/repository secrets) uses a unique name and 0600
-// perms — so concurrent runs don't clobber each other and a pre-created file
-// can't redirect the write.
+// (which can hold registry/repository secrets) lands in the OS temp dir — not
+// the user's working directory — with a unique name and 0600 perms, so
+// concurrent runs don't clobber each other and a pre-created file can't
+// redirect the write.
 func TestCreateTemporaryValuesFile_UniqueAndPrivate(t *testing.T) {
-	// Run in a scratch dir since the file is created in the working directory.
-	dir := t.TempDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
-
 	h := &HelmValuesModifier{}
 	values := map[string]interface{}{"deployment": map[string]interface{}{"saas": map[string]interface{}{"repository": map[string]interface{}{"password": "s3cret"}}}}
 
@@ -30,9 +20,20 @@ func TestCreateTemporaryValuesFile_UniqueAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTemporaryValuesFile: %v", err)
 	}
+	t.Cleanup(func() { _ = os.Remove(p1) })
 	p2, err := h.CreateTemporaryValuesFile(values)
 	if err != nil {
 		t.Fatalf("CreateTemporaryValuesFile (2nd): %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(p2) })
+
+	// Lands in the OS temp dir, NOT the current working directory.
+	if filepath.Dir(p1) != strings.TrimRight(os.TempDir(), string(os.PathSeparator)) {
+		t.Errorf("temp file must be in os.TempDir() (%s), got dir %s", os.TempDir(), filepath.Dir(p1))
+	}
+	cwd, _ := os.Getwd()
+	if filepath.Dir(p1) == cwd {
+		t.Errorf("temp file must not be created in the working directory: %q", p1)
 	}
 
 	// Unique names, not the old fixed filename.

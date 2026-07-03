@@ -58,16 +58,16 @@ func (h *HelmValuesModifier) LoadOrCreateBaseValues() (map[string]interface{}, e
 	return emptyValues, nil
 }
 
-// CreateTemporaryValuesFile creates a temporary helm values file in the current
-// directory. It uses a unique name via os.CreateTemp (O_EXCL, 0600) rather than
+// CreateTemporaryValuesFile creates a temporary helm values file in the OS
+// temp directory (never the user's working directory, which it must not
+// pollute). It uses a unique name via os.CreateTemp (O_EXCL, 0600) rather than
 // a fixed filename: this avoids clobbering between concurrent runs and prevents
 // a pre-created file / symlink from redirecting the write (the file can hold
-// registry and repository secrets). The caller registers the returned path for
-// cleanup so it does not persist past the install.
+// registry and repository secrets). The caller registers the returned absolute
+// path for cleanup so it does not persist past the install; on Windows the helm
+// manager converts the path for WSL before use.
 func (h *HelmValuesModifier) CreateTemporaryValuesFile(values map[string]interface{}) (string, error) {
-	// Keep it in the current directory so the existing WSL path conversion and
-	// cleanup registration continue to work unchanged.
-	f, err := os.CreateTemp(".", "helm-values-tmp-*.yaml")
+	f, err := os.CreateTemp("", "helm-values-tmp-*.yaml")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary values file: %w", err)
 	}
