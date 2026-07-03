@@ -67,10 +67,10 @@ func TestGetTotalMemoryMB(t *testing.T) {
 	checker := NewMemoryChecker()
 	mem := checker.getTotalMemoryMB()
 
-	// pbnjay/memory reads real physical RAM via a syscall, so any machine
-	// running the test suite must report a positive, sane amount (>= 256MB).
+	// go-sysinfo reads real physical RAM, so any machine running the test suite
+	// must report a positive, sane amount (>= 256MB).
 	if mem < 256 {
-		t.Errorf("expected total memory >= 256MB from the syscall, got %d MB", mem)
+		t.Errorf("expected total memory >= 256MB, got %d MB", mem)
 	}
 
 	// Stable across calls (no shell-out flakiness).

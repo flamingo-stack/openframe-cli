@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	sysmem "github.com/pbnjay/memory"
+	sysinfo "github.com/elastic/go-sysinfo"
 )
 
 type MemoryChecker struct{}
@@ -33,10 +33,19 @@ func (m *MemoryChecker) HasSufficientMemory() bool {
 	return totalMemory >= RecommendedMemoryMB
 }
 
-// getTotalMemoryMB returns total physical RAM in MB, read cross-platform via a
-// syscall (no sysctl/cat/powershell shell-outs). Returns 0 if unavailable.
+// getTotalMemoryMB returns total physical RAM in MB, read cross-platform via
+// elastic/go-sysinfo (procfs on Linux, sysctl syscall on macOS, Win32 API on
+// Windows — no sysctl/cat/powershell shell-outs). Returns 0 if unavailable.
 func (m *MemoryChecker) getTotalMemoryMB() int {
-	mb := sysmem.TotalMemory() / (1024 * 1024)
+	host, err := sysinfo.Host()
+	if err != nil {
+		return 0
+	}
+	memInfo, err := host.Memory()
+	if err != nil {
+		return 0
+	}
+	mb := memInfo.Total / (1024 * 1024)
 	if mb > uint64(math.MaxInt) {
 		return math.MaxInt
 	}
