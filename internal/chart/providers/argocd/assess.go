@@ -18,10 +18,10 @@ type appAssessment struct {
 func assessApplications(apps []Application, everReady map[string]bool) appAssessment {
 	var a appAssessment
 	for _, app := range apps {
-		if app.Health == "Healthy" {
+		if app.Health == ArgoCDHealthHealthy {
 			a.healthyNames = append(a.healthyNames, app.Name)
 		}
-		if app.Health == "Healthy" && app.Sync == "Synced" {
+		if app.Health == ArgoCDHealthHealthy && app.Sync == ArgoCDSyncSynced {
 			a.ready++
 			// Once marked, apps stay counted even if they go out of sync later.
 			everReady[app.Name] = true
@@ -30,9 +30,9 @@ func assessApplications(apps []Application, everReady map[string]bool) appAssess
 		// Show the most important status issue.
 		var status string
 		switch {
-		case app.Health != "Healthy" && app.Sync != "Synced":
+		case app.Health != ArgoCDHealthHealthy && app.Sync != ArgoCDSyncSynced:
 			status = fmt.Sprintf("%s/%s", app.Health, app.Sync)
-		case app.Health != "Healthy":
+		case app.Health != ArgoCDHealthHealthy:
 			status = fmt.Sprintf("Health: %s", app.Health)
 		default:
 			status = fmt.Sprintf("Sync: %s", app.Sync)
@@ -65,7 +65,7 @@ var repoServerErrorPatterns = []string{
 // cleared for apps that no longer do.
 func classifyAppIssues(apps []Application, issueCounts map[string]int) (unknown, conditionErrors []Application) {
 	for _, app := range apps {
-		if app.Health == "Unknown" || app.Sync == "Unknown" {
+		if app.Health == ArgoCDStatusUnknown || app.Sync == ArgoCDStatusUnknown {
 			unknown = append(unknown, app)
 		}
 

@@ -102,10 +102,10 @@ func (s *Service) Report(ctx context.Context, verbose bool) (Report, error) {
 func summarize(apps []argocd.Application) (total, synced, healthy int) {
 	total = len(apps)
 	for _, a := range apps {
-		if a.Sync == "Synced" {
+		if a.Sync == argocd.ArgoCDSyncSynced {
 			synced++
 		}
-		if a.Health == "Healthy" {
+		if a.Health == argocd.ArgoCDHealthHealthy {
 			healthy++
 		}
 	}

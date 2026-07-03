@@ -559,7 +559,7 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 			redact.RegisterSecret(chartConfig.SaaSConfig.RepositoryPassword)
 			// Replace https:// with https://x-access-token:TOKEN@
 			// This format is required for GitHub PAT authentication in non-interactive mode
-			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
+			githubRepo = strings.Replace(githubRepo, "https://", "https://"+git.GitTokenUser+":"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
 		}
 	}
 

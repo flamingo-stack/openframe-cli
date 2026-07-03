@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/app/target"
+	chartmodels "github.com/flamingo-stack/openframe-cli/internal/chart/models"
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
@@ -19,10 +21,10 @@ func getInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install [cluster-name]",
 		Short: "Install ArgoCD and app-of-apps",
-		Long: `Install ArgoCD and app-of-apps on a Kubernetes cluster
+		Long: fmt.Sprintf(`Install ArgoCD and app-of-apps on a Kubernetes cluster
 
 This command installs:
-1. ArgoCD (version 10.1.0) with custom values
+1. ArgoCD (version %s) with custom values
 2. App-of-apps from GitHub repository (configurable)
 
 The cluster must exist before running this command.
@@ -33,7 +35,7 @@ Examples:
   openframe chart install my-cluster                        # Install on specific cluster
   openframe chart install --deployment-mode=oss-tenant     # Skip deployment selection
   openframe chart install --deployment-mode=saas-shared --non-interactive  # Full CI/CD mode
-  openframe chart install --github-branch develop          # Use develop branch`,
+  openframe chart install --github-branch develop          # Use develop branch`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
 		SilenceErrors: true, // Errors are handled by our custom error handler
 		SilenceUsage:  true, // Don't show usage on errors
@@ -203,8 +205,8 @@ func getVerboseFlag(cmd *cobra.Command) bool {
 func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force", "f", false, "Force installation even if charts already exist")
 	cmd.Flags().Bool("dry-run", false, "Show what would be installed without executing")
-	cmd.Flags().String("github-repo", "https://github.com/flamingo-stack/openframe-oss-tenant", "GitHub repository URL")
-	cmd.Flags().String("github-branch", "main", "GitHub repository branch")
+	cmd.Flags().String("github-repo", chartmodels.RepoOSSTenant, "GitHub repository URL")
+	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "GitHub repository branch")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
 	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")

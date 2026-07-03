@@ -183,9 +183,9 @@ func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespa
 // (crds.install=true), so no crds flag is passed.
 func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []string {
 	args := []string{
-		"upgrade", "--install", "argo-cd", "argo/argo-cd",
-		"--version=10.1.0",
-		"--namespace", "argocd",
+		"upgrade", "--install", argocd.ArgoCDReleaseName, argocd.ArgoCDChartRef,
+		"--version=" + argocd.ArgoCDChartVersion,
+		"--namespace", argocd.ArgoCDNamespace,
 		"--create-namespace",
 		"--wait",
 		"--timeout", "7m",
@@ -231,7 +231,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// Add ArgoCD repository silently
 	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
-		Args:    []string{"repo", "add", "argo", "https://argoproj.github.io/argo-helm"},
+		Args:    []string{"repo", "add", "argo", argocd.ArgoHelmRepoURL},
 		Env:     h.getHelmEnv(),
 	})
 	if err != nil {
@@ -312,7 +312,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 
 	// Installation details are now silent - just show in verbose mode
 	if config.Verbose {
-		pterm.Info.Printf("   Version: 10.1.0\n")
+		pterm.Info.Printf("   Version: %s\n", argocd.ArgoCDChartVersion)
 		pterm.Info.Printf("   Namespace: argocd\n")
 		pterm.Info.Println("   Values: piped via stdin (-f -)")
 	}
@@ -377,7 +377,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	}
 
 	// Verify the Helm release was actually created by checking helm list
-	if err := h.verifyHelmRelease(ctx, "argo-cd", "argocd", config.ClusterName, config.Verbose); err != nil {
+	if err := h.verifyHelmRelease(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace, config.ClusterName, config.Verbose); err != nil {
 		if spinner != nil {
 			spinner.Stop()
 		}

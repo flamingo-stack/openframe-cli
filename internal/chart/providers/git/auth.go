@@ -8,6 +8,12 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
+// GitTokenUser is the conventional username for GitHub token (PAT) auth: the
+// token is the password and the username is ignored, so "x-access-token" is
+// used by convention. Single source of truth for both the in-memory clone auth
+// and any token-in-URL the CLI builds.
+const GitTokenUser = "x-access-token"
+
 // gitAuth holds credentials extracted from a clone URL together with the
 // cleaned, credential-free URL.
 //
@@ -47,7 +53,7 @@ func (a gitAuth) buildAuth() transport.AuthMethod {
 	}
 	user := a.username
 	if user == "" {
-		user = "x-access-token"
+		user = GitTokenUser
 	}
 	return &githttp.BasicAuth{Username: user, Password: a.token}
 }

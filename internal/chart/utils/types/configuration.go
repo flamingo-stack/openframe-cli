@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 )
 
 // ValidDeploymentModes are the accepted --deployment-mode flag values.
@@ -110,13 +112,13 @@ type ChartConfiguration struct {
 func GetRepositoryURL(mode DeploymentMode) string {
 	switch mode {
 	case DeploymentModeSaaSShared:
-		return "https://github.com/flamingo-stack/openframe-saas-shared"
+		return models.RepoSaaSShared
 	case DeploymentModeSaaS:
-		return "https://github.com/flamingo-stack/openframe-saas-tenant"
+		return models.RepoSaaSTenant
 	case DeploymentModeOSS:
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
+		return models.RepoOSSTenant
 	default:
 		// Default to OSS repository
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
+		return models.RepoOSSTenant
 	}
 }

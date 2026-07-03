@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	chartmodels "github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
@@ -123,9 +124,9 @@ func (s *Service) installChartWithMode(ctx context.Context, clusterName, deploym
 		Force:          false,
 		DryRun:         false,
 		Verbose:        verbose,
-		GitHubRepo:     "https://github.com/flamingo-stack/openframe-oss-tenant", // Default repository
-		GitHubBranch:   "main",                                                   // Default branch
-		CertDir:        "",                                                       // Auto-detected
+		GitHubRepo:     chartmodels.RepoOSSTenant,    // Default repository
+		GitHubBranch:   chartmodels.DefaultGitBranch, // Default branch
+		CertDir:        "",                           // Auto-detected
 		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,

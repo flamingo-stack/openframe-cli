@@ -352,7 +352,7 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
 	}
 
-	apps := m.dynamicClient.Resource(applicationGVR).Namespace("argocd")
+	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
 
 	// --- Primary Method: Native dynamic client ---
 
@@ -403,7 +403,7 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, config config.ChartInstallConfig) int {
 	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl.
 	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
-	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io", "app-of-apps",
+	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io", "app-of-apps",
 		"-o", "json")...)
 
 	if err == nil && manifestResult.Stdout != "" {
@@ -426,7 +426,7 @@ func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, co
 
 	// Fallback Method 2: Try to get all applications including those being created
 	// Use -o json to avoid Windows WSL escaping issues with jsonpath
-	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io",
 		"-o", "json")...)
 
 	if err == nil && allAppsResult.Stdout != "" {
@@ -465,7 +465,7 @@ func (m *Manager) AdminPassword(ctx context.Context) (string, error) {
 	if m.kubeClient == nil {
 		return "", fmt.Errorf("kubernetes client not available")
 	}
-	secret, err := m.kubeClient.CoreV1().Secrets("argocd").Get(ctx, "argocd-initial-admin-secret", metav1.GetOptions{})
+	secret, err := m.kubeClient.CoreV1().Secrets(ArgoCDNamespace).Get(ctx, "argocd-initial-admin-secret", metav1.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("reading argocd-initial-admin-secret: %w", err)
 	}
@@ -491,7 +491,7 @@ func (m *Manager) DeleteApplications(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("dynamic client not available")
 	}
 
-	res := m.dynamicClient.Resource(applicationGVR).Namespace("argocd")
+	res := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
 	list, err := res.List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -551,7 +551,7 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 	}
 
 	// Use the dynamic client to list Application CRDs
-	list, err := m.dynamicClient.Resource(applicationGVR).Namespace("argocd").List(ctx, metav1.ListOptions{})
+	list, err := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to list Argo CD applications via native client: %v\n", err)
@@ -577,7 +577,7 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 // parseApplicationsViaKubectl is the fallback method using kubectl
 func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool) ([]Application, error) {
 	// Use -o json to avoid Windows WSL escaping issues with jsonpath
-	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", "argocd", "get", "applications.argoproj.io",
+	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io",
 		"-o", "json")...)
 
 	if err != nil {

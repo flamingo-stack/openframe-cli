@@ -17,7 +17,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	pterm.Warning.Println("ArgoCD pods failed to become ready. Collecting diagnostics...")
 
 	// First check Helm release status to understand if ArgoCD was installed correctly
-	helmStatusArgs := []string{"status", "argo-cd", "-n", "argocd"}
+	helmStatusArgs := []string{"status", ArgoCDReleaseName, "-n", ArgoCDNamespace}
 	helmResult, _ := m.executor.Execute(ctx, "helm", helmStatusArgs...)
 	if helmResult != nil && helmResult.Stdout != "" {
 		pterm.Info.Println("\nHelm release status:")
@@ -33,7 +33,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	}
 
 	// Check for deployments in argocd namespace
-	deployArgs := m.getKubectlArgs("-n", "argocd", "get", "deployments", "-o", "wide")
+	deployArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "deployments", "-o", "wide")
 	deployResult, _ := m.executor.Execute(ctx, "kubectl", deployArgs...)
 	if deployResult != nil && deployResult.Stdout != "" {
 		pterm.Info.Println("\nArgoCD deployments:")
@@ -43,7 +43,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	}
 
 	// Get all pods in argocd namespace with their status
-	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", "wide")
+	podArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods", "-o", "wide")
 	podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
 	if podResult != nil && podResult.Stdout != "" {
 		pterm.Info.Println("ArgoCD pods status:")
@@ -54,7 +54,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 
 	// Get pods that are not ready and show their details
 	// Use --field-selector instead of jsonpath to avoid Windows WSL escaping issues
-	notReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase!=Running", "-o", "name")
+	notReadyArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods", "--field-selector=status.phase!=Running", "-o", "name")
 	notReadyResult, _ := m.executor.Execute(ctx, "kubectl", notReadyArgs...)
 
 	var problemPods []string
@@ -70,7 +70,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 
 	// Also check for pods that are Running but not Ready (container issues)
 	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath
-	runningPodsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase=Running", "-o", "json")
+	runningPodsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods", "--field-selector=status.phase=Running", "-o", "json")
 	runningPodsResult, _ := m.executor.Execute(ctx, "kubectl", runningPodsArgs...)
 	if runningPodsResult != nil && runningPodsResult.Stdout != "" {
 		var podList corev1.PodList
@@ -92,7 +92,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 		pterm.Info.Printf("\n--- Pod: %s ---\n", podName)
 
 		// Get pod details as JSON to avoid Windows WSL escaping issues with jsonpath
-		podArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o", "json")
+		podArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pod", podName, "-o", "json")
 		podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
 		if podResult != nil && podResult.Stdout != "" {
 			var pod corev1.Pod
@@ -119,7 +119,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 		}
 
 		// Get recent events for this pod
-		eventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
+		eventsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "events",
 			"--field-selector", "involvedObject.name="+podName,
 			"--sort-by=.lastTimestamp",
 			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,REASON:.reason,MESSAGE:.message",
@@ -140,7 +140,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 		}
 
 		// Get container logs if pod exists
-		logsArgs := m.getKubectlArgs("-n", "argocd", "logs", podName, "--tail=10", "--all-containers=true")
+		logsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "logs", podName, "--tail=10", "--all-containers=true")
 		logsResult, _ := m.executor.Execute(ctx, "kubectl", logsArgs...)
 		if logsResult != nil && logsResult.Stdout != "" {
 			pterm.Info.Println("Recent Logs (last 10 lines):")
@@ -153,7 +153,7 @@ func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
 	// If no specific problem pods found, show general namespace events
 	if len(problemPods) == 0 {
 		pterm.Info.Println("\nNo specific problem pods found. Showing recent namespace events:")
-		nsEventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
+		nsEventsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "events",
 			"--sort-by=.lastTimestamp",
 			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,OBJECT:.involvedObject.name,REASON:.reason,MESSAGE:.message",
 			"--no-headers")
@@ -392,7 +392,7 @@ type RepoServerIssue struct {
 // checkRepoServerHealth checks the health of the ArgoCD repo-server and returns any issues found
 func (m *Manager) checkRepoServerHealth(ctx context.Context, verbose bool) *RepoServerIssue {
 	// Get repo-server pod status
-	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-l", "app.kubernetes.io/name=argocd-repo-server", "-o", "json")
+	podArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods", "-l", "app.kubernetes.io/name=argocd-repo-server", "-o", "json")
 	podResult, err := m.executor.Execute(ctx, "kubectl", podArgs...)
 	if err != nil {
 		return &RepoServerIssue{
@@ -455,7 +455,7 @@ func (m *Manager) checkRepoServerHealth(ctx context.Context, verbose bool) *Repo
 // triggerRepoServerRecovery attempts to recover from repo-server issues
 func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string) bool {
 	// Delete the repo-server pod to force a restart
-	deleteArgs := m.getKubectlArgs("-n", "argocd", "delete", "pod", "-l", "app.kubernetes.io/name=argocd-repo-server", "--wait=false")
+	deleteArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "delete", "pod", "-l", "app.kubernetes.io/name=argocd-repo-server", "--wait=false")
 	deleteResult, err := m.executor.Execute(ctx, "kubectl", deleteArgs...)
 	if err != nil || (deleteResult != nil && deleteResult.ExitCode != 0) {
 		return false
@@ -474,7 +474,7 @@ func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string)
 		if issue == nil {
 			// Force a refresh of the application if specified
 			if appName != "" {
-				refreshArgs := m.getKubectlArgs("-n", "argocd", "patch", "application", appName,
+				refreshArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "patch", "application", appName,
 					"--type", "merge", "-p", `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
 				if _, err := m.executor.Execute(ctx, "kubectl", refreshArgs...); err != nil {
 					pterm.Debug.Printf("best-effort refresh of application %s failed: %v\n", appName, err)

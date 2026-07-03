@@ -5,14 +5,16 @@ package uninstall
 import (
 	"context"
 	"fmt"
+
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 )
 
 // namespace is where ArgoCD and the app-of-apps live.
-const namespace = "argocd"
+const namespace = argocd.ArgoCDNamespace
 
 // releases lists the Helm releases to remove, ordered so the app-of-apps release
 // (which owns the child Applications) goes before ArgoCD itself.
-var releases = []string{"app-of-apps", "argo-cd"}
+var releases = []string{"app-of-apps", argocd.ArgoCDReleaseName}
 
 // ApplicationDeleter deletes ArgoCD Application CRs (cascading their workloads).
 type ApplicationDeleter interface {

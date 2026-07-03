@@ -470,7 +470,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						if elapsed > 7*time.Minute && int(elapsed.Seconds())%300 == 0 {
 							stuckApps := []Application{}
 							for _, app := range apps {
-								if app.Health != "Healthy" && app.Health != "Missing" {
+								if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
 									stuckApps = append(stuckApps, app)
 								}
 							}
@@ -483,7 +483,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 									// Get namespace using explicit context.
 									// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
-									nsArgs := m.getKubectlArgs("-n", "argocd", "get", "app", app.Name, "-o", "json")
+									nsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "app", app.Name, "-o", "json")
 									nsResult, err := m.executor.Execute(localCtx, "kubectl", nsArgs...)
 									if err != nil || nsResult == nil || nsResult.Stdout == "" {
 										pterm.Warning.Printf("Could not get namespace for %s\n", app.Name)
@@ -932,7 +932,7 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		}
 
 		// List ArgoCD pods using native client
-		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+		podList, err := m.kubeClient.CoreV1().Pods(ArgoCDNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app.kubernetes.io/part-of=argocd",
 		})
 
@@ -968,7 +968,7 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		default:
 		}
 
-		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+		podList, err := m.kubeClient.CoreV1().Pods(ArgoCDNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app.kubernetes.io/part-of=argocd",
 		})
 
@@ -1071,7 +1071,7 @@ func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool
 		}
 
 		// Use -o json to avoid Windows WSL escaping issues with jsonpath
-		checkArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
+		checkArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods",
 			"-l", "app.kubernetes.io/part-of=argocd",
 			"-o", "json")
 		checkResult, checkErr := m.executor.Execute(ctx, "kubectl", checkArgs...)
@@ -1120,7 +1120,7 @@ func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool
 		}
 
 		// Get all ArgoCD pods as JSON
-		podsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
+		podsArgs := m.getKubectlArgs("-n", ArgoCDNamespace, "get", "pods",
 			"-l", "app.kubernetes.io/part-of=argocd",
 			"-o", "json")
 		podsResult, err := m.executor.Execute(ctx, "kubectl", podsArgs...)

@@ -24,8 +24,8 @@ type AppOfAppsConfig struct {
 // NewAppOfAppsConfig creates a new AppOfAppsConfig with defaults
 func NewAppOfAppsConfig() *AppOfAppsConfig {
 	return &AppOfAppsConfig{
-		GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant",
-		GitHubBranch: "main",
+		GitHubRepo:   RepoOSSTenant,
+		GitHubBranch: DefaultGitBranch,
 		ChartPath:    "manifests/app-of-apps",
 		Namespace:    "argocd",
 		Timeout:      "60m",
