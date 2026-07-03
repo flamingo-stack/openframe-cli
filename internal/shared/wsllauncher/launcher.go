@@ -52,7 +52,14 @@ func Forward(version string, args []string) (int, error) {
 	if err := ensureOpenframeInWSL(version, runtime.GOARCH); err != nil {
 		return 1, err
 	}
-	cmd := exec.Command("wsl", buildForwardArgv(Distro, BinaryInWSL, args)...) // #nosec G204 -- fixed distro/binary; user args are the CLI's own args
+	// Resolve the concrete binary path: a PATH-installed openframe, else the
+	// absolute install dir (~/.openframe/bin is not necessarily on PATH). ensure
+	// above already verified this resolves to a runnable binary.
+	bin, err := resolveWSLBinaryPath()
+	if err != nil || bin == "" {
+		return 1, notInstalledError()
+	}
+	cmd := exec.Command("wsl", buildForwardArgv(Distro, bin, args)...) // #nosec G204 -- fixed distro; bin is resolved from a fixed lookup, user args are the CLI's own args
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -132,12 +139,36 @@ func exitCodeOf(err error) int {
 	return 1
 }
 
+// wslBinaryLookupScript resolves the openframe binary path inside WSL: the
+// PATH-resolved binary if present, otherwise the absolute path where the
+// launcher installs it. `command -v` fails (prints nothing) when openframe is
+// not on PATH, so the `||` branch falls back to ~/.openframe/bin — which is
+// where both the release download and OPENFRAME_WSL_BINARY install it, and which
+// is not necessarily on the WSL PATH. It is a constant (no interpolated input).
+const wslBinaryLookupScript = "command -v " + BinaryInWSL + ` 2>/dev/null || printf '%s' "$HOME/.openframe/bin/` + BinaryInWSL + `"`
+
+// resolveWSLBinaryPath returns the absolute path of the openframe binary inside
+// WSL (PATH-resolved or the install dir). The path is not guaranteed to exist —
+// callers verify it is runnable.
+func resolveWSLBinaryPath() (string, error) {
+	out, err := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", wslBinaryLookupScript).Output() // #nosec G204 -- fixed distro; script is a constant
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // verifyOpenframeInWSL checks that the openframe binary is runnable inside WSL,
-// returning setup guidance if not.
+// returning setup guidance if not. It resolves the binary path (PATH or the
+// install dir) and confirms it is executable — `command -v` alone would miss a
+// binary installed under ~/.openframe/bin, which is not on the default PATH.
 func verifyOpenframeInWSL() error {
-	// `command -v` is a shell builtin, so run it via bash inside the distro.
-	check := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", "command -v "+BinaryInWSL) // #nosec G204 -- fixed distro/binary name
-	if err := check.Run(); err != nil {
+	bin, err := resolveWSLBinaryPath()
+	if err != nil || bin == "" {
+		return notInstalledError()
+	}
+	check := exec.Command("wsl", "-d", Distro, "--", "bash", "-lc", "test -x "+shellSingleQuote(bin)) // #nosec G204 -- fixed distro; bin single-quoted
+	if check.Run() != nil {
 		return notInstalledError()
 	}
 	return nil

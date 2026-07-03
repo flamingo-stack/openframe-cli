@@ -101,9 +101,24 @@ func TestExitCodeOf(t *testing.T) {
 
 func TestNotInstalledError_HasGuidance(t *testing.T) {
 	msg := notInstalledError().Error()
-	for _, want := range []string{"not installed inside WSL", "wsl -d Ubuntu", disableEnv} {
+	for _, want := range []string{"not installed inside WSL", "wsl -d Ubuntu", disableEnv, localBinaryEnv} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("guidance missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+// TestWSLBinaryLookupScript locks the resolver: it must consult PATH first and
+// fall back to the ~/.openframe/bin install dir (which is not on PATH), so a
+// binary installed there is still found.
+func TestWSLBinaryLookupScript(t *testing.T) {
+	for _, want := range []string{
+		"command -v " + BinaryInWSL,
+		`"$HOME/.openframe/bin/` + BinaryInWSL + `"`,
+		"||", // PATH first, install-dir fallback
+	} {
+		if !strings.Contains(wslBinaryLookupScript, want) {
+			t.Errorf("lookup script missing %q:\n%s", want, wslBinaryLookupScript)
 		}
 	}
 }
