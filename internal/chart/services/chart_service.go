@@ -99,11 +99,6 @@ func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose b
 	return nil
 }
 
-// Install performs the complete chart installation process
-func (cs *ChartService) Install(req types.InstallationRequest) error {
-	return cs.InstallWithContext(context.Background(), req)
-}
-
 func (cs *ChartService) InstallWithContext(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
@@ -155,11 +150,6 @@ type InstallationWorkflow struct {
 	chartService   *ChartService
 	clusterService types.ClusterAccess
 	fileCleanup    *files.FileCleanup
-}
-
-// Execute runs the installation workflow
-func (w *InstallationWorkflow) Execute(req types.InstallationRequest) error {
-	return w.ExecuteWithContext(context.Background(), req)
 }
 
 func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req types.InstallationRequest) error {
@@ -630,37 +620,6 @@ func (w *InstallationWorkflow) performInstallationWithRetry(parentCtx context.Co
 		}
 		return w.performInstallation(ctx, config)
 	})
-}
-
-// InstallChartsWithPrerequisites installs charts after checking prerequisites
-// This is a wrapper function for bootstrap and other automated flows
-func InstallChartsWithPrerequisites(clusterName string, verbose bool) error {
-	return InstallChartsWithDefaults([]string{clusterName}, false, false, verbose)
-}
-
-// InstallChartsWithDefaults installs charts with default GitHub configuration
-// This is the common logic used by both chart install command and bootstrap
-func InstallChartsWithDefaults(args []string, force, dryRun, verbose bool) error {
-	return InstallChartsWithDefaultsContext(context.Background(), args, force, dryRun, verbose)
-}
-
-// InstallChartsWithDefaultsContext installs charts with default GitHub configuration and context support
-func InstallChartsWithDefaultsContext(ctx context.Context, args []string, force, dryRun, verbose bool) error {
-	return InstallChartsWithConfigContext(ctx, types.InstallationRequest{
-		Args:         args,
-		Force:        force,
-		DryRun:       dryRun,
-		Verbose:      verbose,
-		GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant", // Default repository
-		GitHubBranch: "main",                                                   // Default branch
-		CertDir:      "",                                                       // Auto-detected
-	})
-}
-
-// InstallChartsWithConfig installs charts with the given configuration
-// This is the common installation logic used by all flows
-func InstallChartsWithConfig(req types.InstallationRequest) error {
-	return InstallChartsWithConfigContext(context.Background(), req)
 }
 
 // InstallChartsWithConfigContext installs charts with the given configuration and context support

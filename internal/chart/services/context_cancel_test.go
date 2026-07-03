@@ -25,15 +25,3 @@ func TestInstallChartsWithConfigContext_CancelledContextIsHonored(t *testing.T) 
 		t.Fatalf("error must wrap context.Canceled, got %v", err)
 	}
 }
-
-// TestInstallChartsWithDefaultsContext_CancelledContextIsHonored covers the
-// bootstrap-style entry (defaults) — same contract.
-func TestInstallChartsWithDefaultsContext_CancelledContextIsHonored(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := InstallChartsWithDefaultsContext(ctx, []string{"c"}, false, false, false)
-	if err == nil || !stderrors.Is(err, context.Canceled) {
-		t.Fatalf("expected a context.Canceled error, got %v", err)
-	}
-}
