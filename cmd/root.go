@@ -120,7 +120,7 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 	// Kubernetes client live there (Option 1). The Linux build inside WSL does
 	// not forward, so this happens at most once.
 	if wsllauncher.ShouldForward() {
-		code, err := wsllauncher.Forward(os.Args[1:])
+		code, err := wsllauncher.Forward(versionInfo.Version, os.Args[1:])
 		if err != nil {
 			return err
 		}

@@ -45,10 +45,11 @@ func ShouldForward() bool {
 }
 
 // Forward re-runs `openframe <args>` inside WSL, passing through stdio, the
-// forwarded environment, and the child's exit code. It returns an error only
-// when WSL / the WSL openframe binary are unavailable (with setup guidance).
-func Forward(args []string) (int, error) {
-	if err := verifyOpenframeInWSL(); err != nil {
+// forwarded environment, and the child's exit code. It auto-installs the
+// matching Linux release into WSL when missing, and returns an error only when
+// WSL / the WSL openframe binary are unavailable (with setup guidance).
+func Forward(version string, args []string) (int, error) {
+	if err := ensureOpenframeInWSL(version, runtime.GOARCH); err != nil {
 		return 1, err
 	}
 	cmd := exec.Command("wsl", buildForwardArgv(Distro, BinaryInWSL, args)...) // #nosec G204 -- fixed distro/binary; user args are the CLI's own args
