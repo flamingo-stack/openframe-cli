@@ -355,40 +355,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			}
 
 			// Track applications that have ever been ready during this session
-			currentHealthyCount := 0
-			currentlyReady := 0
-			healthyApps := make([]string, 0)
-			notReadyApps := make([]string, 0)
-
-			for _, app := range apps {
-				// Count currently healthy apps for monitoring
-				if app.Health == "Healthy" {
-					currentHealthyCount++
-					healthyApps = append(healthyApps, app.Name)
-				}
-
-				// Count currently ready apps (both healthy and synced)
-				if app.Health == "Healthy" && app.Sync == "Synced" {
-					currentlyReady++
-					// Mark apps as "ever ready" if they are currently healthy and synced
-					// Once marked, they stay counted even if they go out of sync later
-					everReadyApps[app.Name] = true
-				} else {
-					// Track apps that are not yet ready with more detailed status
-					if app.Health != "Healthy" || app.Sync != "Synced" {
-						// Show the most important status issue
-						var status string
-						if app.Health != "Healthy" && app.Sync != "Synced" {
-							status = fmt.Sprintf("%s/%s", app.Health, app.Sync)
-						} else if app.Health != "Healthy" {
-							status = fmt.Sprintf("Health: %s", app.Health)
-						} else {
-							status = fmt.Sprintf("Sync: %s", app.Sync)
-						}
-						notReadyApps = append(notReadyApps, fmt.Sprintf("%s (%s)", app.Name, status))
-					}
-				}
-			}
+			assess := assessApplications(apps, everReadyApps)
+			currentlyReady := assess.ready
+			healthyApps := assess.healthyNames
+			notReadyApps := assess.notReady
 
 			// Show verbose logging if enabled
 			if config.Verbose && totalApps > 0 {
@@ -422,24 +392,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						}
 
 						// Check for applications stuck in "Unknown" status or with repo-server issues
-						unknownApps := []Application{}
-						appsWithConditionErrors := []Application{}
-						for _, app := range apps {
-							if app.Health == "Unknown" || app.Sync == "Unknown" {
-								unknownApps = append(unknownApps, app)
-							}
-							// Check for repo-server communication errors in condition messages
-							if app.Condition != "" && (strings.Contains(app.Condition, "EOF") ||
-								strings.Contains(app.Condition, "Unavailable") ||
-								strings.Contains(app.Condition, "error reading from server") ||
-								strings.Contains(app.Condition, "failed to generate manifest")) {
-								appsWithConditionErrors = append(appsWithConditionErrors, app)
-								appsWithRepoServerIssues[app.Name]++
-							} else {
-								// Reset counter if app no longer has the issue
-								delete(appsWithRepoServerIssues, app.Name)
-							}
-						}
+						unknownApps, appsWithConditionErrors := classifyAppIssues(apps, appsWithRepoServerIssues)
 
 						// Check for repo-server issues and attempt recovery
 						if len(appsWithConditionErrors) > 0 && elapsed > 2*time.Minute {
@@ -864,14 +817,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				maxAppsSeenReady = readyCount
 			}
 
-			// Check if deployment is complete - ALL currently detected apps must be healthy and synced
-			// All apps must be currently ready (not just "ever ready")
-			// Additionally, totalApps must be >= the highest count we've ever seen (high-water-mark guard)
-			// to prevent declaring success when the API momentarily returns fewer apps
-			allReady := false
-			if totalApps > 0 && currentlyReady == totalApps && totalApps >= maxAppsSeenTotal {
-				allReady = true
-			} else if totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
+			// Check if deployment is complete — ALL currently detected apps must be
+			// healthy and synced (not just "ever ready"), guarded by the high-water
+			// mark of the app count (see isDeploymentComplete).
+			allReady := isDeploymentComplete(totalApps, currentlyReady, maxAppsSeenTotal)
+			if !allReady && totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
 				pterm.Warning.Printf("Application count dropped: %d visible vs %d previously seen — waiting for all apps to reappear\n", totalApps, maxAppsSeenTotal)
 			}
 
