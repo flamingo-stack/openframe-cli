@@ -28,19 +28,6 @@ var K3d = PinnedTool{
 	},
 }
 
-// Kubectl is the pinned kubectl CLI. Upstream: https://dl.k8s.io/release
-// Checksums: each asset's sibling ".sha256" file.
-var Kubectl = PinnedTool{
-	Name:    "kubectl",
-	Version: "v1.36.2",
-	Assets: map[string]PinnedAsset{
-		"linux/amd64":  {URL: "https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl", SHA256: "1e9045ec32bea85da43de85f0065358529ea7c7a152eca78154fba5b58c27d82"},
-		"linux/arm64":  {URL: "https://dl.k8s.io/release/v1.36.2/bin/linux/arm64/kubectl", SHA256: "c957eb8c4bea27a3bb35b269edd9082e27f027f7b76b20b5bf4afebc726c6d3e"},
-		"darwin/amd64": {URL: "https://dl.k8s.io/release/v1.36.2/bin/darwin/amd64/kubectl", SHA256: "ce6c5e55cd17559e87e4fb5e73ebbbc2511bcf2b695d7a40c1b1461a9817d4b3"},
-		"darwin/arm64": {URL: "https://dl.k8s.io/release/v1.36.2/bin/darwin/arm64/kubectl", SHA256: "4408c85c83fd3a31adaa555bdf3c7a6c81f74b19449a9060ba31ab91926f023d"},
-	},
-}
-
 // UserBinDir returns the CLI-managed bin directory (~/.openframe/bin) where
 // verified tool binaries are installed. It does not create the directory.
 func UserBinDir() (string, error) {

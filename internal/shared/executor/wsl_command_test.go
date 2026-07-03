@@ -51,17 +51,8 @@ func TestBuildWSL_HelmArgsArePassedDiscretely(t *testing.T) {
 	assert.Equal(t, helmWSLScript, script)
 }
 
-func TestBuildWSL_KubectlJsonpathSurvivesVerbatim(t *testing.T) {
-	jp := "jsonpath={.items[*].metadata.name}"
-	_, argv := buildWSLCommand("kubectl", []string{"get", "pods", "-o", jp}, "runner")
-
-	assert.True(t, containsExact(argv, jp),
-		"jsonpath with {} and $ must pass through unescaped as a discrete arg: %v", argv)
-	assert.Equal(t, kubectlWSLScript, scriptOf(t, argv))
-}
-
 func TestBuildWSL_HostileUserIsSanitized(t *testing.T) {
-	_, argv := buildWSLCommand("kubectl", []string{"get", "ns"}, "evil; rm -rf /")
+	_, argv := buildWSLCommand("helm", []string{"version"}, "evil; rm -rf /")
 
 	// -u must be followed by the safe fallback, never the hostile value.
 	var userArg string
@@ -101,11 +92,6 @@ func TestBuildWSL_FiltersContextFlags(t *testing.T) {
 
 	_, helmArgv2 := buildWSLCommand("helm", []string{"upgrade", "--kube-context=k3d-x"}, "runner")
 	assert.False(t, containsExact(helmArgv2, "--kube-context=k3d-x"), "= form must be dropped: %v", helmArgv2)
-
-	// kubectl: --context removed.
-	_, kArgv := buildWSLCommand("kubectl", []string{"get", "pods", "--context", "k3d-x"}, "runner")
-	assert.False(t, containsExact(kArgv, "--context"), "kubectl argv: %v", kArgv)
-	assert.False(t, containsExact(kArgv, "k3d-x"), "kubectl context value must be dropped: %v", kArgv)
 }
 
 func TestBuildWSL_K3dUsesSudoAndPassesArgs(t *testing.T) {
@@ -136,7 +122,7 @@ func TestBuildWSL_UnknownCommandPassthrough(t *testing.T) {
 // scripts must back up the kubeconfig and replace it atomically (temp + mv),
 // never edit it in place with `sed -i`.
 func TestWSLScripts_KubeconfigEditIsBackedUpAndAtomic(t *testing.T) {
-	for name, script := range map[string]string{"helm": helmWSLScript, "kubectl": kubectlWSLScript} {
+	for name, script := range map[string]string{"helm": helmWSLScript} {
 		assert.NotContainsf(t, script, "sed -i", "%s script must not edit kubeconfig in place", name)
 		assert.Containsf(t, script, ".kube/config.openframe.bak", "%s script must back up kubeconfig", name)
 		assert.Containsf(t, script, `mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config"`,

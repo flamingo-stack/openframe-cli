@@ -393,7 +393,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		}
 
 		// Check for WSL-specific errors on Windows
-		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "kubectl" || options.Command == "helm" || options.Command == "k3d") {
+		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "helm" || options.Command == "k3d") {
 			// For WSL commands, stderr is often redirected to stdout via 2>&1
 			// Use stdout as error output if stderr is empty
 			errorOutput := result.Stderr
@@ -496,12 +496,7 @@ export HELM_DATA_HOME=/tmp/helm/data
 if [ -f "$HOME/.kube/config" ]; then cp "$HOME/.kube/config" "$HOME/.kube/config.openframe.bak" 2>/dev/null || true; sed "s|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g" "$HOME/.kube/config" > "$HOME/.kube/config.openframe.tmp" 2>/dev/null && mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config" || true; fi
 "$@" 2>&1`
 
-const kubectlWSLScript = `set -e
-export HOME="$1"; shift
-if [ -f "$HOME/.kube/config" ]; then cp "$HOME/.kube/config" "$HOME/.kube/config.openframe.bak" 2>/dev/null || true; sed "s|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g" "$HOME/.kube/config" > "$HOME/.kube/config.openframe.tmp" 2>/dev/null && mv "$HOME/.kube/config.openframe.tmp" "$HOME/.kube/config" || true; fi
-exec "$@"`
-
-// buildWSLCommand wraps kubectl, helm, and k3d so they run inside WSL2 Ubuntu.
+// buildWSLCommand wraps helm and k3d so they run inside WSL2 Ubuntu.
 // It is a pure function (no OS calls) so it can be unit-tested on any platform.
 //
 // Tool arguments are ALWAYS passed as discrete argv elements — never spliced
@@ -522,17 +517,12 @@ func buildWSLCommand(command string, args []string, wslUser string) (string, []s
 		out := append([]string{}, base...)
 		out = append(out, "bash", "-c", helmWSLScript, "bash", home, "helm")
 		return "wsl", append(out, filtered...)
-	case "kubectl":
-		filtered := filterFlag(args, "--context")
-		out := append([]string{}, base...)
-		out = append(out, "bash", "-c", kubectlWSLScript, "bash", home, "kubectl")
-		return "wsl", append(out, filtered...)
 	default:
 		return command, args
 	}
 }
 
-// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2.
+// wrapCommandForWindows wraps helm and k3d commands to run directly in WSL2.
 // On non-Windows platforms it is a no-op. The actual command construction lives in
 // buildWSLCommand (a pure, testable seam).
 func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
@@ -541,8 +531,8 @@ func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []strin
 		return command, args
 	}
 
-	// Only wrap kubectl, helm, and k3d commands
-	if command != "kubectl" && command != "helm" && command != "k3d" {
+	// Only wrap helm and k3d commands
+	if command != "helm" && command != "k3d" {
 		return command, args
 	}
 

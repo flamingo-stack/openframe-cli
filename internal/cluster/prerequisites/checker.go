@@ -7,7 +7,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 )
 
 type PrerequisiteChecker struct {
@@ -34,12 +33,6 @@ func NewPrerequisiteChecker() *PrerequisiteChecker {
 					}
 					return "Docker is installed but not running. Please start Docker Desktop or the Docker daemon."
 				},
-			},
-			{
-				Name:        "kubectl",
-				Command:     "kubectl",
-				IsInstalled: func() bool { return kubectl.NewKubectlInstaller().IsInstalled() },
-				InstallHelp: func() string { return kubectl.NewKubectlInstaller().GetInstallHelp() },
 			},
 			{
 				Name:        "k3d",

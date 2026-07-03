@@ -172,18 +172,12 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - helm might still work if the network is configured correctly
 	}
 
-	// Verify the cluster is reachable and get the rest.Config
+	// Verify the cluster is reachable and get the rest.Config via the native
+	// client (client-go). This is the sole verification — the previous best-effort
+	// kubectl double-check was removed with the kubectl migration.
 	restConfig, err := m.verifyClusterReachable(ctx, config.Name)
 	if err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("cluster created but not reachable: %w", err))
-	}
-
-	// Additional kubectl verification checks (especially important for Windows/WSL)
-	if err := m.verifyClusterViaKubectl(ctx, config.Name); err != nil {
-		if m.verbose {
-			fmt.Printf("Warning: kubectl verification checks failed: %v\n", err)
-		}
-		// Don't fail - the native Go client verification passed, kubectl might just need more time
 	}
 
 	return restConfig, nil

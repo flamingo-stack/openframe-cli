@@ -137,7 +137,7 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test skipped under -short")
 	}
-	for _, tool := range []PinnedTool{K3d, Kubectl} {
+	for _, tool := range []PinnedTool{K3d} {
 		asset, ok := tool.Asset(runtime.GOOS, runtime.GOARCH)
 		if !ok {
 			t.Errorf("%s: no asset for %s/%s", tool.Name, runtime.GOOS, runtime.GOARCH)

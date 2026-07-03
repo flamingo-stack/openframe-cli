@@ -1,50 +1,27 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 
-	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
 )
 
-// deletesNamespace reports whether any recorded command is a
-// `kubectl delete namespace <ns>`.
-func deletesNamespace(cmds []executor.RecordedCommand, ns string) bool {
-	for _, c := range cmds {
-		var sawDelete, sawNamespaceKw, sawNS bool
-		for _, a := range c.Args {
-			switch a {
-			case "delete":
-				sawDelete = true
-			case "namespace":
-				sawNamespaceKw = true
-			case ns:
-				sawNS = true
-			}
-		}
-		if sawDelete && sawNamespaceKw && sawNS {
-			return true
-		}
+// TestFilterProtectedNamespaces_NeverIncludesProtected is the I7 regression
+// guard: the cleanup namespace list must never include a protected/system
+// namespace, even if one is added to the raw list by mistake. cleanup now
+// deletes namespaces via client-go through exactly this filtered list.
+func TestFilterProtectedNamespaces_NeverIncludesProtected(t *testing.T) {
+	// A raw list deliberately tainted with every protected namespace.
+	raw := []string{"argocd", "kube-system", "openframe", "kube-public", "kube-node-lease", "default", "my-app"}
+
+	got := filterProtectedNamespaces(raw)
+
+	for _, protected := range []string{"kube-system", "kube-public", "kube-node-lease", "default"} {
+		assert.NotContainsf(t, got, protected, "protected namespace %q must be filtered out", protected)
 	}
-	return false
-}
-
-// TestCleanup_NeverDeletesProtectedNamespace is the I7 regression guard: cleanup
-// must never issue a `kubectl delete namespace <protected>` — even with force.
-func TestCleanup_NeverDeletesProtectedNamespace(t *testing.T) {
-	for _, force := range []bool{false, true} {
-		mock := executor.NewMockCommandExecutor()
-		svc := NewClusterServiceSuppressed(mock)
-
-		err := svc.cleanupKubernetesResources(context.Background(), false, force)
-		assert.NoError(t, err)
-
-		cmds := mock.Commands()
-		for _, protected := range []string{"kube-system", "kube-public", "kube-node-lease", "default"} {
-			assert.Falsef(t, deletesNamespace(cmds, protected),
-				"cleanup deleted protected namespace %q (force=%v)", protected, force)
-		}
+	// Non-protected namespaces survive.
+	for _, ns := range []string{"argocd", "openframe", "my-app"} {
+		assert.Containsf(t, got, ns, "non-protected namespace %q must survive", ns)
 	}
 }
 

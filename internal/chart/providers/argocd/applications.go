@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
@@ -196,15 +197,6 @@ func (m *Manager) SetClusterName(name string) {
 	m.clusterName = name
 }
 
-// getKubectlArgs returns kubectl args with explicit context if cluster name is set
-func (m *Manager) getKubectlArgs(args ...string) []string {
-	if m.clusterName != "" {
-		contextName := "k3d-" + m.clusterName
-		return append([]string{"--context", contextName}, args...)
-	}
-	return args
-}
-
 // Application represents an ArgoCD application status
 type Application struct {
 	Name             string
@@ -220,11 +212,6 @@ type Application struct {
 	Path             string // Path in repository
 	TargetRevision   string // Target revision (branch/tag)
 	ReconciledAt     string // Last reconciliation time
-}
-
-// argoAppList is used for JSON parsing of ArgoCD applications from kubectl output
-type argoAppList struct {
-	Items []argoApp `json:"items"`
 }
 
 // argoApp represents the minimal ArgoCD application structure for JSON parsing.
@@ -332,24 +319,13 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 		m.clusterName = config.ClusterName
 	}
 
-	// On Windows/WSL2, always use kubectl fallback because:
-	// - The native Go client connects to 127.0.0.1:6550 from Windows
-	// - But this port is only accessible from inside WSL where k3d runs
-	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
-	if runtime.GOOS == "windows" {
-		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
-	}
-
-	// Initialize clients if needed
-	if err := m.initKubernetesClients(); err != nil {
+	// Best-effort upfront count via the native dynamic client; 0 means "unknown"
+	// and the caller discovers the count dynamically while polling.
+	if err := m.initKubernetesClients(); err != nil || m.dynamicClient == nil {
 		if config.Verbose {
-			pterm.Debug.Printf("Could not initialize native clients: %v\n", err)
+			pterm.Debug.Printf("Native client unavailable for upfront app count: %v\n", err)
 		}
-		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
-	}
-
-	if m.dynamicClient == nil {
-		return m.getTotalExpectedApplicationsViaKubectl(ctx, config)
+		return 0
 	}
 
 	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
@@ -392,54 +368,6 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 	}
 
 	// Default: return 0 to indicate unknown, will be discovered dynamically
-	if config.Verbose {
-		pterm.Debug.Println("Could not determine total expected applications upfront, will discover dynamically")
-	}
-
-	return 0
-}
-
-// getTotalExpectedApplicationsViaKubectl is the fallback method using kubectl commands
-func (m *Manager) getTotalExpectedApplicationsViaKubectl(ctx context.Context, config config.ChartInstallConfig) int {
-	// Fallback Method 1: Get all resources that app-of-apps will create from its status via kubectl.
-	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath.
-	manifestResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io", "app-of-apps",
-		"-o", "json")...)
-
-	if err == nil && manifestResult.Stdout != "" {
-		var appOfApps argoApp
-		if err := json.Unmarshal([]byte(manifestResult.Stdout), &appOfApps); err == nil {
-			planned := 0
-			for _, res := range appOfApps.Status.Resources {
-				if res.Kind == "Application" {
-					planned++
-				}
-			}
-			if planned > 0 {
-				if config.Verbose {
-					pterm.Debug.Printf("Detected %d applications planned by app-of-apps (via kubectl)\n", planned)
-				}
-				return planned
-			}
-		}
-	}
-
-	// Fallback Method 2: Try to get all applications including those being created
-	// Use -o json to avoid Windows WSL escaping issues with jsonpath
-	allAppsResult, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io",
-		"-o", "json")...)
-
-	if err == nil && allAppsResult.Stdout != "" {
-		var appList argoAppList
-		if err := json.Unmarshal([]byte(allAppsResult.Stdout), &appList); err == nil && len(appList.Items) > 0 {
-			if config.Verbose {
-				pterm.Debug.Printf("Found %d total ArgoCD applications (via kubectl)\n", len(appList.Items))
-			}
-			return len(appList.Items)
-		}
-	}
-
-	// Default: return 0 to indicate unknown
 	if config.Verbose {
 		pterm.Debug.Println("Could not determine total expected applications upfront, will discover dynamically")
 	}
@@ -530,24 +458,17 @@ func (m *Manager) DeleteNamespace(ctx context.Context, name string) error {
 // parseApplications gets ArgoCD applications and their status using the native
 // dynamic client. This reduces reliance on the external kubectl binary.
 func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Application, error) {
-	// On Windows/WSL2, always use kubectl fallback because:
-	// - The native Go client connects to 127.0.0.1:6550 from Windows
-	// - But this port is only accessible from inside WSL where k3d runs
-	// - kubectl works because it runs via WSL wrapper (wsl -d Ubuntu kubectl...)
-	if runtime.GOOS == "windows" {
-		return m.parseApplicationsViaKubectl(ctx, verbose)
+	// On Windows the cluster lives in WSL2 and must be reached from inside WSL.
+	if err := platform.WSLClusterHint("list ArgoCD applications"); err != nil {
+		return nil, err
 	}
 
 	// Initialize clients if needed
 	if err := m.initKubernetesClients(); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to initialize native clients, falling back to kubectl: %v\n", err)
-		}
-		return m.parseApplicationsViaKubectl(ctx, verbose)
+		return nil, fmt.Errorf("failed to initialize the Kubernetes client: %w", err)
 	}
-
 	if m.dynamicClient == nil {
-		return m.parseApplicationsViaKubectl(ctx, verbose)
+		return nil, fmt.Errorf("kubernetes dynamic client unavailable: cannot reach the cluster to list ArgoCD applications")
 	}
 
 	// Use the dynamic client to list Application CRDs
@@ -568,65 +489,6 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 			}
 			continue
 		}
-		apps = append(apps, applicationFromArgoApp(item))
-	}
-
-	return apps, nil
-}
-
-// parseApplicationsViaKubectl is the fallback method using kubectl
-func (m *Manager) parseApplicationsViaKubectl(ctx context.Context, verbose bool) ([]Application, error) {
-	// Use -o json to avoid Windows WSL escaping issues with jsonpath
-	result, err := m.executor.Execute(ctx, "kubectl", m.getKubectlArgs("-n", ArgoCDNamespace, "get", "applications.argoproj.io",
-		"-o", "json")...)
-
-	if err != nil {
-		if verbose {
-			pterm.Warning.Printf("kubectl get applications failed: %v\n", err)
-		}
-		// Check for WSL-specific errors on Windows - these should be treated as connectivity issues
-		// since they indicate WSL/kubectl infrastructure problems, not application issues
-		errStr := err.Error()
-		if runtime.GOOS == "windows" && (strings.Contains(errStr, "WSL error") ||
-			strings.Contains(errStr, "exit code: 3221225786") || // STATUS_CONTROL_C_EXIT
-			strings.Contains(errStr, "exit code: 4294967295") || // WSL distro not found
-			strings.Contains(errStr, "exit code: -1")) {
-			return []Application{}, fmt.Errorf("cluster unreachable (WSL error): %w", err)
-		}
-		// Return the error so the caller can detect cluster connectivity issues
-		return []Application{}, fmt.Errorf("kubectl execution failed: %w", err)
-	}
-
-	// Try to parse JSON first - if successful, we have valid data regardless of
-	// what text strings appear in application condition messages
-	var appList argoAppList
-	if err := json.Unmarshal([]byte(result.Stdout), &appList); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to parse applications JSON: %v\n", err)
-		}
-
-		// JSON parsing failed - now check if it's a connectivity issue
-		// Only check for connectivity errors when we couldn't parse valid JSON,
-		// since valid JSON output means the command succeeded even if application
-		// conditions contain error-like strings
-		combinedOutput := result.Stdout + result.Stderr
-		if strings.Contains(combinedOutput, "connection refused") ||
-			strings.Contains(combinedOutput, "Unable to connect to the server") ||
-			strings.Contains(combinedOutput, "was refused") ||
-			strings.Contains(combinedOutput, "no such host") {
-			errMsg := "cluster connectivity error"
-			if result.Stderr != "" {
-				errMsg = result.Stderr
-			}
-			return []Application{}, fmt.Errorf("cluster unreachable: %s", errMsg)
-		}
-
-		// JSON parse failed but not a connectivity issue - return empty list
-		return []Application{}, nil
-	}
-
-	apps := make([]Application, 0, len(appList.Items))
-	for _, item := range appList.Items {
 		apps = append(apps, applicationFromArgoApp(item))
 	}
 

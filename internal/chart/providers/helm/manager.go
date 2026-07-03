@@ -14,10 +14,13 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -58,9 +61,10 @@ func NewHelmManager(exec executor.CommandExecutor, config *rest.Config, verbose 
 
 	coreClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		// Log the error but continue with kubectl fallback capability
+		// Native client unavailable — cluster operations will fail with a clear
+		// error (there is no kubectl fallback anymore).
 		if verbose {
-			pterm.Warning.Printf("Failed to create Kubernetes core client (will use kubectl fallback): %v\n", err)
+			pterm.Warning.Printf("Failed to create Kubernetes core client: %v\n", err)
 		}
 		return &HelmManager{
 			executor:   exec,
@@ -257,27 +261,32 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to update Helm repositories: %w", err)
 	}
 
-	// First, verify kubectl can connect to the cluster with retries
-	// Use explicit context if cluster name is provided (important for Windows/WSL)
+	// First, verify the cluster is reachable via the native client (client-go),
+	// with retries while k3d finishes coming up. On Windows the cluster lives in
+	// WSL and must be reached from inside WSL.
+	if err := platform.WSLClusterHint("reach the cluster"); err != nil {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		return err
+	}
 	maxRetries := 10
 	retryDelay := 3 // seconds
 	var lastErr error
 
-	// Build kubectl args with explicit context if cluster name is provided
-	kubectlArgs := []string{"cluster-info"}
-	if config.ClusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
-		kubectlArgs = []string{"--context", contextName, "cluster-info"}
+	if h.kubeClient == nil {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		return fmt.Errorf("kubernetes client unavailable: cannot reach the cluster")
 	}
 
 	for i := 0; i < maxRetries; i++ {
-		result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-			Command: "kubectl",
-			Args:    kubectlArgs,
-		})
-
-		if err == nil && result.ExitCode == 0 {
-			// Cluster is accessible
+		// A cheap API call that requires a reachable API server; NotFound still
+		// means the server answered.
+		_, err := h.kubeClient.CoreV1().Namespaces().Get(ctx, argocd.ArgoCDNamespace, metav1.GetOptions{})
+		if err == nil || k8serrors.IsNotFound(err) {
+			lastErr = nil
 			break
 		}
 
@@ -286,7 +295,6 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			if config.Verbose {
 				pterm.Info.Printf("Waiting for cluster to be ready... (attempt %d/%d)\n", i+1, maxRetries)
 			}
-			// Check if context was cancelled
 			select {
 			case <-ctx.Done():
 				if spinner != nil {
@@ -294,7 +302,6 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 				}
 				return ctx.Err()
 			case <-time.After(time.Duration(retryDelay) * time.Second):
-				// Continue to next retry
 			}
 		}
 	}
@@ -388,43 +395,26 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	// This addresses the race condition where Helm --wait returns before Kubernetes
 	// has actually created the Deployment objects (common in k3d/CI environments)
 	//
-	// Use native Go client for all platforms (including Windows) for fast, reliable polling
-	// The kubeClient uses the same kubeconfig that was used to create the cluster
-	// On Windows/WSL2, always use kubectl because the native Go client can't reliably
-	// reach the cluster running inside WSL due to networking bridge issues
-	if h.kubeClient != nil && runtime.GOOS != "windows" {
-		if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
-			if spinner != nil {
-				spinner.Stop()
-			}
-			// Check if the error is due to context cancellation (CTRL-C)
-			if ctx.Err() == context.Canceled {
-				return ctx.Err()
-			}
-			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
-			pterm.Info.Println("This may indicate a Helm caching issue or cluster connectivity problem")
-			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
+	// Wait for the ArgoCD workloads via the native Go client (client-go). On
+	// Windows a native process cannot reach the WSL2-hosted cluster, so guide the
+	// user to run inside WSL instead of silently failing.
+	if err := platform.WSLClusterHint("verify ArgoCD deployments"); err != nil {
+		if spinner != nil {
+			spinner.Stop()
 		}
-	} else {
-		// Fallback to kubectl-based verification when native Go client is unavailable or on Windows
-		if config.Verbose {
-			if runtime.GOOS == "windows" {
-				pterm.Info.Println("Using kubectl for deployment verification (Windows/WSL2 mode)")
-			} else {
-				pterm.Warning.Println("Native Go client unavailable, using kubectl for deployment verification")
-			}
+		return err
+	}
+	if err := h.waitForArgoCDDeployments(ctx, config.Verbose); err != nil {
+		if spinner != nil {
+			spinner.Stop()
 		}
-		if err := h.waitForArgoCDDeploymentsKubectl(ctx, config.ClusterName, config.Verbose); err != nil {
-			if spinner != nil {
-				spinner.Stop()
-			}
-			if ctx.Err() == context.Canceled {
-				return ctx.Err()
-			}
-			pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
-			pterm.Info.Println("This may indicate a Helm caching issue or cluster connectivity problem")
-			return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
+		// Check if the error is due to context cancellation (CTRL-C)
+		if ctx.Err() == context.Canceled {
+			return ctx.Err()
 		}
+		pterm.Warning.Println("Helm install reported success but ArgoCD deployments were not found")
+		pterm.Info.Println("This may indicate a Helm caching issue or cluster connectivity problem")
+		return fmt.Errorf("ArgoCD Helm install completed but deployments were not created: %w", err)
 	}
 
 	if spinner != nil {

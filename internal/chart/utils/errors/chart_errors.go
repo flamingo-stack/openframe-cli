@@ -83,7 +83,6 @@ var (
 	ErrInvalidConfiguration  = fmt.Errorf("invalid configuration")
 	ErrClusterNotReady       = fmt.Errorf("cluster not ready")
 	ErrHelmNotAvailable      = fmt.Errorf("helm not available")
-	ErrKubectlNotAvailable   = fmt.Errorf("kubectl not available")
 	ErrInsufficientResources = fmt.Errorf("insufficient cluster resources")
 	ErrNetworkTimeout        = fmt.Errorf("network timeout")
 	ErrAuthenticationFailed  = fmt.Errorf("authentication failed")

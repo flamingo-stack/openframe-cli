@@ -72,12 +72,6 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "Docker: Install Docker Desktop from https://docker.com/products/docker-desktop",
 		Default: "Docker: Please install Docker from https://docker.com/",
 	},
-	"kubectl": {
-		Darwin:  "kubectl: Run 'brew install kubectl' or download from https://kubernetes.io/docs/tasks/tools/install-kubectl-macos/",
-		Linux:   "kubectl: Install using your package manager or from https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/",
-		Windows: "kubectl: Download from https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/",
-		Default: "kubectl: Please install kubectl from https://kubernetes.io/docs/tasks/tools/",
-	},
 	"k3d": {
 		Darwin:  "k3d: Run 'brew install k3d' or download from https://k3d.io/v5.4.6/#installation",
 		Linux:   "k3d: Run 'curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash' or download from https://k3d.io/v5.4.6/#installation",

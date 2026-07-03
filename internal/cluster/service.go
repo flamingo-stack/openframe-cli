@@ -12,10 +12,15 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
@@ -228,7 +233,7 @@ func (s *ClusterService) cleanupK3dCluster(clusterName string, verbose bool, for
 	}
 
 	// 2. Clean up Kubernetes resources in common namespaces
-	if err := s.cleanupKubernetesResources(ctx, verbose, force); err != nil {
+	if err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to cleanup Kubernetes resources: %v\n", err)
 		}
@@ -338,34 +343,49 @@ func isProtectedNamespace(ns string) bool {
 	return ok
 }
 
-// cleanupKubernetesResources removes resources from namespaces created by
-// OpenFrame components. It never touches protected/system namespaces.
-func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, verbose bool, force bool) error {
-	// Namespaces created by OpenFrame component installs. System namespaces are
-	// intentionally absent and are additionally guarded below.
-	namespaces := []string{"argocd", "openframe"}
-
-	for _, namespace := range namespaces {
-		// Defense-in-depth: never delete a protected namespace, even if one is
-		// added to the list above by mistake or via --force.
-		if isProtectedNamespace(namespace) {
-			continue
+// filterProtectedNamespaces returns raw with every protected/system namespace
+// removed. It is the I7 defense-in-depth guard: even if a protected namespace is
+// added to a cleanup list by mistake, it can never be deleted.
+func filterProtectedNamespaces(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, ns := range raw {
+		if !isProtectedNamespace(ns) {
+			out = append(out, ns)
 		}
+	}
+	return out
+}
 
-		// Check if namespace exists
-		_, err := s.executor.Execute(ctx, "kubectl", "get", "namespace", namespace)
-		if err != nil {
-			// Namespace doesn't exist, skip
-			continue
+// cleanupKubernetesResources removes namespaces created by OpenFrame components
+// via the native Kubernetes client (client-go). It never touches
+// protected/system namespaces.
+func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, clusterName string, verbose bool, _ bool) error {
+	// On Windows the cluster lives in WSL and must be reached from inside WSL.
+	if err := platform.WSLClusterHint("clean up OpenFrame namespaces"); err != nil {
+		return err
+	}
+
+	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster config for cleanup: %w", err)
+	}
+	client, err := kubernetes.NewForConfig(sharedconfig.ApplyInsecureTLSConfig(restConfig))
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+
+	// Namespaces created by OpenFrame component installs. System namespaces are
+	// intentionally absent and are additionally filtered (I7 defense-in-depth).
+	for _, namespace := range filterProtectedNamespaces([]string{"argocd", "openframe"}) {
+		if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+			continue // doesn't exist (or unreachable) — skip
 		}
 
 		if verbose {
 			pterm.Info.Printf("Cleaning up namespace: %s\n", namespace)
 		}
 
-		// Delete the entire namespace (this will clean up all resources in it)
-		_, err = s.executor.Execute(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true")
-		if err != nil {
+		if err := client.CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 			if verbose {
 				pterm.Warning.Printf("Failed to delete namespace %s: %v\n", namespace, err)
 			}

@@ -8,17 +8,18 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
-// createTestHelmManager creates a HelmManager for testing with a mock rest.Config
+// createTestHelmManager creates a HelmManager for testing with a fake clientset
+// so the native (client-go) connectivity checks and deployment waits work
+// without a real cluster.
 func createTestHelmManager(exec executor.CommandExecutor) *HelmManager {
-	// Create a minimal rest.Config for testing
-	// Note: In tests, we use the manager directly without calling New since the
-	// kubernetes clients would fail to initialize with this fake config
 	return &HelmManager{
-		executor: exec,
-		verbose:  false,
+		executor:   exec,
+		kubeClient: k8sfake.NewSimpleClientset(),
+		verbose:    false,
 	}
 }
 

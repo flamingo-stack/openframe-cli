@@ -63,7 +63,7 @@ func TestInstallDocsHintFor_FallsBackWhenOSEmpty(t *testing.T) {
 }
 
 func TestInstallHint_KnownTools(t *testing.T) {
-	for _, tool := range []string{"docker", "kubectl", "k3d", "helm"} {
+	for _, tool := range []string{"docker", "k3d", "helm"} {
 		hint := InstallHint(tool)
 		if hint == "" {
 			t.Errorf("InstallHint(%q) is empty", tool)

@@ -20,7 +20,7 @@ func TestInstallTool(t *testing.T) {
 	installer := NewInstaller()
 
 	// Test that install tool delegates to appropriate installers
-	validTools := []string{"docker", "kubectl", "k3d"}
+	validTools := []string{"docker", "k3d"}
 
 	for _, tool := range validTools {
 		err := installer.installTool(tool)

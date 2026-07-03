@@ -10,7 +10,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
@@ -84,10 +83,6 @@ func (i *Installer) installSpecificTools(tools []string) error {
 			if !docker.NewDockerInstaller().IsInstalled() {
 				stillMissing = append(stillMissing, "Docker")
 			}
-		case "kubectl":
-			if !kubectl.NewKubectlInstaller().IsInstalled() {
-				stillMissing = append(stillMissing, "kubectl")
-			}
 		case "k3d":
 			if !k3d.NewK3dInstaller().IsInstalled() {
 				stillMissing = append(stillMissing, "k3d")
@@ -112,9 +107,6 @@ func (i *Installer) installTool(tool string) error {
 	switch strings.ToLower(tool) {
 	case "docker":
 		installer := docker.NewDockerInstaller()
-		return installer.Install()
-	case "kubectl":
-		installer := kubectl.NewKubectlInstaller()
 		return installer.Install()
 	case "k3d":
 		installer := k3d.NewK3dInstaller()
@@ -272,7 +264,6 @@ func (i *Installer) showManualInstructions() {
 	// Get instructions for all prerequisites
 	allInstructions := []string{
 		docker.NewDockerInstaller().GetInstallHelp(),
-		kubectl.NewKubectlInstaller().GetInstallHelp(),
 		k3d.NewK3dInstaller().GetInstallHelp(),
 		helm.NewHelmInstaller().GetInstallHelp(),
 	}

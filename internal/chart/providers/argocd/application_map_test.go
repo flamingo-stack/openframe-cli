@@ -16,8 +16,8 @@ func TestApplicationFromArgoApp_FullMapping(t *testing.T) {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	}{
-		{Type: "", Message: ""},                       // skipped (empty message)
-		{Type: "ComparisonError", Message: "drift!"},  // first non-empty → taken
+		{Type: "", Message: ""},                      // skipped (empty message)
+		{Type: "ComparisonError", Message: "drift!"}, // first non-empty → taken
 		{Type: "OtherError", Message: "ignored"},
 	}
 	item.Spec.Source.RepoURL = "https://github.com/org/repo"

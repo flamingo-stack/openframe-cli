@@ -22,5 +22,5 @@ func TestClusterSet_Structure(t *testing.T) {
 		assert.NotEmptyf(t, it.DocsURL, "%s must carry manual setup guidance", it.Name)
 	}
 
-	require.ElementsMatch(t, []string{"Docker", "kubectl", "k3d", "helm"}, names)
+	require.ElementsMatch(t, []string{"Docker", "k3d", "helm"}, names)
 }
