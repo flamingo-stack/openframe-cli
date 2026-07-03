@@ -35,7 +35,8 @@ Examples:
   openframe chart install my-cluster                        # Install on specific cluster
   openframe chart install --deployment-mode=oss-tenant     # Skip deployment selection
   openframe chart install --deployment-mode=saas-shared --non-interactive  # Full CI/CD mode
-  openframe chart install --github-branch develop          # Use develop branch`, argocd.ArgoCDChartVersion),
+  openframe chart install --github-branch develop          # Use develop branch
+  openframe chart install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
 		SilenceErrors: true, // Errors are handled by our custom error handler
 		SilenceUsage:  true, // Don't show usage on errors
@@ -60,14 +61,32 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 	// Get verbose flag (with fallback)
 	verbose := getVerboseFlag(cmd)
 
-	// Use common installation function
+	req, err := buildInstallRequest(cmd, args, flags, verbose, "Installing")
+	if err != nil {
+		return sharedErrors.HandleGlobalError(err, verbose)
+	}
+
+	if err := services.InstallChartsWithConfigContext(cmd.Context(), req); err != nil {
+		// Use shared error handler for consistent error display
+		return sharedErrors.HandleGlobalError(err, verbose)
+	}
+	return nil
+}
+
+// buildInstallRequest assembles the InstallationRequest and resolves the target
+// cluster's rest.Config: an explicit --context, or — for a bare interactive run
+// (no cluster name, not --non-interactive/--dry-run) — a prompt-selected
+// context. A named cluster / --non-interactive / --dry-run leave KubeConfig nil
+// so the service layer selects the cluster. `action` labels the interactive
+// message (e.g. "Installing"/"Upgrading"). Shared by install and upgrade Mode 1.
+func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags, verbose bool, action string) (types.InstallationRequest, error) {
 	req := types.InstallationRequest{
 		Args:           args,
 		Force:          flags.Force,
 		DryRun:         flags.DryRun,
 		Verbose:        verbose,
 		GitHubRepo:     flags.GitHubRepo,
-		GitHubBranch:   flags.GitHubBranch,
+		GitHubBranch:   flags.resolvedRef(),
 		CertDir:        flags.CertDir,
 		DeploymentMode: flags.DeploymentMode,
 		NonInteractive: flags.NonInteractive,
@@ -81,35 +100,30 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 	if contextName, _ := cmd.Flags().GetString("context"); contextName != "" {
 		cfg, cerr := k8s.RestConfigForContext(k8s.DefaultKubeconfigPath(), contextName)
 		if cerr != nil {
-			return sharedErrors.HandleGlobalError(fmt.Errorf("could not use context %q: %w", contextName, cerr), verbose)
+			return req, fmt.Errorf("could not use context %q: %w", contextName, cerr)
 		}
 		req.KubeConfig = cfg
 	}
 
-	// Bare interactive install (`openframe app install`, no cluster name): let the
-	// user pick a kube-context and validate the cluster is reachable/ready before
-	// installing (req 16/27). Every other invocation keeps its existing behavior:
-	// a named cluster, --non-interactive, --dry-run, or --context all skip this.
+	// Bare interactive run (no cluster name): let the user pick a kube-context and
+	// validate the cluster is reachable/ready before proceeding (req 16/27). Every
+	// other invocation keeps its existing behavior: a named cluster,
+	// --non-interactive, --dry-run, or --context all skip this.
 	if req.KubeConfig == nil && !flags.NonInteractive && !flags.DryRun && len(args) == 0 {
 		sel := target.NewSelector(target.UIPrompter{}, recommendedRequirements())
 		res, serr := sel.Select(cmd.Context())
 		if serr != nil {
-			return sharedErrors.HandleGlobalError(serr, verbose)
+			return req, serr
 		}
 		if !res.ResourcesSufficient {
 			pterm.Warning.Printf("Cluster %q is smaller than recommended (~%d cores / %dGB RAM). Continuing anyway.\n",
 				res.Context, recommendedCPUCores, recommendedMemGB)
 		}
-		pterm.Info.Printf("Installing OpenFrame into context %q\n", res.Context)
+		pterm.Info.Printf("%s OpenFrame into context %q\n", action, res.Context)
 		req.KubeConfig = res.Config
 	}
 
-	err = services.InstallChartsWithConfigContext(cmd.Context(), req)
-	if err != nil {
-		// Use shared error handler for consistent error display
-		return sharedErrors.HandleGlobalError(err, verbose)
-	}
-	return nil
+	return req, nil
 }
 
 const (
@@ -132,9 +146,20 @@ type InstallFlags struct {
 	DryRun         bool
 	GitHubRepo     string
 	GitHubBranch   string
+	Ref            string
 	CertDir        string
 	DeploymentMode string
 	NonInteractive bool
+}
+
+// resolvedRef returns the git ref to deploy: the general --ref wins over the
+// legacy --github-branch when both are set, otherwise --github-branch (whose
+// default is "main") is used.
+func (f *InstallFlags) resolvedRef() string {
+	if f.Ref != "" {
+		return f.Ref
+	}
+	return f.GitHubBranch
 }
 
 // extractInstallFlags extracts install flags from cobra command
@@ -155,6 +180,10 @@ func extractInstallFlags(cmd *cobra.Command) (*InstallFlags, error) {
 	}
 
 	if flags.GitHubBranch, err = cmd.Flags().GetString("github-branch"); err != nil {
+		return nil, err
+	}
+
+	if flags.Ref, err = cmd.Flags().GetString("ref"); err != nil {
 		return nil, err
 	}
 
@@ -206,7 +235,8 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force", "f", false, "Force installation even if charts already exist")
 	cmd.Flags().Bool("dry-run", false, "Show what would be installed without executing")
 	cmd.Flags().String("github-repo", chartmodels.RepoOSSTenant, "GitHub repository URL")
-	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "GitHub repository branch")
+	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "Git ref (branch or tag) to deploy")
+	cmd.Flags().String("ref", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
 	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")

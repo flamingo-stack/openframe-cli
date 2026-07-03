@@ -10,7 +10,7 @@ import (
 type AppOfAppsConfig struct {
 	// GitHub repository configuration
 	GitHubRepo   string // Repository URL (e.g., "https://github.com/flamingo-stack/openframe-oss-tenant")
-	GitHubBranch string // Branch to use (e.g., "main", "develop")
+	GitHubBranch string // Git ref to use: branch ("main", "develop") or release tag ("v1.2.3")
 	ChartPath    string // Path to chart in repository (e.g., "manifests/app-of-apps")
 	// Certificate configuration
 	CertDir string // Directory containing certificates for TLS configuration

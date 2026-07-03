@@ -39,6 +39,17 @@ func makeLocalRepo(t *testing.T, chartPath string) (repoURL, branch string) {
 	return dir, head.Name().Short()
 }
 
+// tagLocalRepo tags the HEAD commit of the repo at dir with the given tag name.
+func tagLocalRepo(t *testing.T, dir, tag string) {
+	t.Helper()
+	repo, err := gogit.PlainOpen(dir)
+	require.NoError(t, err)
+	head, err := repo.Head()
+	require.NoError(t, err)
+	_, err = repo.CreateTag(tag, head.Hash(), nil)
+	require.NoError(t, err)
+}
+
 func TestCloneChartRepository_Success(t *testing.T) {
 	url, branch := makeLocalRepo(t, "manifests/app-of-apps")
 	repo := NewRepository()
@@ -57,6 +68,26 @@ func TestCloneChartRepository_Success(t *testing.T) {
 	// The cloned .git must exist — proving a real checkout happened.
 	if _, err := os.Stat(filepath.Join(res.TempDir, ".git")); err != nil {
 		t.Errorf("expected a .git in the clone: %v", err)
+	}
+}
+
+// TestCloneChartRepository_Tag proves --ref accepts a release tag: the ref is
+// not a branch, so the clone falls through to the tag attempt.
+func TestCloneChartRepository_Tag(t *testing.T) {
+	url, _ := makeLocalRepo(t, "manifests/app-of-apps")
+	tagLocalRepo(t, url, "v1.2.3")
+	repo := NewRepository()
+
+	res, err := repo.CloneChartRepository(context.Background(), &models.AppOfAppsConfig{
+		GitHubRepo:   url,
+		GitHubBranch: "v1.2.3", // a tag, not a branch
+		ChartPath:    "manifests/app-of-apps",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { repo.Cleanup(res.TempDir) })
+
+	if _, err := os.Stat(filepath.Join(res.ChartPath, "Chart.yaml")); err != nil {
+		t.Fatalf("tag clone must contain Chart.yaml: %v", err)
 	}
 }
 

@@ -133,6 +133,37 @@ func TestInstallCommandFlagHandling(t *testing.T) {
 	}
 }
 
+// TestResolvedRef proves --ref supersedes --github-branch, and --github-branch
+// (default "main") is used when --ref is absent.
+func TestResolvedRef(t *testing.T) {
+	cases := []struct {
+		name   string
+		flags  InstallFlags
+		expect string
+	}{
+		{"github-branch only", InstallFlags{GitHubBranch: "main"}, "main"},
+		{"ref only", InstallFlags{Ref: "v1.2.3"}, "v1.2.3"},
+		{"ref wins over branch", InstallFlags{GitHubBranch: "develop", Ref: "v1.2.3"}, "v1.2.3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expect, tc.flags.resolvedRef())
+		})
+	}
+}
+
+// TestExtractInstallFlags_Ref confirms the --ref flag is wired end-to-end.
+func TestExtractInstallFlags_Ref(t *testing.T) {
+	cmd := getInstallCmd()
+	require.NoError(t, cmd.Flags().Set("github-branch", "develop"))
+	require.NoError(t, cmd.Flags().Set("ref", "v2.0.0"))
+
+	flags, err := extractInstallFlags(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "v2.0.0", flags.Ref)
+	assert.Equal(t, "v2.0.0", flags.resolvedRef(), "ref supersedes github-branch")
+}
+
 // MockExecutor for integration tests
 type MockExecutor struct {
 	commands [][]string

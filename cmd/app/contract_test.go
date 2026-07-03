@@ -18,7 +18,25 @@ func TestAppContract_RootShape(t *testing.T) {
 	assert.ElementsMatch(t, []string{"chart", "c"}, app.Aliases, "chart/c aliases are part of the contract")
 	assert.NotEmpty(t, app.Short)
 
-	testutil.AssertSubcommands(t, app, "install", "status", "access", "uninstall")
+	testutil.AssertSubcommands(t, app, "install", "upgrade", "status", "access", "uninstall")
+}
+
+func TestAppContract_UpgradeFlags(t *testing.T) {
+	upgrade := testutil.FindSubcommand(t, GetAppCmd(), "upgrade")
+
+	// Upgrade mutates the cluster → must NOT be readonly (runs the prereq gate).
+	assert.NotEqual(t, "true", upgrade.Annotations["readonly"], "upgrade must run the prereq gate")
+
+	// Upgrade shares the install flag set plus --sync.
+	testutil.AssertFlags(t, upgrade, []testutil.FlagSpec{
+		{Name: "force", Shorthand: "f", Type: "bool", Default: "false"},
+		{Name: "dry-run", Type: "bool", Default: "false"},
+		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
+		{Name: "github-branch", Type: "string", Default: "main"},
+		{Name: "ref", Type: "string", Default: ""},
+		{Name: "sync", Type: "bool", Default: "false"},
+		{Name: "context", Type: "string", Default: ""},
+	})
 }
 
 func TestAppContract_InstallFlags(t *testing.T) {
@@ -29,6 +47,7 @@ func TestAppContract_InstallFlags(t *testing.T) {
 		{Name: "dry-run", Type: "bool", Default: "false"},
 		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
 		{Name: "github-branch", Type: "string", Default: "main"},
+		{Name: "ref", Type: "string", Default: ""},
 		{Name: "cert-dir", Type: "string", Default: ""},
 		{Name: "deployment-mode", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},

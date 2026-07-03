@@ -24,45 +24,64 @@ func NewRepository() *Repository {
 }
 
 // CloneChartRepository clones a GitHub repository to a temporary directory with
-// a shallow, single-branch checkout.
+// a shallow, single-ref checkout. GitHubBranch carries a general git ref: it is
+// tried first as a branch and, if no such branch exists, as a tag — so a release
+// tag (e.g. "v1.2.3") works as well as a branch name.
 func (r *Repository) CloneChartRepository(ctx context.Context, config *models.AppOfAppsConfig) (*CloneResult, error) {
-	// Create a temporary directory
-	tempDir, err := os.MkdirTemp("", "openframe-chart-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
-	}
-
 	// Separate any embedded credential from the URL so the token is passed only
 	// via the in-memory auth method (audit I1) — never in the URL, argv, or a
 	// credentials file on disk.
 	auth := extractGitAuth(config.GitHubRepo)
 
-	_, err = gogit.PlainCloneContext(ctx, tempDir, false, &gogit.CloneOptions{
-		URL:           auth.cleanURL,
-		Auth:          auth.buildAuth(),
-		ReferenceName: plumbing.NewBranchReferenceName(config.GitHubBranch),
-		SingleBranch:  true,
-		Depth:         1,
-		Tags:          gogit.NoTags,
-	})
-	if err != nil {
-		r.Cleanup(tempDir)
-		if isBranchNotFound(err) {
-			return nil, fmt.Errorf("branch '%s' does not exist in repository. Please check if the branch name is correct or use 'main' branch", config.GitHubBranch)
+	// Try the ref as a branch first, then as a tag. A branch that is present
+	// succeeds on the first attempt; a tag falls through the branch-not-found
+	// path to the second. Any other error (auth, network) aborts immediately.
+	var lastErr error
+	for _, refName := range []plumbing.ReferenceName{
+		plumbing.NewBranchReferenceName(config.GitHubBranch),
+		plumbing.NewTagReferenceName(config.GitHubBranch),
+	} {
+		tempDir, err := os.MkdirTemp("", "openframe-chart-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 		}
-		// Mask the token in any surfaced output as defense-in-depth.
-		return nil, fmt.Errorf("failed to clone repository: %s", maskToken(err.Error(), auth.token))
+
+		_, err = gogit.PlainCloneContext(ctx, tempDir, false, &gogit.CloneOptions{
+			URL:           auth.cleanURL,
+			Auth:          auth.buildAuth(),
+			ReferenceName: refName,
+			SingleBranch:  true,
+			Depth:         1,
+			Tags:          gogit.NoTags,
+		})
+		if err == nil {
+			return r.chartResult(tempDir, config.ChartPath)
+		}
+
+		r.Cleanup(tempDir)
+		lastErr = err
+		// Only a missing ref is worth retrying as the other ref type; a real
+		// failure (auth/network) must surface as-is.
+		if !isBranchNotFound(err) {
+			break
+		}
 	}
 
-	// Build the path to the chart within the cloned repository
-	chartPath := filepath.Join(tempDir, config.ChartPath)
+	if isBranchNotFound(lastErr) {
+		return nil, fmt.Errorf("ref '%s' does not exist in repository (tried as both branch and tag). Please check the branch/tag name", config.GitHubBranch)
+	}
+	// Mask the token in any surfaced output as defense-in-depth.
+	return nil, fmt.Errorf("failed to clone repository: %s", maskToken(lastErr.Error(), auth.token))
+}
 
-	// Verify the chart directory exists
+// chartResult validates that chartPath exists inside the freshly cloned tempDir
+// and returns the CloneResult, cleaning up on failure.
+func (r *Repository) chartResult(tempDir, chartSubPath string) (*CloneResult, error) {
+	chartPath := filepath.Join(tempDir, chartSubPath)
 	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
 		r.Cleanup(tempDir)
-		return nil, fmt.Errorf("chart path '%s' does not exist in repository", config.ChartPath)
+		return nil, fmt.Errorf("chart path '%s' does not exist in repository", chartSubPath)
 	}
-
 	return &CloneResult{
 		TempDir:   tempDir,
 		ChartPath: chartPath,
