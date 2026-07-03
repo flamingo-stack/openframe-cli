@@ -32,5 +32,3 @@ Thumbs.db
 # Generated per-file doc stubs (external doc-orchestrator bot). All documentation
 # lives in docs/; these hidden .md files next to source must not be committed.
 .*.md
-# Temporary helm values files (may contain registry/repo secrets — never commit)
-helm-values-tmp*.yaml

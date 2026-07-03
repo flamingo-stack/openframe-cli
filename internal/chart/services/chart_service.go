@@ -190,18 +190,16 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
 	if req.DryRun {
-		// Create minimal configuration for dry-run mode using base values from current directory
-		modifier := templates.NewHelmValuesModifier()
-		baseValues, err := modifier.LoadOrCreateBaseValues()
+		var err error
+		chartConfig, err = w.dryRunConfiguration()
 		if err != nil {
-			return fmt.Errorf("failed to load base values for dry-run: %w", err)
+			return err
 		}
-
-		chartConfig = &types.ChartConfiguration{
-			BaseHelmValuesPath: "helm-values.yaml",
-			TempHelmValuesPath: "helm-values-tmp.yaml", // Use tmp file in current directory for dry-run
-			ExistingValues:     baseValues,
-			ModifiedSections:   make([]string, 0),
+		// dry-run writes a real values file too, so register it for cleanup.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
@@ -331,17 +329,16 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
 	if req.DryRun {
-		modifier := templates.NewHelmValuesModifier()
-		baseValues, err := modifier.LoadOrCreateBaseValues()
+		var err error
+		chartConfig, err = w.dryRunConfiguration()
 		if err != nil {
-			return fmt.Errorf("failed to load base values for dry-run: %w", err)
+			return err
 		}
-
-		chartConfig = &types.ChartConfiguration{
-			BaseHelmValuesPath: "helm-values.yaml",
-			TempHelmValuesPath: "helm-values-tmp.yaml",
-			ExistingValues:     baseValues,
-			ModifiedSections:   make([]string, 0),
+		// dry-run writes a real values file too, so register it for cleanup.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
@@ -478,6 +475,30 @@ func (w *InstallationWorkflow) runConfigurationWizard() (*types.ChartConfigurati
 }
 
 // loadExistingConfiguration loads existing helm-values.yaml for non-interactive mode
+// dryRunConfiguration builds the chart configuration for a dry-run. Like every
+// other mode, it writes the base helm values to a real temporary file and
+// points TempHelmValuesPath at it — previously dry-run set a fixed
+// "helm-values-tmp.yaml" that nothing ever wrote, so the app-of-apps step ran
+// `helm --dry-run -f helm-values-tmp.yaml` against a non-existent file. The
+// caller registers the returned path for cleanup.
+func (w *InstallationWorkflow) dryRunConfiguration() (*types.ChartConfiguration, error) {
+	modifier := templates.NewHelmValuesModifier()
+	baseValues, err := modifier.LoadOrCreateBaseValues()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load base values for dry-run: %w", err)
+	}
+	tempFilePath, err := modifier.CreateTemporaryValuesFile(baseValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary values file for dry-run: %w", err)
+	}
+	return &types.ChartConfiguration{
+		BaseHelmValuesPath: "helm-values.yaml",
+		TempHelmValuesPath: tempFilePath,
+		ExistingValues:     baseValues,
+		ModifiedSections:   make([]string, 0),
+	}, nil
+}
+
 func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr string) (*types.ChartConfiguration, error) {
 	modifier := templates.NewHelmValuesModifier()
 
