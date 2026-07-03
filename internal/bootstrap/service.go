@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -66,7 +67,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 		clusterName = strings.TrimSpace(args[0])
 	}
 
-	err = s.bootstrap(clusterName, deploymentMode, nonInteractive, verbose)
+	err = s.bootstrap(cmd.Context(), clusterName, deploymentMode, nonInteractive, verbose)
 	if err != nil {
 		// Use shared error handler for consistent error display (same as chart install)
 		return sharedErrors.HandleGlobalError(err, verbose)
@@ -75,7 +76,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 }
 
 // bootstrap executes cluster create followed by chart install
-func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool) error {
 	// On Windows, initialize WSL2 first before anything else
 	if runtime.GOOS == "windows" {
 		if err := s.initializeWSL(verbose); err != nil {
@@ -100,7 +101,7 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	fmt.Println()
 
 	// Step 2: Install charts with deployment mode flags on the created cluster
-	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
+	if err := s.installChartWithMode(ctx, actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
 
@@ -115,9 +116,9 @@ func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonI
 }
 
 // installChartWithMode installs charts with deployment mode flags
-func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
+func (s *Service) installChartWithMode(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	// Use the chart installation function with deployment mode flags
-	return chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
+	return chartServices.InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
 		DryRun:         false,

@@ -4,10 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites"
@@ -166,26 +163,11 @@ func (w *InstallationWorkflow) Execute(req types.InstallationRequest) error {
 }
 
 func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req types.InstallationRequest) error {
-	// Set up signal handling for graceful cleanup on interruption
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan) // Clean up signal handler
-
-	// Create a context that can be cancelled on signal OR parent context
+	// parentCtx is already signal-cancelled (the root runs via ExecuteContext),
+	// so Ctrl-C / SIGTERM cancels it directly — no local signal handler needed.
+	// A derived cancellable context lets us stop remaining work early.
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-
-	// Track if we've been interrupted
-	interrupted := false
-
-	// Start signal handler goroutine
-	go func() {
-		<-sigChan
-		interrupted = true
-		// Signal received - clean cancellation handled by error handler
-		cancel()
-		// No delay - immediate cancellation
-	}()
 
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
@@ -286,8 +268,8 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		return err
 	}
 
-	// Check if cancelled by signal (CTRL-C)
-	if interrupted || ctx.Err() != nil {
+	// Check if cancelled by signal (CTRL-C) — the context is signal-cancelled.
+	if ctx.Err() != nil {
 		// User interrupted - clean up temporary files silently
 		_ = w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
 		return fmt.Errorf("installation cancelled by user")
@@ -307,24 +289,10 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 // ExecuteWithContextDeferred runs the installation workflow with deferred HelmManager initialization
 // This is used when KubeConfig is not available upfront (e.g., standalone chart install)
 func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req types.InstallationRequest) error {
-	// Set up signal handling for graceful cleanup on interruption
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan) // Clean up signal handler
-
-	// Create a context that can be cancelled on signal OR parent context
+	// parentCtx is already signal-cancelled (root ExecuteContext); a derived
+	// cancellable context is enough to stop remaining work on Ctrl-C / SIGTERM.
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-
-	// Track if we've been interrupted
-	interrupted := false
-
-	// Start signal handler goroutine
-	go func() {
-		<-sigChan
-		interrupted = true
-		cancel()
-	}()
 
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
@@ -427,7 +395,7 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return err
 	}
 
-	if interrupted || ctx.Err() != nil {
+	if ctx.Err() != nil {
 		_ = w.fileCleanup.RestoreFiles(false)
 		return fmt.Errorf("installation cancelled by user")
 	}

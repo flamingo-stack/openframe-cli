@@ -102,7 +102,7 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 		req.KubeConfig = res.Config
 	}
 
-	err = services.InstallChartsWithConfig(req)
+	err = services.InstallChartsWithConfigContext(cmd.Context(), req)
 	if err != nil {
 		// Use shared error handler for consistent error display
 		return sharedErrors.HandleGlobalError(err, verbose)

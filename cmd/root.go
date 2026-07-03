@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/flamingo-stack/openframe-cli/cmd/app"
 	"github.com/flamingo-stack/openframe-cli/cmd/bootstrap"
@@ -127,7 +130,13 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 		download.PrependToPath(binDir)
 	}
 
-	return rootCmd.Execute()
+	// Run with a signal-cancelled context so Ctrl-C / SIGTERM cancels every
+	// command via cmd.Context(). This replaces the per-operation signal handlers
+	// that individual services used to install by hand.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return rootCmd.ExecuteContext(ctx)
 }
 
 // getClusterCmd returns the cluster command

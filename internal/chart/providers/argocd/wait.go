@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/signal"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
@@ -47,20 +44,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		}
 	}
 
-	// Create a derived context that responds to both parent cancellation AND direct signals
-	// This ensures immediate response to Ctrl+C even if parent context isn't propagating fast enough
+	// Derive a cancellable context from the parent. The parent is already
+	// signal-cancelled (root ExecuteContext), so Ctrl-C / SIGTERM propagates
+	// here immediately — no local signal handler required.
 	localCtx, localCancel := context.WithCancel(ctx)
 	defer localCancel()
-
-	// Handle direct interrupt signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
-	go func() {
-		<-sigChan
-		localCancel() // Cancel our local context immediately
-	}()
 
 	// Check if we should start the spinner (skip if context is cancelled or expiring soon)
 	shouldSkipSpinner := localCtx.Err() != nil
