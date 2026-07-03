@@ -25,11 +25,20 @@ func TestBootstrapContract_Flags(t *testing.T) {
 func TestBootstrapContract_AcceptsAtMostOneArg(t *testing.T) {
 	cmd := GetBootstrapCmd()
 
-	// The single positional arg is the optional cluster name; the boundary
-	// validation of that name lives in clustermodels.ValidateClusterName (tested
-	// there) and cannot be exercised through Execute here because the error path
-	// calls os.Exit.
 	assert.NotNil(t, cmd.RunE, "bootstrap must be wired to a RunE")
 	assert.NoError(t, cmd.Args(cmd, []string{"one"}), "a single cluster-name arg is allowed")
 	assert.Error(t, cmd.Args(cmd, []string{"one", "two"}), "more than one positional arg must be rejected")
+}
+
+// TestBootstrapContract_RejectsUnsafeClusterName drives the command end-to-end.
+// This is now possible because the error path RETURNS instead of calling
+// os.Exit (P1) — previously Execute() killed the test process here.
+func TestBootstrapContract_RejectsUnsafeClusterName(t *testing.T) {
+	cmd := GetBootstrapCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"bad;rm -rf /"})
+
+	err := cmd.Execute()
+	assert.Error(t, err, "an unsafe cluster name must be rejected before Execute reaches the cluster")
 }

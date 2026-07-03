@@ -3,7 +3,6 @@ package errors
 import (
 	stderrors "errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pterm/pterm"
@@ -113,11 +112,12 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	// Clean up common error patterns for better user experience
 	errorMsg := err.Error()
 
-	// Handle user interruptions (Ctrl+C)
+	// Handle user interruptions (Ctrl+C). Do NOT os.Exit here — returning lets
+	// the caller's deferred cleanup run and the process exit via the normal
+	// error-return path.
 	if eh.isUserInterruption(errorMsg) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
-		os.Exit(1)
 		return
 	}
 
@@ -232,19 +232,16 @@ func HandleGlobalError(err error, verbose bool) error {
 
 	handler := NewErrorHandler(verbose)
 
-	// Check if this is a user interruption - these should exit cleanly
+	// Display the error (interruptions get a friendly "cancelled" message). We
+	// return an AlreadyHandledError rather than calling os.Exit: the RunE caller
+	// returns it, cobra/main map it to a non-zero exit code, and every deferred
+	// cleanup (signal.Stop, cancel, temp-file restore) still runs. main.go
+	// recognises the sentinel and does not re-print the message.
 	if handler.isUserInterruption(err.Error()) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
-		os.Exit(1)
-		return nil // Won't be reached
+	} else {
+		handler.HandleError(err)
 	}
-
-	// Display the error
-	handler.HandleError(err)
-
-	// Don't return the error to prevent double display
-	// Exit with code 1 to indicate failure
-	os.Exit(1)
-	return nil // Won't be reached
+	return &AlreadyHandledError{OriginalError: err}
 }

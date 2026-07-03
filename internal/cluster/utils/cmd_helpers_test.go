@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
@@ -129,8 +130,10 @@ func TestWrapCommandWithCommonSetup(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil for generic errors after handling them
-		assert.Nil(t, err)
+		// After handling+displaying, the error surfaces as a non-nil handled
+		// sentinel so the process exits non-zero (previously it returned nil).
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
 	})
 
 	t.Run("handles verbose mode in error handling", func(t *testing.T) {
@@ -144,8 +147,8 @@ func TestWrapCommandWithCommonSetup(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil for generic errors after handling them
-		assert.Nil(t, err)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
 
 		// Clean up
 		globalFlags.Global.Verbose = false
@@ -343,8 +346,10 @@ func TestCmdHelpersEdgeCases(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil after handling the error to prevent double error messages
-		assert.Nil(t, err)
+		// After handling+displaying, the error surfaces as a non-nil handled
+		// sentinel so the process exits non-zero (even with nil global flags).
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
 
 		// Clean up
 		globalFlags = originalFlags
@@ -432,8 +437,10 @@ func TestComprehensiveFunctionCoverage(t *testing.T) {
 
 				cmd := &cobra.Command{}
 				err := wrappedFunc(cmd, []string{})
-				// WrapCommandWithCommonSetup returns nil after handling the error to prevent double error messages
-				assert.Nil(t, err)
+				// After handling+displaying, the error surfaces as a non-nil
+				// handled sentinel so the process exits non-zero.
+				require.Error(t, err)
+				assert.ErrorIs(t, err, assert.AnError)
 			})
 		}
 	})
