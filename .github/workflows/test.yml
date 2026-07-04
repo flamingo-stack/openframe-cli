@@ -71,7 +71,21 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-        
+
+      # The Windows binary re-runs the whole CLI inside WSL2, so the runner needs
+      # a WSL distro. Fresh runners have WSL but no distribution installed, so
+      # register one here (via `wsl --import`, headless, no Store/reboot). Alpine
+      # is the lightest official distro; it ships busybox `ash`, so pull in `bash`
+      # which the launcher uses (`bash -lc`). Set as default so the launcher (and
+      # the install step below) target it without hardcoding its registered name.
+      - name: Install Alpine in WSL
+        if: matrix.os == 'windows'
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Alpine-3.23
+          set-as-default: 'true'
+          additional-packages: bash
+
       - name: Run integration tests
         if: matrix.os != 'darwin'
         shell: bash
@@ -79,15 +93,12 @@ jobs:
         run: |
           make build
           if [ "${{ matrix.os }}" = "windows" ]; then
-            # The Windows binary re-runs the whole CLI inside WSL2, where the
-            # cluster and the Kubernetes client live. That needs a *Linux*
-            # openframe binary in WSL. `make build` is a dev version with no
+            # The cluster and the Kubernetes client live in WSL, so the CLI needs a
+            # *Linux* openframe binary there. `make build` is a dev version with no
             # published release to auto-download, so build the Linux binary and
-            # stream it into WSL's ~/.openframe/bin via stdin — no Windows→WSL
-            # path translation, which is where the launcher looks for it.
+            # stream it into the default WSL distro's ~/.openframe/bin via stdin —
+            # no Windows→WSL path translation, which is where the launcher looks.
             GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
-            # Install into the WSL *default* distro (the launcher targets the same
-            # one) — the runner's distro is not necessarily named "Ubuntu".
             wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
           fi
           ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
