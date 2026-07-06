@@ -26,22 +26,24 @@ func IsNonInteractive() bool {
 	return !term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-// ConfirmActionInteractive prompts the user with a polished interactive confirmation
-// Uses pterm's interactive confirm with colored styling and clear y/N format
-func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {
+// confirm shows pterm's styled interactive y/N confirmation with the given
+// default. It is the single implementation behind the exported confirm helpers.
+func confirm(message string, defaultYes bool) (bool, error) {
 	return pterm.DefaultInteractiveConfirm.
 		WithDefaultText(message).
-		WithDefaultValue(defaultValue).
+		WithDefaultValue(defaultYes).
 		Show()
 }
 
-// ConfirmDeletion prompts for deletion confirmation with consistent styling
+// ConfirmActionInteractive prompts the user with a polished interactive
+// confirmation (colored styling, clear y/N format) defaulting to defaultValue.
+func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {
+	return confirm(message, defaultValue)
+}
+
+// ConfirmDeletion prompts for deletion confirmation (defaults to No).
 func ConfirmDeletion(resourceType, resourceName string) (bool, error) {
-	message := fmt.Sprintf("Are you sure you want to delete %s '%s'?", resourceType, pterm.Cyan(resourceName))
-	return pterm.DefaultInteractiveConfirm.
-		WithDefaultText(message).
-		WithDefaultValue(false).
-		Show()
+	return confirm(fmt.Sprintf("Are you sure you want to delete %s '%s'?", resourceType, pterm.Cyan(resourceName)), false)
 }
 
 // ConfirmAction prompts the user to confirm an action with friendly UX:
@@ -105,53 +107,21 @@ func ConfirmAction(message string) (bool, error) {
 	}
 }
 
-// SelectFromList prompts the user to select from a list of options
+// selectTemplates is the shared styling for the interactive list selectors.
+var selectTemplates = &promptui.SelectTemplates{
+	Label:    "{{ . }}?",
+	Active:   "→ {{ . | cyan }}",
+	Inactive: "  {{ . | white }}",
+	Selected: "✓ {{ . | green }}",
+}
+
+// SelectFromList prompts the user to select from a list of options.
 func SelectFromList(label string, items []string) (int, string, error) {
-	prompt := promptui.Select{
-		Label: label,
-		Items: items,
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-			Active:   "\U00002192 {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "\U00002713 {{ . | green }}",
-		},
-	}
-
-	return prompt.Run()
-}
-
-// SelectFromListWithSearch prompts the user to select from a list with search/filter capability
-func SelectFromListWithSearch(label string, items []string) (int, string, error) {
-	prompt := promptui.Select{
-		Label: label,
-		Items: items,
-		Size:  5, // Show max 5 items at once
-		Searcher: func(input string, index int) bool {
-			item := items[index]
-			name := strings.ToLower(item)
-			input = strings.ToLower(input)
-			return strings.Contains(name, input)
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-			Active:   "\U00002192 {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "\U00002713 {{ . | green }}",
-		},
-	}
-
-	return prompt.Run()
-}
-
-// SelectFromListWithCustomTemplates provides more control over selection styling
-func SelectFromListWithCustomTemplates(label string, items []string, templates *promptui.SelectTemplates) (int, string, error) {
 	prompt := promptui.Select{
 		Label:     label,
 		Items:     items,
-		Templates: templates,
+		Templates: selectTemplates,
 	}
-
 	return prompt.Run()
 }
 
@@ -186,11 +156,10 @@ func GetMultiChoice(label string, items []string, defaults []bool) ([]bool, erro
 	return results, nil
 }
 
-// HandleResourceSelection handles the common pattern of getting a resource name from args or interactive selection
-// If args provided, validates the first arg is not empty and returns it
-// If no args, uses SelectFromList to let user choose from available items
+// HandleResourceSelection resolves a resource name from args or interactive
+// selection: it returns the first non-empty arg if given, otherwise prompts the
+// user to pick from items via SelectFromList.
 func HandleResourceSelection(args []string, items []string, prompt string) (string, error) {
-	// If resource name provided as argument, use it directly
 	if len(args) > 0 {
 		resourceName := strings.TrimSpace(args[0])
 		if resourceName == "" {
@@ -198,18 +167,13 @@ func HandleResourceSelection(args []string, items []string, prompt string) (stri
 		}
 		return resourceName, nil
 	}
-
-	// Check if items are available
 	if len(items) == 0 {
 		return "", fmt.Errorf("no items available for selection")
 	}
-
-	// Use interactive selection
 	_, selected, err := SelectFromList(prompt, items)
 	if err != nil {
 		return "", fmt.Errorf("selection failed: %w", err)
 	}
-
 	return selected, nil
 }
 
@@ -235,12 +199,4 @@ func ValidateIntRange(min, max int, fieldName string) func(string) error {
 		}
 		return nil
 	}
-}
-
-// boolToString converts boolean to y/N format (helper function)
-func boolToString(b bool) string {
-	if b {
-		return "y"
-	}
-	return "N"
 }

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifoldco/promptui"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -179,35 +178,13 @@ func TestConfirmAction_ResultParsing(t *testing.T) {
 	}
 }
 
-func TestSelectFromList_TemplateConfiguration(t *testing.T) {
-	// Test that the SelectFromList function sets up the correct templates
-	// We can't easily test the actual prompting, but we can verify the template setup
-
-	label := "Select an option"
-	items := []string{"option1", "option2", "option3"}
-
-	// This would be the configuration used in SelectFromList
-	expectedTemplates := &promptui.SelectTemplates{
-		Label:    "{{ . }}?",
-		Active:   "\U00002192 {{ . | cyan }}",
-		Inactive: "  {{ . | white }}",
-		Selected: "\U00002192 {{ . | green }}",
-	}
-
-	// Verify the templates are correctly defined
-	assert.Equal(t, "{{ . }}?", expectedTemplates.Label)
-	assert.Equal(t, "\U00002192 {{ . | cyan }}", expectedTemplates.Active)
-	assert.Equal(t, "  {{ . | white }}", expectedTemplates.Inactive)
-	assert.Equal(t, "\U00002192 {{ . | green }}", expectedTemplates.Selected)
-
-	// Verify the Unicode characters are correct
-	assert.Contains(t, expectedTemplates.Active, "→")   // Right arrow
-	assert.Contains(t, expectedTemplates.Selected, "→") // Right arrow
-
-	// Mock the function parameters to verify they would be used correctly
-	assert.Equal(t, "Select an option", label)
-	assert.Equal(t, 3, len(items))
-	assert.Contains(t, items, "option1")
+// TestSelectTemplates asserts on the shared selectTemplates the selectors use,
+// so a styling change is a deliberate, reviewed edit.
+func TestSelectTemplates(t *testing.T) {
+	assert.Equal(t, "{{ . }}?", selectTemplates.Label)
+	assert.Equal(t, "→ {{ . | cyan }}", selectTemplates.Active) // active row: arrow
+	assert.Equal(t, "  {{ . | white }}", selectTemplates.Inactive)
+	assert.Equal(t, "✓ {{ . | green }}", selectTemplates.Selected) // chosen row: check
 }
 
 func TestGetInput_DefaultValues(t *testing.T) {
@@ -316,38 +293,6 @@ func TestGetMultiChoice_ErrorHandling(t *testing.T) {
 				// Verify length consistency
 				assert.Equal(t, len(tt.items), len(tt.defaults))
 			}
-		})
-	}
-}
-
-func TestBoolToString(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    bool
-		expected string
-	}{
-		{
-			name:     "true to y",
-			input:    true,
-			expected: "y",
-		},
-		{
-			name:     "false to N",
-			input:    false,
-			expected: "N",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := boolToString(tt.input)
-			assert.Equal(t, tt.expected, result)
-
-			// Verify result is always non-empty
-			assert.NotEmpty(t, result)
-
-			// Verify result is always single character
-			assert.Len(t, result, 1)
 		})
 	}
 }
