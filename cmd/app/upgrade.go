@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/app/target"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
@@ -136,6 +137,9 @@ func runUpgradeForceSync(cmd *cobra.Command, args []string, flags *InstallFlags,
 	if err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
+	// Re-syncing an already-installed platform should not block for the full
+	// install budget (60m); cap the wait so a stuck child fails fast.
+	manager.WithWaitTimeout(15 * time.Minute)
 
 	prune, _ := cmd.Flags().GetBool("prune")
 

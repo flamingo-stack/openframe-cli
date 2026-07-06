@@ -71,6 +71,31 @@ func TestRefreshAndSync_NotInstalled(t *testing.T) {
 	}
 }
 
+// TestRefreshAndSync_SyncsChildren proves force-sync rolls out child Applications
+// too (not just the root), so non-auto-sync children don't stay OutOfSync.
+func TestRefreshAndSync_SyncsChildren(t *testing.T) {
+	m := fakeManager(
+		appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced),
+		appObj("core-api", ArgoCDHealthHealthy, ArgoCDSyncOutOfSync),
+		appObj("nats", ArgoCDHealthHealthy, ArgoCDSyncOutOfSync),
+	)
+
+	if err := m.RefreshAndSync(context.Background(), false); err != nil {
+		t.Fatalf("RefreshAndSync: %v", err)
+	}
+
+	res := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	for _, name := range []string{AppOfAppsName, "core-api", "nats"} {
+		got, err := res.Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if _, ok := got.Object["operation"]; !ok {
+			t.Errorf("%s must have a sync .operation set", name)
+		}
+	}
+}
+
 // TestRefreshAndSync_InFlightOperation refuses to clobber a sync that is already
 // running, returning an error instead of racing it.
 func TestRefreshAndSync_InFlightOperation(t *testing.T) {

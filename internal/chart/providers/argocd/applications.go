@@ -58,6 +58,19 @@ type Manager struct {
 	// processed and for any in-flight operation to clear. Zero means the default
 	// (30s). Tests set a tiny value for speed.
 	syncWait time.Duration
+
+	// waitTimeout overrides how long WaitForApplications waits for every app to
+	// become Healthy+Synced. Zero means the default (60m, sized for a fresh
+	// install). The force-sync path sets a shorter value — re-syncing an existing
+	// platform should not block for an hour.
+	waitTimeout time.Duration
+}
+
+// WithWaitTimeout sets a custom WaitForApplications timeout and returns the
+// Manager for chaining. Zero keeps the default (60m).
+func (m *Manager) WithWaitTimeout(d time.Duration) *Manager {
+	m.waitTimeout = d
+	return m
 }
 
 // NewManager creates a new ArgoCD manager

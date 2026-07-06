@@ -87,6 +87,32 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(syncOperationPatch(prune)), metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("triggering sync of app-of-apps: %w", err)
 	}
+
+	// 4) Sync the child Applications too. Syncing only the root updates child
+	// specs but does not roll them out: children that are not auto-sync would
+	// stay OutOfSync and WaitForApplications would then block until its timeout.
+	// Best-effort — a child that already has an operation in flight is skipped.
+	return m.syncChildApplications(ctx, prune)
+}
+
+// syncChildApplications triggers a sync on every Application except the root
+// app-of-apps (which the caller already synced). Best-effort: errors on
+// individual children (e.g. an operation already running) are ignored so one
+// stuck child cannot block the whole force-sync.
+func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
+	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	list, err := apps.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("listing applications to sync: %w", err)
+	}
+	patch := []byte(syncOperationPatch(prune))
+	for i := range list.Items {
+		name := list.Items[i].GetName()
+		if name == AppOfAppsName {
+			continue
+		}
+		_, _ = apps.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	}
 	return nil
 }
 

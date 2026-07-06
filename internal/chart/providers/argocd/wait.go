@@ -140,7 +140,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Main monitoring phase
 	startTime := time.Now()
-	timeout := 60 * time.Minute
+	timeout := m.waitTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Minute // default, sized for a fresh install
+	}
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
 	clusterHealthCheckInterval := 10 * time.Second
