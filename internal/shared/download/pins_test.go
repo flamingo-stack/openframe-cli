@@ -149,11 +149,11 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 	}
 }
 
-// TestHelm_Pins locks the helm pin shape: a Helm 3.x .tar.gz + non-empty SHA256
+// TestHelm_Pins locks the helm pin shape: a versioned .tar.gz + non-empty SHA256
 // for each supported linux/darwin platform, marked as a tarball.
 func TestHelm_Pins(t *testing.T) {
-	if !strings.HasPrefix(Helm.Version, "v3.") {
-		t.Fatalf("Helm must stay pinned to v3.x (CLI is built for Helm 3), got %q", Helm.Version)
+	if !strings.HasPrefix(Helm.Version, "v") {
+		t.Fatalf("Helm.Version must be a v-prefixed tag, got %q", Helm.Version)
 	}
 	if !Helm.Tarball {
 		t.Error("Helm assets are .tar.gz — Tarball must be true")

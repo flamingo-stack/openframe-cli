@@ -66,19 +66,20 @@ var Mkcert = PinnedTool{
 }
 
 // Helm is the pinned Helm CLI. Upstream: https://github.com/helm/helm/releases
-// (binaries served from get.helm.sh). Pinned to the latest Helm 3.x — the CLI is
-// built and tested against Helm 3 (get-helm-3), so this is a deliberate v3 pin,
-// not "latest". The assets are .tar.gz (Tarball), so the helm binary is extracted
-// from "<os>-<arch>/helm". SHA256 from helm's published *.tar.gz.sha256sum.
-// Replaces the unverified `curl get-helm-3 | bash` install (audit T0.3).
+// (binaries served from get.helm.sh). Pinned to the latest stable (Helm 4.x). The
+// CLI only uses stable core commands (upgrade --install, list, status, uninstall,
+// repo add/update) and flags that are unchanged across Helm 3→4. The assets are
+// .tar.gz (Tarball), so the helm binary is extracted from "<os>-<arch>/helm".
+// SHA256 from helm's published *.tar.gz.sha256sum. Replaces the unverified
+// `curl get-helm-3 | bash` install (audit T0.3).
 const (
-	helmVersion = "v3.21.2"
+	helmVersion = "v4.2.2"
 	helmBaseURL = "https://get.helm.sh/helm-" + helmVersion + "-"
 
-	helmSHA256LinuxAMD64  = "0a745198de24545d0055cd8414bc8d2ba10363ef5f5d38369ea1b399671cc083"
-	helmSHA256LinuxARM64  = "bbd559fc0547f1d96ccbc68fe4f1cb98f01808f36538139e669369066b781267"
-	helmSHA256DarwinAMD64 = "82ac9105e657267cb029b5bf27ed28e35db104777328a036a84d345046f9f329"
-	helmSHA256DarwinARM64 = "aea537342b4c03cf58e089cb8dc99468087bb1a0218531df40462faca3f6c5d3"
+	helmSHA256LinuxAMD64  = "9adafecab4d406853bba163a70e9f104f47dbbf65ce24b7653bae7e36150bcb6"
+	helmSHA256LinuxARM64  = "78803142087a0069fa4b50d3f32a84d3ef25c14d1ee8a40fbccf86a6216d2f36"
+	helmSHA256DarwinAMD64 = "10c1e36ee8c5f2e2ee25a16599cb03ab74c0953cd889cacb980a49ba4b6574ba"
+	helmSHA256DarwinARM64 = "5410a0dae3d5d91f45653b161260d9301aabc4ae80ae50a6605d66884b6df8ea"
 )
 
 var Helm = PinnedTool{
