@@ -21,10 +21,12 @@ func (d *Dependency) IsAvailable() bool {
 	return cmd.Run() == nil
 }
 
-// RequireOrSkip checks dependency and skips test with warning if not available
+// RequireOrSkip skips (does NOT pass) the test when the dependency is missing.
 func (d *Dependency) RequireOrSkip(t *testing.T, skipMsg string) {
 	if !d.IsAvailable() {
-		t.Logf("WARNING: %s - integration test passed due to missing dependency. %s", d.Name, d.InstallMsg)
+		// SKIPPED, not passed: the code path was never exercised. %s tells the
+		// developer how to install it so the test can actually run.
+		t.Logf("SKIPPING (not run): %s unavailable — %s", d.Name, d.InstallMsg)
 		t.Skip(skipMsg)
 	}
 }
