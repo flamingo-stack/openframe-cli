@@ -569,6 +569,28 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 		deploymentModeStr = string(*chartConfig.DeploymentMode)
 	}
 
+	// When the operator explicitly pins a ref (--ref/--github-branch), write it into
+	// the temp helm-values' repository.branch BEFORE the builder reads it back. This
+	// makes the explicit ref win over the values-file branch and keeps BOTH the
+	// app-of-apps clone and the child Applications' targetRevision on that ref
+	// (otherwise the values-file branch silently overrides --ref).
+	if ref := strings.TrimSpace(req.GitHubBranch); req.GitHubRefExplicit && ref != "" && chartConfig.TempHelmValuesPath != "" {
+		modifier := templates.NewHelmValuesModifier()
+		values := chartConfig.ExistingValues
+		if values == nil {
+			loaded, lerr := modifier.LoadExistingValues(chartConfig.TempHelmValuesPath)
+			if lerr != nil {
+				return config.ChartInstallConfig{}, fmt.Errorf("pinning ref %q: %w", ref, lerr)
+			}
+			values = loaded
+		}
+		modifier.SetRepositoryBranch(values, deploymentModeStr, ref)
+		if werr := modifier.WriteValues(values, chartConfig.TempHelmValuesPath); werr != nil {
+			return config.ChartInstallConfig{}, fmt.Errorf("pinning ref %q into helm values: %w", ref, werr)
+		}
+		pterm.Info.Printf("Pinning platform to ref %q\n", ref)
+	}
+
 	return configBuilder.BuildInstallConfigWithCustomHelmPath(
 		req.Force, req.DryRun, req.Verbose, req.NonInteractive, clusterName,
 		githubRepo, req.GitHubBranch, req.CertDir,

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,4 +48,35 @@ func TestClusterNameArg(t *testing.T) {
 	assert.Equal(t, "", clusterNameArg(nil))
 	assert.Equal(t, "", clusterNameArg([]string{}))
 	assert.Equal(t, "my-cluster", clusterNameArg([]string{"my-cluster"}))
+}
+
+// TestDeploymentModeForUpgrade covers OSS auto-inference and the SaaS-requires-flag
+// guard for Mode-1 upgrades.
+func TestDeploymentModeForUpgrade(t *testing.T) {
+	t.Run("no helm-values → auto oss-tenant", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		mode, err := deploymentModeForUpgrade()
+		require.NoError(t, err)
+		assert.Equal(t, "oss-tenant", mode)
+	})
+
+	t.Run("oss-enabled values → oss-tenant", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "helm-values.yaml"),
+			[]byte("deployment:\n  oss:\n    enabled: true\n"), 0o600))
+		t.Chdir(dir)
+		mode, err := deploymentModeForUpgrade()
+		require.NoError(t, err)
+		assert.Equal(t, "oss-tenant", mode)
+	})
+
+	t.Run("saas-enabled values → require explicit flag", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "helm-values.yaml"),
+			[]byte("deployment:\n  saas:\n    enabled: true\n"), 0o600))
+		t.Chdir(dir)
+		_, err := deploymentModeForUpgrade()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "deployment-mode")
+	})
 }

@@ -176,18 +176,86 @@ func resolveWSLBinaryPath() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// verifyOpenframeInWSL checks that the openframe binary is runnable inside WSL,
-// returning setup guidance if not. It resolves the binary path (PATH or the
-// install dir) and confirms it is executable — `command -v` alone would miss a
-// binary installed under ~/.openframe/bin, which is not on the default PATH.
-func verifyOpenframeInWSL() error {
-	bin, err := resolveWSLBinaryPath()
-	if err != nil || bin == "" {
-		return notInstalledError()
+// wslBinaryStatus reports whether openframe is runnable inside WSL. A non-nil
+// error means WSL ITSELF is unavailable (not installed, or no distro registered)
+// and carries actionable setup guidance. err==nil with present==false means WSL
+// works but the binary is simply not installed yet (installable) — the caller
+// may auto-install and then re-check.
+func wslBinaryStatus() (present bool, err error) {
+	bin, rerr := resolveWSLBinaryPath()
+	if rerr != nil {
+		// Distinguish "WSL/​distro not available" (fatal, actionable) from an
+		// otherwise-unknown failure (treat as "binary absent" so install can try).
+		if guide := wslUnavailableError(rerr); guide != nil {
+			return false, guide
+		}
+		return false, nil
+	}
+	if bin == "" {
+		return false, nil
 	}
 	check := exec.Command("wsl", wslArgv("bash", "-lc", "test -x "+shellSingleQuote(bin))...) // #nosec G204 -- bin single-quoted
 	if check.Run() != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// verifyOpenframeInWSL checks that the openframe binary is runnable inside WSL,
+// returning setup guidance if not.
+func verifyOpenframeInWSL() error {
+	present, err := wslBinaryStatus()
+	if err != nil {
+		return err
+	}
+	if !present {
 		return notInstalledError()
+	}
+	return nil
+}
+
+// wslStderr extracts the stderr captured by exec (Output() stores it on
+// *exec.ExitError), falling back to the error text.
+func wslStderr(err error) string {
+	var ee *exec.ExitError
+	if stderrors.As(err, &ee) {
+		return string(ee.Stderr)
+	}
+	return err.Error()
+}
+
+// wslUnavailableError categorizes a failed `wsl` invocation into actionable
+// guidance — WSL not installed, or no/wrong distro — or returns nil when the
+// failure is not a WSL-availability problem (caller falls back to
+// notInstalledError). This stops every WSL hiccup from collapsing into the
+// misleading "OpenFrame is not installed inside WSL".
+func wslUnavailableError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// wsl.exe itself is missing → the WSL feature is not installed.
+	if stderrors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf(`WSL is not installed on this system.
+
+On Windows OpenFrame runs inside WSL2. Install it, reboot if prompted, then re-run:
+
+    wsl --install
+
+Set %s=1 to bypass and run natively on Windows (unsupported)`, disableEnv)
+	}
+	low := strings.ToLower(wslStderr(err))
+	switch {
+	case strings.Contains(low, "no distribution"),
+		strings.Contains(low, "wsl_e_distro_not_found"),
+		strings.Contains(low, "has no installed distributions"):
+		return fmt.Errorf(`WSL has no usable distribution (%s).
+
+Install one and re-run, or point OpenFrame at an existing distro:
+
+    wsl --install -d Ubuntu
+    # or, if you already have one: set %s=<name>   (list with: wsl -l -q)
+
+Set %s=1 to bypass and run natively on Windows (unsupported)`, distroLabel(), distroEnv, disableEnv)
 	}
 	return nil
 }

@@ -14,19 +14,21 @@ import (
 // the force-sync path only has to act on this one object.
 const AppOfAppsName = "app-of-apps"
 
-// The patches below are CONSTANT JSON — no value is ever interpolated, so they
-// carry no injection surface.
-const (
-	// refreshHardPatch forces the repo-server to re-read git and drop its cached
-	// manifests (a plain "normal" refresh can serve stale cache for a moved ref).
-	refreshHardPatch = `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}`
+// refreshHardPatch forces the repo-server to re-read git and drop its cached
+// manifests (a plain "normal" refresh can serve stale cache for a moved ref).
+// CONSTANT JSON — no interpolation, no injection surface.
+const refreshHardPatch = `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}`
 
-	// syncOperationPatch sets the top-level .operation field — the exact
-	// mechanism `argocd app sync` uses, driven through the CRD so no argocd CLI
-	// or API port is needed. The application-controller watches .operation and
-	// runs the sync (with prune) as soon as it appears.
-	syncOperationPatch = `{"operation":{"initiatedBy":{"username":"openframe-cli"},"sync":{"prune":true,"syncStrategy":{"apply":{"force":false}}}}}`
-)
+// syncOperationPatch builds the top-level .operation sync patch — the exact
+// mechanism `argocd app sync` uses, driven through the CRD so no argocd CLI or
+// API port is needed. `prune` controls whether ArgoCD DELETES resources no
+// longer present in git; it is off by default because a force-sync of a moved
+// ref must never silently delete workloads (deleting a child Application
+// cascades to its resources). Only the boolean is interpolated, so there is no
+// injection surface.
+func syncOperationPatch(prune bool) string {
+	return fmt.Sprintf(`{"operation":{"initiatedBy":{"username":"openframe-cli"},"sync":{"prune":%t,"syncStrategy":{"apply":{"force":false}}}}}`, prune)
+}
 
 // RefreshAndSync forces ArgoCD to re-read git for the root app-of-apps
 // Application and trigger a sync, WITHOUT changing its targetRevision. This is
@@ -34,9 +36,11 @@ const (
 // (e.g. a branch whose HEAD advanced) and roll it out when auto-sync is off or
 // the repo-server is serving stale manifests.
 //
-// It applies two dynamic-client patches to app-of-apps: a hard refresh, then a
-// sync operation. ArgoCD reconciles the cascade to child Applications itself.
-func (m *Manager) RefreshAndSync(ctx context.Context) error {
+// prune enables deletion of resources removed from git (off by default — see
+// syncOperationPatch). It applies two dynamic-client patches to app-of-apps: a
+// hard refresh, then a sync operation. ArgoCD reconciles the cascade to child
+// Applications itself.
+func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	if m.dynamicClient == nil {
 		if err := m.initKubernetesClients(); err != nil {
 			return err
@@ -57,7 +61,7 @@ func (m *Manager) RefreshAndSync(ctx context.Context) error {
 	}
 
 	// 2) Trigger the sync via the top-level .operation field.
-	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(syncOperationPatch), metav1.PatchOptions{}); err != nil {
+	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(syncOperationPatch(prune)), metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("triggering sync of app-of-apps: %w", err)
 	}
 	return nil

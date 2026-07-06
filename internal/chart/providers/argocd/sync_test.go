@@ -12,35 +12,48 @@ import (
 // refresh annotation and the top-level .operation sync to the app-of-apps
 // Application via the dynamic client.
 func TestRefreshAndSync_PatchesAppOfApps(t *testing.T) {
-	m := fakeManager(appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced))
+	// prune defaults to false: a force-sync must not delete workloads.
+	for _, prune := range []bool{false, true} {
+		m := fakeManager(appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced))
 
-	if err := m.RefreshAndSync(context.Background()); err != nil {
-		t.Fatalf("RefreshAndSync: %v", err)
-	}
+		if err := m.RefreshAndSync(context.Background(), prune); err != nil {
+			t.Fatalf("RefreshAndSync(prune=%v): %v", prune, err)
+		}
 
-	got, err := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
-		Get(context.Background(), AppOfAppsName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get app-of-apps: %v", err)
-	}
+		got, err := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
+			Get(context.Background(), AppOfAppsName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get app-of-apps: %v", err)
+		}
 
-	// 1) Hard refresh annotation is set.
-	ann, _, _ := unstructuredNestedString(got.Object, "metadata", "annotations", "argocd.argoproj.io/refresh")
-	if ann != "hard" {
-		t.Errorf("refresh annotation = %q, want hard", ann)
-	}
+		// 1) Hard refresh annotation is set.
+		ann, _, _ := unstructuredNestedString(got.Object, "metadata", "annotations", "argocd.argoproj.io/refresh")
+		if ann != "hard" {
+			t.Errorf("refresh annotation = %q, want hard", ann)
+		}
 
-	// 2) A sync operation is present with prune enabled.
-	op, ok := got.Object["operation"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("no .operation set; object=%v", got.Object)
+		// 2) A sync operation is present with prune matching the requested value.
+		op, ok := got.Object["operation"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("no .operation set; object=%v", got.Object)
+		}
+		sync, ok := op["sync"].(map[string]interface{})
+		if !ok {
+			t.Fatalf(".operation.sync missing: %v", op)
+		}
+		if gotPrune, _ := sync["prune"].(bool); gotPrune != prune {
+			t.Errorf(".operation.sync.prune = %v, want %v", sync["prune"], prune)
+		}
 	}
-	sync, ok := op["sync"].(map[string]interface{})
-	if !ok {
-		t.Fatalf(".operation.sync missing: %v", op)
+}
+
+// TestSyncOperationPatch_PruneDefault locks that the default patch does NOT prune.
+func TestSyncOperationPatch_PruneDefault(t *testing.T) {
+	if !strings.Contains(syncOperationPatch(false), `"prune":false`) {
+		t.Errorf("default sync patch must not prune: %s", syncOperationPatch(false))
 	}
-	if prune, _ := sync["prune"].(bool); !prune {
-		t.Errorf(".operation.sync.prune = %v, want true", sync["prune"])
+	if !strings.Contains(syncOperationPatch(true), `"prune":true`) {
+		t.Errorf("prune=true patch must prune: %s", syncOperationPatch(true))
 	}
 }
 
@@ -49,7 +62,7 @@ func TestRefreshAndSync_PatchesAppOfApps(t *testing.T) {
 func TestRefreshAndSync_NotInstalled(t *testing.T) {
 	m := fakeManager() // no applications
 
-	err := m.RefreshAndSync(context.Background())
+	err := m.RefreshAndSync(context.Background(), false)
 	if err == nil {
 		t.Fatal("expected an error when app-of-apps is missing")
 	}
@@ -63,7 +76,7 @@ func TestRefreshAndSync_NotInstalled(t *testing.T) {
 func TestRefreshAndSync_NoClient(t *testing.T) {
 	m := &Manager{clientsInitialized: true} // initialized but nil dynamicClient
 
-	if err := m.RefreshAndSync(context.Background()); err == nil {
+	if err := m.RefreshAndSync(context.Background(), false); err == nil {
 		t.Fatal("expected an error when dynamic client is nil")
 	}
 }

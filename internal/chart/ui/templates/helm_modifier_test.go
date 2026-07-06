@@ -143,6 +143,34 @@ func TestHelmValuesModifier_GetCurrentOSSBranch(t *testing.T) {
 	assert.Equal(t, "main", noBranch)
 }
 
+func TestHelmValuesModifier_SetRepositoryBranch(t *testing.T) {
+	modifier := NewHelmValuesModifier()
+
+	// OSS / saas-tenant → deployment.oss.repository.branch, created from empty.
+	for _, mode := range []string{"oss-tenant", "saas-tenant", ""} {
+		values := make(map[string]interface{})
+		modifier.SetRepositoryBranch(values, mode, "v1.3.0")
+		assert.Equalf(t, "v1.3.0", modifier.GetCurrentOSSBranch(values), "mode %q writes oss branch", mode)
+	}
+
+	// saas-shared → deployment.saas.repository.branch (not oss).
+	values := make(map[string]interface{})
+	modifier.SetRepositoryBranch(values, "saas-shared", "v2.0.0")
+	saasBranch := values["deployment"].(map[string]interface{})["saas"].(map[string]interface{})["repository"].(map[string]interface{})["branch"]
+	assert.Equal(t, "v2.0.0", saasBranch)
+	_, hasOSS := values["deployment"].(map[string]interface{})["oss"]
+	assert.False(t, hasOSS, "saas-shared must not touch the oss section")
+
+	// Overwrites an existing branch in place.
+	existing := map[string]interface{}{
+		"deployment": map[string]interface{}{
+			"oss": map[string]interface{}{"repository": map[string]interface{}{"branch": "main"}},
+		},
+	}
+	modifier.SetRepositoryBranch(existing, "oss-tenant", "v9")
+	assert.Equal(t, "v9", modifier.GetCurrentOSSBranch(existing))
+}
+
 func TestHelmValuesModifier_GetCurrentDockerSettings(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 

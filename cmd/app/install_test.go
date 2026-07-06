@@ -164,6 +164,39 @@ func TestExtractInstallFlags_Ref(t *testing.T) {
 	assert.Equal(t, "v2.0.0", flags.resolvedRef(), "ref supersedes github-branch")
 }
 
+// TestBuildInstallRequest_RefExplicit proves an explicitly set --ref/--github-branch
+// marks the request GitHubRefExplicit (so it wins over the helm-values branch),
+// and a bare invocation does not.
+func TestBuildInstallRequest_RefExplicit(t *testing.T) {
+	// --ref set → explicit.
+	cmd := getInstallCmd()
+	require.NoError(t, cmd.Flags().Set("dry-run", "true"))
+	require.NoError(t, cmd.Flags().Set("ref", "v1.2.3"))
+	flags, err := extractInstallFlags(cmd)
+	require.NoError(t, err)
+	req, err := buildInstallRequest(cmd, nil, flags, false, "Installing")
+	require.NoError(t, err)
+	assert.True(t, req.GitHubRefExplicit, "--ref must set GitHubRefExplicit")
+	assert.Equal(t, "v1.2.3", req.GitHubBranch)
+
+	// --github-branch set → explicit.
+	cmdB := getInstallCmd()
+	require.NoError(t, cmdB.Flags().Set("dry-run", "true"))
+	require.NoError(t, cmdB.Flags().Set("github-branch", "develop"))
+	flagsB, _ := extractInstallFlags(cmdB)
+	reqB, err := buildInstallRequest(cmdB, nil, flagsB, false, "Installing")
+	require.NoError(t, err)
+	assert.True(t, reqB.GitHubRefExplicit, "--github-branch must set GitHubRefExplicit")
+
+	// Neither set → not explicit (values-file branch keeps precedence).
+	cmdC := getInstallCmd()
+	require.NoError(t, cmdC.Flags().Set("dry-run", "true"))
+	flagsC, _ := extractInstallFlags(cmdC)
+	reqC, err := buildInstallRequest(cmdC, nil, flagsC, false, "Installing")
+	require.NoError(t, err)
+	assert.False(t, reqC.GitHubRefExplicit, "bare invocation must not be explicit")
+}
+
 // MockExecutor for integration tests
 type MockExecutor struct {
 	commands [][]string

@@ -120,6 +120,39 @@ func TestNotInstalledError_HasGuidance(t *testing.T) {
 	}
 }
 
+// TestWSLUnavailableError categorizes wsl failures into actionable guidance:
+// missing wsl.exe vs missing/unknown distro vs "not an availability problem".
+func TestWSLUnavailableError(t *testing.T) {
+	// nil → nil.
+	if wslUnavailableError(nil) != nil {
+		t.Error("nil error must categorize to nil")
+	}
+
+	// wsl.exe missing → "WSL is not installed" guidance.
+	notFound := &exec.Error{Name: "wsl", Err: exec.ErrNotFound}
+	if got := wslUnavailableError(notFound); got == nil || !strings.Contains(got.Error(), "wsl --install") {
+		t.Errorf("missing wsl.exe must guide to `wsl --install`, got: %v", got)
+	}
+
+	// distro-not-found (stderr) → distro guidance mentioning OPENFRAME_WSL_DISTRO.
+	for _, msg := range []string{
+		"There is no distribution with the supplied name.",
+		"WSL_E_DISTRO_NOT_FOUND",
+		"Windows Subsystem for Linux has no installed distributions.",
+	} {
+		ee := &exec.ExitError{Stderr: []byte(msg)}
+		got := wslUnavailableError(ee)
+		if got == nil || !strings.Contains(got.Error(), distroEnv) {
+			t.Errorf("distro error %q must guide to %s, got: %v", msg, distroEnv, got)
+		}
+	}
+
+	// A generic non-availability failure → nil (caller falls back to not-installed).
+	if got := wslUnavailableError(errors.New("some other failure")); got != nil {
+		t.Errorf("non-availability error must categorize to nil, got: %v", got)
+	}
+}
+
 // TestWSLBinaryLookupScript locks the resolver: it must consult PATH first and
 // fall back to the ~/.openframe/bin install dir (which is not on PATH), so a
 // binary installed there is still found.

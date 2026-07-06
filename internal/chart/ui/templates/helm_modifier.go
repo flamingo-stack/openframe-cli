@@ -232,31 +232,42 @@ func (h *HelmValuesModifier) applySaaSConfig(values map[string]interface{}, saas
 
 // updateOSSBranch updates the OSS repository branch
 func (h *HelmValuesModifier) updateOSSBranch(values map[string]interface{}, branch string) error {
-	// Ensure deployment section exists
+	h.setSectionBranch(values, "oss", branch)
+	return nil
+}
+
+// SetRepositoryBranch pins the app-of-apps repository branch/ref for the given
+// deployment mode. It mirrors the branch-selection used when reading values back
+// (getBranchForDeploymentMode): saas-shared uses deployment.saas.repository.branch;
+// OSS and saas-tenant use deployment.oss.repository.branch. Used to make an
+// explicit --ref win over, and stay consistent with, the values-file branch.
+func (h *HelmValuesModifier) SetRepositoryBranch(values map[string]interface{}, deploymentMode, branch string) {
+	section := "oss"
+	if deploymentMode == "saas-shared" {
+		section = "saas"
+	}
+	h.setSectionBranch(values, section, branch)
+}
+
+// setSectionBranch sets deployment.<section>.repository.branch, creating the
+// nested maps as needed.
+func (h *HelmValuesModifier) setSectionBranch(values map[string]interface{}, section, branch string) {
 	deployment, ok := values["deployment"].(map[string]interface{})
 	if !ok {
 		deployment = make(map[string]interface{})
 		values["deployment"] = deployment
 	}
-
-	// Ensure OSS section exists
-	oss, ok := deployment["oss"].(map[string]interface{})
+	sec, ok := deployment[section].(map[string]interface{})
 	if !ok {
-		oss = make(map[string]interface{})
-		deployment["oss"] = oss
+		sec = make(map[string]interface{})
+		deployment[section] = sec
 	}
-
-	// Ensure repository section exists
-	repository, ok := oss["repository"].(map[string]interface{})
+	repository, ok := sec["repository"].(map[string]interface{})
 	if !ok {
 		repository = make(map[string]interface{})
-		oss["repository"] = repository
+		sec["repository"] = repository
 	}
-
-	// Set the branch
 	repository["branch"] = branch
-
-	return nil
 }
 
 // WriteValues writes updated values back to the Helm values file

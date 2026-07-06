@@ -77,7 +77,13 @@ func installScript(archiveURL, checksumsURL, archiveName string) string {
 // build, or the download/verify failed) — in that case the caller falls back to
 // showing instructions.
 func ensureOpenframeInWSL(version, goarch string) error {
-	if verifyOpenframeInWSL() == nil {
+	// Probe WSL first. A missing WSL / missing distro returns actionable guidance
+	// (fatal); "binary absent" (present=false, err=nil) means we may auto-install.
+	present, err := wslBinaryStatus()
+	if err != nil {
+		return err
+	}
+	if present {
 		return nil
 	}
 
@@ -86,19 +92,25 @@ func ensureOpenframeInWSL(version, goarch string) error {
 	// install/verify failed instead of the generic "not installed" guidance —
 	// otherwise the real error (bad path, wrong arch, wslpath) is swallowed.
 	if src := os.Getenv(localBinaryEnv); strings.TrimSpace(src) != "" {
-		if err := installLocalBinaryInWSL(src); err != nil {
-			return fmt.Errorf("%s=%s: %w", localBinaryEnv, src, err)
+		if ierr := installLocalBinaryInWSL(src); ierr != nil {
+			return fmt.Errorf("%s=%s: %w", localBinaryEnv, src, ierr)
 		}
-		if err := verifyOpenframeInWSL(); err != nil {
-			return fmt.Errorf("installed %s into WSL from %s but it is not runnable there — is it a linux/%s binary? (%w)", BinaryInWSL, src, goarch, err)
+		if verr := verifyOpenframeInWSL(); verr != nil {
+			return fmt.Errorf("installed %s into WSL from %s but it is not runnable there — is it a linux/%s binary? (%w)", BinaryInWSL, src, goarch, verr)
 		}
 		return nil
 	}
 
 	if isReleaseVersion(version) {
-		if installOpenframeInWSL(version, goarch) == nil && verifyOpenframeInWSL() == nil {
-			return nil
+		// Surface the real download/verify failure (404, checksum mismatch, no
+		// curl in the distro) instead of swallowing it into generic guidance.
+		if ierr := installOpenframeInWSL(version, goarch); ierr != nil {
+			return fmt.Errorf("auto-installing openframe %s into WSL failed: %w", version, ierr)
 		}
+		if verr := verifyOpenframeInWSL(); verr != nil {
+			return verr
+		}
+		return nil
 	}
 
 	return notInstalledError()

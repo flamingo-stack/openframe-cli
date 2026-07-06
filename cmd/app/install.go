@@ -81,15 +81,17 @@ func runInstallCommand(cmd *cobra.Command, args []string) error {
 // message (e.g. "Installing"/"Upgrading"). Shared by install and upgrade Mode 1.
 func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags, verbose bool, action string) (types.InstallationRequest, error) {
 	req := types.InstallationRequest{
-		Args:           args,
-		Force:          flags.Force,
-		DryRun:         flags.DryRun,
-		Verbose:        verbose,
-		GitHubRepo:     flags.GitHubRepo,
-		GitHubBranch:   flags.resolvedRef(),
-		CertDir:        flags.CertDir,
-		DeploymentMode: flags.DeploymentMode,
-		NonInteractive: flags.NonInteractive,
+		Args:         args,
+		Force:        flags.Force,
+		DryRun:       flags.DryRun,
+		Verbose:      verbose,
+		GitHubRepo:   flags.GitHubRepo,
+		GitHubBranch: flags.resolvedRef(),
+		// An explicitly set ref must win over the branch baked into helm-values.yaml.
+		GitHubRefExplicit: cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch"),
+		CertDir:           flags.CertDir,
+		DeploymentMode:    flags.DeploymentMode,
+		NonInteractive:    flags.NonInteractive,
 		// Inject cluster access from the command layer (composition root) so the
 		// app subsystem stays isolated from cluster-creation code (req 18/19).
 		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),

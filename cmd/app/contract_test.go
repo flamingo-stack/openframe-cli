@@ -35,6 +35,7 @@ func TestAppContract_UpgradeFlags(t *testing.T) {
 		{Name: "github-branch", Type: "string", Default: "main"},
 		{Name: "ref", Type: "string", Default: ""},
 		{Name: "sync", Type: "bool", Default: "false"},
+		{Name: "prune", Type: "bool", Default: "false"},
 		{Name: "context", Type: "string", Default: ""},
 	})
 }
