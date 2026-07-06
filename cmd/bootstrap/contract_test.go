@@ -16,9 +16,9 @@ func TestBootstrapContract_Flags(t *testing.T) {
 
 	assert.Equal(t, "bootstrap", cmd.Name())
 	testutil.AssertFlags(t, cmd, []testutil.FlagSpec{
-		{Name: "deployment-mode", Type: "string", Default: ""},
+		{Name: "deployment-mode", Shorthand: "m", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},
-		{Name: "verbose", Shorthand: "v", Type: "bool", Default: "false"},
+		// verbose/-v is now inherited from the root persistent flag, not local.
 	})
 }
 

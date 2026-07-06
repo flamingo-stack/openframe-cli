@@ -33,10 +33,10 @@ func TestAppContract_UpgradeFlags(t *testing.T) {
 		{Name: "dry-run", Type: "bool", Default: "false"},
 		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
 		{Name: "github-branch", Type: "string", Default: "main"},
-		{Name: "ref", Type: "string", Default: ""},
-		{Name: "sync", Type: "bool", Default: "false"},
-		{Name: "prune", Type: "bool", Default: "false"},
-		{Name: "context", Type: "string", Default: ""},
+		{Name: "ref", Shorthand: "r", Type: "string", Default: ""},
+		{Name: "sync", Shorthand: "s", Type: "bool", Default: "false"},
+		{Name: "prune", Shorthand: "p", Type: "bool", Default: "false"},
+		{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 	})
 }
 
@@ -48,11 +48,11 @@ func TestAppContract_InstallFlags(t *testing.T) {
 		{Name: "dry-run", Type: "bool", Default: "false"},
 		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
 		{Name: "github-branch", Type: "string", Default: "main"},
-		{Name: "ref", Type: "string", Default: ""},
+		{Name: "ref", Shorthand: "r", Type: "string", Default: ""},
 		{Name: "cert-dir", Type: "string", Default: ""},
-		{Name: "deployment-mode", Type: "string", Default: ""},
+		{Name: "deployment-mode", Shorthand: "m", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},
-		{Name: "context", Type: "string", Default: ""},
+		{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 	})
 }
 
@@ -62,7 +62,7 @@ func TestAppContract_StatusAndAccessAreReadonly(t *testing.T) {
 		cmd := testutil.FindSubcommand(t, app, name)
 		assert.Equalf(t, "true", cmd.Annotations["readonly"], "%s must be annotated readonly (skips the prereq gate)", name)
 		testutil.AssertFlags(t, cmd, []testutil.FlagSpec{
-			{Name: "context", Type: "string", Default: ""},
+			{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 			{Name: "output", Shorthand: "o", Type: "string", Default: "text"},
 		})
 	}
@@ -74,7 +74,7 @@ func TestAppContract_UninstallFlags(t *testing.T) {
 	// Uninstall mutates the cluster → must NOT be readonly.
 	assert.NotEqual(t, "true", uninstall.Annotations["readonly"], "uninstall must run the prereq gate")
 	testutil.AssertFlags(t, uninstall, []testutil.FlagSpec{
-		{Name: "context", Type: "string", Default: ""},
+		{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 		{Name: "yes", Shorthand: "y", Type: "bool", Default: "false"},
 		{Name: "delete-namespace", Type: "bool", Default: "false"},
 	})

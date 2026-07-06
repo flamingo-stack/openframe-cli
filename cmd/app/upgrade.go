@@ -54,8 +54,8 @@ Examples:
 	}
 
 	addInstallFlags(cmd)
-	cmd.Flags().Bool("sync", false, "Force ArgoCD to refresh and re-sync the current ref (Mode 2)")
-	cmd.Flags().Bool("prune", false, "During force-sync, delete resources no longer present in git (destructive)")
+	cmd.Flags().BoolP("sync", "s", false, "Force ArgoCD to refresh and re-sync the current ref (Mode 2)")
+	cmd.Flags().BoolP("prune", "p", false, "During force-sync, delete resources no longer present in git (destructive)")
 
 	return cmd
 }

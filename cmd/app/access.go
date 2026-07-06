@@ -28,7 +28,7 @@ Examples:
 		RunE:        runAccessCommand,
 		Annotations: map[string]string{"readonly": "true"},
 	}
-	cmd.Flags().String("context", "", "Kube-context to use (defaults to the current context)")
+	cmd.Flags().StringP("context", "c", "", "Kube-context to use (defaults to the current context)")
 	addOutputFlag(cmd)
 	return cmd
 }

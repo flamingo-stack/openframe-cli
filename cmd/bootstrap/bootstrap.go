@@ -46,9 +46,9 @@ Examples:
 	}
 
 	// Add deployment mode flags
-	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
+	cmd.Flags().StringP("deployment-mode", "m", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
-	cmd.Flags().BoolP("verbose", "v", false, "Show detailed logging including ArgoCD sync progress")
+	// --verbose/-v is the root persistent flag; read here via cmd.Flags().GetBool.
 
 	return cmd
 }

@@ -59,7 +59,7 @@ func MaybeAutoUpdate(ctx context.Context, current string, interactive bool, prog
 	if err := u.Apply(ctx, rel, progress); err != nil {
 		return fmt.Sprintf("auto-update to %s failed (run `openframe update`): %v", rel.TagName, err)
 	}
-	return fmt.Sprintf("Auto-updated %s → %s. Run `openframe update --rollback` to revert.", current, rel.TagName)
+	return fmt.Sprintf("Auto-updated %s → %s. Run `openframe update rollback` to revert.", current, rel.TagName)
 }
 
 // sameMajor reports whether current and latest share a semver major version.

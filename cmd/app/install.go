@@ -238,9 +238,9 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("dry-run", false, "Show what would be installed without executing")
 	cmd.Flags().String("github-repo", chartmodels.RepoOSSTenant, "GitHub repository URL")
 	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "Git ref (branch or tag) to deploy")
-	cmd.Flags().String("ref", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
+	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
-	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
+	cmd.Flags().StringP("deployment-mode", "m", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
-	cmd.Flags().String("context", "", "Kube-context to install into (skips interactive selection)")
+	cmd.Flags().StringP("context", "c", "", "Kube-context to install into (skips interactive selection)")
 }

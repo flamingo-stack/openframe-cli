@@ -15,54 +15,92 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// GetUpdateCmd returns the `openframe update` command. currentVersion is the
-// running CLI version (from the root command's VersionInfo).
+// GetUpdateCmd returns the `openframe update` command tree. currentVersion is
+// the running CLI version (from the root command's VersionInfo).
+//
+// Modes are subcommands rather than flags:
+//
+//	openframe update            update to the latest release
+//	openframe update v1.4.0     switch to a specific release (up or down)
+//	openframe update check      report whether an update is available
+//	openframe update rollback   revert to the previous version, offline
 func GetUpdateCmd(currentVersion string) *cobra.Command {
 	var (
-		checkOnly bool
-		targetVer string
 		assumeYes bool
 		force     bool
-		rollback  bool
 	)
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update the OpenFrame CLI to the latest release",
-		Long: `Check for a newer OpenFrame CLI release and, unless --check is given,
-download the verified binary and replace the running executable in place.
+		Use:   "update [version]",
+		Short: "Update the OpenFrame CLI to the latest (or a specific) release",
+		Long: `Download the verified OpenFrame CLI binary and replace the running
+executable in place. With no argument it updates to the latest release; pass a
+version (e.g. v1.4.0) to switch to a specific one, up or down.
 
 Every download is checksum-verified before it touches disk. A backup of the
-current binary is kept and automatically restored if the new one fails to run.
-The previous binary is retained so --rollback can revert instantly, offline.
+current binary is kept and automatically restored if the new one fails to run,
+and the previous binary is retained so 'openframe update rollback' can revert
+instantly, offline.
 
 Opt into automatic updates by setting OPENFRAME_AUTO_UPDATE=1 (checked once a
 day, skips major versions, never runs in CI/non-interactive shells).`,
 		Example: `  openframe update             # update to the latest release
-  openframe update --check     # only report whether an update is available
-  openframe update --version v1.4.0   # switch to a specific release (up or down)
-  openframe update --rollback  # revert to the previous version, no download`,
-		Args:         cobra.NoArgs,
+  openframe update v1.4.0      # switch to a specific release (up or down)
+  openframe update check       # only report whether an update is available
+  openframe update rollback    # revert to the previous version, no download`,
+		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if rollback && (checkOnly || targetVer != "" || force) {
-				return fmt.Errorf("--rollback cannot be combined with --check, --version, or --force")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
 			}
-			if rollback {
-				return runRollback(cmd.Context(), currentVersion, assumeYes)
-			}
-			return run(cmd.Context(), cmd, currentVersion, checkOnly, targetVer, assumeYes, force)
+			return run(cmd.Context(), currentVersion, target, assumeYes, force)
 		},
 	}
-	cmd.Flags().BoolVar(&checkOnly, "check", false, "Only report whether an update is available; make no changes")
-	cmd.Flags().StringVar(&targetVer, "version", "", "Target a specific release (e.g. v1.4.0) instead of the latest")
-	cmd.Flags().BoolVar(&rollback, "rollback", false, "Revert to the previously-installed version (offline, no download)")
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip the confirmation prompt")
 	cmd.Flags().BoolVar(&force, "force", false, "Reinstall even if already up to date")
-	cmd.Flags().StringP("output", "o", "text", "Output format for --check: text, json, or yaml")
+	cmd.AddCommand(newCheckCmd(currentVersion))
+	cmd.AddCommand(newRollbackCmd(currentVersion))
 	return cmd
 }
 
-func run(ctx context.Context, cmd *cobra.Command, current string, checkOnly bool, target string, assumeYes, force bool) error {
+// newCheckCmd is `openframe update check`: report availability, change nothing.
+func newCheckCmd(current string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "check",
+		Short:        "Report whether an update is available, without changing anything",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			u := selfupdate.Updater{Current: current, Client: selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")}}
+			st, _, err := u.Check(cmd.Context(), "")
+			if err != nil {
+				return fmt.Errorf("checking for updates: %w", err)
+			}
+			return reportStatus(cmd, st)
+		},
+	}
+	cmd.Flags().StringP("output", "o", "text", "Output format: text, json, or yaml")
+	return cmd
+}
+
+// newRollbackCmd is `openframe update rollback`: revert to the previous version.
+func newRollbackCmd(current string) *cobra.Command {
+	var assumeYes bool
+	cmd := &cobra.Command{
+		Use:          "rollback",
+		Short:        "Revert to the previously-installed version (offline, no download)",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRollback(cmd.Context(), current, assumeYes)
+		},
+	}
+	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip the confirmation prompt")
+	return cmd
+}
+
+func run(ctx context.Context, current, target string, assumeYes, force bool) error {
 	u := selfupdate.Updater{
 		Current: current,
 		Client:  selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")},
@@ -70,10 +108,6 @@ func run(ctx context.Context, cmd *cobra.Command, current string, checkOnly bool
 	st, rel, err := u.Check(ctx, target)
 	if err != nil {
 		return fmt.Errorf("checking for updates: %w", err)
-	}
-
-	if checkOnly {
-		return reportStatus(cmd, st)
 	}
 
 	if st.DevBuild {
