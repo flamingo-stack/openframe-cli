@@ -1,6 +1,9 @@
 package download
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +16,53 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// makeTarGz builds a gzip-compressed tar with a single regular file.
+func makeTarGz(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(content)), Typeflag: tar.TypeReg}))
+	_, err := tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+	return buf.Bytes()
+}
+
+func TestInstallVerifiedTarGz_ExtractsMember(t *testing.T) {
+	want := []byte("#!/bin/sh\necho helm\n")
+	archive := makeTarGz(t, "linux-amd64/helm", want)
+	srv := serve(t, archive)
+
+	dest := filepath.Join(t.TempDir(), "helm")
+	d := Downloader{}
+	require.NoError(t, d.InstallVerifiedTarGz(context.Background(),
+		PinnedAsset{URL: srv.URL, SHA256: sha256hex(archive)}, "linux-amd64/helm", dest, 0o755))
+
+	got, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestExtractTarGzMember_NotFound(t *testing.T) {
+	archive := makeTarGz(t, "linux-amd64/helm", []byte("x"))
+	_, err := extractTarGzMember(archive, "linux-amd64/nope")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestInstallVerifiedTarGz_RejectsChecksumMismatch(t *testing.T) {
+	archive := makeTarGz(t, "linux-amd64/helm", []byte("x"))
+	srv := serve(t, archive)
+	dest := filepath.Join(t.TempDir(), "helm")
+	err := Downloader{}.InstallVerifiedTarGz(context.Background(),
+		PinnedAsset{URL: srv.URL, SHA256: "00"}, "linux-amd64/helm", dest, 0o755)
+	require.Error(t, err)
+	_, statErr := os.Stat(dest)
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written on checksum mismatch")
+}
 
 func sha256hex(b []byte) string {
 	s := sha256.Sum256(b)

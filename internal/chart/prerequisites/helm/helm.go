@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 )
 
@@ -81,74 +82,28 @@ func (h *HelmInstaller) installMacOS() error {
 }
 
 func (h *HelmInstaller) installLinux() error {
-	if commandExists("apt") {
-		return h.installUbuntu()
-	} else if commandExists("yum") {
-		return h.installRedHat()
-	} else if commandExists("dnf") {
-		return h.installFedora()
-	} else if commandExists("pacman") {
-		return h.installArch()
-	} else {
-		return h.installScript()
-	}
+	return h.installVerified()
 }
 
-func (h *HelmInstaller) installUbuntu() error {
-	commands := []string{
-		"curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null",
-		"sudo apt-get install apt-transport-https --yes",
-		"echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main\" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list",
-		"sudo apt-get update",
-		"sudo apt-get install helm",
+// installVerified downloads the pinned Helm .tar.gz, verifies its SHA256, extracts
+// the helm binary, and installs it into ~/.openframe/bin (no sudo). This replaces
+// the unverified apt/`curl get-helm-3 | bash` installs (audit T0.3).
+func (h *HelmInstaller) installVerified() error {
+	binDir, err := download.UserBinDir()
+	if err != nil {
+		return err
 	}
 
-	for _, cmd := range commands {
-		if err := h.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	fmt.Printf("Downloading verified helm %s...\n", download.Helm.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Helm, binDir)
+	if err != nil {
+		return fmt.Errorf("verified helm install failed: %w", err)
 	}
-
-	return nil
-}
-
-func (h *HelmInstaller) installRedHat() error {
-	commands := []string{
-		"curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
-	}
-
-	for _, cmd := range commands {
-		if err := h.runShellCommand(cmd); err != nil {
-			return fmt.Errorf("failed to run command '%s': %w", cmd, err)
-		}
-	}
-
-	return nil
-}
-
-func (h *HelmInstaller) installFedora() error {
-	if err := h.runCommand("sudo", "dnf", "install", "-y", "helm"); err != nil {
-		// If dnf package not available, fall back to script
-		return h.installScript()
-	}
-	return nil
-}
-
-func (h *HelmInstaller) installArch() error {
-	if err := h.runCommand("sudo", "pacman", "-S", "--noconfirm", "helm"); err != nil {
-		return fmt.Errorf("failed to install Helm: %w", err)
-	}
-	return nil
-}
-
-func (h *HelmInstaller) installScript() error {
-	// Use the official Helm install script
-	installCmd := "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
-
-	if err := h.runShellCommand(installCmd); err != nil {
-		return fmt.Errorf("failed to install Helm via script: %w", err)
-	}
-
+	download.PrependToPath(binDir)
+	fmt.Printf("Installed verified helm %s to %s\n", download.Helm.Version, path)
 	return nil
 }
 
@@ -291,16 +246,4 @@ func containsPath(pathEnv, dir string) bool {
 		}
 	}
 	return false
-}
-
-func (h *HelmInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
-func (h *HelmInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
 }

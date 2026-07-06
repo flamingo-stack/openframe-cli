@@ -65,6 +65,34 @@ var Mkcert = PinnedTool{
 	},
 }
 
+// Helm is the pinned Helm CLI. Upstream: https://github.com/helm/helm/releases
+// (binaries served from get.helm.sh). Pinned to the latest Helm 3.x — the CLI is
+// built and tested against Helm 3 (get-helm-3), so this is a deliberate v3 pin,
+// not "latest". The assets are .tar.gz (Tarball), so the helm binary is extracted
+// from "<os>-<arch>/helm". SHA256 from helm's published *.tar.gz.sha256sum.
+// Replaces the unverified `curl get-helm-3 | bash` install (audit T0.3).
+const (
+	helmVersion = "v3.21.2"
+	helmBaseURL = "https://get.helm.sh/helm-" + helmVersion + "-"
+
+	helmSHA256LinuxAMD64  = "0a745198de24545d0055cd8414bc8d2ba10363ef5f5d38369ea1b399671cc083"
+	helmSHA256LinuxARM64  = "bbd559fc0547f1d96ccbc68fe4f1cb98f01808f36538139e669369066b781267"
+	helmSHA256DarwinAMD64 = "82ac9105e657267cb029b5bf27ed28e35db104777328a036a84d345046f9f329"
+	helmSHA256DarwinARM64 = "aea537342b4c03cf58e089cb8dc99468087bb1a0218531df40462faca3f6c5d3"
+)
+
+var Helm = PinnedTool{
+	Name:    "helm",
+	Version: helmVersion,
+	Tarball: true,
+	Assets: map[string]PinnedAsset{
+		"linux/amd64":  {URL: helmBaseURL + "linux-amd64.tar.gz", SHA256: helmSHA256LinuxAMD64},
+		"linux/arm64":  {URL: helmBaseURL + "linux-arm64.tar.gz", SHA256: helmSHA256LinuxARM64},
+		"darwin/amd64": {URL: helmBaseURL + "darwin-amd64.tar.gz", SHA256: helmSHA256DarwinAMD64},
+		"darwin/arm64": {URL: helmBaseURL + "darwin-arm64.tar.gz", SHA256: helmSHA256DarwinARM64},
+	},
+}
+
 // UserBinDir returns the CLI-managed bin directory (~/.openframe/bin) where
 // verified tool binaries are installed. It does not create the directory.
 func UserBinDir() (string, error) {
@@ -88,6 +116,13 @@ func (d Downloader) InstallPinnedTool(ctx context.Context, tool PinnedTool, binD
 		return "", fmt.Errorf("creating %s: %w", binDir, err)
 	}
 	dest := filepath.Join(binDir, tool.Name)
+	if tool.Tarball {
+		member := fmt.Sprintf("%s-%s/%s", runtime.GOOS, runtime.GOARCH, tool.Name)
+		if err := d.InstallVerifiedTarGz(ctx, asset, member, dest, 0o750); err != nil {
+			return "", err
+		}
+		return dest, nil
+	}
 	if err := d.InstallVerified(ctx, asset, dest, 0o750); err != nil {
 		return "", err
 	}

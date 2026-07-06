@@ -7,13 +7,18 @@
 package download
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -30,6 +35,10 @@ type PinnedTool struct {
 	Name    string
 	Version string
 	Assets  map[string]PinnedAsset
+	// Tarball marks the assets as .tar.gz archives (e.g. helm). The binary is
+	// extracted from the archive member "<GOOS>-<GOARCH>/<Name>" (the layout
+	// helm and many Go tools ship). Bare-binary tools leave this false.
+	Tarball bool
 }
 
 // Asset returns the pinned asset for the given platform.
@@ -89,14 +98,65 @@ func (d Downloader) FetchVerified(ctx context.Context, asset PinnedAsset) ([]byt
 	return body, nil
 }
 
-// InstallVerified downloads and verifies the asset, then writes it to destPath
-// with mode perm via a temp file + atomic rename. On any failure the
-// destination is left untouched and no partial file remains.
+// InstallVerified downloads and verifies the asset (a bare binary), then writes
+// it to destPath with mode perm via a temp file + atomic rename. On any failure
+// the destination is left untouched and no partial file remains.
 func (d Downloader) InstallVerified(ctx context.Context, asset PinnedAsset, destPath string, perm os.FileMode) error {
 	body, err := d.FetchVerified(ctx, asset)
 	if err != nil {
 		return err
 	}
+	return writeFileAtomic(body, destPath, perm)
+}
+
+// InstallVerifiedTarGz downloads and verifies a .tar.gz asset, extracts the
+// regular file named member (a slash path within the archive, e.g.
+// "linux-amd64/helm"), and installs it to destPath with mode perm (atomic).
+func (d Downloader) InstallVerifiedTarGz(ctx context.Context, asset PinnedAsset, member, destPath string, perm os.FileMode) error {
+	body, err := d.FetchVerified(ctx, asset)
+	if err != nil {
+		return err
+	}
+	extracted, err := extractTarGzMember(body, member)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(extracted, destPath, perm)
+}
+
+// extractTarGzMember returns the bytes of the regular file named member inside a
+// gzip-compressed tar archive. The member is matched by its cleaned path.
+func extractTarGzMember(data []byte, member string) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("opening gzip: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+	tr := tar.NewReader(gz)
+	want := path.Clean(member)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("member %q not found in archive", member)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading archive: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg || path.Clean(hdr.Name) != want {
+			continue
+		}
+		// Cap extraction to guard against a decompression bomb.
+		b, err := io.ReadAll(io.LimitReader(tr, 200<<20))
+		if err != nil {
+			return nil, fmt.Errorf("extracting %q: %w", member, err)
+		}
+		return b, nil
+	}
+}
+
+// writeFileAtomic writes body to destPath with mode perm via a temp file in the
+// same directory + atomic rename. On any failure nothing partial remains.
+func writeFileAtomic(body []byte, destPath string, perm os.FileMode) error {
 	dir := filepath.Dir(destPath)
 	tmp, err := os.CreateTemp(dir, ".of-download-*")
 	if err != nil {

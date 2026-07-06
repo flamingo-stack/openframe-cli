@@ -137,7 +137,7 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test skipped under -short")
 	}
-	for _, tool := range []PinnedTool{K3d, Mkcert} {
+	for _, tool := range []PinnedTool{K3d, Mkcert, Helm} {
 		asset, ok := tool.Asset(runtime.GOOS, runtime.GOARCH)
 		if !ok {
 			t.Errorf("%s: no asset for %s/%s", tool.Name, runtime.GOOS, runtime.GOARCH)
@@ -145,6 +145,32 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 		}
 		if _, err := (Downloader{}).FetchVerified(context.Background(), asset); err != nil {
 			t.Errorf("%s %s (%s): %v", tool.Name, tool.Version, asset.URL, err)
+		}
+	}
+}
+
+// TestHelm_Pins locks the helm pin shape: a Helm 3.x .tar.gz + non-empty SHA256
+// for each supported linux/darwin platform, marked as a tarball.
+func TestHelm_Pins(t *testing.T) {
+	if !strings.HasPrefix(Helm.Version, "v3.") {
+		t.Fatalf("Helm must stay pinned to v3.x (CLI is built for Helm 3), got %q", Helm.Version)
+	}
+	if !Helm.Tarball {
+		t.Error("Helm assets are .tar.gz — Tarball must be true")
+	}
+	for _, p := range []struct{ os, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"},
+	} {
+		asset, ok := Helm.Asset(p.os, p.arch)
+		if !ok {
+			t.Errorf("no helm asset for %s/%s", p.os, p.arch)
+			continue
+		}
+		if len(asset.SHA256) != 64 {
+			t.Errorf("%s/%s: SHA256 must be 64 hex chars, got %q", p.os, p.arch, asset.SHA256)
+		}
+		if !strings.Contains(asset.URL, Helm.Version) || !strings.HasSuffix(asset.URL, p.os+"-"+p.arch+".tar.gz") {
+			t.Errorf("%s/%s: URL %q must contain version and end with platform.tar.gz", p.os, p.arch, asset.URL)
 		}
 	}
 }

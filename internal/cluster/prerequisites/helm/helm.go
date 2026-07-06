@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 )
 
@@ -84,21 +85,28 @@ func (h *HelmInstaller) installMacOS() error {
 }
 
 func (h *HelmInstaller) installLinux() error {
-	// Helm doesn't have official package repos, so we use the install script
-	return h.installViaScript()
+	return h.installVerified()
 }
 
-func (h *HelmInstaller) installViaScript() error {
-	fmt.Println("Installing helm via official install script...")
-
-	cmd := exec.Command("bash", "-c", "curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to install helm: %w", err)
+// installVerified downloads the pinned Helm .tar.gz, verifies its SHA256, extracts
+// the helm binary, and installs it into ~/.openframe/bin (no sudo). This replaces
+// the unverified `curl get-helm-3 | bash` install (audit T0.3).
+func (h *HelmInstaller) installVerified() error {
+	binDir, err := download.UserBinDir()
+	if err != nil {
+		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	fmt.Printf("Downloading verified helm %s...\n", download.Helm.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Helm, binDir)
+	if err != nil {
+		return fmt.Errorf("verified helm install failed: %w", err)
+	}
+	download.PrependToPath(binDir)
+	fmt.Printf("Installed verified helm %s to %s\n", download.Helm.Version, path)
 	return nil
 }
 
