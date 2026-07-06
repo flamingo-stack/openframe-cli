@@ -2,7 +2,6 @@ package prerequisites
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -215,7 +214,7 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			}
 
 			_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-			os.Exit(1)
+			return fmt.Errorf("required prerequisites are missing")
 		}
 	}
 

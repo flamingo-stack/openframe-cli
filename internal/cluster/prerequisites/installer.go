@@ -2,7 +2,6 @@ package prerequisites
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -196,7 +195,7 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			}
 		} else {
 			i.showManualInstructions()
-			os.Exit(1)
+			return fmt.Errorf("required prerequisites are missing")
 		}
 	}
 
@@ -235,21 +234,20 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			}
 			if confirmed {
 				if err := docker.StartDocker(); err != nil {
-					pterm.Error.Printf("Failed to start Docker: %v\n", err)
 					pterm.Info.Println("Please start Docker Desktop manually and try again.")
-					os.Exit(1)
+					return fmt.Errorf("failed to start Docker: %w", err)
 				}
 				sp := spinner.New()
 				sp.Start("Waiting for Docker to start...")
 				if err := docker.WaitForDocker(); err != nil {
 					sp.Fail("Docker failed to start")
 					pterm.Info.Println("Please start Docker Desktop manually and try again.")
-					os.Exit(1)
+					return fmt.Errorf("timed out waiting for Docker to start: %w", err)
 				}
 				sp.Success("Docker started successfully")
 			} else {
 				i.showDockerStartInstructions()
-				os.Exit(1)
+				return fmt.Errorf("the Docker daemon is not running")
 			}
 		}
 	}

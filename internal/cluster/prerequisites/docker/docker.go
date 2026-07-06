@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 )
+
+// ErrWSLRestartRequired is returned after WSL2 is installed and the machine must
+// be rebooted before Docker setup can continue. It is a non-nil error (not an
+// os.Exit(0)) so automation sees a non-zero exit and deferred cleanup still runs
+// — an os.Exit(0) here previously reported success though nothing was installed.
+var ErrWSLRestartRequired = stderrors.New("WSL2 installed — restart your computer, then re-run to continue Docker installation")
 
 type DockerInstaller struct{}
 
@@ -325,7 +332,7 @@ func (d *DockerInstaller) ensureWSL2() error {
 
 		fmt.Println("\n⚠ IMPORTANT: You must restart your computer now for WSL2 to work")
 		fmt.Println("After restart, run this command again to continue Docker installation")
-		os.Exit(0)
+		return ErrWSLRestartRequired
 	}
 
 	// Set WSL2 as default version
