@@ -53,6 +53,22 @@ func IsNewer(current, latest string) bool {
 	return semver.Compare(l, c) > 0
 }
 
+// ChangeVerb describes the direction of a version change for user-facing
+// prompts: "Update" (newer), "Downgrade" (older), or "Reinstall" (same/unknown).
+func ChangeVerb(current, target string) string {
+	c, t := normalizeVersion(current), normalizeVersion(target)
+	switch {
+	case c == "" || t == "":
+		return "Switch"
+	case semver.Compare(t, c) > 0:
+		return "Update"
+	case semver.Compare(t, c) < 0:
+		return "Downgrade"
+	default:
+		return "Reinstall"
+	}
+}
+
 // Status is the outcome of a version check.
 type Status struct {
 	Current    string `json:"current"`
@@ -169,25 +185,39 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 		return err
 	}
 
-	// Smoke-test the staged binary before committing to it.
-	log("Verifying the downloaded binary...")
-	if err := smokeTest(ctx, newPath); err != nil {
-		return fmt.Errorf("the downloaded binary failed to run, keeping the current version: %w", err)
+	backup, err := swapExecutable(ctx, exePath, newPath, log)
+	if err != nil {
+		return err
 	}
-
-	// Swap with a backup so a failed install can be rolled back.
-	backup := exePath + ".bak"
-	_ = os.Remove(backup)
-	if err := os.Rename(exePath, backup); err != nil {
-		return fmt.Errorf("backing up the current binary: %w", err)
-	}
-	if err := os.Rename(newPath, exePath); err != nil {
-		_ = os.Rename(backup, exePath) // roll back
-		return fmt.Errorf("installing the new binary (rolled back): %w", err)
+	// Retain the just-replaced binary as the rollback point (best effort), then
+	// drop the temporary backup.
+	if err := savePrevious(backup, u.Current); err != nil {
+		log(fmt.Sprintf("warning: could not save a rollback point: %v", err))
 	}
 	_ = os.Remove(backup)
 	log(fmt.Sprintf("Installed %s.", rel.TagName))
 	return nil
+}
+
+// swapExecutable smoke-tests the binary staged at newPath, then atomically moves
+// it over exePath. On success the replaced binary is left at the returned backup
+// path (the caller keeps or removes it); on any failure the original is restored
+// and an error returned.
+func swapExecutable(ctx context.Context, exePath, newPath string, log func(string)) (string, error) {
+	log("Verifying the staged binary...")
+	if err := smokeTest(ctx, newPath); err != nil {
+		return "", fmt.Errorf("the new binary failed to run, keeping the current version: %w", err)
+	}
+	backup := exePath + ".bak"
+	_ = os.Remove(backup)
+	if err := os.Rename(exePath, backup); err != nil {
+		return "", fmt.Errorf("backing up the current binary: %w", err)
+	}
+	if err := os.Rename(newPath, exePath); err != nil {
+		_ = os.Rename(backup, exePath) // roll back
+		return "", fmt.Errorf("installing the new binary (rolled back): %w", err)
+	}
+	return backup, nil
 }
 
 // verifySignature establishes that the checksums list is authentic: it fetches

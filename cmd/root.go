@@ -154,12 +154,19 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 
 	err := rootCmd.ExecuteContext(ctx)
 
-	// Passive, rate-limited update notice. Best-effort and printed to stderr so
-	// it never blocks the command, changes its exit code, or corrupts machine
-	// output on stdout. Suppressed in CI / non-TTY / dev builds and by
-	// OPENFRAME_NO_UPDATE_CHECK (see selfupdate.MaybeNotify).
-	if msg := selfupdate.MaybeNotify(context.Background(), versionInfo.Version, !ui.IsNonInteractive()); msg != "" {
-		pterm.Info.WithWriter(os.Stderr).Println(msg)
+	// Post-command self-update handling, best-effort and printed to stderr so it
+	// never blocks the command, changes its exit code, or corrupts machine output
+	// on stdout. All paths are suppressed in CI / non-TTY / dev builds and by
+	// OPENFRAME_NO_UPDATE_CHECK. When OPENFRAME_AUTO_UPDATE is opted in, apply the
+	// update in place (skipping major bumps); otherwise just show a notice.
+	interactive := !ui.IsNonInteractive()
+	stderr := func(s string) { pterm.Info.WithWriter(os.Stderr).Println(s) }
+	if selfupdate.AutoUpdateEnabled() {
+		if msg := selfupdate.MaybeAutoUpdate(context.Background(), versionInfo.Version, interactive, stderr); msg != "" {
+			stderr(msg)
+		}
+	} else if msg := selfupdate.MaybeNotify(context.Background(), versionInfo.Version, interactive); msg != "" {
+		stderr(msg)
 	}
 	return err
 }

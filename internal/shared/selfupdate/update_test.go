@@ -41,8 +41,8 @@ func TestIsNewer(t *testing.T) {
 		{"1.0.0", "v1.1.0", true}, // mixed prefixes still compare
 		{"v1.2.3", "v1.2.3", false},
 		{"v1.2.3", "v1.2.2", false},
-		{"dev", "v1.0.0", false},   // dev builds never self-update
-		{"v1.0.0", "dev", false},   // unparseable latest → no update
+		{"dev", "v1.0.0", false}, // dev builds never self-update
+		{"v1.0.0", "dev", false}, // unparseable latest → no update
 		{"v1.0.0", "garbage", false},
 	}
 	for _, c := range cases {
@@ -72,6 +72,7 @@ func TestApplyEndToEnd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("smoke test runs a /bin/sh stub binary; unix-only")
 	}
+	t.Setenv("HOME", t.TempDir()) // isolate ~/.openframe (Apply saves a rollback point)
 
 	// A stand-in "release binary": a shell script that satisfies `--version`.
 	stub := []byte("#!/bin/sh\necho v9.9.9\n")
