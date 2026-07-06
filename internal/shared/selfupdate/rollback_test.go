@@ -51,14 +51,15 @@ func TestSavePreviousAndRollback(t *testing.T) {
 	exe := filepath.Join(dir, "openframe")
 	require.NoError(t, os.WriteFile(exe, []byte("#!/bin/sh\necho v2.0.0\n"), 0o755)) // current binary
 
-	// A stand-in "previous" binary, retained as the rollback point.
+	// A stand-in "previous" binary, retained as the rollback point. It echoes a
+	// version when run with --version, which PreviousVersion reads back.
 	prevSrc := filepath.Join(dir, "prev-src")
 	require.NoError(t, os.WriteFile(prevSrc, []byte("#!/bin/sh\necho v1.0.0\n"), 0o755))
-	require.NoError(t, savePrevious(prevSrc, "v1.0.0"))
+	require.NoError(t, savePrevious(prevSrc))
 
 	v, ok := PreviousVersion()
 	require.True(t, ok)
-	require.Equal(t, "v1.0.0", v)
+	require.Equal(t, "v1.0.0", v, "version should be read from the retained binary")
 
 	u := Updater{Current: "v2.0.0", GOOS: "linux", GOARCH: "amd64", exePath: exe}
 	require.NoError(t, u.Rollback(context.Background(), nil))

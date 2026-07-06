@@ -113,8 +113,12 @@ func runRollback(ctx context.Context, current string, assumeYes bool) error {
 		pterm.Warning.Println("No previous version to roll back to (nothing was saved by a prior update).")
 		return nil
 	}
+	label := prev
+	if label == "" {
+		label = "the previous version" // binary exists but couldn't report its version
+	}
 	if !assumeYes && !ui.IsNonInteractive() {
-		confirmed, err := ui.ConfirmActionInteractive(fmt.Sprintf("Roll back from %s to %s?", current, prev), true)
+		confirmed, err := ui.ConfirmActionInteractive(fmt.Sprintf("Roll back from %s to %s?", current, label), true)
 		if err != nil {
 			return err
 		}
@@ -126,7 +130,7 @@ func runRollback(ctx context.Context, current string, assumeYes bool) error {
 	if err := u.Rollback(ctx, func(msg string) { pterm.Info.Println(msg) }); err != nil {
 		return err
 	}
-	pterm.Success.Printfln("Rolled back to %s.", prev)
+	pterm.Success.Printfln("Rolled back to %s.", label)
 	return nil
 }
 

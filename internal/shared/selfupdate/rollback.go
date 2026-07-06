@@ -2,35 +2,29 @@ package selfupdate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
-// prevInfo records what the retained rollback binary is.
-type prevInfo struct {
-	Version string `json:"version"`
-}
-
 // prevBinaryPath is where the previously-installed binary is kept so `openframe
-// update --rollback` can restore it without any download. prevInfoPath holds its
-// version metadata.
-func prevBinaryPath() (string, error) { return statePath("openframe.prev") }
-func prevInfoPath() (string, error)   { return statePath("openframe.prev.json") }
-
-func statePath(name string) (string, error) {
+// update --rollback` can restore it without any download. Its version is not
+// stored separately — the binary self-reports it via `--version`.
+func prevBinaryPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".openframe", "state", name), nil
+	return filepath.Join(home, ".openframe", "state", "openframe.prev"), nil
 }
 
 // savePrevious copies the just-replaced binary (currently at backupPath) to the
-// rollback slot and records the version it holds.
-func savePrevious(backupPath, version string) error {
+// rollback slot.
+func savePrevious(backupPath string) error {
 	dst, err := prevBinaryPath()
 	if err != nil {
 		return err
@@ -38,35 +32,35 @@ func savePrevious(backupPath, version string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return err
 	}
-	if err := copyFile(backupPath, dst, 0o755); err != nil {
-		return err
-	}
-	info, err := prevInfoPath()
-	if err != nil {
-		return err
-	}
-	b, err := json.Marshal(prevInfo{Version: version})
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(info, b, 0o600)
+	return copyFile(backupPath, dst, 0o755)
 }
 
-// PreviousVersion returns the version of the retained rollback binary, if any.
+// PreviousVersion reports whether a rollback point exists and, best-effort, the
+// version it holds (read from the binary itself; "" if it cannot report one).
 func PreviousVersion() (string, bool) {
-	p, err := prevInfoPath()
+	p, err := prevBinaryPath()
 	if err != nil {
 		return "", false
 	}
-	b, err := os.ReadFile(p) //nolint:gosec // G304: fixed CLI-owned path
+	if _, err := os.Stat(p); err != nil {
+		return "", false
+	}
+	return binaryVersion(p), true
+}
+
+// binaryVersion runs "<path> --version" and returns the leading version token
+// (the CLI prints "<version> (<commit>) built on <date>").
+func binaryVersion(path string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err != nil {
-		return "", false
+		return ""
 	}
-	var info prevInfo
-	if json.Unmarshal(b, &info) != nil || info.Version == "" {
-		return "", false
+	if fields := strings.Fields(string(out)); len(fields) > 0 {
+		return fields[0]
 	}
-	return info.Version, true
+	return ""
 }
 
 // Rollback restores the binary saved by the most recent successful update,
@@ -112,9 +106,6 @@ func (u Updater) Rollback(ctx context.Context, progress func(string)) error {
 
 	// The rollback point has been consumed.
 	_ = os.Remove(prev)
-	if info, e := prevInfoPath(); e == nil {
-		_ = os.Remove(info)
-	}
 	log("Rolled back to the previous version.")
 	return nil
 }

@@ -191,7 +191,7 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 	}
 	// Retain the just-replaced binary as the rollback point (best effort), then
 	// drop the temporary backup.
-	if err := savePrevious(backup, u.Current); err != nil {
+	if err := savePrevious(backup); err != nil {
 		log(fmt.Sprintf("warning: could not save a rollback point: %v", err))
 	}
 	_ = os.Remove(backup)
