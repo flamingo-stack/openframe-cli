@@ -155,8 +155,7 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	}
 }
 
-// isUserInterruption reports whether err represents a user interruption (Ctrl+C),
-// so the handler can print a friendly "cancelled" message instead of a failure.
+// isInterruption reports whether err represents a user interruption (Ctrl+C).
 //
 // It is structural first: errors.Is(context.Canceled) matches the signal-
 // cancelled root context and anything that %w-wraps ctx.Err() (e.g. "operation
@@ -164,16 +163,24 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 // so a real timeout is not mislabeled as a user cancellation — and it won't
 // false-match an unrelated error that merely mentions "context canceled" in its
 // text. The remaining string checks cover promptui's Ctrl-C at an interactive
-// prompt ("^C") and the stringified "interrupted" some prompt sites return.
-func (eh *ErrorHandler) isUserInterruption(err error) bool {
+// prompt ("^C") and the exact "interrupted" some prompt sites return. "interrupted"
+// is matched exactly (not as a substring) so an unrelated "connection was
+// interrupted" network error is not mislabeled as a user cancellation.
+func isInterruption(err error) bool {
 	if err == nil {
 		return false
 	}
 	if stderrors.Is(err, context.Canceled) {
 		return true
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "^c") || strings.Contains(msg, "interrupted")
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return msg == "interrupted" || strings.Contains(msg, "^c")
+}
+
+// isUserInterruption reports whether err is a user interruption (Ctrl+C), so the
+// handler can print a friendly "cancelled" message instead of a failure.
+func (eh *ErrorHandler) isUserInterruption(err error) bool {
+	return isInterruption(err)
 }
 
 // CreateValidationError creates a new validation error

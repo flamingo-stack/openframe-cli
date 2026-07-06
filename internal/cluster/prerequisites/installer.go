@@ -226,11 +226,9 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			// Interactive mode - prompt user
 			pterm.Warning.Println("Docker is not running.")
 			confirmed, err := ui.ConfirmActionInteractive("Would you like me to start Docker for you?", true)
-			if errors.HandleConfirmationError(err) {
-				return nil // Won't be reached due to os.Exit in handler
-			}
 			if err != nil {
-				return fmt.Errorf("failed to get Docker start confirmation: %w", err)
+				// A Ctrl-C interruption flows up as-is; other errors get context.
+				return errors.WrapConfirmationError(err, "failed to get Docker start confirmation")
 			}
 			if confirmed {
 				if err := docker.StartDocker(); err != nil {

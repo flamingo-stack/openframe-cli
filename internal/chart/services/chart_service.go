@@ -407,7 +407,8 @@ func (w *InstallationWorkflow) selectCluster(args []string, verbose bool) (strin
 func (w *InstallationWorkflow) confirmInstallationOnCluster(clusterName string) bool {
 	confirmed, err := w.chartService.operationsUI.ConfirmInstallationOnCluster(clusterName)
 	if err != nil {
-		sharedErrors.HandleConfirmationError(err)
+		// Treat a prompt error/interruption as "not confirmed"; the caller turns
+		// that into a cancellation error that exits non-zero (no os.Exit here).
 		return false
 	}
 	return confirmed
