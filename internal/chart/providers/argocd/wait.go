@@ -34,11 +34,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return fmt.Errorf("operation already cancelled: %w", ctx.Err())
 	}
 
-	// Early exit if context has a short deadline (indicates timeout scenario)
+	// If the deadline is too close to meaningfully verify the applications, do
+	// NOT report success. Returning nil here would mark the platform "ready"
+	// while apps are still syncing (and let cleanup delete the temp values);
+	// surface it as a timeout so the caller sees the truth.
 	if deadline, ok := ctx.Deadline(); ok {
-		if time.Until(deadline) < 5*time.Second {
-			// Context will expire soon - skip ArgoCD applications wait
-			return nil
+		if left := time.Until(deadline); left < 10*time.Second {
+			return fmt.Errorf("insufficient time to verify ArgoCD applications before the deadline (%s left)", left.Round(time.Second))
 		}
 	}
 
@@ -47,29 +49,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// here immediately — no local signal handler required.
 	localCtx, localCancel := context.WithCancel(ctx)
 	defer localCancel()
-
-	// Check if we should start the spinner (skip if context is cancelled or expiring soon)
-	shouldSkipSpinner := localCtx.Err() != nil
-
-	// Check if context is cancelled
-
-	// Check if original context is cancelled
-	if ctx.Err() != nil {
-		shouldSkipSpinner = true
-	}
-
-	// Check if context deadline is very close (less than 10 seconds)
-	if deadline, ok := ctx.Deadline(); ok {
-		timeLeft := time.Until(deadline)
-		if timeLeft < 10*time.Second {
-			shouldSkipSpinner = true
-		}
-	}
-
-	if shouldSkipSpinner {
-		// Context is cancelled or expiring soon - skip ArgoCD applications wait entirely
-		return nil
-	}
 
 	// Wait for ArgoCD CRD and pods to be ready before checking applications
 	if err := m.waitForArgoCDReady(localCtx, config.Verbose, config.SkipCRDs); err != nil {

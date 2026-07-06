@@ -8,6 +8,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWaitForApplications_DryRun(t *testing.T) {
@@ -55,8 +56,10 @@ func TestWaitForApplications_ContextCancellation(t *testing.T) {
 	// Wait for the result with a timeout
 	select {
 	case err := <-done:
-		// The function returns nil for short deadlines (< 5 seconds)
-		assert.NoError(t, err)
+		// A near-deadline context can't verify the apps, so it must NOT report
+		// success — it surfaces a timeout error instead of a false nil.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "insufficient time")
 	case <-time.After(35 * time.Second): // Wait longer than bootstrap sleep
 		t.Fatal("WaitForApplications did not respect context cancellation")
 	}
