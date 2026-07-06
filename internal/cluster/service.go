@@ -71,9 +71,7 @@ func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager provide
 
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
-func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Config, error) {
-	ctx := context.Background()
-
+func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
 	// Check if cluster already exists
 	if existingInfo, err := s.manager.GetClusterStatus(ctx, config.Name); err == nil {
 		// Cluster already exists - show friendly message
@@ -153,9 +151,7 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 }
 
 // DeleteCluster handles cluster deletion business logic
-func (s *ClusterService) DeleteCluster(name string, clusterType models.ClusterType, force bool) error {
-	ctx := context.Background()
-
+func (s *ClusterService) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
 	// Show deletion progress
 	var sp *spinner.Spinner
 	if !s.suppressUI {
@@ -207,19 +203,17 @@ func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, err
 }
 
 // CleanupCluster handles cluster cleanup business logic
-func (s *ClusterService) CleanupCluster(name string, clusterType models.ClusterType, verbose bool, force bool) error {
+func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool, force bool) error {
 	switch clusterType {
 	case models.ClusterTypeK3d:
-		return s.cleanupK3dCluster(name, verbose, force)
+		return s.cleanupK3dCluster(ctx, name, verbose, force)
 	default:
 		return fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
 	}
 }
 
 // cleanupK3dCluster handles K3d-specific cleanup
-func (s *ClusterService) cleanupK3dCluster(clusterName string, verbose bool, force bool) error {
-	ctx := context.Background()
-
+func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool, force bool) error {
 	if verbose {
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
@@ -766,13 +760,13 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 // CreateClusterWithPrerequisites creates a cluster after checking prerequisites
 // This is a wrapper function for bootstrap and other automated flows
 // Returns the *rest.Config for the created cluster
-func CreateClusterWithPrerequisites(clusterName string, verbose bool) (*rest.Config, error) {
-	return CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, false)
+func CreateClusterWithPrerequisites(ctx context.Context, clusterName string, verbose bool) (*rest.Config, error) {
+	return CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, false)
 }
 
 // CreateClusterWithPrerequisitesNonInteractive creates a cluster with non-interactive support
 // Returns the *rest.Config for the created cluster
-func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
+func CreateClusterWithPrerequisitesNonInteractive(ctx context.Context, clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Show logo first, then check prerequisites (consistent with individual commands)
 	ui.ShowLogo()
 
@@ -804,5 +798,5 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 	}
 
 	// Create the cluster and return the rest.Config
-	return service.CreateCluster(config)
+	return service.CreateCluster(ctx, config)
 }

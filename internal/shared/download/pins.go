@@ -17,14 +17,24 @@ import (
 
 // K3d is the pinned k3d CLI. Upstream: https://github.com/k3d-io/k3d/releases
 // Checksums: the release's checksums.txt.
+const (
+	k3dVersion = "v5.9.0"
+	k3dBaseURL = "https://github.com/k3d-io/k3d/releases/download/" + k3dVersion + "/k3d-"
+
+	k3dSHA256LinuxAMD64  = "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"
+	k3dSHA256LinuxARM64  = "03cde5cf23e6e8e67de5a039ecf26e5b85aca82fba3e5d13dadf904cd218a250"
+	k3dSHA256DarwinAMD64 = "b4aabc37534f95b9c764e7823f2df923f50d57600837aa60a06266cce47db732"
+	k3dSHA256DarwinARM64 = "fe106541d5d0a3f18debcd4d432a16f8c0ce3e6ddc06f8fbb6f696a122313e00"
+)
+
 var K3d = PinnedTool{
 	Name:    "k3d",
-	Version: "v5.9.0",
+	Version: k3dVersion,
 	Assets: map[string]PinnedAsset{
-		"linux/amd64":  {URL: "https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64", SHA256: "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"},
-		"linux/arm64":  {URL: "https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-arm64", SHA256: "03cde5cf23e6e8e67de5a039ecf26e5b85aca82fba3e5d13dadf904cd218a250"},
-		"darwin/amd64": {URL: "https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-darwin-amd64", SHA256: "b4aabc37534f95b9c764e7823f2df923f50d57600837aa60a06266cce47db732"},
-		"darwin/arm64": {URL: "https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-darwin-arm64", SHA256: "fe106541d5d0a3f18debcd4d432a16f8c0ce3e6ddc06f8fbb6f696a122313e00"},
+		"linux/amd64":  {URL: k3dBaseURL + "linux-amd64", SHA256: k3dSHA256LinuxAMD64},
+		"linux/arm64":  {URL: k3dBaseURL + "linux-arm64", SHA256: k3dSHA256LinuxARM64},
+		"darwin/amd64": {URL: k3dBaseURL + "darwin-amd64", SHA256: k3dSHA256DarwinAMD64},
+		"darwin/arm64": {URL: k3dBaseURL + "darwin-arm64", SHA256: k3dSHA256DarwinARM64},
 	},
 }
 
@@ -34,14 +44,24 @@ var K3d = PinnedTool{
 // the published v1.4.4 assets. Replacing the unverified
 // `curl dl.filippo.io/mkcert/latest` install (audit T0.3) — critical because
 // mkcert injects a root CA into the system/NSS trust stores.
+const (
+	mkcertVersion = "v1.4.4"
+	mkcertBaseURL = "https://github.com/FiloSottile/mkcert/releases/download/" + mkcertVersion + "/mkcert-" + mkcertVersion + "-"
+
+	mkcertSHA256LinuxAMD64  = "6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52"
+	mkcertSHA256LinuxARM64  = "b98f2cc69fd9147fe4d405d859c57504571adec0d3611c3eefd04107c7ac00d0"
+	mkcertSHA256DarwinAMD64 = "a32dfab51f1845d51e810db8e47dcf0e6b51ae3422426514bf5a2b8302e97d4e"
+	mkcertSHA256DarwinARM64 = "c8af0df44bce04359794dad8ea28d750437411d632748049d08644ffb66a60c6"
+)
+
 var Mkcert = PinnedTool{
 	Name:    "mkcert",
-	Version: "v1.4.4",
+	Version: mkcertVersion,
 	Assets: map[string]PinnedAsset{
-		"linux/amd64":  {URL: "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64", SHA256: "6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52"},
-		"linux/arm64":  {URL: "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-arm64", SHA256: "b98f2cc69fd9147fe4d405d859c57504571adec0d3611c3eefd04107c7ac00d0"},
-		"darwin/amd64": {URL: "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-darwin-amd64", SHA256: "a32dfab51f1845d51e810db8e47dcf0e6b51ae3422426514bf5a2b8302e97d4e"},
-		"darwin/arm64": {URL: "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-darwin-arm64", SHA256: "c8af0df44bce04359794dad8ea28d750437411d632748049d08644ffb66a60c6"},
+		"linux/amd64":  {URL: mkcertBaseURL + "linux-amd64", SHA256: mkcertSHA256LinuxAMD64},
+		"linux/arm64":  {URL: mkcertBaseURL + "linux-arm64", SHA256: mkcertSHA256LinuxARM64},
+		"darwin/amd64": {URL: mkcertBaseURL + "darwin-amd64", SHA256: mkcertSHA256DarwinAMD64},
+		"darwin/arm64": {URL: mkcertBaseURL + "darwin-arm64", SHA256: mkcertSHA256DarwinARM64},
 	},
 }
 

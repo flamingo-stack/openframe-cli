@@ -92,7 +92,7 @@ func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode str
 	}
 
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
-	kubeConfig, err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive)
+	kubeConfig, err := s.createClusterSuppressed(ctx, actualClusterName, verbose, nonInteractive)
 	if err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
@@ -111,9 +111,9 @@ func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode str
 
 // createClusterSuppressed creates a cluster with suppressed UI elements
 // Returns the *rest.Config for the created cluster
-func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
+func (s *Service) createClusterSuppressed(ctx context.Context, clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Use the wrapper function that includes prerequisite checks
-	return cluster.CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, nonInteractive)
+	return cluster.CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, nonInteractive)
 }
 
 // installChartWithMode installs charts with deployment mode flags
