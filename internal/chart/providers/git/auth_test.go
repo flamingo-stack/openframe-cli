@@ -17,6 +17,15 @@ func TestExtractGitAuth(t *testing.T) {
 	assert.Equal(t, fakeToken, a.token)
 	assert.True(t, a.hasToken())
 
+	// Single-field userinfo (https://<token>@host, a common PAT shorthand): the
+	// token is in the username field with no password — it must be recognized as
+	// the token, not silently dropped.
+	tok := extractGitAuth("https://" + fakeToken + "@github.com/org/repo")
+	assert.Equal(t, "https://github.com/org/repo", tok.cleanURL)
+	assert.Empty(t, tok.username)
+	assert.Equal(t, fakeToken, tok.token)
+	assert.True(t, tok.hasToken())
+
 	pub := extractGitAuth("https://github.com/org/repo")
 	assert.Equal(t, "https://github.com/org/repo", pub.cleanURL)
 	assert.False(t, pub.hasToken())
@@ -39,6 +48,13 @@ func TestBuildAuth(t *testing.T) {
 		a := extractGitAuth("https://alice:" + fakeToken + "@github.com/org/repo")
 		basic := a.buildAuth().(*githttp.BasicAuth)
 		assert.Equal(t, "alice", basic.Username)
+		assert.Equal(t, fakeToken, basic.Password)
+	})
+
+	t.Run("token-only URL → default username + token as password", func(t *testing.T) {
+		a := extractGitAuth("https://" + fakeToken + "@github.com/org/repo")
+		basic := a.buildAuth().(*githttp.BasicAuth)
+		assert.Equal(t, GitTokenUser, basic.Username)
 		assert.Equal(t, fakeToken, basic.Password)
 	})
 

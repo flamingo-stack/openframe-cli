@@ -35,7 +35,15 @@ func extractGitAuth(rawURL string) gitAuth {
 		return gitAuth{cleanURL: rawURL}
 	}
 	username := u.User.Username()
-	token, _ := u.User.Password()
+	token, hasPassword := u.User.Password()
+	// A single-field userinfo (e.g. https://<token>@host, a common GitHub PAT
+	// shorthand) carries the token as the username with no password. Treat it as
+	// the token so it is used for auth (and masked in output) rather than
+	// silently stripped from the URL and dropped.
+	if !hasPassword {
+		token = username
+		username = ""
+	}
 	u.User = nil
 	return gitAuth{cleanURL: u.String(), username: username, token: token}
 }
