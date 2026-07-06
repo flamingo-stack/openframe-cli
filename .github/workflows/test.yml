@@ -136,6 +136,7 @@ jobs:
         run: |
           "$OF_BIN" cluster list
           "$OF_BIN" cluster list -o json
+          "$OF_BIN" cluster list -o yaml
 
       # --- Medium: dry-run, still no real changes ----------------------------
       - name: 'CLI: dry-run create & install'
@@ -167,6 +168,7 @@ jobs:
         run: |
           "$OF_BIN" app status --context "$OF_CONTEXT"
           "$OF_BIN" app status --context "$OF_CONTEXT" -o json
+          "$OF_BIN" app status --context "$OF_CONTEXT" -o yaml
           "$OF_BIN" app access --context "$OF_CONTEXT"
 
       - name: 'App: upgrade (dry-run then force-sync)'

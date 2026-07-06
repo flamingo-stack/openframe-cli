@@ -23,8 +23,34 @@ func TestOutputFormat(t *testing.T) {
 	}
 
 	_ = cmd.Flags().Set("output", "yaml")
+	if f, err := outputFormat(cmd); err != nil || f != "yaml" {
+		t.Fatalf("yaml = (%q, %v), want (yaml, nil)", f, err)
+	}
+
+	_ = cmd.Flags().Set("output", "toml")
 	if _, err := outputFormat(cmd); err == nil {
-		t.Fatal("expected an error for --output yaml")
+		t.Fatal("expected an error for an unsupported --output value")
+	}
+}
+
+// TestIsMachineOutput locks in that both json and yaml switch the command into
+// machine mode (which suppresses the logo and the prerequisite gate), while
+// text/default do not.
+func TestIsMachineOutput(t *testing.T) {
+	for _, tc := range []struct {
+		format string
+		want   bool
+	}{
+		{"", false},
+		{"text", false},
+		{"json", true},
+		{"yaml", true},
+	} {
+		cmd := getStatusCmd()
+		_ = cmd.Flags().Set("output", tc.format)
+		if got := isMachineOutput(cmd); got != tc.want {
+			t.Errorf("isMachineOutput(%q) = %v, want %v", tc.format, got, tc.want)
+		}
 	}
 }
 

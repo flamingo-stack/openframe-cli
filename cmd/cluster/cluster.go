@@ -32,9 +32,9 @@ Examples:
   openframe cluster create
   openframe cluster delete`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// JSON output is machine mode: no logo, no prerequisite gate, so
-			// stdout stays clean for scripts.
-			if out, _ := cmd.Flags().GetString("output"); out == "json" {
+			// Machine output (json/yaml) is machine mode: no logo, no prerequisite
+			// gate, so stdout stays clean for scripts.
+			if out, _ := cmd.Flags().GetString("output"); out == "json" || out == "yaml" {
 				return nil
 			}
 			// Show logo for subcommands, but not for the root cluster command

@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 func getListCmd() *cobra.Command {
@@ -44,7 +45,7 @@ Examples:
 	if globalFlags != nil && globalFlags.List != nil {
 		models.AddListFlags(listCmd, globalFlags.List)
 	}
-	listCmd.Flags().StringP("output", "o", "text", "Output format: text or json")
+	listCmd.Flags().StringP("output", "o", "text", "Output format: text, json, or yaml")
 
 	return listCmd
 }
@@ -61,11 +62,13 @@ func runListClusters(cmd *cobra.Command, args []string) error {
 	switch out, _ := cmd.Flags().GetString("output"); out {
 	case "json":
 		return printClustersJSON(clusters)
+	case "yaml":
+		return printClustersYAML(clusters)
 	case "", "text":
 		globalFlags := utils.GetGlobalFlags()
 		return service.DisplayClusterList(clusters, globalFlags.List.Quiet, globalFlags.Global.Verbose)
 	default:
-		return fmt.Errorf("invalid --output %q (want \"text\" or \"json\")", out)
+		return fmt.Errorf("invalid --output %q (want \"text\", \"json\", or \"yaml\")", out)
 	}
 }
 
@@ -98,5 +101,16 @@ func printClustersJSON(clusters []models.ClusterInfo) error {
 		return fmt.Errorf("encoding JSON: %w", err)
 	}
 	fmt.Println(string(b))
+	return nil
+}
+
+// printClustersYAML writes the cluster list as YAML. sigs.k8s.io/yaml reuses the
+// same `json:` struct tags, so the field names match the JSON output.
+func printClustersYAML(clusters []models.ClusterInfo) error {
+	b, err := yaml.Marshal(clustersToJSON(clusters))
+	if err != nil {
+		return fmt.Errorf("encoding YAML: %w", err)
+	}
+	fmt.Print(string(b)) // yaml.Marshal already terminates with a newline
 	return nil
 }

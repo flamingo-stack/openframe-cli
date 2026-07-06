@@ -25,9 +25,9 @@ Examples:
   openframe app install
   openframe app install my-cluster`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// JSON output is machine mode: no logo, no interactive prerequisite
-			// gate, so stdout stays clean and scripts never hit a prompt.
-			if isJSONOutput(cmd) {
+			// Machine output (json/yaml) is machine mode: no logo, no interactive
+			// prerequisite gate, so stdout stays clean and scripts never hit a prompt.
+			if isMachineOutput(cmd) {
 				return nil
 			}
 			// Show logo for subcommands, but not for the root app command

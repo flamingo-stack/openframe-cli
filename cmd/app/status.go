@@ -58,8 +58,8 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 		return sharedErrors.HandleGlobalError(fmt.Errorf("could not read platform status: %w", err), verbose)
 	}
 
-	if format == "json" {
-		return printJSON(statusToJSON(rep))
+	if format != "text" {
+		return renderMachine(format, statusToJSON(rep))
 	}
 	renderStatus(rep)
 	return nil

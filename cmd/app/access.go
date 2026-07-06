@@ -52,8 +52,8 @@ func runAccessCommand(cmd *cobra.Command, _ []string) error {
 			fmt.Errorf("could not read the ArgoCD admin password — is OpenFrame installed? (%w)", err), verbose)
 	}
 
-	if format == "json" {
-		return printJSON(struct {
+	if format != "text" {
+		return renderMachine(format, struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}{Username: "admin", Password: password})
