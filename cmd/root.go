@@ -28,11 +28,22 @@ type VersionInfo struct {
 	Date    string
 }
 
-// DefaultVersionInfo provides default version information
+// Build-time version metadata. These MUST be package-level string vars: the
+// linker's -X flag can only set package-level strings, not struct fields, so a
+// prior `-X ...DefaultVersionInfo.Version=...` silently no-op'd and every
+// release reported "dev" (which also disabled self-update). See .goreleaser.yml.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+// DefaultVersionInfo provides default version information, populated from the
+// build-time vars above (overridden via -ldflags -X at release time).
 var DefaultVersionInfo = VersionInfo{
-	Version: "dev",
-	Commit:  "none",
-	Date:    "unknown",
+	Version: version,
+	Commit:  commit,
+	Date:    date,
 }
 
 // GetRootCmd returns the root command following cluster command pattern

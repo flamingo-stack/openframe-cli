@@ -22,10 +22,13 @@ builds:
       - amd64
       - arm64
     ldflags:
+      # Target package-level string vars, NOT struct fields: `-X` cannot set a
+      # struct field (it silently no-ops), which previously left every release
+      # reporting "dev" and disabled self-update.
       - -s -w
-      - -X github.com/flamingo-stack/openframe-cli/cmd.DefaultVersionInfo.Version={{.Version}}
-      - -X github.com/flamingo-stack/openframe-cli/cmd.DefaultVersionInfo.Commit={{.Commit}}
-      - -X github.com/flamingo-stack/openframe-cli/cmd.DefaultVersionInfo.Date={{.Date}}
+      - -X github.com/flamingo-stack/openframe-cli/cmd.version={{.Version}}
+      - -X github.com/flamingo-stack/openframe-cli/cmd.commit={{.Commit}}
+      - -X github.com/flamingo-stack/openframe-cli/cmd.date={{.Date}}
 
 archives:
   - id: openframe-cli-archive
