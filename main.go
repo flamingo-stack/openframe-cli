@@ -7,6 +7,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/cmd"
 	sharederrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
 func main() {
@@ -18,6 +19,16 @@ func main() {
 		if !stderrors.As(err, &handled) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
+}
+
+// exitCode preserves a failed external command's exit code (exit-code fidelity
+// for automation) when it is a valid Unix code; otherwise it is a generic 1.
+func exitCode(err error) int {
+	var ce *executor.CommandError
+	if stderrors.As(err, &ce) && ce.ExitCode > 0 && ce.ExitCode < 256 {
+		return ce.ExitCode
+	}
+	return 1
 }

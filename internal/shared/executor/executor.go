@@ -43,6 +43,23 @@ func (e *WSLError) Error() string {
 	return msg
 }
 
+// CommandError is returned when an external command exits non-zero. It carries
+// the child's exit code so the top level can propagate it (exit-code fidelity for
+// automation), while its Error() message is byte-identical to the previous plain
+// error so all existing string-based handling keeps working.
+type CommandError struct {
+	Command  string
+	ExitCode int
+	cause    error
+}
+
+func (e *CommandError) Error() string {
+	return fmt.Sprintf("command failed: %s (exit code: %d): %v", e.Command, e.ExitCode, e.cause)
+}
+
+// Unwrap exposes the underlying exec error so errors.As/Is still reach it.
+func (e *CommandError) Unwrap() error { return e.cause }
+
 // wslAvailabilityCache caches the WSL availability check result
 var (
 	wslAvailable     bool
@@ -421,7 +438,7 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			}
 		}
 
-		return result, fmt.Errorf("command failed: %s (exit code: %d): %w", fullCommand, result.ExitCode, err)
+		return result, &CommandError{Command: fullCommand, ExitCode: result.ExitCode, cause: err}
 	}
 
 	result.ExitCode = 0
@@ -442,4 +459,3 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 	}
 	return envStrings
 }
-

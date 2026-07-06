@@ -23,6 +23,10 @@ import (
 	"strings"
 )
 
+// maxAssetBytes bounds FetchVerified's in-memory read so a misbehaving or
+// oversized response cannot exhaust memory before the checksum runs.
+const maxAssetBytes = 512 << 20 // 512 MiB
+
 // PinnedAsset is a single platform's download, pinned to a content digest.
 type PinnedAsset struct {
 	URL    string
@@ -88,9 +92,15 @@ func (d Downloader) FetchVerified(ctx context.Context, asset PinnedAsset) ([]byt
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	// Cap the read so a misbehaving/oversized response can't exhaust memory. The
+	// pinned assets (tool binaries / archives) are tens of MB; 512 MiB is a
+	// generous ceiling. Read one byte past to detect an over-cap body.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAssetBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading download body: %w", err)
+	}
+	if int64(len(body)) > maxAssetBytes {
+		return nil, fmt.Errorf("download exceeds the %d-byte cap", maxAssetBytes)
 	}
 	if err := VerifyChecksum(body, asset.SHA256); err != nil {
 		return nil, err

@@ -73,10 +73,10 @@ var toolDocs = map[string]InstallDocs{
 		Default: "Docker: Please install Docker from https://docker.com/",
 	},
 	"k3d": {
-		Darwin:  "k3d: Run 'brew install k3d' or download from https://k3d.io/v5.4.6/#installation",
-		Linux:   "k3d: Run 'curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash' or download from https://k3d.io/v5.4.6/#installation",
+		Darwin:  "k3d: Run 'brew install k3d' or download from https://k3d.io/stable/#installation",
+		Linux:   "k3d: Run 'curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash' or download from https://k3d.io/stable/#installation",
 		Windows: "k3d: Download from https://github.com/k3d-io/k3d/releases or use chocolatey 'choco install k3d'",
-		Default: "k3d: Please install k3d from https://k3d.io/v5.4.6/#installation",
+		Default: "k3d: Please install k3d from https://k3d.io/stable/#installation",
 	},
 	"helm": {
 		Darwin:  "helm: Run 'brew install helm' or download from https://helm.sh/docs/intro/install/",
