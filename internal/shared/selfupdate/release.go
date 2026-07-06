@@ -123,31 +123,31 @@ func (c Client) getRelease(ctx context.Context, path string) (Release, error) {
 	return rel, nil
 }
 
-// fetchChecksum downloads the release's checksums.txt and returns the
-// lowercase-hex SHA256 recorded for filename.
-func (c Client) fetchChecksum(ctx context.Context, rel Release, filename string) (string, error) {
-	url, ok := rel.assetURL(checksumsFile)
+// fetchAsset downloads a named release asset (bounded), returning its bytes.
+// Used for the small metadata assets (checksums.txt and its signature bundle).
+func (c Client) fetchAsset(ctx context.Context, rel Release, name string) ([]byte, error) {
+	url, ok := rel.assetURL(name)
 	if !ok {
-		return "", fmt.Errorf("release %s has no %s", rel.TagName, checksumsFile)
+		return nil, fmt.Errorf("release %s has no %s", rel.TagName, name)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return "", fmt.Errorf("downloading %s: %w", checksumsFile, err)
+		return nil, fmt.Errorf("downloading %s: %w", name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("downloading %s: HTTP %d", checksumsFile, resp.StatusCode)
+		return nil, fmt.Errorf("downloading %s: HTTP %d", name, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMetaBytes))
 	if err != nil {
-		return "", fmt.Errorf("reading %s: %w", checksumsFile, err)
+		return nil, fmt.Errorf("reading %s: %w", name, err)
 	}
-	return parseChecksum(string(body), filename)
+	return body, nil
 }
 
 // parseChecksum extracts the hex digest for filename from a sha256sum listing

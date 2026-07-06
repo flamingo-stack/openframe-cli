@@ -51,18 +51,28 @@ sboms:
     artifacts: archive
 
 # Keyless cosign signature of the checksums file (which covers every artifact
-# via its SHA256). Produces detached checksums.txt.sig + .pem — the binaries
-# themselves are NOT modified and run identically with or without verification.
-# Requires cosign on PATH and `id-token: write` in the release workflow.
+# via its SHA256). Emits a new-format Sigstore bundle (checksums.txt.bundle)
+# carrying the signature, the Fulcio certificate, and the Rekor transparency-log
+# entry in one file — this is what `openframe update` verifies (Phase 2) against
+# the pinned GitHub Actions OIDC identity. The binaries themselves are NOT
+# modified and run identically with or without verification.
+# Requires cosign >= 3.0 (where `--bundle` writes the new format by default; the
+# old `--new-bundle-format` flag was removed) and `id-token: write` in the
+# release workflow. cosign-installer installs the latest (v3.x) by default.
+#
+# Manual verification:
+#   cosign verify-blob --bundle checksums.txt.bundle \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/flamingo-stack/openframe-cli/\.github/workflows/release\.yml@.*$' \
+#     checksums.txt
 signs:
   - cmd: cosign
     artifacts: checksum
     output: true
-    certificate: '${artifact}.pem'
+    signature: '${artifact}.bundle'
     args:
       - sign-blob
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
+      - '--bundle=${signature}'
       - '${artifact}'
       - '--yes'
 

@@ -49,6 +49,11 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # Pin the cosign version: the signing flags are coupled to it (v3
+          # removed --new-bundle-format and makes `--bundle` new-format by
+          # default, which is what the .goreleaser.yml signs block relies on).
+          cosign-release: 'v3.1.1'
 
       - name: Install syft (SBOM generator)
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0

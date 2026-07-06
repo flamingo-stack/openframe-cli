@@ -84,6 +84,9 @@ func TestApplyEndToEnd(t *testing.T) {
 	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), archive)
 	})
+	mux.HandleFunc("/checksums.txt.bundle", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("STUB-BUNDLE"))
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -91,6 +94,7 @@ func TestApplyEndToEnd(t *testing.T) {
 		TagName: "v9.9.9",
 		Assets: []Asset{
 			{Name: checksumsFile, URL: srv.URL + "/checksums.txt"},
+			{Name: bundleAsset, URL: srv.URL + "/checksums.txt.bundle"},
 			{Name: archive, URL: srv.URL + "/archive.tgz"},
 		},
 	}
@@ -102,9 +106,25 @@ func TestApplyEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u := Updater{Current: "v1.0.0", GOOS: "linux", GOARCH: "amd64", Client: Client{APIBase: srv.URL}, exePath: exe}
+	// Signature verification is exercised separately (TestVerifyChecksums*); here
+	// inject a stub that asserts the bundle was fetched, to keep Apply offline.
+	var verified bool
+	u := Updater{
+		Current: "v1.0.0", GOOS: "linux", GOARCH: "amd64",
+		Client: Client{APIBase: srv.URL}, exePath: exe,
+		verify: func(_ context.Context, artifact, bundleJSON []byte) error {
+			verified = true
+			if !bytes.Contains(artifact, []byte(archive)) || string(bundleJSON) != "STUB-BUNDLE" {
+				return fmt.Errorf("verify called with unexpected inputs")
+			}
+			return nil
+		},
+	}
 	if err := u.Apply(context.Background(), rel, nil); err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	if !verified {
+		t.Fatal("signature verification was not invoked")
 	}
 
 	got, err := os.ReadFile(exe)
@@ -137,11 +157,15 @@ func TestApplyChecksumMismatch(t *testing.T) {
 		// Deliberately wrong digest.
 		fmt.Fprintf(w, "%s  %s\n", "0000000000000000000000000000000000000000000000000000000000000000", archive)
 	})
+	mux.HandleFunc("/checksums.txt.bundle", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("STUB-BUNDLE"))
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	rel := Release{TagName: "v9.9.9", Assets: []Asset{
 		{Name: checksumsFile, URL: srv.URL + "/checksums.txt"},
+		{Name: bundleAsset, URL: srv.URL + "/checksums.txt.bundle"},
 		{Name: archive, URL: srv.URL + "/archive.tgz"},
 	}}
 
@@ -149,7 +173,11 @@ func TestApplyChecksumMismatch(t *testing.T) {
 	exe := filepath.Join(dir, "openframe")
 	_ = os.WriteFile(exe, []byte("OLD BINARY"), 0o755)
 
-	u := Updater{Current: "v1.0.0", GOOS: "linux", GOARCH: "amd64", Client: Client{APIBase: srv.URL}, exePath: exe}
+	u := Updater{
+		Current: "v1.0.0", GOOS: "linux", GOARCH: "amd64",
+		Client: Client{APIBase: srv.URL}, exePath: exe,
+		verify: func(context.Context, []byte, []byte) error { return nil }, // signature ok; the checksum is what's wrong
+	}
 	if err := u.Apply(context.Background(), rel, nil); err == nil {
 		t.Fatal("expected a checksum-mismatch error")
 	}

@@ -62,12 +62,18 @@ type Status struct {
 	DevBuild   bool   `json:"devBuild"`
 }
 
+// checksumVerifier confirms that the checksums.txt bytes are covered by a valid
+// release signature carried in bundleJSON. Its zero (nil) value on an Updater
+// selects the production cosign verifier (verifyChecksumsProd).
+type checksumVerifier func(ctx context.Context, artifact, bundleJSON []byte) error
+
 // Updater checks for and applies self-updates.
 type Updater struct {
 	Current      string // running version (cmd.DefaultVersionInfo.Version)
 	Client       Client
-	GOOS, GOARCH string // default to runtime values; overridable in tests
-	exePath      string // overrides the resolved executable path in tests
+	GOOS, GOARCH string           // default to runtime values; overridable in tests
+	exePath      string           // overrides the resolved executable path in tests
+	verify       checksumVerifier // nil → verifyChecksumsProd; injected in tests
 }
 
 func (u Updater) goos() string {
@@ -137,8 +143,18 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 	if !ok {
 		return fmt.Errorf("release %s has no asset %s", rel.TagName, name)
 	}
-	log(fmt.Sprintf("Verifying checksum for %s...", name))
-	sum, err := u.Client.fetchChecksum(ctx, rel, name)
+
+	// Fetch the checksums list, then establish trust in it before it is used to
+	// verify the archive: the archive's integrity is only as good as the
+	// authenticity of the checksums it is checked against.
+	checksums, err := u.Client.fetchAsset(ctx, rel, checksumsFile)
+	if err != nil {
+		return err
+	}
+	if err := u.verifySignature(ctx, rel, checksums, log); err != nil {
+		return err
+	}
+	sum, err := parseChecksum(string(checksums), name)
 	if err != nil {
 		return err
 	}
@@ -171,6 +187,32 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 	}
 	_ = os.Remove(backup)
 	log(fmt.Sprintf("Installed %s.", rel.TagName))
+	return nil
+}
+
+// verifySignature establishes that the checksums list is authentic: it fetches
+// the release's cosign signature bundle and verifies it against the pinned
+// GitHub Actions identity. Setting OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY drops
+// to integrity-only (checksums over TLS) with a loud warning — an escape hatch,
+// not a normal mode.
+func (u Updater) verifySignature(ctx context.Context, rel Release, checksums []byte, log func(string)) error {
+	if os.Getenv(insecureSkipEnv) != "" {
+		log("WARNING: skipping release signature verification (" + insecureSkipEnv + " set); integrity is checked but authenticity is NOT.")
+		return nil
+	}
+	bundleJSON, err := u.Client.fetchAsset(ctx, rel, bundleAsset)
+	if err != nil {
+		return fmt.Errorf("release %s is not signed (no %s), refusing to update; "+
+			"set %s=1 to override at your own risk: %w", rel.TagName, bundleAsset, insecureSkipEnv, err)
+	}
+	verify := u.verify
+	if verify == nil {
+		verify = verifyChecksumsProd
+	}
+	log("Verifying the release signature (cosign / GitHub Actions identity)...")
+	if err := verify(ctx, checksums, bundleJSON); err != nil {
+		return fmt.Errorf("release signature verification failed: %w", err)
+	}
 	return nil
 }
 
