@@ -183,60 +183,8 @@ func (c *CertificateInstaller) generateCertificates() error {
 	// Platform-specific trust handling - EXACTLY as in certificates.sh
 	switch runtime.GOOS {
 	case "darwin":
-		// Resolve login keychain
-		kcCmd := exec.Command("bash", "-c", `security default-keychain -d user | tr -d '"'`)
-		kcOutput, _ := kcCmd.Output()
-		keychain := strings.TrimSpace(string(kcOutput))
-
-		// If empty, try default locations
-		if keychain == "" || !fileExists(keychain) {
-			keychain = filepath.Join(homeDir, "Library/Keychains/login.keychain-db")
-			if !fileExists(keychain) {
-				// Return empty if not found
-				keychain = ""
-			}
-		}
-
-		if keychain != "" && fileExists(keychain) {
-			// Remove old mkcert certificates from keychain
-			findCmd := fmt.Sprintf(`security find-certificate -a -c "mkcert" -Z "%s" | awk '/SHA-1 hash:/ {print $3}'`, keychain)
-			shaCmd := exec.Command("bash", "-c", findCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-			shaOutput, _ := shaCmd.Output()
-
-			if len(shaOutput) > 0 {
-				shas := strings.TrimSpace(string(shaOutput))
-				for _, sha := range strings.Split(shas, "\n") {
-					if sha != "" {
-						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-						if err := deleteCmd.Run(); err != nil {                                          // best effort
-							pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
-						}
-					}
-				}
-			}
-
-			// Add mkcert CA to login keychain (silently unless password needed)
-			rootCAPem := filepath.Join(caRoot, "rootCA.pem")
-			trustCmd := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-			// First try silently
-			output, err := trustCmd.CombinedOutput()
-			if err != nil {
-				outputStr := string(output)
-				if strings.Contains(outputStr, "User interaction is not allowed") {
-					// Need user interaction - run interactively
-					trustCmd = exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-					trustCmd.Stdin = os.Stdin
-					trustCmd.Stdout = os.Stdout
-					trustCmd.Stderr = os.Stderr
-					if err := trustCmd.Run(); err != nil {
-						// User likely cancelled - return error to indicate incomplete setup
-						return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
-					}
-				} else if strings.Contains(outputStr, "authorization was canceled by the user") {
-					return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
-				}
-				// Other errors are non-fatal, continue with certificate generation
-			}
+		if err := trustCADarwin(caRoot, homeDir); err != nil {
+			return err
 		}
 
 	case "linux":
@@ -325,4 +273,99 @@ func (c *CertificateInstaller) generateCertificates() error {
 	}
 
 	return nil
+}
+
+// trustCADarwin adds the mkcert root CA to the macOS login keychain, removing any
+// stale mkcert certificates first. It shells out to `security`, but the fragile
+// parts — resolving the keychain, parsing the certificate list, and classifying
+// the add-trusted-cert result — are pure helpers (below) so they can be tested
+// off a real keychain.
+func trustCADarwin(caRoot, homeDir string) error {
+	kcOut, _ := exec.Command("security", "default-keychain", "-d", "user").Output()
+	keychain := resolveLoginKeychain(string(kcOut), homeDir, fileExists)
+	if keychain == "" {
+		return nil // no login keychain — nothing to trust into
+	}
+
+	// Remove old mkcert certificates from the keychain (best-effort).
+	findOut, _ := exec.Command("security", "find-certificate", "-a", "-c", "mkcert", "-Z", keychain).Output() // #nosec G204 -- explicit argv, no shell; keychain is program-derived
+	for _, sha := range parseMkcertCertSHAs(string(findOut)) {
+		if err := exec.Command("security", "delete-certificate", "-Z", sha, keychain).Run(); err != nil { // #nosec G204 -- explicit argv, no shell; values are program-derived
+			pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
+		}
+	}
+
+	// Add the mkcert CA (silently; fall back to interactive if macOS asks).
+	rootCAPem := filepath.Join(caRoot, "rootCA.pem")
+	trustArgs := []string{"add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem}
+	out, err := exec.Command("security", trustArgs...).CombinedOutput() // #nosec G204 -- explicit argv, no shell; values are program-derived
+	switch classifyAddTrustedCert(string(out), err) {
+	case trustNeedsInteractive:
+		ic := exec.Command("security", trustArgs...) // #nosec G204 -- explicit argv, no shell; values are program-derived
+		ic.Stdin, ic.Stdout, ic.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := ic.Run(); err != nil {
+			return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
+		}
+	case trustCancelled:
+		return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
+	case trustAdded, trustOtherError:
+		// Added, or a non-fatal error — continue with certificate generation.
+	}
+	return nil
+}
+
+// resolveLoginKeychain picks the macOS login keychain: the one reported by
+// `security default-keychain` (quotes stripped) when it exists on disk, else
+// ~/Library/Keychains/login.keychain-db, else "" when neither is present. Pure —
+// exists abstracts the filesystem so it is testable off macOS.
+func resolveLoginKeychain(defaultKeychainOut, homeDir string, exists func(string) bool) string {
+	kc := strings.Trim(strings.TrimSpace(defaultKeychainOut), `"`)
+	if kc != "" && exists(kc) {
+		return kc
+	}
+	login := filepath.Join(homeDir, "Library/Keychains/login.keychain-db")
+	if exists(login) {
+		return login
+	}
+	return ""
+}
+
+// parseMkcertCertSHAs extracts SHA-1 hashes from `security find-certificate -a -Z`
+// output, whose relevant lines look like "    SHA-1 hash: A1B2C3…". Parsing in Go
+// (instead of a piped awk) makes it unit-testable.
+func parseMkcertCertSHAs(out string) []string {
+	var shas []string
+	for _, line := range strings.Split(out, "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "SHA-1 hash:"); ok {
+			if h := strings.TrimSpace(after); h != "" {
+				shas = append(shas, h)
+			}
+		}
+	}
+	return shas
+}
+
+// addTrustedCertOutcome classifies the result of `security add-trusted-cert`.
+type addTrustedCertOutcome int
+
+const (
+	trustAdded            addTrustedCertOutcome = iota // succeeded
+	trustNeedsInteractive                              // macOS blocked non-interactive auth; retry with a prompt
+	trustCancelled                                     // the user cancelled the authorization
+	trustOtherError                                    // some other, non-fatal error
+)
+
+// classifyAddTrustedCert maps the command's combined output + error to an outcome.
+func classifyAddTrustedCert(output string, err error) addTrustedCertOutcome {
+	if err == nil {
+		return trustAdded
+	}
+	switch {
+	case strings.Contains(output, "User interaction is not allowed"):
+		return trustNeedsInteractive
+	case strings.Contains(output, "authorization was canceled by the user"):
+		return trustCancelled
+	default:
+		return trustOtherError
+	}
 }
