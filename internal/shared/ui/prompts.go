@@ -74,12 +74,23 @@ func ConfirmAction(message string) (bool, error) {
 		return false, err
 	}
 
+	// restore returns the terminal to its cooked state. It is called before any
+	// output on every exit path (so prints get normal newline handling) rather
+	// than deferred. A failure would leave the terminal in raw mode — surface it
+	// (Debug) instead of silently dropping it; the user's captured choice is the
+	// function's real result, so we don't return the restore error.
+	restore := func() {
+		if err := term.Restore(fd, oldState); err != nil {
+			pterm.Debug.Printf("failed to restore terminal state (it may be left in raw mode): %v\n", err)
+		}
+	}
+
 	// Read single character
 	buf := make([]byte, 1)
 	for {
 		_, err := os.Stdin.Read(buf)
 		if err != nil {
-			_ = term.Restore(fd, oldState)
+			restore()
 			return false, err
 		}
 
@@ -87,19 +98,19 @@ func ConfirmAction(message string) (bool, error) {
 
 		switch char {
 		case '\r', '\n': // Enter key
-			_ = term.Restore(fd, oldState)
+			restore()
 			fmt.Println()
 			return true, nil // Default to yes
 		case 'y', 'Y':
-			_ = term.Restore(fd, oldState)
+			restore()
 			fmt.Println("y")
 			return true, nil
 		case 'n', 'N':
-			_ = term.Restore(fd, oldState)
+			restore()
 			fmt.Println("n")
 			return false, nil
 		case 3: // Ctrl+C
-			_ = term.Restore(fd, oldState)
+			restore()
 			fmt.Println()
 			return false, fmt.Errorf("interrupted")
 			// Ignore other characters and continue reading
