@@ -10,6 +10,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -73,9 +74,21 @@ func newCheckCmd(current string) *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			u := selfupdate.Updater{Current: current, Client: selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")}}
+
+			// Spinner only in human (text) mode — json/yaml must keep stdout clean.
+			var sp *spinner.Spinner
+			if format, _ := cmd.Flags().GetString("output"); format == "" || format == "text" {
+				sp = spinner.Start("Checking for updates...")
+			}
 			st, _, err := u.Check(cmd.Context(), "")
 			if err != nil {
+				if sp != nil {
+					sp.Fail("Update check failed")
+				}
 				return fmt.Errorf("checking for updates: %w", err)
+			}
+			if sp != nil {
+				sp.Stop()
 			}
 			return reportStatus(cmd, st)
 		},
@@ -105,19 +118,22 @@ func run(ctx context.Context, current, target string, assumeYes, force bool) err
 		Current: current,
 		Client:  selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")},
 	}
+	sp := spinner.Start("Checking for updates...")
 	st, rel, err := u.Check(ctx, target)
 	if err != nil {
+		sp.Fail("Update check failed")
 		return fmt.Errorf("checking for updates: %w", err)
 	}
 
 	if st.DevBuild {
-		pterm.Warning.Println("This is a development build; self-update is disabled. Install a released version to enable updates.")
+		sp.Warning("This is a development build; self-update is disabled. Install a released version to enable updates.")
 		return nil
 	}
 	if !st.Available && !force && target == "" {
-		pterm.Success.Printfln("Already up to date (%s).", st.Current)
+		sp.Success(fmt.Sprintf("Already up to date (%s).", st.Current))
 		return nil
 	}
+	sp.Stop() // stop before the interactive confirm prompt
 
 	// "Update", "Downgrade", or "Reinstall" depending on the target direction.
 	verb := selfupdate.ChangeVerb(st.Current, rel.TagName)
@@ -132,10 +148,12 @@ func run(ctx context.Context, current, target string, assumeYes, force bool) err
 		}
 	}
 
-	if err := u.Apply(ctx, rel, func(msg string) { pterm.Info.Println(msg) }); err != nil {
+	apply := spinner.Start(fmt.Sprintf("%s to %s...", verb, rel.TagName))
+	if err := u.Apply(ctx, rel, func(msg string) { apply.UpdateText(msg) }); err != nil {
+		apply.Fail(fmt.Sprintf("%s failed", verb))
 		return err
 	}
-	pterm.Success.Printfln("OpenFrame CLI is now %s.", rel.TagName)
+	apply.Success(fmt.Sprintf("OpenFrame CLI is now %s.", rel.TagName))
 	return nil
 }
 
@@ -161,10 +179,12 @@ func runRollback(ctx context.Context, current string, assumeYes bool) error {
 			return nil
 		}
 	}
-	if err := u.Rollback(ctx, func(msg string) { pterm.Info.Println(msg) }); err != nil {
+	sp := spinner.Start(fmt.Sprintf("Rolling back to %s...", label))
+	if err := u.Rollback(ctx, func(msg string) { sp.UpdateText(msg) }); err != nil {
+		sp.Fail("Rollback failed")
 		return err
 	}
-	pterm.Success.Printfln("Rolled back to %s.", label)
+	sp.Success(fmt.Sprintf("Rolled back to %s.", label))
 	return nil
 }
 
