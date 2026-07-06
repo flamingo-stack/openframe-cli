@@ -12,6 +12,20 @@ import (
 	"golang.org/x/term"
 )
 
+// IsNonInteractive reports whether the CLI must avoid interactive prompts:
+// either a recognized CI environment, or stdin is not a terminal (piped /
+// redirected, as in CI). Prompt-driven flows (e.g. the prerequisite gate) should
+// take their non-interactive path so they never block waiting for a Y/N that
+// no one can type.
+func IsNonInteractive() bool {
+	for _, v := range []string{"CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI"} {
+		if os.Getenv(v) != "" {
+			return true
+		}
+	}
+	return !term.IsTerminal(int(os.Stdin.Fd()))
+}
+
 // ConfirmActionInteractive prompts the user with a polished interactive confirmation
 // Uses pterm's interactive confirm with colored styling and clear y/N format
 func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {

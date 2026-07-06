@@ -41,7 +41,9 @@ Examples:
 			if cmd.Annotations["readonly"] == "true" {
 				return nil
 			}
-			return prerequisites.NewInstaller().CheckAndInstall()
+			// CheckPrerequisites is CI/non-TTY aware, so it never blocks on a Y/N
+			// prompt in automation (previously CheckAndInstall hung CI).
+			return prerequisites.CheckPrerequisites()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show logo when no subcommand is provided

@@ -6,6 +6,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/certificates"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/memory"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 )
 
 type PrerequisiteChecker struct {
@@ -74,6 +75,8 @@ func (pc *PrerequisiteChecker) GetInstallInstructions(missingTools []string) []s
 }
 
 func CheckPrerequisites() error {
-	installer := NewInstaller()
-	return installer.CheckAndInstall()
+	// A CI environment or a non-terminal stdin must not hit an interactive prompt
+	// (this gate previously always called the interactive CheckAndInstall, which
+	// hung CI waiting for a Y/N to install tools or start Docker).
+	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }
