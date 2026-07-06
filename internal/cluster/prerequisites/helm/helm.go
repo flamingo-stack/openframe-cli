@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 )
 
 type HelmInstaller struct{}
@@ -22,8 +23,7 @@ func commandExists(cmd string) bool {
 func isHelmInstalled() bool {
 	// On Windows, check helm in WSL2
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "helm")
-		return cmd.Run() == nil
+		return wsllauncher.CommandAvailable("helm")
 	}
 
 	if !commandExists("helm") {

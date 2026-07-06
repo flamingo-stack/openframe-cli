@@ -11,6 +11,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 	"github.com/pterm/pterm"
 )
 
@@ -24,8 +25,7 @@ func commandExists(cmd string) bool {
 func isK3dInstalled() bool {
 	// On Windows, check k3d in WSL2
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "k3d")
-		return cmd.Run() == nil
+		return wsllauncher.CommandAvailable("k3d")
 	}
 
 	if !commandExists("k3d") {
@@ -305,4 +305,3 @@ func (k *K3dInstaller) runCommand(name string, args ...string) error {
 	// Completely silence output during installation
 	return cmd.Run()
 }
-

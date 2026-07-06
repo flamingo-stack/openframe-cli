@@ -10,12 +10,14 @@
 package wsllauncher
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -174,6 +176,19 @@ func resolveWSLBinaryPath() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// CommandAvailable reports whether a command is on the PATH inside the WSL
+// distro (the default distro, or OPENFRAME_WSL_DISTRO). It is bounded by a short
+// timeout so a cold-starting / mid-init distro cannot hang the caller forever,
+// and it targets the configured distro instead of a hardcoded "Ubuntu". Used by
+// the Windows prerequisite checks. Returns false on any error/timeout.
+func CommandAvailable(binary string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// `command -v` is a shell builtin, so run it through bash.
+	cmd := exec.CommandContext(ctx, "wsl", wslArgv("bash", "-lc", "command -v "+shellSingleQuote(binary))...) // #nosec G204 -- binary single-quoted
+	return cmd.Run() == nil
 }
 
 // wslBinaryStatus reports whether openframe is runnable inside WSL. A non-nil
