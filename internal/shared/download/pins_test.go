@@ -137,7 +137,7 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test skipped under -short")
 	}
-	for _, tool := range []PinnedTool{K3d} {
+	for _, tool := range []PinnedTool{K3d, Mkcert} {
 		asset, ok := tool.Asset(runtime.GOOS, runtime.GOARCH)
 		if !ok {
 			t.Errorf("%s: no asset for %s/%s", tool.Name, runtime.GOOS, runtime.GOARCH)
@@ -145,6 +145,29 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 		}
 		if _, err := (Downloader{}).FetchVerified(context.Background(), asset); err != nil {
 			t.Errorf("%s %s (%s): %v", tool.Name, tool.Version, asset.URL, err)
+		}
+	}
+}
+
+// TestMkcert_Pins locks the mkcert pin shape: a versioned URL + non-empty SHA256
+// for each supported linux/darwin platform.
+func TestMkcert_Pins(t *testing.T) {
+	if Mkcert.Version == "" {
+		t.Fatal("Mkcert.Version must be set")
+	}
+	for _, p := range []struct{ os, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"},
+	} {
+		asset, ok := Mkcert.Asset(p.os, p.arch)
+		if !ok {
+			t.Errorf("no mkcert asset for %s/%s", p.os, p.arch)
+			continue
+		}
+		if len(asset.SHA256) != 64 {
+			t.Errorf("%s/%s: SHA256 must be 64 hex chars, got %q", p.os, p.arch, asset.SHA256)
+		}
+		if !strings.Contains(asset.URL, Mkcert.Version) || !strings.Contains(asset.URL, p.os+"-"+p.arch) {
+			t.Errorf("%s/%s: URL %q must contain version and platform", p.os, p.arch, asset.URL)
 		}
 	}
 }

@@ -1,14 +1,17 @@
 package certificates
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/pterm/pterm"
 )
 
@@ -112,29 +115,26 @@ func (c *CertificateInstaller) installMkcertMacOS() error {
 }
 
 func (c *CertificateInstaller) installMkcertLinux() error {
-	homeDir, err := os.UserHomeDir()
+	// Verified, pinned download (SHA256) into ~/.openframe/bin — replacing the
+	// unverified `curl dl.filippo.io/mkcert/latest?for=linux/amd64` install, which
+	// hardcoded amd64 and ran an unauthenticated binary that injects a root CA
+	// (audit T0.3). The bin dir is on this process's PATH (prepended at startup),
+	// so the later `mkcert` invocations resolve it.
+	binDir, err := download.UserBinDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return fmt.Errorf("resolving bin directory: %w", err)
 	}
 
-	binDir := filepath.Join(homeDir, "bin")
-	if err := os.MkdirAll(binDir, 0750); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	pterm.Info.Printf("Downloading verified mkcert %s...\n", download.Mkcert.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Mkcert, binDir)
+	if err != nil {
+		return fmt.Errorf("installing verified mkcert: %w", err)
 	}
-
-	mkcertPath := filepath.Join(binDir, "mkcert")
-
-	// Download mkcert
-	downloadCmd := fmt.Sprintf("curl -fsSL -o %s https://dl.filippo.io/mkcert/latest?for=linux/amd64", mkcertPath)
-	if err := c.runShellCommand(downloadCmd); err != nil {
-		return fmt.Errorf("failed to download mkcert: %w", err)
-	}
-
-	// Make executable
-	if err := os.Chmod(mkcertPath, 0755); err != nil { // #nosec G302 -- downloaded binary must be executable
-		return fmt.Errorf("failed to make mkcert executable: %w", err)
-	}
-
+	download.PrependToPath(binDir)
+	pterm.Success.Printf("Installed verified mkcert %s to %s\n", download.Mkcert.Version, path)
 	return nil
 }
 
@@ -208,7 +208,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 				for _, sha := range strings.Split(shas, "\n") {
 					if sha != "" {
 						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-						if err := deleteCmd.Run(); err != nil { // best effort
+						if err := deleteCmd.Run(); err != nil {                                          // best effort
 							pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
 						}
 					}
@@ -283,7 +283,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 							if len(parts) > 0 {
 								nick := parts[0]
 								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-								if err := deleteCmd.Run(); err != nil { // best effort
+								if err := deleteCmd.Run(); err != nil {                                      // best effort
 									pterm.Debug.Printf("best-effort removal of old mkcert NSS nickname %q failed: %v\n", nick, err)
 								}
 							}
@@ -325,10 +325,4 @@ func (c *CertificateInstaller) generateCertificates() error {
 	}
 
 	return nil
-}
-
-func (c *CertificateInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
 }
