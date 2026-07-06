@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,8 +37,9 @@ func fakeManager(objs ...*unstructured.Unstructured) *Manager {
 		items...,
 	)
 	// clientsInitialized=true so parseApplications skips real client init and uses
-	// the fake dynamic client.
-	return &Manager{dynamicClient: dc, clientsInitialized: true}
+	// the fake dynamic client. syncWait is tiny so RefreshAndSync's waits (which
+	// never complete against the controllerless fake) don't slow the tests.
+	return &Manager{dynamicClient: dc, clientsInitialized: true, syncWait: 10 * time.Millisecond}
 }
 
 // TestParseApplications_UsesDynamicClient proves the kubectl→client-go migration:

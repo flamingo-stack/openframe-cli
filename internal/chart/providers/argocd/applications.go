@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
@@ -52,6 +53,11 @@ type Manager struct {
 	// before declaring success. Defaults to 15 (~30s at 2s interval).
 	// Tests can override this to a smaller value for speed.
 	StabilizationChecks int
+
+	// syncWait bounds how long RefreshAndSync waits for a hard refresh to be
+	// processed and for any in-flight operation to clear. Zero means the default
+	// (30s). Tests set a tiny value for speed.
+	syncWait time.Duration
 }
 
 // NewManager creates a new ArgoCD manager

@@ -71,6 +71,30 @@ func TestRefreshAndSync_NotInstalled(t *testing.T) {
 	}
 }
 
+// TestRefreshAndSync_InFlightOperation refuses to clobber a sync that is already
+// running, returning an error instead of racing it.
+func TestRefreshAndSync_InFlightOperation(t *testing.T) {
+	app := appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced)
+	status := app.Object["status"].(map[string]interface{})
+	status["operationState"] = map[string]interface{}{"phase": "Running"}
+	m := fakeManager(app)
+
+	err := m.RefreshAndSync(context.Background(), false)
+	if err == nil || !strings.Contains(err.Error(), "in progress") {
+		t.Fatalf("want in-progress error, got: %v", err)
+	}
+
+	// It must NOT have set a new .operation over the running one.
+	got, gerr := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
+		Get(context.Background(), AppOfAppsName, metav1.GetOptions{})
+	if gerr != nil {
+		t.Fatalf("get app-of-apps: %v", gerr)
+	}
+	if _, ok := got.Object["operation"]; ok {
+		t.Error("must not set .operation while another operation is running")
+	}
+}
+
 // TestRefreshAndSync_NoClient errors clearly when the dynamic client is
 // unavailable and cannot be initialized.
 func TestRefreshAndSync_NoClient(t *testing.T) {

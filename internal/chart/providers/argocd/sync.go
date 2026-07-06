@@ -3,11 +3,17 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+// refreshAnnotationKey is the annotation ArgoCD watches to force a refresh; its
+// controller clears it once the refresh has been processed.
+const refreshAnnotationKey = "argocd.argoproj.io/refresh"
 
 // AppOfAppsName is the root app-of-apps Application that owns the whole
 // platform. Refreshing and syncing it cascades to every child Application, so
@@ -60,9 +66,97 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 		return fmt.Errorf("refreshing app-of-apps: %w", err)
 	}
 
-	// 2) Trigger the sync via the top-level .operation field.
+	budget := m.syncWait
+	if budget <= 0 {
+		budget = 30 * time.Second
+	}
+
+	// 1b) Wait for the controller to process the hard refresh — it clears the
+	// refresh annotation once it has re-read git — so the sync below runs against
+	// fresh manifests, not the pre-refresh cache. Best-effort: proceed when the
+	// annotation clears or the budget elapses (never fatal).
+	m.waitRefreshCleared(ctx, budget)
+
+	// 2) Don't clobber an operation already in flight — setting .operation over a
+	// running one is racy; wait briefly, then refuse rather than stomp it.
+	if err := m.ensureNoRunningOperation(ctx, budget); err != nil {
+		return err
+	}
+
+	// 3) Trigger the sync via the top-level .operation field.
 	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(syncOperationPatch(prune)), metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("triggering sync of app-of-apps: %w", err)
 	}
 	return nil
+}
+
+// appOfAppsObject fetches the current app-of-apps Application (unstructured).
+func (m *Manager) appOfAppsObject(ctx context.Context) (*unstructured.Unstructured, error) {
+	return m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
+		Get(ctx, AppOfAppsName, metav1.GetOptions{})
+}
+
+// waitRefreshCleared polls until ArgoCD clears the refresh annotation (refresh
+// processed) or the budget elapses. Best-effort — it never returns an error; the
+// sync still triggers a comparison, this just avoids racing the pre-refresh cache.
+func (m *Manager) waitRefreshCleared(ctx context.Context, budget time.Duration) {
+	pollUntil(ctx, budget, func() bool {
+		obj, err := m.appOfAppsObject(ctx)
+		if err != nil {
+			return true // can't read — stop waiting, let the sync proceed
+		}
+		v, _, _ := unstructured.NestedString(obj.Object, "metadata", "annotations", refreshAnnotationKey)
+		return v == "" // cleared
+	})
+}
+
+// ensureNoRunningOperation waits (up to budget) for any in-flight sync to finish,
+// then errors if one is still running rather than clobbering it.
+func (m *Manager) ensureNoRunningOperation(ctx context.Context, budget time.Duration) error {
+	running := false
+	pollUntil(ctx, budget, func() bool {
+		obj, err := m.appOfAppsObject(ctx)
+		if err != nil {
+			running = false
+			return true // can't read — stop; the sync patch will surface real errors
+		}
+		phase, _, _ := unstructured.NestedString(obj.Object, "status", "operationState", "phase")
+		running = phase == "Running"
+		return !running
+	})
+	if running {
+		return fmt.Errorf("app-of-apps already has a sync operation in progress; try again shortly")
+	}
+	return nil
+}
+
+// pollUntil calls done() immediately and then every ~500ms until it returns true,
+// the context is cancelled, or the budget elapses.
+func pollUntil(ctx context.Context, budget time.Duration, done func() bool) {
+	if done() {
+		return
+	}
+	interval := 500 * time.Millisecond
+	if budget < interval {
+		interval = budget
+	}
+	if interval <= 0 {
+		interval = time.Millisecond
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			return
+		case <-ticker.C:
+			if done() {
+				return
+			}
+		}
+	}
 }
