@@ -122,6 +122,7 @@ jobs:
           "$OF_BIN" app install --help
           "$OF_BIN" app upgrade --help
           "$OF_BIN" bootstrap --help
+          "$OF_BIN" update --help
 
       - name: 'CLI: prerequisites check'
         if: matrix.os != 'darwin'

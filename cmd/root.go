@@ -11,10 +11,13 @@ import (
 	"github.com/flamingo-stack/openframe-cli/cmd/bootstrap"
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/cmd/prerequisites"
+	"github.com/flamingo-stack/openframe-cli/cmd/update"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -72,6 +75,7 @@ operation for automation and power users.`,
 	rootCmd.AddCommand(getAppCmd())
 	rootCmd.AddCommand(getBootstrapCmd())
 	rootCmd.AddCommand(getPrerequisitesCmd())
+	rootCmd.AddCommand(getUpdateCmd(versionInfo.Version))
 
 	// Add global flags following cluster pattern
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
@@ -148,7 +152,16 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return rootCmd.ExecuteContext(ctx)
+	err := rootCmd.ExecuteContext(ctx)
+
+	// Passive, rate-limited update notice. Best-effort and printed to stderr so
+	// it never blocks the command, changes its exit code, or corrupts machine
+	// output on stdout. Suppressed in CI / non-TTY / dev builds and by
+	// OPENFRAME_NO_UPDATE_CHECK (see selfupdate.MaybeNotify).
+	if msg := selfupdate.MaybeNotify(context.Background(), versionInfo.Version, !ui.IsNonInteractive()); msg != "" {
+		pterm.Info.WithWriter(os.Stderr).Println(msg)
+	}
+	return err
 }
 
 // getClusterCmd returns the cluster command
@@ -169,4 +182,9 @@ func getBootstrapCmd() *cobra.Command {
 // getPrerequisitesCmd returns the prerequisites command
 func getPrerequisitesCmd() *cobra.Command {
 	return prerequisites.GetPrerequisitesCmd()
+}
+
+// getUpdateCmd returns the self-update command, bound to the running version.
+func getUpdateCmd(currentVersion string) *cobra.Command {
+	return update.GetUpdateCmd(currentVersion)
 }
