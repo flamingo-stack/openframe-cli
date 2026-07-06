@@ -62,6 +62,36 @@ func TestLoadContexts_MissingFile(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestResolveContextForCluster(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+current-context: prod
+clusters:
+- {name: c1, cluster: {server: https://x}}
+contexts:
+- {name: prod, context: {cluster: c1, user: u}}
+- {name: k3d-dev, context: {cluster: c1, user: u}}
+users:
+- {name: u, user: {}}
+`
+	path := writeKubeconfig(t, kubeconfig)
+
+	// Empty cluster name → empty context.
+	assert.Equal(t, "", ResolveContextForCluster(path, ""))
+
+	// An exact context match wins (non-k3d / renamed context).
+	assert.Equal(t, "prod", ResolveContextForCluster(path, "prod"))
+
+	// No literal match → k3d-<name> convention (which happens to exist here).
+	assert.Equal(t, "k3d-dev", ResolveContextForCluster(path, "dev"))
+
+	// No match at all → k3d-<name> fallback (preserves prior behavior).
+	assert.Equal(t, "k3d-missing", ResolveContextForCluster(path, "missing"))
+
+	// Unreadable kubeconfig → k3d-<name> fallback, never empty for a named cluster.
+	assert.Equal(t, "k3d-foo", ResolveContextForCluster(filepath.Join(t.TempDir(), "nope"), "foo"))
+}
+
 func TestDefaultKubeconfigPath_EnvWins(t *testing.T) {
 	t.Setenv("KUBECONFIG", "/custom/kubeconfig")
 	assert.Equal(t, "/custom/kubeconfig", DefaultKubeconfigPath())

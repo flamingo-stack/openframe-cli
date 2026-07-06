@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -123,7 +124,7 @@ func (m *Manager) initKubernetesClients() error {
 	// Build config with explicit context if cluster name is set
 	var kubeContext string
 	if m.clusterName != "" {
-		kubeContext = "k3d-" + m.clusterName
+		kubeContext = k8s.ResolveContextForCluster(kubeconfigPath, m.clusterName)
 	}
 
 	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}

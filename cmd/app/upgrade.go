@@ -209,7 +209,7 @@ func resolveUpgradeTarget(cmd *cobra.Command, args []string, flags *InstallFlags
 	}
 
 	if name := clusterNameArg(args); name != "" {
-		cfg, err := k8s.RestConfigForContext(path, "k3d-"+name)
+		cfg, err := k8s.RestConfigForContext(path, k8s.ResolveContextForCluster(path, name))
 		if err != nil {
 			return nil, "", fmt.Errorf("could not use cluster %q: %w", name, err)
 		}

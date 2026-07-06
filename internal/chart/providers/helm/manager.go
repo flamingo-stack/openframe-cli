@@ -14,6 +14,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -196,7 +197,7 @@ func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []s
 		"-f", valuesFilePath,
 	}
 	if cfg.ClusterName != "" {
-		args = append(args, "--kube-context", fmt.Sprintf("k3d-%s", cfg.ClusterName))
+		args = append(args, "--kube-context", k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), cfg.ClusterName))
 	}
 	if cfg.DryRun {
 		args = append(args, "--dry-run")
@@ -531,7 +532,7 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 
 	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
 	if config.ClusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", config.ClusterName)
+		contextName := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), config.ClusterName)
 		args = append(args, "--kube-context", contextName)
 	}
 

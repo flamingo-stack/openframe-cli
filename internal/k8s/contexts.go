@@ -34,6 +34,29 @@ func DefaultKubeconfigPath() string {
 	return filepath.Join(home, ".kube", "config")
 }
 
+// ResolveContextForCluster returns the kube-context to use for a named cluster.
+// It prefers a context whose name matches the cluster exactly, otherwise the
+// k3d convention "k3d-<name>" — which is also the fallback when the kubeconfig
+// cannot be read, preserving prior behavior. This stops the chart/helm layer
+// from hardcoding the k3d naming and so breaking on renamed or non-k3d contexts.
+// An empty cluster name yields "".
+func ResolveContextForCluster(kubeconfigPath, clusterName string) string {
+	if clusterName == "" {
+		return ""
+	}
+	k3d := "k3d-" + clusterName
+	contexts, _, err := LoadContexts(kubeconfigPath)
+	if err != nil {
+		return k3d
+	}
+	for _, c := range contexts {
+		if c.Name == clusterName {
+			return clusterName
+		}
+	}
+	return k3d
+}
+
 // LoadContexts reads the kubeconfig at path and returns its contexts (sorted by
 // name) together with the current-context name. This is what the interactive
 // context-selection menu is built on.

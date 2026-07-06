@@ -9,6 +9,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
@@ -202,7 +203,7 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 
 	// Add explicit kube-context if cluster name is provided
 	if clusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		contextName := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
 		args = append(args, "--kube-context", contextName)
 	}
 
@@ -231,7 +232,7 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 	// Also run helm status for more details
 	statusArgs := []string{"status", releaseName, "-n", namespace}
 	if clusterName != "" {
-		contextName := fmt.Sprintf("k3d-%s", clusterName)
+		contextName := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
 		statusArgs = append(statusArgs, "--kube-context", contextName)
 	}
 
