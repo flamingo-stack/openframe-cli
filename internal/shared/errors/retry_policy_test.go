@@ -3,6 +3,7 @@ package errors
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,6 +17,24 @@ type nonRecoverable struct{ msg string }
 func (e nonRecoverable) Error() string                { return e.msg }
 func (e nonRecoverable) IsRecoverable() bool          { return false }
 func (e nonRecoverable) GetRetryAfter() time.Duration { return 0 }
+
+// recoverable implements RecoverableError and reports itself retryable.
+type recoverable struct{ msg string }
+
+func (e recoverable) Error() string                { return e.msg }
+func (e recoverable) IsRecoverable() bool          { return true }
+func (e recoverable) GetRetryAfter() time.Duration { return 0 }
+
+// TestShouldRetry_WrappedRecoverableIsUnwrapped proves the fix: a recoverable
+// error wrapped with %w (message carrying NO retryable substring) is still
+// retried — only errors.As, not a bare type assertion, recognizes it.
+func TestShouldRetry_WrappedRecoverableIsUnwrapped(t *testing.T) {
+	p := NewExponentialBackoffPolicy(5, time.Millisecond)
+	wrapped := fmt.Errorf("install step failed: %w", recoverable{msg: "boom"})
+	assert.True(t, p.ShouldRetry(wrapped, 0), "wrapped recoverable error must still retry")
+	assert.True(t, IsRecoverable(wrapped), "IsRecoverable must unwrap %w chains")
+	assert.False(t, IsRecoverable(fmt.Errorf("plain: %w", nonRecoverable{msg: "x"})))
+}
 
 func TestShouldRetry_RespectsMaxAttempts(t *testing.T) {
 	p := NewExponentialBackoffPolicy(3, time.Millisecond)

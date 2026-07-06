@@ -2,6 +2,7 @@ package errors
 
 import (
 	"context"
+	stderrors "errors"
 	"math"
 	"math/rand"
 	"strings"
@@ -58,8 +59,10 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 		return false
 	}
 
-	// Check if it's a recoverable error
-	if recoverableErr, ok := err.(RecoverableError); ok {
+	// Check if it's a recoverable error. errors.As unwraps %w chains, so a
+	// recoverable error stays recognized after being wrapped.
+	var recoverableErr RecoverableError
+	if stderrors.As(err, &recoverableErr) {
 		return recoverableErr.IsRecoverable()
 	}
 
@@ -281,7 +284,8 @@ func VerboseRetryCallback() func(error, int, time.Duration) {
 		pterm.Warning.Printf("Operation failed on attempt %d: %v\n", attempt, err)
 		pterm.Info.Printf("Waiting %s before retry attempt %d...\n", delay.Round(time.Millisecond), attempt+1)
 
-		if recoverableErr, ok := err.(RecoverableError); ok && recoverableErr.IsRecoverable() {
+		var recoverableErr RecoverableError
+		if stderrors.As(err, &recoverableErr) && recoverableErr.IsRecoverable() {
 			pterm.Debug.Printf("Error is recoverable with suggested retry after %v\n", recoverableErr.GetRetryAfter())
 		}
 	}
@@ -336,7 +340,8 @@ func InstallationRetryPolicy() RetryPolicy {
 
 // IsRecoverable checks if an error is recoverable
 func IsRecoverable(err error) bool {
-	if recoverableErr, ok := err.(RecoverableError); ok {
+	var recoverableErr RecoverableError
+	if stderrors.As(err, &recoverableErr) {
 		return recoverableErr.IsRecoverable()
 	}
 	return false

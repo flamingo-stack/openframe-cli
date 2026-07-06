@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"strings"
@@ -115,7 +116,7 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	// Handle user interruptions (Ctrl+C). Do NOT os.Exit here — returning lets
 	// the caller's deferred cleanup run and the process exit via the normal
 	// error-return path.
-	if eh.isUserInterruption(errorMsg) {
+	if eh.isUserInterruption(err) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
 		return
@@ -154,29 +155,25 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	}
 }
 
-// isUserInterruption checks if the error represents a user interruption (Ctrl+C)
-func (eh *ErrorHandler) isUserInterruption(errorMsg string) bool {
-	// Common interruption patterns
-	interruptions := []string{
-		"interrupted",
-		"interrupt",
-		"^C",
-		"cluster selection failed: ^C",
-		"selection failed: ^C",
-		"confirmation failed: ^C",
-		"operation cancelled",
-		"user cancelled",
-		"context canceled",
+// isUserInterruption reports whether err represents a user interruption (Ctrl+C),
+// so the handler can print a friendly "cancelled" message instead of a failure.
+//
+// It is structural first: errors.Is(context.Canceled) matches the signal-
+// cancelled root context and anything that %w-wraps ctx.Err() (e.g. "operation
+// cancelled: <ctx.Err()>"). Crucially it does NOT match context.DeadlineExceeded,
+// so a real timeout is not mislabeled as a user cancellation — and it won't
+// false-match an unrelated error that merely mentions "context canceled" in its
+// text. The remaining string checks cover promptui's Ctrl-C at an interactive
+// prompt ("^C") and the stringified "interrupted" some prompt sites return.
+func (eh *ErrorHandler) isUserInterruption(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	errorLower := strings.ToLower(errorMsg)
-	for _, pattern := range interruptions {
-		if strings.Contains(errorLower, strings.ToLower(pattern)) {
-			return true
-		}
+	if stderrors.Is(err, context.Canceled) {
+		return true
 	}
-
-	return false
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "^c") || strings.Contains(msg, "interrupted")
 }
 
 // CreateValidationError creates a new validation error
@@ -237,7 +234,7 @@ func HandleGlobalError(err error, verbose bool) error {
 	// returns it, cobra/main map it to a non-zero exit code, and every deferred
 	// cleanup (signal.Stop, cancel, temp-file restore) still runs. main.go
 	// recognises the sentinel and does not re-print the message.
-	if handler.isUserInterruption(err.Error()) {
+	if handler.isUserInterruption(err) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
 	} else {
