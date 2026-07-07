@@ -123,6 +123,9 @@ jobs:
           "$OF_BIN" app upgrade --help
           "$OF_BIN" bootstrap --help
           "$OF_BIN" update --help
+          # Self-update check needs neither Docker nor k3d, so it runs everywhere
+          # (incl. darwin); tolerate transient network issues on the runner.
+          "$OF_BIN" update check || echo "update check skipped (network)"
 
       # Windows only: run the CLI's own prerequisite installer inside WSL. This
       # exercises the apk Docker install path (installAlpine) and installs k3d +
@@ -157,11 +160,11 @@ jobs:
           fi
           wsl -u root -- docker version
 
+      # Runs on all platforms (incl. darwin): `check` only reports, never installs,
+      # so it is safe on the macOS runner (which has no Docker). Informational —
+      # missing tools are expected pre-bootstrap, hence `|| echo`.
       - name: 'CLI: prerequisites check'
-        if: matrix.os != 'darwin'
         shell: bash
-        # Missing tools are expected before bootstrap installs them, so this is
-        # informational — it must run cleanly, not necessarily report all present.
         run: '"$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"'
 
       # Everything below needs a Docker daemon + k3d. It runs on linux and on
