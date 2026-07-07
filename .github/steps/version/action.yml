@@ -10,13 +10,13 @@ inputs:
 outputs:
   version:
     description: 'Resolved release version'
-    value: ${{ steps.resolve.outputs.version }}
+    value: ${{ steps.version.outputs.version }}
 
 runs:
   using: "composite"
   steps:
     - name: Resolve version
-      id: resolve
+      id: version
       shell: bash
       env:
         INPUT_VERSION: ${{ inputs.version }}

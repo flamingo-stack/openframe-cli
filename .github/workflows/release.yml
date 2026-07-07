@@ -31,7 +31,7 @@ jobs:
 
       - name: Resolve version
         id: version
-        uses: ./.github/steps/resolve-version
+        uses: ./.github/steps/version
         with:
           version: ${{ inputs.version }}
 
