@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
@@ -14,6 +15,9 @@ import (
 // migration for namespace creation: with a native (fake) clientset the argocd
 // namespace is created through the Kubernetes API — no kubectl shell-out.
 func TestEnsureArgoCDNamespace_CreatesViaClientGo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("native cluster ops are refused on Windows (must run inside WSL)")
+	}
 	// Fake clientset with the namespace pre-marked Active so the readiness poll
 	// returns immediately once it exists.
 	client := fake.NewSimpleClientset()

@@ -3,6 +3,7 @@ package templates
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,9 @@ import (
 // concurrent runs don't clobber each other and a pre-created file can't
 // redirect the write.
 func TestCreateTemporaryValuesFile_UniqueAndPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes (0600) aren't honoured on Windows")
+	}
 	h := &HelmValuesModifier{}
 	values := map[string]interface{}{"deployment": map[string]interface{}{"saas": map[string]interface{}{"repository": map[string]interface{}{"password": "s3cret"}}}}
 

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,6 +103,9 @@ func TestFetchVerified_RejectsChecksumMismatch(t *testing.T) {
 }
 
 func TestInstallVerified_WritesExecutableOnlyWhenValid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes (0755) aren't honoured on Windows")
+	}
 	body := []byte("#!/bin/sh\necho tool\n")
 	srv := serve(t, body)
 	d := Downloader{Client: srv.Client()}

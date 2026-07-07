@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	goruntime "runtime"
 	"testing"
 	"time"
 
@@ -45,6 +46,9 @@ func fakeManager(objs ...*unstructured.Unstructured) *Manager {
 // TestParseApplications_UsesDynamicClient proves the kubectl→client-go migration:
 // applications are listed through the dynamic client, no kubectl involved.
 func TestParseApplications_UsesDynamicClient(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("native cluster ops are refused on Windows (must run inside WSL)")
+	}
 	m := fakeManager(
 		appObj("core-api", ArgoCDHealthHealthy, ArgoCDSyncSynced),
 		appObj("nats", ArgoCDHealthProgressing, ArgoCDSyncOutOfSync),
@@ -67,6 +71,9 @@ func TestParseApplications_UsesDynamicClient(t *testing.T) {
 }
 
 func TestParseApplications_Empty(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("native cluster ops are refused on Windows (must run inside WSL)")
+	}
 	apps, err := fakeManager().parseApplications(context.Background(), false)
 	if err != nil {
 		t.Fatalf("parseApplications on empty: %v", err)

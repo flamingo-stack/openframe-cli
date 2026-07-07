@@ -3,6 +3,7 @@ package templates
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,9 @@ import (
 // values file may carry secrets (SaaS PAT, docker password), so it must be
 // written 0600, never world-readable.
 func TestWriteValues_SecretFileIsOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes (0600) aren't honoured on Windows")
+	}
 	h := NewHelmValuesModifier()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "helm-values.yaml")

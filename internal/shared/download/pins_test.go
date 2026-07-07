@@ -22,6 +22,9 @@ func hexSum(b []byte) string {
 }
 
 func TestInstallPinnedTool_Success(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes (0750) aren't honoured on Windows")
+	}
 	payload := []byte("#!/bin/sh\necho hi\n")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(payload)
@@ -136,6 +139,9 @@ func TestUserBinDir(t *testing.T) {
 func TestPinnedAssets_RealDownload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test skipped under -short")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("no windows pins: on Windows the CLI runs the linux binary inside WSL")
 	}
 	for _, tool := range []PinnedTool{K3d, Mkcert, Helm} {
 		asset, ok := tool.Asset(runtime.GOOS, runtime.GOARCH)
