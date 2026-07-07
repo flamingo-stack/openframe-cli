@@ -74,10 +74,8 @@ func TestConfigurationWizard_Integration_LoadAndApply(t *testing.T) {
 	tmpDir := t.TempDir()
 	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
 
-	originalYAML := `deployment:
-  oss:
-    repository:
-      branch: main
+	originalYAML := `repository:
+  branch: main
 registry:
   docker:
     username: default
@@ -126,10 +124,8 @@ registry:
 	updatedValues, err := modifier.LoadExistingValues(tempHelmValuesPath)
 	assert.NoError(t, err)
 
-	// Verify deployment structure changes
-	deployment := updatedValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	repository := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository.branch changed
+	repository := updatedValues["repository"].(map[string]interface{})
 	assert.Equal(t, "develop", repository["branch"])
 
 	registry := updatedValues["registry"].(map[string]interface{})

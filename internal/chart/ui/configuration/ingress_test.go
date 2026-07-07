@@ -29,8 +29,7 @@ func TestIngressConfigurator_Configure_LocalhostIngress(t *testing.T) {
 
 	// Verify localhost ingress is configured
 	deployment := existingValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	ingress := oss["ingress"].(map[string]interface{})
+	ingress := deployment["ingress"].(map[string]interface{})
 	localhost := ingress["localhost"].(map[string]interface{})
 	assert.True(t, localhost["enabled"].(bool))
 }
@@ -56,8 +55,7 @@ func TestIngressConfigurator_Configure_NgrokIngress(t *testing.T) {
 
 	// Verify ngrok ingress is configured
 	deployment := existingValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	ingress := oss["ingress"].(map[string]interface{})
+	ingress := deployment["ingress"].(map[string]interface{})
 	ngrok := ingress["ngrok"].(map[string]interface{})
 	assert.True(t, ngrok["enabled"].(bool))
 	assert.Equal(t, "example.ngrok-free.app", ngrok["url"])
@@ -89,8 +87,7 @@ func TestIngressConfigurator_Configure_NgrokWithAllowedIPs(t *testing.T) {
 
 	// Verify ngrok ingress with allowed IPs
 	deployment := existingValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	ingress := oss["ingress"].(map[string]interface{})
+	ingress := deployment["ingress"].(map[string]interface{})
 	ngrok := ingress["ngrok"].(map[string]interface{})
 	assert.True(t, ngrok["enabled"].(bool))
 	assert.Equal(t, "example.ngrok-free.app", ngrok["url"])
@@ -119,11 +116,9 @@ func TestIngressConfigurator_Configure_GetCurrentIngressSettings(t *testing.T) {
 			name: "localhost enabled",
 			values: map[string]interface{}{
 				"deployment": map[string]interface{}{
-					"oss": map[string]interface{}{
-						"ingress": map[string]interface{}{
-							"localhost": map[string]interface{}{
-								"enabled": true,
-							},
+					"ingress": map[string]interface{}{
+						"localhost": map[string]interface{}{
+							"enabled": true,
 						},
 					},
 				},
@@ -134,11 +129,9 @@ func TestIngressConfigurator_Configure_GetCurrentIngressSettings(t *testing.T) {
 			name: "ngrok enabled",
 			values: map[string]interface{}{
 				"deployment": map[string]interface{}{
-					"oss": map[string]interface{}{
-						"ingress": map[string]interface{}{
-							"ngrok": map[string]interface{}{
-								"enabled": true,
-							},
+					"ingress": map[string]interface{}{
+						"ngrok": map[string]interface{}{
+							"enabled": true,
 						},
 					},
 				},
@@ -149,14 +142,12 @@ func TestIngressConfigurator_Configure_GetCurrentIngressSettings(t *testing.T) {
 			name: "both disabled",
 			values: map[string]interface{}{
 				"deployment": map[string]interface{}{
-					"oss": map[string]interface{}{
-						"ingress": map[string]interface{}{
-							"localhost": map[string]interface{}{
-								"enabled": false,
-							},
-							"ngrok": map[string]interface{}{
-								"enabled": false,
-							},
+					"ingress": map[string]interface{}{
+						"localhost": map[string]interface{}{
+							"enabled": false,
+						},
+						"ngrok": map[string]interface{}{
+							"enabled": false,
 						},
 					},
 				},
@@ -172,9 +163,7 @@ func TestIngressConfigurator_Configure_GetCurrentIngressSettings(t *testing.T) {
 			name: "no ingress section",
 			values: map[string]interface{}{
 				"deployment": map[string]interface{}{
-					"oss": map[string]interface{}{
-						"enabled": true,
-					},
+					"enabled": true,
 				},
 			},
 			expectedResult: "localhost", // default fallback
@@ -293,8 +282,7 @@ func TestIngressConfigurator_Configure_SwitchIngressTypes(t *testing.T) {
 
 	// Verify localhost is disabled and ngrok is enabled
 	deployment := existingValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	ingress := oss["ingress"].(map[string]interface{})
+	ingress := deployment["ingress"].(map[string]interface{})
 
 	ngrok := ingress["ngrok"].(map[string]interface{})
 	assert.True(t, ngrok["enabled"].(bool))
@@ -374,8 +362,7 @@ func TestIngressConfigurator_Configure_IPAllowlistScenarios(t *testing.T) {
 			assert.NoError(t, err)
 
 			deployment := existingValues["deployment"].(map[string]interface{})
-			oss := deployment["oss"].(map[string]interface{})
-			ingress := oss["ingress"].(map[string]interface{})
+			ingress := deployment["ingress"].(map[string]interface{})
 			ngrok := ingress["ngrok"].(map[string]interface{})
 
 			if tc.shouldHaveIPs {
@@ -387,49 +374,5 @@ func TestIngressConfigurator_Configure_IPAllowlistScenarios(t *testing.T) {
 				assert.False(t, exists)
 			}
 		})
-	}
-}
-
-// TestMirrorOSSIngressToFlattened verifies the ingress config is bridged from the
-// legacy deployment.oss.ingress to the flattened deployment.ingress read by the
-// current chart, deep-copied (no aliasing between the two locations).
-func TestMirrorOSSIngressToFlattened(t *testing.T) {
-	values := map[string]interface{}{
-		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"ingress": map[string]interface{}{
-					"localhost": map[string]interface{}{"enabled": false},
-					"ngrok": map[string]interface{}{
-						"enabled":     true,
-						"url":         "example.ngrok.app",
-						"credentials": map[string]interface{}{"apiKey": "k", "authtoken": "t"},
-					},
-				},
-			},
-		},
-	}
-
-	mirrorOSSIngressToFlattened(values)
-
-	dep := values["deployment"].(map[string]interface{})
-	flat, ok := dep["ingress"].(map[string]interface{})
-	assert.True(t, ok, "deployment.ingress must be written")
-	ngrok := flat["ngrok"].(map[string]interface{})
-	assert.Equal(t, true, ngrok["enabled"])
-	assert.Equal(t, "example.ngrok.app", ngrok["url"])
-	assert.Equal(t, "t", ngrok["credentials"].(map[string]interface{})["authtoken"])
-
-	// Deep copy: mutating the flattened copy must not touch the legacy subtree.
-	ngrok["url"] = "changed"
-	legacy := dep["oss"].(map[string]interface{})["ingress"].(map[string]interface{})["ngrok"].(map[string]interface{})
-	assert.Equal(t, "example.ngrok.app", legacy["url"], "legacy subtree must be independent (deep copy)")
-}
-
-// TestMirrorOSSIngressToFlattened_NoOSSIngress is a no-op when there is nothing to mirror.
-func TestMirrorOSSIngressToFlattened_NoOSSIngress(t *testing.T) {
-	values := map[string]interface{}{"deployment": map[string]interface{}{}}
-	mirrorOSSIngressToFlattened(values) // must not panic
-	if _, ok := values["deployment"].(map[string]interface{})["ingress"]; ok {
-		t.Fatal("must not create deployment.ingress when there is no oss.ingress")
 	}
 }

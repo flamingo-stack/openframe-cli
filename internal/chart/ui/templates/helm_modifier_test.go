@@ -112,89 +112,38 @@ func TestHelmValuesModifier_LoadExistingValues_EmptyFile(t *testing.T) {
 func TestHelmValuesModifier_GetCurrentOSSBranch(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 
-	// Test with existing OSS branch in deployment structure
+	// Existing branch at the flattened top-level repository.branch.
 	values := map[string]interface{}{
-		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"repository": map[string]interface{}{
-					"branch": "develop",
-				},
-			},
-		},
+		"repository": map[string]interface{}{"branch": "develop"},
 	}
+	assert.Equal(t, "develop", modifier.GetCurrentOSSBranch(values))
 
-	branch := modifier.GetCurrentOSSBranch(values)
-	assert.Equal(t, "develop", branch)
+	// No repository section → default.
+	assert.Equal(t, "main", modifier.GetCurrentOSSBranch(make(map[string]interface{})))
 
-	// Test with no deployment section - should return default
-	emptyValues := make(map[string]interface{})
-	defaultBranch := modifier.GetCurrentOSSBranch(emptyValues)
-	assert.Equal(t, "main", defaultBranch)
-
-	// Test with deployment section but no OSS branch - should return default
-	nobranchValues := map[string]interface{}{
-		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"enabled": true,
-			},
-		},
-	}
-	noBranch := modifier.GetCurrentOSSBranch(nobranchValues)
-	assert.Equal(t, "main", noBranch)
+	// repository present but no branch → default.
+	noBranch := map[string]interface{}{"repository": map[string]interface{}{}}
+	assert.Equal(t, "main", modifier.GetCurrentOSSBranch(noBranch))
 }
 
 func TestHelmValuesModifier_SetRepositoryBranch(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 
-	// OSS / saas-tenant → deployment.oss.repository.branch, created from empty.
-	for _, mode := range []string{"oss-tenant", "saas-tenant", ""} {
+	// Every deployment mode writes the single top-level repository.branch (the
+	// flattened chart schema has no per-mode repository section).
+	for _, mode := range []string{"oss-tenant", "saas-tenant", "saas-shared", ""} {
 		values := make(map[string]interface{})
 		modifier.SetRepositoryBranch(values, mode, "v1.3.0")
-		assert.Equalf(t, "v1.3.0", modifier.GetCurrentOSSBranch(values), "mode %q writes oss branch", mode)
+		got := values["repository"].(map[string]interface{})["branch"]
+		assert.Equalf(t, "v1.3.0", got, "mode %q writes repository.branch", mode)
+		_, hasDeployment := values["deployment"]
+		assert.Falsef(t, hasDeployment, "mode %q must not write a deployment section", mode)
 	}
-
-	// saas-shared → deployment.saas.repository.branch (not oss).
-	values := make(map[string]interface{})
-	modifier.SetRepositoryBranch(values, "saas-shared", "v2.0.0")
-	saasBranch := values["deployment"].(map[string]interface{})["saas"].(map[string]interface{})["repository"].(map[string]interface{})["branch"]
-	assert.Equal(t, "v2.0.0", saasBranch)
-	_, hasOSS := values["deployment"].(map[string]interface{})["oss"]
-	assert.False(t, hasOSS, "saas-shared must not touch the oss section")
 
 	// Overwrites an existing branch in place.
-	existing := map[string]interface{}{
-		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{"repository": map[string]interface{}{"branch": "main"}},
-		},
-	}
+	existing := map[string]interface{}{"repository": map[string]interface{}{"branch": "main"}}
 	modifier.SetRepositoryBranch(existing, "oss-tenant", "v9")
 	assert.Equal(t, "v9", modifier.GetCurrentOSSBranch(existing))
-}
-
-// TestHelmValuesModifier_SetRepositoryBranch_DualWrite guards that the branch is
-// written under BOTH the legacy deployment.oss.repository.branch and the
-// flattened top-level repository.branch, so the app-of-apps values stay
-// compatible with both the current and the flattened chart schema.
-func TestHelmValuesModifier_SetRepositoryBranch_DualWrite(t *testing.T) {
-	modifier := NewHelmValuesModifier()
-	values := make(map[string]interface{})
-	modifier.SetRepositoryBranch(values, "oss-tenant", "v1.4.0")
-
-	legacy := values["deployment"].(map[string]interface{})["oss"].(map[string]interface{})["repository"].(map[string]interface{})["branch"]
-	assert.Equal(t, "v1.4.0", legacy, "legacy deployment.oss.repository.branch")
-
-	flat := values["repository"].(map[string]interface{})["branch"]
-	assert.Equal(t, "v1.4.0", flat, "flattened top-level repository.branch")
-}
-
-// TestHelmValuesModifier_GetCurrentOSSBranch_Flattened verifies the branch is
-// read from the flattened schema when there is no legacy deployment.oss section.
-func TestHelmValuesModifier_GetCurrentOSSBranch_Flattened(t *testing.T) {
-	modifier := NewHelmValuesModifier()
-	values := map[string]interface{}{
-		"repository": map[string]interface{}{"branch": "feature/x"},
-	}
-	assert.Equal(t, "feature/x", modifier.GetCurrentOSSBranch(values))
 }
 
 func TestHelmValuesModifier_GetCurrentDockerSettings(t *testing.T) {
@@ -240,15 +189,9 @@ func TestHelmValuesModifier_GetCurrentDockerSettings(t *testing.T) {
 func TestHelmValuesModifier_ApplyConfiguration_Branch(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 
-	// Prepare initial values with deployment structure
+	// Prepare initial values with a top-level repository section
 	values := map[string]interface{}{
-		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"repository": map[string]interface{}{
-					"branch": "main",
-				},
-			},
-		},
+		"repository": map[string]interface{}{"branch": "main"},
 	}
 
 	// Create configuration with new branch for OSS deployment
@@ -264,10 +207,8 @@ func TestHelmValuesModifier_ApplyConfiguration_Branch(t *testing.T) {
 	err := modifier.ApplyConfiguration(values, config)
 	assert.NoError(t, err)
 
-	// Verify changes in deployment structure
-	deployment := values["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	repository := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository.branch was updated
+	repository := values["repository"].(map[string]interface{})
 	assert.Equal(t, "develop", repository["branch"])
 }
 
@@ -296,12 +237,8 @@ func TestHelmValuesModifier_ApplyConfiguration_Branch_NoDeployment(t *testing.T)
 	err := modifier.ApplyConfiguration(values, config)
 	assert.NoError(t, err)
 
-	// Verify deployment structure was created
-	deployment, ok := values["deployment"].(map[string]interface{})
-	assert.True(t, ok)
-	oss, ok := deployment["oss"].(map[string]interface{})
-	assert.True(t, ok)
-	repository, ok := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository section was created
+	repository, ok := values["repository"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "develop", repository["branch"])
 }
@@ -473,14 +410,12 @@ func TestHelmValuesModifier_GetCurrentIngressSettings(t *testing.T) {
 	// Test with ngrok enabled
 	valuesWithNgrok := map[string]interface{}{
 		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"ingress": map[string]interface{}{
-					"ngrok": map[string]interface{}{
-						"enabled": true,
-					},
-					"localhost": map[string]interface{}{
-						"enabled": false,
-					},
+			"ingress": map[string]interface{}{
+				"ngrok": map[string]interface{}{
+					"enabled": true,
+				},
+				"localhost": map[string]interface{}{
+					"enabled": false,
 				},
 			},
 		},
@@ -492,14 +427,12 @@ func TestHelmValuesModifier_GetCurrentIngressSettings(t *testing.T) {
 	// Test with localhost enabled
 	valuesWithLocalhost := map[string]interface{}{
 		"deployment": map[string]interface{}{
-			"oss": map[string]interface{}{
-				"ingress": map[string]interface{}{
-					"localhost": map[string]interface{}{
-						"enabled": true,
-					},
-					"ngrok": map[string]interface{}{
-						"enabled": false,
-					},
+			"ingress": map[string]interface{}{
+				"localhost": map[string]interface{}{
+					"enabled": true,
+				},
+				"ngrok": map[string]interface{}{
+					"enabled": false,
 				},
 			},
 		},

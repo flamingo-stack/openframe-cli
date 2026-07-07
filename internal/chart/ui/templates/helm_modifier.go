@@ -93,7 +93,7 @@ func (h *HelmValuesModifier) ApplyConfiguration(values map[string]interface{}, c
 
 	// Update branch if it was modified - handle deployment-specific branches
 	if config.Branch != nil {
-		// For OSS deployment, update deployment.oss.repository.branch
+		// For OSS deployment, update the top-level repository.branch.
 		if config.DeploymentMode != nil && *config.DeploymentMode == types.DeploymentModeOSS {
 			if err := h.updateOSSBranch(values, *config.Branch); err != nil {
 				return fmt.Errorf("failed to update OSS branch: %w", err)
@@ -230,63 +230,29 @@ func (h *HelmValuesModifier) applySaaSConfig(values map[string]interface{}, saas
 	return nil
 }
 
-// updateOSSBranch updates the OSS repository branch
+// updateOSSBranch updates the app-of-apps repository branch.
 func (h *HelmValuesModifier) updateOSSBranch(values map[string]interface{}, branch string) error {
-	h.setSectionBranch(values, "oss", branch)
+	h.setRepositoryBranch(values, branch)
 	return nil
 }
 
-// SetRepositoryBranch pins the app-of-apps repository branch/ref for the given
-// deployment mode. It mirrors the branch-selection used when reading values back
-// (getBranchForDeploymentMode): saas-shared uses deployment.saas.repository.branch;
-// OSS and saas-tenant use deployment.oss.repository.branch. Used to make an
-// explicit --ref win over, and stay consistent with, the values-file branch.
-func (h *HelmValuesModifier) SetRepositoryBranch(values map[string]interface{}, deploymentMode, branch string) {
-	section := "oss"
-	if deploymentMode == "saas-shared" {
-		section = "saas"
-	}
-	h.setSectionBranch(values, section, branch)
+// SetRepositoryBranch pins the app-of-apps repository branch/ref. The flattened
+// chart schema uses a single top-level repository.branch regardless of
+// deployment mode (openframe-oss-tenant flattened deployment.oss.repository.* to
+// repository.*), so the deployment mode no longer selects a section.
+func (h *HelmValuesModifier) SetRepositoryBranch(values map[string]interface{}, _, branch string) {
+	h.setRepositoryBranch(values, branch)
 }
 
-// setSectionBranch pins the app-of-apps repository branch. It DUAL-WRITES both
-// layouts so the values stay compatible with the current chart and the
-// flattened one (openframe-oss-tenant#feature/updt-oss moved the app-of-apps
-// source from deployment.oss.repository.* to a top-level repository.*):
-//   - deployment.<section>.repository.branch  (legacy nesting, read by main)
-//   - repository.branch                       (flattened, read by the new chart)
-//
-// The unread key is a harmless extra for whichever chart doesn't consume it, so
-// `--ref`/`--github-branch` keep working across the schema transition without a
-// lockstep release. NOTE: only the branch is bridged here — ingress,
-// deployment-mode, and registry-credential keys also moved and are NOT yet
-// migrated (they need the finalized schema / a product decision).
-func (h *HelmValuesModifier) setSectionBranch(values map[string]interface{}, section, branch string) {
-	// Legacy path: deployment.<section>.repository.branch.
-	deployment, ok := values["deployment"].(map[string]interface{})
-	if !ok {
-		deployment = make(map[string]interface{})
-		values["deployment"] = deployment
-	}
-	sec, ok := deployment[section].(map[string]interface{})
-	if !ok {
-		sec = make(map[string]interface{})
-		deployment[section] = sec
-	}
-	repository, ok := sec["repository"].(map[string]interface{})
+// setRepositoryBranch pins the app-of-apps source at the top-level
+// repository.branch, creating the map as needed.
+func (h *HelmValuesModifier) setRepositoryBranch(values map[string]interface{}, branch string) {
+	repository, ok := values["repository"].(map[string]interface{})
 	if !ok {
 		repository = make(map[string]interface{})
-		sec["repository"] = repository
+		values["repository"] = repository
 	}
 	repository["branch"] = branch
-
-	// Flattened path: top-level repository.branch.
-	newRepo, ok := values["repository"].(map[string]interface{})
-	if !ok {
-		newRepo = make(map[string]interface{})
-		values["repository"] = newRepo
-	}
-	newRepo["branch"] = branch
 }
 
 // WriteValues writes updated values back to the Helm values file
@@ -322,24 +288,12 @@ func (h *HelmValuesModifier) GetCurrentBranch(values map[string]interface{}) str
 	return "main" // default fallback
 }
 
-// GetCurrentOSSBranch extracts the current OSS repository branch from Helm
-// values, reading the flattened top-level repository.branch first (new schema)
-// and falling back to the legacy deployment.oss.repository.branch.
+// GetCurrentOSSBranch extracts the current repository branch from the top-level
+// repository.branch (the flattened chart schema).
 func (h *HelmValuesModifier) GetCurrentOSSBranch(values map[string]interface{}) string {
-	// New flattened schema: top-level repository.branch.
 	if repo, ok := values["repository"].(map[string]interface{}); ok {
 		if branch, ok := repo["branch"].(string); ok && branch != "" {
 			return branch
-		}
-	}
-	// Legacy schema: deployment.oss.repository.branch.
-	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
-			if repository, ok := oss["repository"].(map[string]interface{}); ok {
-				if branch, ok := repository["branch"].(string); ok {
-					return branch
-				}
-			}
 		}
 	}
 	return "main" // default fallback
@@ -373,20 +327,18 @@ func (h *HelmValuesModifier) GetCurrentDockerSettings(values map[string]interfac
 // GetCurrentIngressSettings extracts current ingress settings from Helm values
 func (h *HelmValuesModifier) GetCurrentIngressSettings(values map[string]interface{}) string {
 	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
-			if ingress, ok := oss["ingress"].(map[string]interface{}); ok {
-				// Check if ngrok is enabled
-				if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
-					if enabled, ok := ngrok["enabled"].(bool); ok && enabled {
-						return "ngrok"
-					}
+		if ingress, ok := deployment["ingress"].(map[string]interface{}); ok {
+			// Check if ngrok is enabled
+			if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
+				if enabled, ok := ngrok["enabled"].(bool); ok && enabled {
+					return "ngrok"
 				}
+			}
 
-				// Check if localhost is enabled
-				if localhost, ok := ingress["localhost"].(map[string]interface{}); ok {
-					if enabled, ok := localhost["enabled"].(bool); ok && enabled {
-						return "localhost"
-					}
+			// Check if localhost is enabled
+			if localhost, ok := ingress["localhost"].(map[string]interface{}); ok {
+				if enabled, ok := localhost["enabled"].(bool); ok && enabled {
+					return "localhost"
 				}
 			}
 		}
