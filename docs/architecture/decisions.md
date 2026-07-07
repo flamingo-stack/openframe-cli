@@ -56,14 +56,20 @@ mode may also influence *where* a cluster is created: OSS → local, SaaS → cl
 
 ## D3 — Commands: `cluster` and `app` are the two primitives
 
-- `openframe cluster create|delete|list|status` — cluster lifecycle. `create`
-  **only creates the cluster**; it never installs the app. (Verb is `create`;
-  there is no `apply`.)
-- `openframe app install|status|uninstall` — installs the OpenFrame app into an
-  existing, online cluster. (`app` was previously `chart`; `chart` remains a
-  hidden alias for one release for backward compatibility.)
+- `openframe cluster create|delete|list|status|cleanup` — cluster lifecycle.
+  `create` **only creates the cluster**; it never installs the app. (Verb is
+  `create`; there is no `apply`.) `cleanup` removes unused cluster resources.
+- `openframe app install|upgrade|status|access|uninstall` — installs and operates
+  the OpenFrame app on an existing, online cluster. `upgrade` re-deploys the
+  app-of-apps at a new git ref (`--ref`) or forces an ArgoCD hard refresh + sync
+  (`--sync`); `access` prints the ArgoCD admin credentials and how to open the
+  UI. (`app` was previously `chart`; `chart` remains a hidden alias for
+  backward compatibility.)
 - `openframe prerequisites check|install [cluster|app]` — the prerequisite
   checks/installs as first-class commands.
+- `openframe update` — self-update of the CLI binary (checksum + cosign verified,
+  with `check` and `rollback`); see D6-adjacent tooling in
+  `internal/shared/selfupdate`.
 
 ---
 
@@ -128,17 +134,19 @@ rather than raw errors.
 
 ```
 cmd/
-  cluster/         create, delete, list, status
-  app/             install, status, uninstall   (alias: chart)
+  cluster/         create, delete, list, status, cleanup
+  app/             install, upgrade, status, access, uninstall   (alias: chart)
   prerequisites/   check, install
   bootstrap/       orchestrator (prerequisites → cluster create → app install)
+  update/          self-update: (update), check, rollback
 internal/
   cluster/provider/   Provider interface + Target(local|cloud) + k3d impl
-  cluster/service/    cluster lifecycle
-  app/service/        helm/argocd install + interactive values
-  app/k8s/            cluster-access API: contexts, health, resources
+  cluster/            cluster lifecycle (service + k3d provider)
+  chart/              helm/argocd/git providers + app-of-apps install
+  k8s/                cluster-access API: contexts, rest.Config, health, resources
   prerequisites/      OS-aware checker/installer framework
-  platform/           OS detection + Windows doc links
-  shared/             executor, errors, ui, redact, download, files, config
+  platform/           OS detection + Windows/WSL2 doc hints
+  shared/             executor, errors, ui, redact, files, config, flags,
+                      download (pinned tools), selfupdate, wsllauncher
 docs/                 all documentation
 ```
