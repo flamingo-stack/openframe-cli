@@ -83,18 +83,31 @@ jobs:
           cache: true
 
       # The Windows binary re-runs the whole CLI inside WSL2, so the runner needs
-      # a WSL distro. Fresh runners have WSL but no distribution installed, so
-      # register one here (via `wsl --import`, headless, no Store/reboot). Alpine
-      # is the lightest official distro; it ships busybox `ash`, so pull in `bash`
-      # which the launcher uses (`bash -lc`). Set as default so the launcher (and
-      # the install step below) target it without hardcoding its registered name.
+      # a WSL distro that can run Docker (k3d needs a Docker daemon). Alpine is the
+      # lightest official distro; the CLI's Docker installer now supports it (apk),
+      # and `docker` is pre-installed here for a reliable CI daemon. `bash` is what
+      # the launcher uses (`bash -lc`). With Docker present the CLI only installs
+      # k3d/helm (verified download) itself.
       - name: Install Alpine in WSL
         if: matrix.os == 'windows'
         uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
         with:
           distribution: Alpine-3.23
           set-as-default: 'true'
-          additional-packages: bash
+          additional-packages: bash docker
+
+      # Start the Docker daemon inside WSL. Alpine WSL runs as root and has no
+      # OpenRC init, so launch dockerd directly and wait for the socket.
+      - name: Start Docker in WSL
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          wsl -- sh -c 'nohup dockerd >/var/log/dockerd.log 2>&1 &'
+          for i in $(seq 1 30); do
+            if wsl -- docker info >/dev/null 2>&1; then echo "docker is up"; break; fi
+            echo "waiting for dockerd ($i)..."; sleep 2
+          done
+          wsl -- docker version
 
       # --- Build & stage (all platforms, incl. darwin) -----------------------
       - name: Build & stage CLI
@@ -131,6 +144,10 @@ jobs:
         # informational — it must run cleanly, not necessarily report all present.
         run: '"$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"'
 
+      # Everything below needs a Docker daemon + k3d. It runs on linux and on
+      # windows (the Windows binary forwards into WSL, where Docker was started
+      # above), exercising the real cluster lifecycle on both. darwin stays
+      # read-only (no nested Docker on the macOS runner).
       - name: 'CLI: cluster queries (empty)'
         if: matrix.os != 'darwin'
         shell: bash

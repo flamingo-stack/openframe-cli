@@ -119,17 +119,59 @@ func (d *DockerInstaller) installMacOS() error {
 }
 
 func (d *DockerInstaller) installLinux() error {
-	if commandExists("apt") {
+	switch {
+	case commandExists("apk"):
+		return d.installAlpine()
+	case commandExists("apt"):
 		return d.installUbuntu()
-	} else if commandExists("yum") {
+	case commandExists("yum"):
 		return d.installRedHat()
-	} else if commandExists("dnf") {
+	case commandExists("dnf"):
 		return d.installFedora()
-	} else if commandExists("pacman") {
+	case commandExists("pacman"):
 		return d.installArch()
-	} else {
+	default:
 		return fmt.Errorf("no supported package manager found. Please install Docker manually from https://docs.docker.com/engine/install/")
 	}
+}
+
+// installAlpine installs Docker on Alpine Linux following
+// https://wiki.alpinelinux.org/wiki/Docker — apk add docker, then enable and
+// start the OpenRC service. Alpine's default user is often root (and may not
+// ship sudo, e.g. in WSL/containers), so sudo is only prefixed when needed.
+// Enabling/starting the service is best-effort: under WSL or containers OpenRC
+// may not be the init system, but `apk add docker` already provides the engine,
+// which can be started directly (see StartDocker).
+func (d *DockerInstaller) installAlpine() error {
+	fmt.Println("Installing Docker on Alpine Linux...")
+
+	run := func(args ...string) error {
+		if os.Geteuid() != 0 && commandExists("sudo") {
+			args = append([]string{"sudo"}, args...)
+		}
+		return d.runCommand(args[0], args[1:]...)
+	}
+
+	if err := run("apk", "add", "--no-cache", "docker"); err != nil {
+		return fmt.Errorf("failed to install Docker with apk: %w", err)
+	}
+	if err := run("rc-update", "add", "docker", "default"); err != nil {
+		fmt.Printf("Warning: could not enable the docker service (rc-update): %v\n", err)
+	}
+	if err := run("rc-service", "docker", "start"); err != nil {
+		fmt.Printf("Warning: could not start the docker service (rc-service): %v\n", err)
+	}
+
+	// Add the current user to the docker group (Alpine uses addgroup, not usermod).
+	if user := os.Getenv("USER"); user != "" && user != "root" {
+		if err := run("addgroup", user, "docker"); err != nil {
+			fmt.Printf("Warning: could not add user to the docker group: %v\n", err)
+		} else {
+			fmt.Println("Note: log out and back in for Docker group permissions to take effect")
+		}
+	}
+
+	return nil
 }
 
 func (d *DockerInstaller) installUbuntu() error {
@@ -323,6 +365,17 @@ func startDockerLinux() error {
 			if err := cmd.Run(); err != nil {
 				return fmt.Errorf("failed to start Docker daemon with systemctl: %w", err)
 			}
+		}
+		return nil
+	}
+
+	// OpenRC (Alpine)
+	if commandExists("rc-service") {
+		if exec.Command("rc-service", "docker", "start").Run() == nil {
+			return nil
+		}
+		if err := exec.Command("sudo", "rc-service", "docker", "start").Run(); err != nil {
+			return fmt.Errorf("failed to start Docker daemon with rc-service: %w", err)
 		}
 		return nil
 	}
