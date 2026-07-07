@@ -143,19 +143,26 @@ jobs:
         if: matrix.os == 'windows'
         shell: bash
         run: |
+          # rc-service is unreliable in initless WSL (it returns 0 without actually
+          # bringing up the daemon), so start dockerd directly and detached
+          # (setsid, </dev/null) so it survives this shell and keeps the WSL VM and
+          # daemon alive for later steps. vfs avoids overlayfs issues under WSL2.
           wsl -u root -- sh -c '
+            command -v dockerd >/dev/null || { echo "dockerd not installed"; exit 1; }
+            rc-service docker stop >/dev/null 2>&1 || true
+            pkill dockerd >/dev/null 2>&1 || true
             mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
-            if ! rc-service docker start 2>/dev/null; then
-              nohup dockerd --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
-            fi
+            setsid dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs </dev/null >/var/log/dockerd.log 2>&1 &
+            sleep 1
           '
           for i in $(seq 1 30); do
             if wsl -u root -- docker info >/dev/null 2>&1; then echo "docker is up"; break; fi
             echo "waiting for dockerd ($i)..."; sleep 2
           done
           if ! wsl -u root -- docker info >/dev/null 2>&1; then
-            echo "=== dockerd did not start; log + status ==="
-            wsl -u root -- sh -c 'cat /var/log/dockerd.log 2>/dev/null; rc-service docker status 2>/dev/null; ls -la /var/run/docker.sock 2>/dev/null'
+            echo "=== dockerd did not come up; diagnostics ==="
+            wsl -u root -- cat /var/log/dockerd.log 2>/dev/null || echo "(dockerd wrote no log)"
+            wsl -u root -- sh -c 'command -v dockerd; ls -la /var/run/docker.sock 2>&1; ls /sys/fs/cgroup 2>&1 | head; uname -r'
             exit 1
           fi
           wsl -u root -- docker version
