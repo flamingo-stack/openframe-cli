@@ -15,10 +15,11 @@ import (
 // controller clears it once the refresh has been processed.
 const refreshAnnotationKey = "argocd.argoproj.io/refresh"
 
-// AppOfAppsName is the root app-of-apps Application that owns the whole
-// platform. Refreshing and syncing it cascades to every child Application, so
-// the force-sync path only has to act on this one object.
-const AppOfAppsName = "app-of-apps"
+// AppOfAppsName is the root Application that owns the whole platform. Refreshing
+// and syncing it cascades to every child Application, so the force-sync path only
+// has to act on this one object. openframe-oss-tenant renamed it from
+// "app-of-apps" to "argocd-apps".
+const AppOfAppsName = "argocd-apps"
 
 // refreshHardPatch forces the repo-server to re-read git and drop its cached
 // manifests (a plain "normal" refresh can serve stale cache for a moved ref).
@@ -61,9 +62,9 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	// 1) Hard refresh — repo-server re-reads git, bypassing the manifest cache.
 	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(refreshHardPatch), metav1.PatchOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("app-of-apps not found in namespace %q — is OpenFrame installed?", ArgoCDNamespace)
+			return fmt.Errorf("%s not found in namespace %q — is OpenFrame installed?", AppOfAppsName, ArgoCDNamespace)
 		}
-		return fmt.Errorf("refreshing app-of-apps: %w", err)
+		return fmt.Errorf("refreshing %s: %w", AppOfAppsName, err)
 	}
 
 	budget := m.syncWait
@@ -85,7 +86,7 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 
 	// 3) Trigger the sync via the top-level .operation field.
 	if _, err := apps.Patch(ctx, AppOfAppsName, types.MergePatchType, []byte(syncOperationPatch(prune)), metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("triggering sync of app-of-apps: %w", err)
+		return fmt.Errorf("triggering sync of %s: %w", AppOfAppsName, err)
 	}
 
 	// 4) Sync the child Applications too. Syncing only the root updates child
@@ -151,7 +152,7 @@ func (m *Manager) ensureNoRunningOperation(ctx context.Context, budget time.Dura
 		return !running
 	})
 	if running {
-		return fmt.Errorf("app-of-apps already has a sync operation in progress; try again shortly")
+		return fmt.Errorf("%s already has a sync operation in progress; try again shortly", AppOfAppsName)
 	}
 	return nil
 }

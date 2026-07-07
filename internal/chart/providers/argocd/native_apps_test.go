@@ -77,16 +77,16 @@ func TestParseApplications_Empty(t *testing.T) {
 }
 
 // TestGetTotalExpectedApplications_CountsViaDynamicClient: Method 2 (list all
-// apps except app-of-apps) via the dynamic client.
+// apps except the root app-of-apps) via the dynamic client.
 func TestGetTotalExpectedApplications_CountsViaDynamicClient(t *testing.T) {
 	m := fakeManager(
-		appObj("app-of-apps", ArgoCDHealthHealthy, ArgoCDSyncSynced),
+		appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced),
 		appObj("child-1", ArgoCDHealthHealthy, ArgoCDSyncSynced),
 		appObj("child-2", ArgoCDHealthProgressing, ArgoCDSyncOutOfSync),
 	)
 	got := m.getTotalExpectedApplications(context.Background(), config.ChartInstallConfig{})
 	if got != 2 {
-		t.Fatalf("expected 2 children (app-of-apps excluded), got %d", got)
+		t.Fatalf("expected 2 children (%s excluded), got %d", AppOfAppsName, got)
 	}
 }
 

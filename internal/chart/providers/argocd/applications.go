@@ -352,8 +352,8 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 	// --- Primary Method: Native dynamic client ---
 
-	// Method 1: Get app-of-apps and count Application resources from its status
-	if obj, err := apps.Get(ctx, "app-of-apps", metav1.GetOptions{}); err == nil {
+	// Method 1: Get the root app-of-apps and count Application resources from its status
+	if obj, err := apps.Get(ctx, AppOfAppsName, metav1.GetOptions{}); err == nil {
 		if app, cerr := argoAppFromObject(obj.Object); cerr == nil {
 			appCount := 0
 			for _, res := range app.Status.Resources {
@@ -372,10 +372,10 @@ func (m *Manager) getTotalExpectedApplications(ctx context.Context, config confi
 
 	// Method 2: List all applications directly via native client
 	if list, err := apps.List(ctx, metav1.ListOptions{}); err == nil && len(list.Items) > 0 {
-		// Count all apps except app-of-apps itself
+		// Count all apps except the root app-of-apps itself
 		count := 0
 		for _, item := range list.Items {
-			if item.GetName() != "app-of-apps" {
+			if item.GetName() != AppOfAppsName {
 				count++
 			}
 		}
