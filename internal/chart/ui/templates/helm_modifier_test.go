@@ -171,6 +171,32 @@ func TestHelmValuesModifier_SetRepositoryBranch(t *testing.T) {
 	assert.Equal(t, "v9", modifier.GetCurrentOSSBranch(existing))
 }
 
+// TestHelmValuesModifier_SetRepositoryBranch_DualWrite guards that the branch is
+// written under BOTH the legacy deployment.oss.repository.branch and the
+// flattened top-level repository.branch, so the app-of-apps values stay
+// compatible with both the current and the flattened chart schema.
+func TestHelmValuesModifier_SetRepositoryBranch_DualWrite(t *testing.T) {
+	modifier := NewHelmValuesModifier()
+	values := make(map[string]interface{})
+	modifier.SetRepositoryBranch(values, "oss-tenant", "v1.4.0")
+
+	legacy := values["deployment"].(map[string]interface{})["oss"].(map[string]interface{})["repository"].(map[string]interface{})["branch"]
+	assert.Equal(t, "v1.4.0", legacy, "legacy deployment.oss.repository.branch")
+
+	flat := values["repository"].(map[string]interface{})["branch"]
+	assert.Equal(t, "v1.4.0", flat, "flattened top-level repository.branch")
+}
+
+// TestHelmValuesModifier_GetCurrentOSSBranch_Flattened verifies the branch is
+// read from the flattened schema when there is no legacy deployment.oss section.
+func TestHelmValuesModifier_GetCurrentOSSBranch_Flattened(t *testing.T) {
+	modifier := NewHelmValuesModifier()
+	values := map[string]interface{}{
+		"repository": map[string]interface{}{"branch": "feature/x"},
+	}
+	assert.Equal(t, "feature/x", modifier.GetCurrentOSSBranch(values))
+}
+
 func TestHelmValuesModifier_GetCurrentDockerSettings(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 

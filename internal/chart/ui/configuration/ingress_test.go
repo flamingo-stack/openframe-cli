@@ -389,3 +389,47 @@ func TestIngressConfigurator_Configure_IPAllowlistScenarios(t *testing.T) {
 		})
 	}
 }
+
+// TestMirrorOSSIngressToFlattened verifies the ingress config is bridged from the
+// legacy deployment.oss.ingress to the flattened deployment.ingress read by the
+// current chart, deep-copied (no aliasing between the two locations).
+func TestMirrorOSSIngressToFlattened(t *testing.T) {
+	values := map[string]interface{}{
+		"deployment": map[string]interface{}{
+			"oss": map[string]interface{}{
+				"ingress": map[string]interface{}{
+					"localhost": map[string]interface{}{"enabled": false},
+					"ngrok": map[string]interface{}{
+						"enabled":     true,
+						"url":         "example.ngrok.app",
+						"credentials": map[string]interface{}{"apiKey": "k", "authtoken": "t"},
+					},
+				},
+			},
+		},
+	}
+
+	mirrorOSSIngressToFlattened(values)
+
+	dep := values["deployment"].(map[string]interface{})
+	flat, ok := dep["ingress"].(map[string]interface{})
+	assert.True(t, ok, "deployment.ingress must be written")
+	ngrok := flat["ngrok"].(map[string]interface{})
+	assert.Equal(t, true, ngrok["enabled"])
+	assert.Equal(t, "example.ngrok.app", ngrok["url"])
+	assert.Equal(t, "t", ngrok["credentials"].(map[string]interface{})["authtoken"])
+
+	// Deep copy: mutating the flattened copy must not touch the legacy subtree.
+	ngrok["url"] = "changed"
+	legacy := dep["oss"].(map[string]interface{})["ingress"].(map[string]interface{})["ngrok"].(map[string]interface{})
+	assert.Equal(t, "example.ngrok.app", legacy["url"], "legacy subtree must be independent (deep copy)")
+}
+
+// TestMirrorOSSIngressToFlattened_NoOSSIngress is a no-op when there is nothing to mirror.
+func TestMirrorOSSIngressToFlattened_NoOSSIngress(t *testing.T) {
+	values := map[string]interface{}{"deployment": map[string]interface{}{}}
+	mirrorOSSIngressToFlattened(values) // must not panic
+	if _, ok := values["deployment"].(map[string]interface{})["ingress"]; ok {
+		t.Fatal("must not create deployment.ingress when there is no oss.ingress")
+	}
+}

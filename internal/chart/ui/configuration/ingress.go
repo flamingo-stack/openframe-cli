@@ -83,6 +83,12 @@ func (i *IngressConfigurator) Configure(config *types.ChartConfiguration) error 
 		}
 	}
 
+	// Dual-write the ingress config to the flattened deployment.ingress location
+	// read by the current chart schema (openframe-oss-tenant flattened
+	// deployment.oss.ingress → deployment.ingress). The legacy deployment.oss.ingress
+	// stays for older release tags; the inner shape is identical.
+	mirrorOSSIngressToFlattened(config.ExistingValues)
+
 	config.IngressConfig = ingressConfig
 	config.ModifiedSections = append(config.ModifiedSections, "ingress")
 
@@ -384,4 +390,51 @@ func (i *IngressConfigurator) applyGCPConfig(values map[string]interface{}) erro
 	pterm.Success.Printf("✓ Configured GCP ingress with domain prefix: %s\n", tenantID)
 
 	return nil
+}
+
+// mirrorOSSIngressToFlattened copies the built deployment.oss.ingress subtree to
+// the flattened deployment.ingress location that the current chart schema reads
+// (openframe-oss-tenant flattened deployment.oss.ingress → deployment.ingress;
+// the inner localhost/ngrok shape is identical). Both are written so ingress
+// selection works against the current chart and older release tags. GCP ingress
+// lives under deployment.saas.ingress (a SaaS/cloud concern) and is not mirrored.
+func mirrorOSSIngressToFlattened(values map[string]interface{}) {
+	deployment, ok := values["deployment"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	oss, ok := deployment["oss"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	ingress, ok := oss["ingress"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	// Deep copy so the two locations don't alias (aliasing would emit YAML
+	// anchors/aliases into helm-values.yaml).
+	deployment["ingress"] = deepCopyMap(ingress)
+}
+
+// deepCopyMap returns a recursive copy of a map[string]interface{}, copying
+// nested maps and slices so the result shares no references with the original.
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		switch t := v.(type) {
+		case map[string]interface{}:
+			out[k] = deepCopyMap(t)
+		case []string:
+			cp := make([]string, len(t))
+			copy(cp, t)
+			out[k] = cp
+		case []interface{}:
+			cp := make([]interface{}, len(t))
+			copy(cp, t)
+			out[k] = cp
+		default:
+			out[k] = v
+		}
+	}
+	return out
 }

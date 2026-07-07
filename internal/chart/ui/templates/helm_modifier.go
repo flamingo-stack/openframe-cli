@@ -249,9 +249,20 @@ func (h *HelmValuesModifier) SetRepositoryBranch(values map[string]interface{}, 
 	h.setSectionBranch(values, section, branch)
 }
 
-// setSectionBranch sets deployment.<section>.repository.branch, creating the
-// nested maps as needed.
+// setSectionBranch pins the app-of-apps repository branch. It DUAL-WRITES both
+// layouts so the values stay compatible with the current chart and the
+// flattened one (openframe-oss-tenant#feature/updt-oss moved the app-of-apps
+// source from deployment.oss.repository.* to a top-level repository.*):
+//   - deployment.<section>.repository.branch  (legacy nesting, read by main)
+//   - repository.branch                       (flattened, read by the new chart)
+//
+// The unread key is a harmless extra for whichever chart doesn't consume it, so
+// `--ref`/`--github-branch` keep working across the schema transition without a
+// lockstep release. NOTE: only the branch is bridged here — ingress,
+// deployment-mode, and registry-credential keys also moved and are NOT yet
+// migrated (they need the finalized schema / a product decision).
 func (h *HelmValuesModifier) setSectionBranch(values map[string]interface{}, section, branch string) {
+	// Legacy path: deployment.<section>.repository.branch.
 	deployment, ok := values["deployment"].(map[string]interface{})
 	if !ok {
 		deployment = make(map[string]interface{})
@@ -268,6 +279,14 @@ func (h *HelmValuesModifier) setSectionBranch(values map[string]interface{}, sec
 		sec["repository"] = repository
 	}
 	repository["branch"] = branch
+
+	// Flattened path: top-level repository.branch.
+	newRepo, ok := values["repository"].(map[string]interface{})
+	if !ok {
+		newRepo = make(map[string]interface{})
+		values["repository"] = newRepo
+	}
+	newRepo["branch"] = branch
 }
 
 // WriteValues writes updated values back to the Helm values file
@@ -303,8 +322,17 @@ func (h *HelmValuesModifier) GetCurrentBranch(values map[string]interface{}) str
 	return "main" // default fallback
 }
 
-// GetCurrentOSSBranch extracts the current OSS repository branch from Helm values
+// GetCurrentOSSBranch extracts the current OSS repository branch from Helm
+// values, reading the flattened top-level repository.branch first (new schema)
+// and falling back to the legacy deployment.oss.repository.branch.
 func (h *HelmValuesModifier) GetCurrentOSSBranch(values map[string]interface{}) string {
+	// New flattened schema: top-level repository.branch.
+	if repo, ok := values["repository"].(map[string]interface{}); ok {
+		if branch, ok := repo["branch"].(string); ok && branch != "" {
+			return branch
+		}
+	}
+	// Legacy schema: deployment.oss.repository.branch.
 	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
 		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
 			if repository, ok := oss["repository"].(map[string]interface{}); ok {
