@@ -52,6 +52,15 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 		if strings.ToLower(tool) == "memory" {
 			continue
 		}
+		// In non-interactive mode, certificates (a local-HTTPS cert via mkcert) are
+		// intentionally not generated: mkcert -install mutates the OS trust store
+		// and CI never opens the HTTPS UI. Skip cleanly rather than run a no-op that
+		// then reports "installed successfully" while the re-check still finds it
+		// missing.
+		if nonInteractive && strings.ToLower(tool) == "certificates" {
+			pterm.Info.Println("Skipping certificates (local HTTPS cert; not needed in non-interactive mode)")
+			continue
+		}
 
 		// Create a spinner for the installation process
 		sp := spinner.New()
@@ -73,12 +82,15 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 	// Verify all tools are now installed
 	_, stillMissing := i.checker.CheckAll()
 
-	// Filter out memory from verification (we only care about installable tools)
+	// Filter out memory (not installable) and, in non-interactive mode,
+	// certificates (intentionally skipped above) from verification.
 	stillMissingInstallable := []string{}
 	for _, tool := range stillMissing {
-		if strings.ToLower(tool) != "memory" {
-			stillMissingInstallable = append(stillMissingInstallable, tool)
+		lc := strings.ToLower(tool)
+		if lc == "memory" || (nonInteractive && lc == "certificates") {
+			continue
 		}
+		stillMissingInstallable = append(stillMissingInstallable, tool)
 	}
 
 	if len(stillMissingInstallable) > 0 {
@@ -110,11 +122,8 @@ func (i *Installer) installToolNonInteractive(tool string, nonInteractive bool) 
 		// Memory cannot be automatically installed
 		return fmt.Errorf("memory cannot be automatically increased. Please add more physical RAM or increase virtual memory allocation")
 	case "certificates":
-		if nonInteractive {
-			// In non-interactive mode (CI/CD), skip certificate generation
-			pterm.Info.Println("Skipping certificate generation in non-interactive mode (not needed for CI/CD)")
-			return nil
-		}
+		// Non-interactive callers skip certificates before reaching here (see
+		// installMissingToolsNonInteractive); this path installs them interactively.
 		installer := certificates.NewCertificateInstaller()
 		return installer.Install()
 	default:
