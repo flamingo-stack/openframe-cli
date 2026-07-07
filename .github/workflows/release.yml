@@ -30,13 +30,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Resolve version
-        id: resolve
+        id: version
         uses: ./.github/steps/resolve-version
         with:
           version: ${{ inputs.version }}
 
       - name: Export version
-        run: echo "VERSION=${{ steps.resolve.outputs.version }}" >> "$GITHUB_ENV"
+        run: echo "VERSION=${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
 
 
       - name: Set up Go
