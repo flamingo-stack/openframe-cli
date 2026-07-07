@@ -52,13 +52,14 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 		if strings.ToLower(tool) == "memory" {
 			continue
 		}
-		// In non-interactive mode, certificates (a local-HTTPS cert via mkcert) are
-		// intentionally not generated: mkcert -install mutates the OS trust store
-		// and CI never opens the HTTPS UI. Skip cleanly rather than run a no-op that
-		// then reports "installed successfully" while the re-check still finds it
-		// missing.
+		// Certificate setup can't run non-interactively: generateCertificates runs
+		// `mkcert -install`, which installs a local root CA into the system/browser
+		// trust store and may need an interactive sudo password. Skip it here (the
+		// consequence is that localhost HTTPS is served with an untrusted cert)
+		// rather than run a no-op that reports "installed successfully" while the
+		// re-check still finds it missing.
 		if nonInteractive && strings.ToLower(tool) == "certificates" {
-			pterm.Info.Println("Skipping certificates (local HTTPS cert; not needed in non-interactive mode)")
+			pterm.Info.Println("Skipping certificates: mkcert -install needs interactive trust-store/sudo access — localhost HTTPS will be untrusted")
 			continue
 		}
 
