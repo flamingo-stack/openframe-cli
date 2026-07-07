@@ -519,12 +519,11 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		if _, err := os.Stat(certFile); err == nil {
 			if _, err := os.Stat(keyFile); err == nil {
 				args = append(args,
-					// OSS mode certificates (use WSL paths for Helm)
-					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.cert=%s", certFilePath),
-					"--set-file", fmt.Sprintf("deployment.oss.ingress.localhost.tls.key=%s", keyFilePath),
-					// SaaS mode certificates (use WSL paths for Helm)
-					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.cert=%s", certFilePath),
-					"--set-file", fmt.Sprintf("deployment.saas.ingress.localhost.tls.key=%s", keyFilePath),
+					// Localhost ingress TLS. The chart flattened this from
+					// deployment.oss/saas.ingress.localhost.tls to a single
+					// deployment.ingress.localhost.tls (cert/key fields, WSL paths for Helm).
+					"--set-file", fmt.Sprintf("deployment.ingress.localhost.tls.cert=%s", certFilePath),
+					"--set-file", fmt.Sprintf("deployment.ingress.localhost.tls.key=%s", keyFilePath),
 				)
 			}
 		}
