@@ -39,7 +39,7 @@ The Go extension (`golang.Go`) covers most needs. A reasonable `.vscode/settings
 }
 ```
 
-Debug configurations in `.vscode/launch.json`. Note that `--non-interactive` requires `--deployment-mode`, otherwise the command errors at runtime:
+Debug configurations in `.vscode/launch.json`. `--non-interactive` reuses the existing `helm-values.yaml`:
 
 ```json
 {
@@ -59,7 +59,7 @@ Debug configurations in `.vscode/launch.json`. Note that `--non-interactive` req
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/main.go",
-      "args": ["bootstrap", "--verbose", "--non-interactive", "--deployment-mode", "oss-tenant"]
+      "args": ["bootstrap", "--verbose", "--non-interactive"]
     },
     {
       "name": "Debug Cluster Status",

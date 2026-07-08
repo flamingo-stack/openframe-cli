@@ -39,7 +39,7 @@ openframe cluster cleanup             # remove leftover resources
 
 ```bash
 openframe app install                        # install into the current cluster
-openframe app install -m saas-tenant         # choose a deployment mode
+openframe app install --non-interactive      # reuse the existing helm-values.yaml
 openframe app install --dry-run              # preview without applying
 
 openframe app status                         # deployment status (add -o text|json|yaml)
@@ -49,7 +49,7 @@ openframe app access                         # print ArgoCD URL, admin creds, po
 openframe app uninstall -y                   # remove the deployment
 ```
 
-Key `app install` flags: `--deployment-mode/-m` (`oss-tenant`|`saas-tenant`|`saas-shared`), `--github-repo`, `--github-branch`, `--ref/-r`, `--context/-c`, `--cert-dir`, `--non-interactive`, `--dry-run`, `--force/-f`.
+Key `app install` flags: `--github-repo`, `--github-branch`, `--ref/-r`, `--context/-c`, `--cert-dir`, `--non-interactive`, `--dry-run`, `--force/-f`.
 
 `app install` deploys the OpenFrame platform app-of-apps — it does not install arbitrary charts.
 

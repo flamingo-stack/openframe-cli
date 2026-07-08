@@ -53,14 +53,6 @@ func (w *ConfigurationWizard) ShowConfigurationSummary(config *types.ChartConfig
 
 	for _, section := range config.ModifiedSections {
 		switch section {
-		case "deployment":
-			if config.DeploymentMode != nil {
-				pterm.Success.Printf("✓ Deployment mode: %s\n", string(*config.DeploymentMode))
-			}
-		case "saas":
-			if config.SaaSConfig != nil {
-				pterm.Success.Printf("✓ SaaS repository password configured\n")
-			}
 		case "branch":
 			if config.Branch != nil {
 				pterm.Success.Printf("✓ Branch updated: %s\n", *config.Branch)

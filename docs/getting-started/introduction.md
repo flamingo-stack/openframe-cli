@@ -15,7 +15,7 @@ This repository (`flamingo-stack/openframe-cli`) is the CLI itself. The platform
 ### Environment bootstrapping
 
 - `openframe bootstrap` creates a cluster and installs the platform in one step
-- Deployment modes: `oss-tenant` (default, self-hosted), `saas-tenant`, `saas-shared`
+- Deployment: `oss-tenant` (self-hosted, public chart repository)
 
 ### Cluster management
 

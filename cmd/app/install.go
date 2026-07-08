@@ -33,8 +33,7 @@ Certificates are automatically regenerated during installation.
 Examples:
   openframe chart install                                    # Interactive mode (default)
   openframe chart install my-cluster                        # Install on specific cluster
-  openframe chart install --deployment-mode=oss-tenant     # Skip deployment selection
-  openframe chart install --deployment-mode=saas-shared --non-interactive  # Full CI/CD mode
+  openframe chart install --non-interactive                 # Use existing helm-values.yaml (CI/CD)
   openframe chart install --github-branch develop          # Use develop branch
   openframe chart install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
@@ -90,7 +89,6 @@ func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags,
 		// An explicitly set ref must win over the branch baked into helm-values.yaml.
 		GitHubRefExplicit: cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch"),
 		CertDir:           flags.CertDir,
-		DeploymentMode:    flags.DeploymentMode,
 		NonInteractive:    flags.NonInteractive,
 		// Inject cluster access from the command layer (composition root) so the
 		// app subsystem stays isolated from cluster-creation code (req 18/19).
@@ -150,7 +148,6 @@ type InstallFlags struct {
 	GitHubBranch   string
 	Ref            string
 	CertDir        string
-	DeploymentMode string
 	NonInteractive bool
 }
 
@@ -193,22 +190,8 @@ func extractInstallFlags(cmd *cobra.Command) (*InstallFlags, error) {
 		return nil, err
 	}
 
-	if flags.DeploymentMode, err = cmd.Flags().GetString("deployment-mode"); err != nil {
-		return nil, err
-	}
-
 	if flags.NonInteractive, err = cmd.Flags().GetBool("non-interactive"); err != nil {
 		return nil, err
-	}
-
-	// Validate deployment mode
-	if err := types.ValidateDeploymentMode(flags.DeploymentMode); err != nil {
-		return nil, err
-	}
-
-	// Validate non-interactive requires deployment mode
-	if flags.NonInteractive && flags.DeploymentMode == "" {
-		return nil, fmt.Errorf("--deployment-mode is required when using --non-interactive")
 	}
 
 	return flags, nil
@@ -240,7 +223,6 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "Git ref (branch or tag) to deploy")
 	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
-	cmd.Flags().StringP("deployment-mode", "m", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
 	cmd.Flags().StringP("context", "c", "", "Kube-context to install into (skips interactive selection)")
 }

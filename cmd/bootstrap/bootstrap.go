@@ -26,10 +26,8 @@ a streamlined experience for getting started with OpenFrame.
 Examples:
   openframe bootstrap                                    # Interactive mode (default)
   openframe bootstrap my-cluster                        # Bootstrap with custom cluster name
-  openframe bootstrap --deployment-mode=oss-tenant     # Skip deployment selection
-  openframe bootstrap --deployment-mode=saas-shared --non-interactive  # Full CI/CD mode
-  openframe bootstrap --verbose                         # Show detailed logs including ArgoCD sync progress
-  openframe bootstrap -v --deployment-mode=oss-tenant  # Verbose mode with pre-selected deployment`,
+  openframe bootstrap --non-interactive                 # Use existing helm-values.yaml (CI/CD)
+  openframe bootstrap --verbose                         # Show detailed logs including ArgoCD sync progress`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate the cluster name at the boundary (RFC1123) so nothing
@@ -45,8 +43,6 @@ Examples:
 		},
 	}
 
-	// Add deployment mode flags
-	cmd.Flags().StringP("deployment-mode", "m", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
 	// --verbose/-v is the root persistent flag; read here via cmd.Flags().GetBool.
 

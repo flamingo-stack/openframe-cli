@@ -185,11 +185,11 @@ openframe cluster status dev
 openframe cluster delete dev --force
 ```
 
-Deploy and manage the platform (modes: `oss-tenant`, `saas-tenant`, `saas-shared`):
+Deploy and manage the platform (OSS tenant deployment):
 
 ```bash
-openframe app install                           # interactive: pick mode + context
-openframe app install dev --deployment-mode oss-tenant --non-interactive
+openframe app install                           # interactive: pick context
+openframe app install dev --non-interactive     # reuse existing helm-values.yaml
 openframe app install -c k3d-dev --ref v1.3.0   # deploy a specific release tag
 openframe app status  -c k3d-dev                # -o json|yaml supported
 openframe app access  -c k3d-dev                # ArgoCD URL + admin credentials

@@ -54,10 +54,8 @@ func TestBranchConfigurator_Configure_CustomBranch(t *testing.T) {
 
 	// Simulate custom branch selection for OSS deployment
 	newBranch := "develop"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
 		Branch:           &newBranch,
-		DeploymentMode:   &deploymentMode,
 		ModifiedSections: []string{"branch"},
 		ExistingValues:   existingValues,
 	}
@@ -83,10 +81,8 @@ func TestBranchConfigurator_Configure_WithEmptyValues(t *testing.T) {
 
 	// Test applying custom branch to empty values for OSS deployment
 	newBranch := "feature-branch"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
 		Branch:           &newBranch,
-		DeploymentMode:   &deploymentMode,
 		ModifiedSections: []string{"branch"},
 		ExistingValues:   existingValues,
 	}
@@ -128,10 +124,8 @@ func TestBranchConfigurator_Configure_BranchValidation(t *testing.T) {
 			}
 
 			if tc.valid {
-				deploymentMode := types.DeploymentModeOSS
 				config := &types.ChartConfiguration{
 					Branch:           &tc.branch,
-					DeploymentMode:   &deploymentMode,
 					ModifiedSections: []string{"branch"},
 					ExistingValues:   existingValues,
 				}

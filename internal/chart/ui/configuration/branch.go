@@ -24,12 +24,7 @@ func NewBranchConfigurator(modifier *templates.HelmValuesModifier) *BranchConfig
 
 // Configure asks user about Git branch configuration
 func (b *BranchConfigurator) Configure(config *types.ChartConfiguration) error {
-	// Skip branch configuration for SaaS and SaaS Shared modes - it's handled in SaaS configuration
-	if config.DeploymentMode != nil && (*config.DeploymentMode == types.DeploymentModeSaaS || *config.DeploymentMode == types.DeploymentModeSaaSShared) {
-		return nil
-	}
-
-	// For OSS deployment, configure OSS repository branch
+	// Configure the OSS repository branch
 	currentBranch := b.modifier.GetCurrentOSSBranch(config.ExistingValues)
 
 	pterm.Info.Printf("OSS Repository Branch Configuration (current: %s)", currentBranch)

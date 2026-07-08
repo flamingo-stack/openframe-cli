@@ -32,59 +32,15 @@ type HelmValues struct {
 				Branch string `yaml:"branch"`
 			} `yaml:"repository"`
 		} `yaml:"oss"`
-		SaaS struct {
-			Enabled    bool `yaml:"enabled"`
-			Repository struct {
-				Branch string `yaml:"branch"`
-			} `yaml:"repository"`
-		} `yaml:"saas"`
 	} `yaml:"deployment"`
 }
 
-// getBranchForDeploymentMode reads the Helm values and returns the appropriate branch based on deployment mode
-func (b *Builder) getBranchForDeploymentMode(helmValuesPath string, deploymentMode string) string {
-	if helmValuesPath == "" {
-		pathResolver := NewPathResolver()
-		helmValuesPath = pathResolver.GetHelmValuesFile()
-	}
-
-	// Read the YAML file
-	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
-	if err != nil {
-		return ""
-	}
-
-	var values HelmValues
-	err = yaml.Unmarshal(data, &values)
-	if err != nil {
-		return ""
-	}
-
-	// Branch selection based on deployment mode:
-	// - SaaS Shared: use deployment.saas.repository.branch (app-of-apps from saas-shared repo)
-	// - SaaS Tenant: use deployment.oss.repository.branch (app-of-apps from oss-tenant repo)
-	// - OSS Tenant: use deployment.oss.repository.branch (app-of-apps from oss-tenant repo)
-	if deploymentMode == "saas-shared" {
-		// SaaS Shared uses the saas branch
-		if values.Deployment.SaaS.Repository.Branch != "" {
-			return values.Deployment.SaaS.Repository.Branch
-		}
-	} else {
-		// OSS and SaaS Tenant both use the OSS branch
-		if values.Deployment.OSS.Repository.Branch != "" {
-			return values.Deployment.OSS.Repository.Branch
-		}
-	}
-
-	return "" // Return empty string if no branch found
-}
-
-// getBranchFromHelmValues reads the Helm values file and extracts branch from deployment structure or legacy global structure
+// getBranchFromHelmValues reads the Helm values file and extracts the OSS branch
 func (b *Builder) getBranchFromHelmValues() string {
 	return b.getBranchFromHelmValuesPath("")
 }
 
-// getBranchFromHelmValuesPath reads a specific Helm values file and extracts branch from deployment structure or legacy global structure
+// getBranchFromHelmValuesPath reads a specific Helm values file and extracts the OSS repository branch
 func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
 	if helmValuesPath == "" {
 		pathResolver := NewPathResolver()
@@ -105,12 +61,7 @@ func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
 		return ""
 	}
 
-	// Check which deployment mode is enabled and use the appropriate branch
-	if values.Deployment.SaaS.Enabled && values.Deployment.SaaS.Repository.Branch != "" {
-		// For SaaS and SaaS Shared modes, use the SaaS branch
-		return values.Deployment.SaaS.Repository.Branch
-	} else if values.Deployment.OSS.Repository.Branch != "" {
-		// For OSS mode, use the OSS branch
+	if values.Deployment.OSS.Repository.Branch != "" {
 		return values.Deployment.OSS.Repository.Branch
 	}
 
@@ -160,7 +111,6 @@ func (b *Builder) BuildInstallConfig(
 func (b *Builder) BuildInstallConfigWithCustomHelmPath(
 	force, dryRun, verbose, nonInteractive bool,
 	clusterName, githubRepo, githubBranch, certDir, helmValuesPath string,
-	deploymentMode string,
 ) (ChartInstallConfig, error) {
 	// Use config service for certificate directory
 	if certDir == "" {
@@ -182,12 +132,9 @@ func (b *Builder) BuildInstallConfigWithCustomHelmPath(
 			appOfAppsConfig.ValuesFile = helmValuesPath
 		}
 
-		// After credentials are provided, check for branch override from custom Helm values path
-		// Branch selection logic based on deployment mode:
-		// - OSS Tenant: use deployment.oss.repository.branch
-		// - SaaS Tenant: use deployment.oss.repository.branch (app-of-apps is in OSS repo)
-		// - SaaS Shared: use deployment.saas.repository.branch (app-of-apps is in saas-shared repo)
-		helmBranch := b.getBranchForDeploymentMode(helmValuesPath, deploymentMode)
+		// Check for a branch override from the custom Helm values path
+		// (OSS Tenant: deployment.oss.repository.branch).
+		helmBranch := b.getBranchFromHelmValuesPath(helmValuesPath)
 		if helmBranch != "" {
 			if verbose {
 				pterm.Info.Printf("📥 Using branch '%s' from Helm values\n", helmBranch)

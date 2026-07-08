@@ -22,8 +22,8 @@ func TestShouldForward_OffWindowsIsFalse(t *testing.T) {
 
 func TestWSLArgvWith(t *testing.T) {
 	// With an explicit distro selector.
-	got := wslArgvWith([]string{"-d", "Ubuntu-24.04"}, "openframe", "bootstrap", "--deployment-mode=oss-tenant")
-	want := []string{"-d", "Ubuntu-24.04", "--", "openframe", "bootstrap", "--deployment-mode=oss-tenant"}
+	got := wslArgvWith([]string{"-d", "Ubuntu-24.04"}, "openframe", "bootstrap", "--non-interactive")
+	want := []string{"-d", "Ubuntu-24.04", "--", "openframe", "bootstrap", "--non-interactive"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}

@@ -20,10 +20,10 @@ func TestMain(m *testing.M) {
 }
 
 // TestBootstrapOSSTenantHappyPath is the end-to-end anchor for the OSS-tenant
-// contract (reqs 7/22/24): `openframe bootstrap <name> --deployment-mode=
-// oss-tenant --non-interactive` must create a local k3d cluster and install
-// ArgoCD + the app-of-apps from the public OSS repo with no credentials, and
-// exit 0 only after ArgoCD reports the apps synced.
+// contract (reqs 7/22/24): `openframe bootstrap <name> --non-interactive` must
+// create a local k3d cluster and install ArgoCD + the app-of-apps from the
+// public OSS repo with no credentials, and exit 0 only after ArgoCD reports the
+// apps synced.
 //
 // It is heavy (real cluster + image pulls + ArgoCD sync) so it is gated:
 //   - skipped under `-short`,
@@ -50,9 +50,9 @@ func TestBootstrapOSSTenantHappyPath(t *testing.T) {
 	clusterName := fmt.Sprintf("of-e2e-%d", time.Now().Unix()%100000)
 	t.Cleanup(func() { common.CleanupTestCluster(clusterName) })
 
-	t.Logf("Running: openframe bootstrap %s --deployment-mode=oss-tenant --non-interactive", clusterName)
+	t.Logf("Running: openframe bootstrap %s --non-interactive", clusterName)
 	start := time.Now()
-	result := common.RunCLI("bootstrap", clusterName, "--deployment-mode=oss-tenant", "--non-interactive")
+	result := common.RunCLI("bootstrap", clusterName, "--non-interactive")
 	t.Logf("bootstrap finished in %v (exit=%d)", time.Since(start), result.ExitCode)
 
 	if !result.Success() {

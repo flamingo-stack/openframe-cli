@@ -7,19 +7,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Freezes the public CLI contract of `bootstrap`. The flags below are the
-// hard-contract entrypoint (`bootstrap --deployment-mode=oss-tenant
-// --non-interactive` must keep working at every step of the refactor).
+// Freezes the public CLI contract of `bootstrap`. The CLI supports only the OSS
+// (oss-tenant) deployment, so `bootstrap --non-interactive` reuses the existing
+// helm-values.yaml with no deployment-mode flag.
 
 func TestBootstrapContract_Flags(t *testing.T) {
 	cmd := GetBootstrapCmd()
 
 	assert.Equal(t, "bootstrap", cmd.Name())
 	testutil.AssertFlags(t, cmd, []testutil.FlagSpec{
-		{Name: "deployment-mode", Shorthand: "m", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},
 		// verbose/-v is now inherited from the root persistent flag, not local.
 	})
+	assert.Nil(t, cmd.Flags().Lookup("deployment-mode"), "--deployment-mode must be removed")
 }
 
 func TestBootstrapContract_AcceptsAtMostOneArg(t *testing.T) {

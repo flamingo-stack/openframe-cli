@@ -8,43 +8,6 @@ import (
 	"github.com/pterm/pterm"
 )
 
-// showDeploymentModeSelection shows the deployment mode selection
-func (w *ConfigurationWizard) showDeploymentModeSelection() (types.DeploymentMode, error) {
-	pterm.Info.Printf("Select your deployment mode:\n")
-	fmt.Println()
-
-	prompt := promptui.Select{
-		Label: "Deployment Mode",
-		Items: []string{
-			"OSS Tenant deployment (Default self-hosted version)",
-			"SaaS Tenant deployment",
-			"SaaS Shared deployment",
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-
-	switch idx {
-	case 0:
-		return types.DeploymentModeOSS, nil
-	case 1:
-		return types.DeploymentModeSaaS, nil
-	case 2:
-		return types.DeploymentModeSaaSShared, nil
-	default:
-		return types.DeploymentModeOSS, nil
-	}
-}
-
 // showConfigurationModeSelection shows the initial configuration mode selection
 func (w *ConfigurationWizard) showConfigurationModeSelection() (string, error) {
 	fmt.Println()
@@ -76,25 +39,15 @@ func (w *ConfigurationWizard) showConfigurationModeSelection() (string, error) {
 	return "interactive", nil
 }
 
-// configureWithDefaults creates a default configuration without user interaction
-func (w *ConfigurationWizard) configureWithDefaults(deploymentMode types.DeploymentMode) (*types.ChartConfiguration, error) {
-	pterm.Info.Printf("Using default configuration for %s deployment\n", string(deploymentMode))
+// configureWithDefaults creates a default configuration without user interaction.
+// The default is to use the existing helm-values.yaml as-is.
+func (w *ConfigurationWizard) configureWithDefaults() (*types.ChartConfiguration, error) {
+	pterm.Info.Println("Using default configuration for OSS deployment")
 
 	// Load base values from current directory or create default
 	config, err := w.loadBaseValues()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load base values: %w", err)
-	}
-
-	// Set deployment mode
-	config.DeploymentMode = &deploymentMode
-	config.ModifiedSections = append(config.ModifiedSections, "deployment")
-
-	// Configure SaaS-specific settings if in SaaS or SaaS Shared mode
-	if deploymentMode == types.DeploymentModeSaaS || deploymentMode == types.DeploymentModeSaaSShared {
-		if err := w.configureSaaSDefaults(config); err != nil {
-			return nil, fmt.Errorf("SaaS configuration failed: %w", err)
-		}
 	}
 
 	// Create temporary file with default configuration
@@ -106,24 +59,13 @@ func (w *ConfigurationWizard) configureWithDefaults(deploymentMode types.Deploym
 }
 
 // configureInteractive runs the interactive configuration wizard
-func (w *ConfigurationWizard) configureInteractive(deploymentMode types.DeploymentMode) (*types.ChartConfiguration, error) {
-	pterm.Info.Printf("Configuring Helm values for %s deployment\n", string(deploymentMode))
+func (w *ConfigurationWizard) configureInteractive() (*types.ChartConfiguration, error) {
+	pterm.Info.Println("Configuring Helm values for OSS deployment")
 
 	// Load base values from current directory or create default
 	config, err := w.loadBaseValues()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load base values: %w", err)
-	}
-
-	// Set deployment mode
-	config.DeploymentMode = &deploymentMode
-	config.ModifiedSections = append(config.ModifiedSections, "deployment")
-
-	// Configure SaaS-specific settings if in SaaS or SaaS Shared mode
-	if deploymentMode == types.DeploymentModeSaaS || deploymentMode == types.DeploymentModeSaaSShared {
-		if err := w.configureSaaSInteractive(config); err != nil {
-			return nil, fmt.Errorf("SaaS configuration failed: %w", err)
-		}
 	}
 
 	// Configure each section in the correct order

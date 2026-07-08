@@ -115,7 +115,7 @@ Use the launch configurations from [Environment Setup](environment.md), set brea
 ```bash
 go install github.com/go-delve/delve/cmd/dlv@latest
 
-dlv debug . -- bootstrap --verbose --non-interactive --deployment-mode oss-tenant
+dlv debug . -- bootstrap --verbose --non-interactive
 dlv test ./internal/bootstrap/
 ```
 
@@ -134,13 +134,13 @@ go run . cluster list
 go run . cluster delete test-cluster
 
 # App-of-apps: clones openframe-oss-tenant and installs ArgoCD + the app-of-apps chart.
-# --non-interactive requires --deployment-mode.
-go run . app install --non-interactive --deployment-mode oss-tenant
+# --non-interactive reuses the existing helm-values.yaml.
+go run . app install --non-interactive
 go run . app status
 go run . app access
 
 # Full bootstrap (cluster + app-of-apps)
-go run . bootstrap --deployment-mode oss-tenant --non-interactive
+go run . bootstrap --non-interactive
 ```
 
 Verify against a real cluster:

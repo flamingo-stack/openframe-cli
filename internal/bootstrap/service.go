@@ -41,25 +41,9 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get deployment mode flags
-	deploymentMode, err := cmd.Flags().GetString("deployment-mode")
-	if err != nil {
-		deploymentMode = ""
-	}
-
 	nonInteractive, err := cmd.Flags().GetBool("non-interactive")
 	if err != nil {
 		nonInteractive = false
-	}
-
-	// Validate deployment mode
-	if err := utilTypes.ValidateDeploymentMode(deploymentMode); err != nil {
-		return err
-	}
-
-	// Validate non-interactive requires deployment mode
-	if nonInteractive && deploymentMode == "" {
-		return fmt.Errorf("--deployment-mode is required when using --non-interactive")
 	}
 
 	// Get cluster name from args if provided
@@ -68,7 +52,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 		clusterName = strings.TrimSpace(args[0])
 	}
 
-	err = s.bootstrap(cmd.Context(), clusterName, deploymentMode, nonInteractive, verbose)
+	err = s.bootstrap(cmd.Context(), clusterName, nonInteractive, verbose)
 	if err != nil {
 		// Use shared error handler for consistent error display (same as chart install)
 		return sharedErrors.HandleGlobalError(err, verbose)
@@ -77,7 +61,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 }
 
 // bootstrap executes cluster create followed by chart install
-func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteractive, verbose bool) error {
 	// On Windows, initialize WSL2 first before anything else
 	if runtime.GOOS == "windows" {
 		if err := s.initializeWSL(verbose); err != nil {
@@ -101,8 +85,8 @@ func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode str
 	fmt.Println()
 	fmt.Println()
 
-	// Step 2: Install charts with deployment mode flags on the created cluster
-	if err := s.installChartWithMode(ctx, actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
+	// Step 2: Install charts on the created cluster
+	if err := s.installChart(ctx, actualClusterName, nonInteractive, verbose, kubeConfig); err != nil {
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
 
@@ -116,9 +100,8 @@ func (s *Service) createClusterSuppressed(ctx context.Context, clusterName strin
 	return cluster.CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, nonInteractive)
 }
 
-// installChartWithMode installs charts with deployment mode flags
-func (s *Service) installChartWithMode(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
-	// Use the chart installation function with deployment mode flags
+// installChart installs charts on the created cluster
+func (s *Service) installChart(ctx context.Context, clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	return chartServices.InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
@@ -127,7 +110,6 @@ func (s *Service) installChartWithMode(ctx context.Context, clusterName, deploym
 		GitHubRepo:     chartmodels.RepoOSSTenant,    // Default repository
 		GitHubBranch:   chartmodels.DefaultGitBranch, // Default branch
 		CertDir:        "",                           // Auto-detected
-		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
 		// Inject cluster access from the orchestrator (composition root) so the

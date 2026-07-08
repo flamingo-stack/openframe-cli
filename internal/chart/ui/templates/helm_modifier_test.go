@@ -129,20 +129,18 @@ func TestHelmValuesModifier_GetCurrentOSSBranch(t *testing.T) {
 func TestHelmValuesModifier_SetRepositoryBranch(t *testing.T) {
 	modifier := NewHelmValuesModifier()
 
-	// Every deployment mode writes the single top-level repository.branch (the
-	// flattened chart schema has no per-mode repository section).
-	for _, mode := range []string{"oss-tenant", "saas-tenant", "saas-shared", ""} {
-		values := make(map[string]interface{})
-		modifier.SetRepositoryBranch(values, mode, "v1.3.0")
-		got := values["repository"].(map[string]interface{})["branch"]
-		assert.Equalf(t, "v1.3.0", got, "mode %q writes repository.branch", mode)
-		_, hasDeployment := values["deployment"]
-		assert.Falsef(t, hasDeployment, "mode %q must not write a deployment section", mode)
-	}
+	// Writes the single top-level repository.branch (the flattened chart schema
+	// has no per-mode repository section).
+	values := make(map[string]interface{})
+	modifier.SetRepositoryBranch(values, "v1.3.0")
+	got := values["repository"].(map[string]interface{})["branch"]
+	assert.Equal(t, "v1.3.0", got, "writes repository.branch")
+	_, hasDeployment := values["deployment"]
+	assert.False(t, hasDeployment, "must not write a deployment section")
 
 	// Overwrites an existing branch in place.
 	existing := map[string]interface{}{"repository": map[string]interface{}{"branch": "main"}}
-	modifier.SetRepositoryBranch(existing, "oss-tenant", "v9")
+	modifier.SetRepositoryBranch(existing, "v9")
 	assert.Equal(t, "v9", modifier.GetCurrentOSSBranch(existing))
 }
 
@@ -196,10 +194,8 @@ func TestHelmValuesModifier_ApplyConfiguration_Branch(t *testing.T) {
 
 	// Create configuration with new branch for OSS deployment
 	newBranch := "develop"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
 		Branch:           &newBranch,
-		DeploymentMode:   &deploymentMode,
 		ModifiedSections: []string{"branch"},
 	}
 
@@ -226,10 +222,8 @@ func TestHelmValuesModifier_ApplyConfiguration_Branch_NoDeployment(t *testing.T)
 
 	// Create configuration with new branch for OSS deployment
 	newBranch := "develop"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
 		Branch:           &newBranch,
-		DeploymentMode:   &deploymentMode,
 		ModifiedSections: []string{"branch"},
 	}
 

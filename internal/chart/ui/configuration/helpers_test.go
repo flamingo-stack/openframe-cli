@@ -27,10 +27,8 @@ func TestConfigurationWizard_ShowConfigurationSummary_WithChanges(t *testing.T) 
 
 	// Create configuration with modified sections
 	branch := "develop"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
-		Branch:         &branch,
-		DeploymentMode: &deploymentMode,
+		Branch: &branch,
 		DockerRegistry: &types.DockerRegistryConfig{
 			Username: "newuser",
 			Password: "newpass",
@@ -39,7 +37,7 @@ func TestConfigurationWizard_ShowConfigurationSummary_WithChanges(t *testing.T) 
 		IngressConfig: &types.IngressConfig{
 			Type: types.IngressTypeLocalhost,
 		},
-		ModifiedSections: []string{"deployment", "branch", "docker", "ingress"},
+		ModifiedSections: []string{"branch", "docker", "ingress"},
 		ExistingValues:   map[string]interface{}{},
 	}
 
@@ -65,28 +63,6 @@ func TestConfigurationWizard_ShowConfigurationSummary_WithNgrokConfig(t *testing
 			},
 		},
 		ModifiedSections: []string{"ingress"},
-		ExistingValues:   map[string]interface{}{},
-	}
-
-	// Should not panic when called
-	assert.NotPanics(t, func() {
-		wizard.ShowConfigurationSummary(config)
-	})
-}
-
-func TestConfigurationWizard_ShowConfigurationSummary_WithSaaSConfig(t *testing.T) {
-	wizard := NewConfigurationWizard()
-
-	// Create configuration with SaaS settings
-	deploymentMode := types.DeploymentModeSaaS
-	config := &types.ChartConfiguration{
-		DeploymentMode: &deploymentMode,
-		SaaSConfig: &types.SaaSConfig{
-			RepositoryPassword: "repo-pass",
-			SaaSBranch:         "main",
-			OSSBranch:          "develop",
-		},
-		ModifiedSections: []string{"deployment", "saas"},
 		ExistingValues:   map[string]interface{}{},
 	}
 

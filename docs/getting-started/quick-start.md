@@ -58,10 +58,10 @@ openframe --help
 openframe bootstrap
 ```
 
-The interactive wizard prompts for the deployment mode (`oss-tenant`, `saas-tenant`, or `saas-shared`) and other options. For CI or scripting, run non-interactively — `--non-interactive` requires `--deployment-mode`:
+The interactive wizard prompts for configuration options. For CI or scripting, run non-interactively — `--non-interactive` reuses the existing `helm-values.yaml`:
 
 ```bash
-openframe bootstrap --deployment-mode oss-tenant --non-interactive
+openframe bootstrap --non-interactive
 ```
 
 ## Step 4: Verify Your Environment

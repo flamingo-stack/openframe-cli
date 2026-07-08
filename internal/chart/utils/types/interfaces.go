@@ -151,9 +151,8 @@ type InstallationRequest struct {
 	// Applications' targetRevision track that ref.
 	GitHubRefExplicit bool
 	CertDir           string
-	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
-	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
-	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
+	NonInteractive    bool         // Skip all prompts, use existing helm-values.yaml
+	KubeConfig        *rest.Config // Kubernetes REST config for cluster communication
 	// ClusterAccess resolves clusters and their rest.Config for the install
 	// target. Injected by the composition root so the app subsystem never imports
 	// cluster-creation code (req 18/19). Required for interactive/named-cluster

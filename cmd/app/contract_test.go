@@ -50,7 +50,6 @@ func TestAppContract_InstallFlags(t *testing.T) {
 		{Name: "github-branch", Type: "string", Default: "main"},
 		{Name: "ref", Shorthand: "r", Type: "string", Default: ""},
 		{Name: "cert-dir", Type: "string", Default: ""},
-		{Name: "deployment-mode", Shorthand: "m", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},
 		{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 	})
