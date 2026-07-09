@@ -10,7 +10,7 @@ import (
 
 // The CLI supports only the OSS (oss-tenant) deployment, so there is no
 // --deployment-mode flag: --non-interactive alone simply reuses the existing
-// helm-values.yaml.
+// openframe-helm-values.yaml.
 func TestExtractInstallFlags_NonInteractiveIsValid(t *testing.T) {
 	cmd := getInstallCmd()
 	if err := cmd.Flags().Set("non-interactive", "true"); err != nil {

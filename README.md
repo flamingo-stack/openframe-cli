@@ -189,7 +189,7 @@ Deploy and manage the platform (OSS tenant deployment):
 
 ```bash
 openframe app install                           # interactive: pick context
-openframe app install dev --non-interactive     # reuse existing helm-values.yaml
+openframe app install dev --non-interactive     # reuse existing openframe-helm-values.yaml
 openframe app install -c k3d-dev --ref v1.3.0   # deploy a specific release tag
 openframe app status  -c k3d-dev                # -o json|yaml supported
 openframe app access  -c k3d-dev                # ArgoCD URL + admin credentials

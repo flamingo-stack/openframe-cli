@@ -8,7 +8,7 @@ import (
 
 func writeValues(t *testing.T, content string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "helm-values.yaml")
+	p := filepath.Join(t.TempDir(), "openframe-helm-values.yaml")
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestGetBranchFromHelmValuesPath(t *testing.T) {
 	})
 
 	t.Run("missing file returns empty (use default)", func(t *testing.T) {
-		if got := b.getBranchFromHelmValuesPath("/nonexistent/helm-values.yaml"); got != "" {
+		if got := b.getBranchFromHelmValuesPath("/nonexistent/openframe-helm-values.yaml"); got != "" {
 			t.Fatalf("got %q, want empty", got)
 		}
 	})

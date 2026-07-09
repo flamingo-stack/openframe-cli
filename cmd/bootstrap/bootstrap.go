@@ -26,7 +26,7 @@ a streamlined experience for getting started with OpenFrame.
 Examples:
   openframe bootstrap                                    # Interactive mode (default)
   openframe bootstrap my-cluster                        # Bootstrap with custom cluster name
-  openframe bootstrap --non-interactive                 # Use existing helm-values.yaml (CI/CD)
+  openframe bootstrap --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
   openframe bootstrap --verbose                         # Show detailed logs including ArgoCD sync progress`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,7 +43,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
+	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing openframe-helm-values.yaml")
 	// --verbose/-v is the root persistent flag; read here via cmd.Flags().GetBool.
 
 	return cmd

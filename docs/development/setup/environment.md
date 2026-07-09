@@ -39,7 +39,7 @@ The Go extension (`golang.Go`) covers most needs. A reasonable `.vscode/settings
 }
 ```
 
-Debug configurations in `.vscode/launch.json`. `--non-interactive` reuses the existing `helm-values.yaml`:
+Debug configurations in `.vscode/launch.json`. `--non-interactive` reuses the existing `openframe-helm-values.yaml`:
 
 ```json
 {

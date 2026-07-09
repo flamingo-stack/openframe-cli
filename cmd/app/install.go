@@ -33,7 +33,7 @@ Certificates are automatically regenerated during installation.
 Examples:
   openframe chart install                                    # Interactive mode (default)
   openframe chart install my-cluster                        # Install on specific cluster
-  openframe chart install --non-interactive                 # Use existing helm-values.yaml (CI/CD)
+  openframe chart install --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
   openframe chart install --github-branch develop          # Use develop branch
   openframe chart install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
@@ -86,7 +86,7 @@ func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags,
 		Verbose:      verbose,
 		GitHubRepo:   flags.GitHubRepo,
 		GitHubBranch: flags.resolvedRef(),
-		// An explicitly set ref must win over the branch baked into helm-values.yaml.
+		// An explicitly set ref must win over the branch baked into openframe-helm-values.yaml.
 		GitHubRefExplicit: cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch"),
 		CertDir:           flags.CertDir,
 		NonInteractive:    flags.NonInteractive,
@@ -223,6 +223,6 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "Git ref (branch or tag) to deploy")
 	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
-	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
+	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing openframe-helm-values.yaml")
 	cmd.Flags().StringP("context", "c", "", "Kube-context to install into (skips interactive selection)")
 }

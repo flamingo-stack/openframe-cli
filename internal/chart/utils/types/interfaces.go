@@ -151,7 +151,7 @@ type InstallationRequest struct {
 	// Applications' targetRevision track that ref.
 	GitHubRefExplicit bool
 	CertDir           string
-	NonInteractive    bool         // Skip all prompts, use existing helm-values.yaml
+	NonInteractive    bool         // Skip all prompts, use existing openframe-helm-values.yaml
 	KubeConfig        *rest.Config // Kubernetes REST config for cluster communication
 	// ClusterAccess resolves clusters and their rest.Config for the install
 	// target. Injected by the composition root so the app subsystem never imports

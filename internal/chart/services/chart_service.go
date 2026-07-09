@@ -174,8 +174,8 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
-		// NON-INTERACTIVE (CI/CD): use the existing helm-values.yaml as-is.
-		pterm.Warning.Println("Running in non-interactive mode using existing helm-values.yaml")
+		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
+		pterm.Warning.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
 		chartConfig, err = w.loadExistingConfiguration()
 		if err != nil {
@@ -282,8 +282,8 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
-		// NON-INTERACTIVE (CI/CD): use the existing helm-values.yaml as-is.
-		pterm.Warning.Println("Running in non-interactive mode using existing helm-values.yaml")
+		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
+		pterm.Warning.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
 		chartConfig, err = w.loadExistingConfiguration()
 		if err != nil {
@@ -403,7 +403,7 @@ func (w *InstallationWorkflow) runConfigurationWizard() (*types.ChartConfigurati
 	return config, nil
 }
 
-// loadExistingConfiguration loads existing helm-values.yaml for non-interactive mode
+// loadExistingConfiguration loads existing openframe-helm-values.yaml for non-interactive mode
 // dryRunConfiguration builds the chart configuration for a dry-run. Like every
 // other mode, it writes the base helm values to a real temporary file and
 // points TempHelmValuesPath at it — previously dry-run set a fixed
@@ -421,7 +421,7 @@ func (w *InstallationWorkflow) dryRunConfiguration() (*types.ChartConfiguration,
 		return nil, fmt.Errorf("failed to create temporary values file for dry-run: %w", err)
 	}
 	return &types.ChartConfiguration{
-		BaseHelmValuesPath: "helm-values.yaml",
+		BaseHelmValuesPath: config.DefaultHelmValuesFile,
 		TempHelmValuesPath: tempFilePath,
 		ExistingValues:     baseValues,
 		ModifiedSections:   make([]string, 0),
@@ -431,10 +431,10 @@ func (w *InstallationWorkflow) dryRunConfiguration() (*types.ChartConfiguration,
 func (w *InstallationWorkflow) loadExistingConfiguration() (*types.ChartConfiguration, error) {
 	modifier := templates.NewHelmValuesModifier()
 
-	// Load existing helm-values.yaml
+	// Load existing openframe-helm-values.yaml
 	values, err := modifier.LoadOrCreateBaseValues()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load helm-values.yaml: %w", err)
+		return nil, fmt.Errorf("failed to load openframe-helm-values.yaml: %w", err)
 	}
 
 	// Create temporary file from the existing values (same as interactive mode)
@@ -444,7 +444,7 @@ func (w *InstallationWorkflow) loadExistingConfiguration() (*types.ChartConfigur
 	}
 
 	result := &types.ChartConfiguration{
-		BaseHelmValuesPath: "helm-values.yaml",
+		BaseHelmValuesPath: config.DefaultHelmValuesFile,
 		TempHelmValuesPath: tempFilePath, // Use temporary file like interactive mode
 		ExistingValues:     values,
 		ModifiedSections:   []string{},

@@ -71,7 +71,7 @@ func TestBuildConfiguration_ExplicitRefPinsRepositoryBranch(t *testing.T) {
 	w := newTestWorkflow(t)
 
 	// A real temp values file whose branch says "main"; the explicit ref must win.
-	valuesPath := filepath.Join(t.TempDir(), "helm-values.yaml")
+	valuesPath := filepath.Join(t.TempDir(), "openframe-helm-values.yaml")
 	require.NoError(t, os.WriteFile(valuesPath, []byte("repository:\n  branch: main\n"), 0o600))
 
 	req := types.InstallationRequest{
@@ -94,7 +94,7 @@ func TestBuildConfiguration_ExplicitRefPinsRepositoryBranch(t *testing.T) {
 func TestBuildConfiguration_NoExplicitRef_LeavesBranch(t *testing.T) {
 	w := newTestWorkflow(t)
 
-	valuesPath := filepath.Join(t.TempDir(), "helm-values.yaml")
+	valuesPath := filepath.Join(t.TempDir(), "openframe-helm-values.yaml")
 	require.NoError(t, os.WriteFile(valuesPath, []byte("repository:\n  branch: develop\n"), 0o600))
 
 	req := types.InstallationRequest{

@@ -3,6 +3,7 @@ package configuration
 import (
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/pterm/pterm"
 )
@@ -14,7 +15,7 @@ func (w *ConfigurationWizard) loadBaseValues() (*types.ChartConfiguration, error
 		return nil, err
 	}
 
-	baseFilePath := "helm-values.yaml"
+	baseFilePath := config.DefaultHelmValuesFile
 
 	return &types.ChartConfiguration{
 		BaseHelmValuesPath: baseFilePath,

@@ -39,7 +39,7 @@ openframe cluster cleanup             # remove leftover resources
 
 ```bash
 openframe app install                        # install into the current cluster
-openframe app install --non-interactive      # reuse the existing helm-values.yaml
+openframe app install --non-interactive      # reuse the existing openframe-helm-values.yaml
 openframe app install --dry-run              # preview without applying
 
 openframe app status                         # deployment status (add -o text|json|yaml)

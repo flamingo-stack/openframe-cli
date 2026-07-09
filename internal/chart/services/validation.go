@@ -4,7 +4,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 )
 
-// ConfigurationValidator validates helm-values.yaml for non-interactive mode
+// ConfigurationValidator validates openframe-helm-values.yaml for non-interactive mode
 type ConfigurationValidator struct{}
 
 // NewConfigurationValidator creates a new configuration validator

@@ -28,7 +28,7 @@ Two modes:
 
   1. Change ref (--ref): re-deploy the app-of-apps at a new git ref (branch or
      release tag), then let ArgoCD roll it out. Runs non-interactively against
-     the existing helm-values.yaml — no config wizard and no certificate
+     the existing openframe-helm-values.yaml — no config wizard and no certificate
      regeneration.
 
   2. Force re-sync (default, or --sync): keep the current ref but force ArgoCD
@@ -81,7 +81,7 @@ func upgradeIsChangeRef(refChanged, branchChanged, sync bool) bool {
 // runUpgradeChangeRef re-deploys the platform at a new ref using the EXISTING
 // configuration (Mode 1). It runs non-interactively — no config wizard and no
 // certificate regeneration — so a scripted ref bump does not re-prompt or rotate
-// TLS certs, reusing the existing helm-values.yaml (OSS deployment).
+// TLS certs, reusing the existing openframe-helm-values.yaml (OSS deployment).
 func runUpgradeChangeRef(cmd *cobra.Command, args []string, flags *InstallFlags, verbose bool) error {
 	flags.Force = true
 	flags.NonInteractive = true

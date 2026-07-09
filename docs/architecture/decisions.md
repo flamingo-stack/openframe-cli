@@ -38,7 +38,7 @@ cluster without installing anything.
 The CLI supports a single deployment: **oss-tenant**. The app is always installed
 from the public `openframe-oss-tenant` chart repository, which requires no
 credentials. There is no `--deployment-mode` flag; `--non-interactive` simply
-reuses the existing `helm-values.yaml`.
+reuses the existing `openframe-helm-values.yaml`.
 
 | deployment   | chart repository                | credentials |
 |--------------|---------------------------------|-------------|
@@ -77,7 +77,7 @@ prerequisites → cluster create → app install
 ```
 
 It contains no business logic of its own — everything lives in the primitives.
-`openframe bootstrap --non-interactive` reuses the existing `helm-values.yaml`
+`openframe bootstrap --non-interactive` reuses the existing `openframe-helm-values.yaml`
 for the OSS tenant deployment.
 
 ---

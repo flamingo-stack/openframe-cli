@@ -9,7 +9,7 @@ import (
 
 // Freezes the public CLI contract of `bootstrap`. The CLI supports only the OSS
 // (oss-tenant) deployment, so `bootstrap --non-interactive` reuses the existing
-// helm-values.yaml with no deployment-mode flag.
+// openframe-helm-values.yaml with no deployment-mode flag.
 
 func TestBootstrapContract_Flags(t *testing.T) {
 	cmd := GetBootstrapCmd()

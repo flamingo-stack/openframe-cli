@@ -134,7 +134,7 @@ go run . cluster list
 go run . cluster delete test-cluster
 
 # App-of-apps: clones openframe-oss-tenant and installs ArgoCD + the app-of-apps chart.
-# --non-interactive reuses the existing helm-values.yaml.
+# --non-interactive reuses the existing openframe-helm-values.yaml.
 go run . app install --non-interactive
 go run . app status
 go run . app access

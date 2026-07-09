@@ -36,7 +36,7 @@ func TestConfigurationWizard_ConfigureWithExistingFile(t *testing.T) {
 
 	// Create temporary directory with existing helm values file
 	tmpDir := t.TempDir()
-	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
+	helmValuesPath := filepath.Join(tmpDir, "openframe-helm-values.yaml")
 
 	existingYAML := `global:
   repoBranch: develop
@@ -72,7 +72,7 @@ func TestConfigurationWizard_Integration_LoadAndApply(t *testing.T) {
 
 	// Create temporary directory with existing helm values
 	tmpDir := t.TempDir()
-	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
+	helmValuesPath := filepath.Join(tmpDir, "openframe-helm-values.yaml")
 
 	originalYAML := `repository:
   branch: main
@@ -145,7 +145,7 @@ func TestConfigurationWizard_LoadBaseValues(t *testing.T) {
 	config, err := wizard.loadBaseValues()
 	assert.NoError(t, err)
 	assert.NotNil(t, config)
-	assert.Equal(t, "helm-values.yaml", config.BaseHelmValuesPath)
+	assert.Equal(t, "openframe-helm-values.yaml", config.BaseHelmValuesPath)
 	assert.Empty(t, config.TempHelmValuesPath)
 	assert.NotNil(t, config.ExistingValues)
 	assert.Empty(t, config.ModifiedSections)

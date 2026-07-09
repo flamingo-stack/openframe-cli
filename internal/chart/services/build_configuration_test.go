@@ -19,7 +19,7 @@ func newTestWorkflow(t *testing.T) *InstallationWorkflow {
 }
 
 // req uses an explicit non-existent values path so branch resolution never
-// picks up a stray helm-values.yaml from the working directory.
+// picks up a stray openframe-helm-values.yaml from the working directory.
 func baseReq() types.InstallationRequest {
 	return types.InstallationRequest{GitHubRepo: "https://github.com/custom/repo", GitHubBranch: "main"}
 }

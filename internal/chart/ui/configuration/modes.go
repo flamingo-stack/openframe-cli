@@ -40,7 +40,7 @@ func (w *ConfigurationWizard) showConfigurationModeSelection() (string, error) {
 }
 
 // configureWithDefaults creates a default configuration without user interaction.
-// The default is to use the existing helm-values.yaml as-is.
+// The default is to use the existing openframe-helm-values.yaml as-is.
 func (w *ConfigurationWizard) configureWithDefaults() (*types.ChartConfiguration, error) {
 	pterm.Info.Println("Using default configuration for OSS deployment")
 

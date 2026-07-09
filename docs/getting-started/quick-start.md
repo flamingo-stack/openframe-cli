@@ -58,7 +58,7 @@ openframe --help
 openframe bootstrap
 ```
 
-The interactive wizard prompts for configuration options. For CI or scripting, run non-interactively — `--non-interactive` reuses the existing `helm-values.yaml`:
+The interactive wizard prompts for configuration options. For CI or scripting, run non-interactively — `--non-interactive` reuses the existing `openframe-helm-values.yaml`:
 
 ```bash
 openframe bootstrap --non-interactive

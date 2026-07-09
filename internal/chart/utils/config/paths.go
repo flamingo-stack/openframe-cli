@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 )
 
+// DefaultHelmValuesFile is the base helm values filename the CLI reads/writes in
+// the working directory (non-interactive installs read it as-is).
+const DefaultHelmValuesFile = "openframe-helm-values.yaml"
+
 // PathResolver handles path resolution for chart-related files and directories
 type PathResolver struct{}
 
@@ -38,9 +42,9 @@ func (p *PathResolver) GetCertificateDirectory() string {
 
 // GetHelmValuesFile returns the path to the helm values file
 func (p *PathResolver) GetHelmValuesFile() string {
-	// Return relative path to helm-values.yaml in CLI directory
+	// Return relative path to the helm values file in the CLI directory
 	// This file should be dynamically read at runtime
-	return "./helm-values.yaml"
+	return "./" + DefaultHelmValuesFile
 }
 
 // GetCertificateFiles returns the paths to the certificate files

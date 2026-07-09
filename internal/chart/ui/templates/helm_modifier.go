@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"gopkg.in/yaml.v3"
 )
@@ -45,7 +46,7 @@ func (h *HelmValuesModifier) LoadExistingValues(helmValuesPath string) (map[stri
 
 // LoadOrCreateBaseValues loads helm values from current directory or creates default if missing
 func (h *HelmValuesModifier) LoadOrCreateBaseValues() (map[string]interface{}, error) {
-	baseHelmValuesPath := "helm-values.yaml"
+	baseHelmValuesPath := config.DefaultHelmValuesFile
 
 	// Try to load existing file from current directory
 	if _, err := os.Stat(baseHelmValuesPath); err == nil {

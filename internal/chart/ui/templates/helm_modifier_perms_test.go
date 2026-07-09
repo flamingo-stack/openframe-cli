@@ -19,7 +19,7 @@ func TestWriteValues_SecretFileIsOwnerOnly(t *testing.T) {
 	}
 	h := NewHelmValuesModifier()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "helm-values.yaml")
+	path := filepath.Join(dir, "openframe-helm-values.yaml")
 
 	values := map[string]interface{}{
 		"saas": map[string]interface{}{
