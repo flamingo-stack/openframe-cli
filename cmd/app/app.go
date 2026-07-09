@@ -25,6 +25,11 @@ Examples:
   openframe app install
   openframe app install my-cluster`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// This command group defines its own PersistentPreRunE, which shadows
+			// the root's, so honor --silent here too.
+			if s, _ := cmd.Flags().GetBool("silent"); s {
+				ui.SetSilent()
+			}
 			// Machine output (json/yaml) is machine mode: no logo, no interactive
 			// prerequisite gate, so stdout stays clean and scripts never hit a prompt.
 			if isMachineOutput(cmd) {

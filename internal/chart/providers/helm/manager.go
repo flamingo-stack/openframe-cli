@@ -200,7 +200,10 @@ func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []s
 		args = append(args, "--kube-context", k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), cfg.ClusterName))
 	}
 	if cfg.DryRun {
-		args = append(args, "--dry-run")
+		// Explicit client-side dry-run: the bare --dry-run form is deprecated in
+		// Helm 3 and client mode needs no cluster round-trip (no false negatives
+		// from server-side validation of pre-existing resources).
+		args = append(args, "--dry-run=client")
 	}
 	return args
 }
@@ -535,7 +538,8 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 	}
 
 	if config.DryRun {
-		args = append(args, "--dry-run")
+		// Client-side dry-run (bare --dry-run is deprecated in Helm 3).
+		args = append(args, "--dry-run=client")
 	}
 
 	// Execute helm command with local chart path

@@ -74,6 +74,14 @@ operation for automation and power users.`,
 		// Silence errors and usage globally - we handle our own error display
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		// Apply --silent before any command runs so it honors its contract
+		// ("suppress all output except errors") across every subcommand.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if s, _ := cmd.Flags().GetBool("silent"); s {
+				ui.SetSilent()
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show logo when no subcommand is provided
 			ui.ShowLogo()

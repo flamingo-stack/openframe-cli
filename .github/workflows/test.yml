@@ -220,6 +220,20 @@ jobs:
           if [ "$code" -eq 0 ]; then echo "::error::app install --non-interactive without a cluster name must fail, got exit 0"; exit 1; fi
           echo "fast-fail OK (exit $code)"
 
+      # Finding 2 guard: an interactive dry-run (no --non-interactive) must NOT
+      # block on the "up to 30 minutes" confirmation prompt or regenerate certs —
+      # dry-run is side-effect-free. A hang would be caught as exit 124.
+      - name: 'App: dry-run does not prompt (Finding 2)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          set +e
+          timeout 120 "$OF_BIN" app install "$OF_CLUSTER" --dry-run </dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 124 ]; then echo "::error::app install --dry-run blocked on a prompt (Finding 2 regression)"; exit 1; fi
+          echo "dry-run did not hang (exit $code)"
+
       - name: 'App: install'
         if: matrix.os != 'darwin'
         shell: bash

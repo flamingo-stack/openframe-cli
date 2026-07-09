@@ -44,7 +44,15 @@ func TestArgoCDInstallArgs_ClusterContextAndDryRun(t *testing.T) {
 	if !strings.Contains(s, "--kube-context k3d-demo") {
 		t.Errorf("expected --kube-context k3d-demo:\n%s", s)
 	}
-	if !strings.Contains(s, "--dry-run") {
-		t.Errorf("expected --dry-run:\n%s", s)
+	// Finding 2: dry-run must use the explicit client-side form (bare --dry-run
+	// is deprecated in Helm 3 and does a server round-trip that false-negatives
+	// on pre-existing resources).
+	if !strings.Contains(s, "--dry-run=client") {
+		t.Errorf("expected --dry-run=client:\n%s", s)
+	}
+	for _, a := range args {
+		if a == "--dry-run" {
+			t.Errorf("must not use the bare deprecated --dry-run form:\n%s", s)
+		}
 	}
 }

@@ -203,19 +203,20 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		return err
 	}
 
-	// Step 3: Confirm installation on the selected cluster (skip in non-interactive mode)
-	if !req.NonInteractive {
+	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
+	if !req.NonInteractive && !req.DryRun {
 		if !w.confirmInstallationOnCluster(clusterName) {
 			pterm.Info.Println("Installation cancelled.")
 			return fmt.Errorf("installation cancelled by user")
 		}
 	}
 
-	// Step 4: Regenerate certificates after configuration and cluster selection
-	// Skip certificate regeneration in non-interactive mode
-	if !req.NonInteractive {
+	// Step 4: Regenerate certificates (skipped in non-interactive and dry-run modes)
+	if !req.NonInteractive && !req.DryRun {
 		// Non-fatal: failures are logged inside the method, continue regardless.
 		_ = w.regenerateCertificates()
+	} else if req.DryRun {
+		pterm.Info.Println("Skipping certificate regeneration (dry-run)")
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}
@@ -318,18 +319,20 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return fmt.Errorf("failed to initialize HelmManager: %w", err)
 	}
 
-	// Step 3: Confirm installation on the selected cluster (skip in non-interactive mode)
-	if !req.NonInteractive {
+	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
+	if !req.NonInteractive && !req.DryRun {
 		if !w.confirmInstallationOnCluster(clusterName) {
 			pterm.Info.Println("Installation cancelled.")
 			return fmt.Errorf("installation cancelled by user")
 		}
 	}
 
-	// Step 4: Regenerate certificates
-	if !req.NonInteractive {
+	// Step 4: Regenerate certificates (skipped in non-interactive and dry-run modes)
+	if !req.NonInteractive && !req.DryRun {
 		// Non-fatal: failures are logged inside the method, continue regardless.
 		_ = w.regenerateCertificates()
+	} else if req.DryRun {
+		pterm.Info.Println("Skipping certificate regeneration (dry-run)")
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}

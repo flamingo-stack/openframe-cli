@@ -13,6 +13,13 @@ func friendlyHint(err error) string {
 	msg := strings.ToLower(err.Error())
 
 	switch {
+	// Helm refuses to adopt a resource (typically the ArgoCD CRDs) that already
+	// exists without Helm ownership metadata — usually a cluster provisioned by an
+	// older OpenFrame CLI that installed CRDs separately. Match this BEFORE the
+	// generic timeout/connection cases so its actionable hint wins (the failure
+	// often surfaces wrapped in a timeout-looking message).
+	case containsAny(msg, "invalid ownership metadata", "cannot be imported into the current release", "missing key \"meta.helm.sh"):
+		return "A resource (usually the ArgoCD CRDs) already exists without Helm ownership, likely from an older OpenFrame install. Recreate the cluster with 'openframe cluster delete' + 'openframe cluster create', or add the Helm ownership labels to the existing CRDs, then retry."
 	case containsAny(msg, "connection refused", "was refused", "unable to connect to the server", "connection reset"):
 		return "The cluster isn't reachable — is it running? Try 'openframe cluster status'."
 	case containsAny(msg, "no such host", "dns resolution", "name resolution"):

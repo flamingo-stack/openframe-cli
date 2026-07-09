@@ -44,7 +44,7 @@ func ShowLogo() {
 
 // ShowLogoConditional displays the OpenFrame ASCII logo with optional suppression
 func ShowLogoConditional(suppress bool) {
-	if TestMode || suppress {
+	if TestMode || suppress || silent {
 		return
 	}
 

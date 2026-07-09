@@ -18,6 +18,10 @@ func TestFriendlyHint(t *testing.T) {
 		{"server unreachable", errors.New("Unable to connect to the server: EOF"), "isn't reachable"},
 		{"no such host", errors.New("lookup api.example.com: no such host"), "couldn't be resolved"},
 		{"timeout", errors.New("context deadline exceeded"), "timed out"},
+		// Finding 7: a Helm CRD-ownership failure must get its own actionable hint,
+		// not the misleading "timed out / unreachable" one.
+		{"crd ownership", errors.New(`CustomResourceDefinition "applications.argoproj.io" exists and cannot be imported into the current release: invalid ownership metadata`), "already exists without Helm ownership"},
+		{"crd ownership beats timeout wording", errors.New(`operation timed out: invalid ownership metadata; missing key "meta.helm.sh/release-name"`), "already exists without Helm ownership"},
 		{"permission denied", errors.New("pods is forbidden: User cannot list"), "Permission was denied"},
 		{"missing context", errors.New(`context "k3d-foo" does not exist`), "kube-context doesn't exist"},
 		{"docker down", errors.New("Cannot connect to the Docker daemon"), "Docker"},
