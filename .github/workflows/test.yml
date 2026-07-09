@@ -204,6 +204,22 @@ jobs:
           "$OF_BIN" cluster list
           "$OF_BIN" cluster status "$OF_CLUSTER"
 
+      # Finding 8 guard: --non-interactive with a cluster present but NO cluster
+      # name must fail fast, never drop into the interactive picker (which hangs
+      # CI until the job timeout). Runs with a short timeout so a regression that
+      # reintroduces the prompt is caught as exit 124, not a 40-minute hang.
+      - name: 'App: --non-interactive without a name fails fast (Finding 8)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          set +e
+          timeout 60 "$OF_BIN" app install --non-interactive
+          code=$?
+          set -e
+          if [ "$code" -eq 124 ]; then echo "::error::app install --non-interactive hung on a prompt (Finding 8 regression)"; exit 1; fi
+          if [ "$code" -eq 0 ]; then echo "::error::app install --non-interactive without a cluster name must fail, got exit 0"; exit 1; fi
+          echo "fast-fail OK (exit $code)"
+
       - name: 'App: install'
         if: matrix.os != 'darwin'
         shell: bash

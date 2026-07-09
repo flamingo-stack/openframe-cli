@@ -198,7 +198,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	}
 
 	// Step 2: Select cluster
-	clusterName, err := w.selectCluster(req.Args, req.Verbose)
+	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
 	if err != nil || clusterName == "" {
 		return err
 	}
@@ -302,7 +302,7 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 	}
 
 	// Step 2: Select cluster
-	clusterName, err := w.selectCluster(req.Args, req.Verbose)
+	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
 	if err != nil || clusterName == "" {
 		return err
 	}
@@ -365,9 +365,9 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 }
 
 // selectCluster handles cluster selection
-func (w *InstallationWorkflow) selectCluster(args []string, verbose bool) (string, error) {
+func (w *InstallationWorkflow) selectCluster(args []string, nonInteractive, verbose bool) (string, error) {
 	clusterSelector := NewClusterSelector(w.clusterService, w.chartService.operationsUI)
-	return clusterSelector.SelectCluster(args, verbose)
+	return clusterSelector.SelectCluster(args, nonInteractive, verbose)
 }
 
 // confirmInstallationOnCluster prompts for user confirmation with specific cluster name
