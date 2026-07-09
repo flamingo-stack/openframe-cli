@@ -19,6 +19,7 @@ import (
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/files"
+	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
@@ -551,9 +552,11 @@ func InstallChartsWithConfigContext(ctx context.Context, req types.InstallationR
 	default:
 	}
 
-	// Check prerequisites first
+	// Check prerequisites first. Treat a non-TTY environment as non-interactive
+	// even without the flag, so CI never blocks on a Y/N prompt (this is the only
+	// prerequisite gate now — the app command group no longer runs a second one).
 	installer := prerequisites.NewInstaller()
-	if err := installer.CheckAndInstallNonInteractive(req.NonInteractive); err != nil {
+	if err := installer.CheckAndInstallNonInteractive(req.NonInteractive || sharedUI.IsNonInteractive()); err != nil {
 		return err
 	}
 

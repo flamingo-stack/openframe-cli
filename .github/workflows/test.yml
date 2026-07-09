@@ -199,16 +199,16 @@ jobs:
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
           "$OF_BIN" app install --non-interactive --dry-run
 
-      # Finding 6 guard: --silent must suppress non-error output. A dry-run create
+      # Guard: --silent must suppress non-error output. A dry-run create
       # normally prints an INFO "Configuration Summary" box; with --silent it must
       # be gone, while the same run without --silent must still show it.
-      - name: 'CLI: --silent suppresses output (Finding 6)'
+      - name: 'CLI: --silent suppresses output'
         if: matrix.os != 'darwin'
         shell: bash
         run: |
           "$OF_BIN" --silent cluster create sil-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >silent.out 2>&1 || true
           "$OF_BIN"          cluster create loud-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >loud.out 2>&1 || true
-          if grep -qi 'Configuration Summary' silent.out; then echo "::error::--silent leaked INFO output (Finding 6 regression)"; cat silent.out; exit 1; fi
+          if grep -qi 'Configuration Summary' silent.out; then echo "::error::--silent leaked INFO output"; cat silent.out; exit 1; fi
           if ! grep -qi 'Configuration Summary' loud.out; then echo "::error::control run printed no summary — test is moot, check the assertion"; exit 1; fi
           echo "silent suppressed INFO, control did not — OK"
 
@@ -224,11 +224,11 @@ jobs:
           "$OF_BIN" cluster status "$OF_CLUSTER" -o json
           "$OF_BIN" cluster status "$OF_CLUSTER" -o yaml
 
-      # Finding 8 guard: --non-interactive with a cluster present but NO cluster
+      # Guard: --non-interactive with a cluster present but NO cluster
       # name must fail fast, never drop into the interactive picker (which hangs
       # CI until the job timeout). Runs with a short timeout so a regression that
       # reintroduces the prompt is caught as exit 124, not a 40-minute hang.
-      - name: 'App: --non-interactive without a name fails fast (Finding 8)'
+      - name: 'App: --non-interactive without a name fails fast'
         if: matrix.os != 'darwin'
         shell: bash
         run: |
@@ -236,7 +236,7 @@ jobs:
           timeout 60 "$OF_BIN" app install --non-interactive
           code=$?
           set -e
-          if [ "$code" -eq 124 ]; then echo "::error::app install --non-interactive hung on a prompt (Finding 8 regression)"; exit 1; fi
+          if [ "$code" -eq 124 ]; then echo "::error::app install --non-interactive hung on a prompt"; exit 1; fi
           if [ "$code" -eq 0 ]; then echo "::error::app install --non-interactive without a cluster name must fail, got exit 0"; exit 1; fi
           echo "fast-fail OK (exit $code)"
 

@@ -24,8 +24,8 @@ func TestAppContract_RootShape(t *testing.T) {
 func TestAppContract_UpgradeFlags(t *testing.T) {
 	upgrade := testutil.FindSubcommand(t, GetAppCmd(), "upgrade")
 
-	// Upgrade mutates the cluster → must NOT be readonly (runs the prereq gate).
-	assert.NotEqual(t, "true", upgrade.Annotations["readonly"], "upgrade must run the prereq gate")
+	// Upgrade mutates the cluster → not marked read-only.
+	assert.NotEqual(t, "true", upgrade.Annotations["readonly"], "upgrade is not read-only")
 
 	// Upgrade shares the install flag set plus --sync.
 	testutil.AssertFlags(t, upgrade, []testutil.FlagSpec{
@@ -59,7 +59,7 @@ func TestAppContract_StatusAndAccessAreReadonly(t *testing.T) {
 	app := GetAppCmd()
 	for _, name := range []string{"status", "access"} {
 		cmd := testutil.FindSubcommand(t, app, name)
-		assert.Equalf(t, "true", cmd.Annotations["readonly"], "%s must be annotated readonly (skips the prereq gate)", name)
+		assert.Equalf(t, "true", cmd.Annotations["readonly"], "%s must be annotated read-only", name)
 		testutil.AssertFlags(t, cmd, []testutil.FlagSpec{
 			{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 			{Name: "output", Shorthand: "o", Type: "string", Default: "text"},
@@ -70,8 +70,8 @@ func TestAppContract_StatusAndAccessAreReadonly(t *testing.T) {
 func TestAppContract_UninstallFlags(t *testing.T) {
 	uninstall := testutil.FindSubcommand(t, GetAppCmd(), "uninstall")
 
-	// Uninstall mutates the cluster → must NOT be readonly.
-	assert.NotEqual(t, "true", uninstall.Annotations["readonly"], "uninstall must run the prereq gate")
+	// Uninstall mutates the cluster → not marked read-only.
+	assert.NotEqual(t, "true", uninstall.Annotations["readonly"], "uninstall is not read-only")
 	testutil.AssertFlags(t, uninstall, []testutil.FlagSpec{
 		{Name: "context", Shorthand: "c", Type: "string", Default: ""},
 		{Name: "yes", Shorthand: "y", Type: "bool", Default: "false"},

@@ -50,15 +50,15 @@ func TestUninstallCommand_Wiring(t *testing.T) {
 	}
 }
 
-func TestReadOnlyCommandsSkipPrereqGate(t *testing.T) {
-	// status and access must be annotated read-only so PersistentPreRunE skips
-	// the interactive prerequisite install gate (which could hang a script).
+func TestReadOnlyCommandsAreAnnotated(t *testing.T) {
+	// status and access only read an existing cluster, so they carry the
+	// read-only annotation; install/upgrade/uninstall mutate it and do not.
 	for name, mk := range map[string]func() *cobra.Command{"status": getStatusCmd, "access": getAccessCmd} {
 		if mk().Annotations["readonly"] != "true" {
 			t.Errorf("%s command must be annotated readonly=true", name)
 		}
 	}
-	// install is NOT read-only (it needs helm/kubectl).
+	// install mutates the cluster (installs ArgoCD + apps).
 	if getInstallCmd().Annotations["readonly"] == "true" {
 		t.Error("install must not be marked read-only")
 	}
