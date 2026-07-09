@@ -21,22 +21,23 @@ on:
 # =============================================================================
 
 jobs:
+  version:
+    name: Resolve Version
+    uses: ./.github/workflows/version.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
     name: "Release"
+    needs: [version]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve version
-        id: version
-        uses: ./.github/steps/version
-        with:
-          version: ${{ inputs.version }}
-
       - name: Export version
-        run: echo "VERSION=${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
+        run: echo "VERSION=${{ needs.version.outputs.version }}" >> "$GITHUB_ENV"
 
 
       - name: Set up Go
