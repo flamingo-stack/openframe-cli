@@ -47,6 +47,7 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 
 	pterm.Info.Printf("Starting installation of %d prerequisite(s): %s\n", len(tools), strings.Join(tools, ", "))
 
+	certsSkipped := false
 	for idx, tool := range tools {
 		// Skip memory as it can't be installed
 		if strings.ToLower(tool) == "memory" {
@@ -60,6 +61,7 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 		// re-check still finds it missing.
 		if nonInteractive && strings.ToLower(tool) == "certificates" {
 			pterm.Info.Println("Skipping certificates: mkcert -install needs interactive trust-store/sudo access — localhost HTTPS will be untrusted")
+			certsSkipped = true
 			continue
 		}
 
@@ -105,7 +107,13 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 		return fmt.Errorf("installation completed but some tools are still missing: %s", strings.Join(stillMissingInstallable, ", "))
 	}
 
-	pterm.Success.Println("All prerequisites installed successfully!")
+	// Don't claim "all installed" when certificates were deliberately skipped —
+	// the re-check will still find them missing, so be honest about it.
+	if certsSkipped {
+		pterm.Success.Println("Installable prerequisites ready — certificates skipped (localhost HTTPS will be untrusted).")
+	} else {
+		pterm.Success.Println("All prerequisites installed successfully!")
+	}
 	return nil
 }
 
