@@ -207,8 +207,14 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 
 	// Step 2: Select cluster
 	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
-	if err != nil || clusterName == "" {
+	if err != nil {
 		return err
+	}
+	if clusterName == "" {
+		// selectCluster prints why (no clusters found, or the interactive
+		// selection was cancelled) but returns no error; surface a non-zero exit
+		// so callers and CI don't read a no-op install as success.
+		return fmt.Errorf("no cluster selected — nothing was installed")
 	}
 
 	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
@@ -319,8 +325,14 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 
 	// Step 2: Select cluster
 	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
-	if err != nil || clusterName == "" {
+	if err != nil {
 		return err
+	}
+	if clusterName == "" {
+		// selectCluster prints why (no clusters found, or the interactive
+		// selection was cancelled) but returns no error; surface a non-zero exit
+		// so callers and CI don't read a no-op install as success.
+		return fmt.Errorf("no cluster selected — nothing was installed")
 	}
 
 	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager.

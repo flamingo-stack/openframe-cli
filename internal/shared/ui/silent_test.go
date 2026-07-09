@@ -15,9 +15,13 @@ func TestSetSilent(t *testing.T) {
 	// SetSilent mutates pterm package globals + the silent flag; restore them so
 	// this test doesn't leak into others in the package.
 	savedInfo, savedSuccess, savedWarning, savedError := pterm.Info, pterm.Success, pterm.Warning, pterm.Error
+	savedDebug, savedBasicText := pterm.Debug, pterm.DefaultBasicText
+	savedBox, savedHeader, savedTable := pterm.DefaultBox, pterm.DefaultHeader, pterm.DefaultTable
 	savedSilent := silent
 	t.Cleanup(func() {
 		pterm.Info, pterm.Success, pterm.Warning, pterm.Error = savedInfo, savedSuccess, savedWarning, savedError
+		pterm.Debug, pterm.DefaultBasicText = savedDebug, savedBasicText
+		pterm.DefaultBox, pterm.DefaultHeader, pterm.DefaultTable = savedBox, savedHeader, savedTable
 		silent = savedSilent
 	})
 

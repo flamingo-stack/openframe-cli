@@ -197,7 +197,10 @@ jobs:
         shell: bash
         run: |
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
-          "$OF_BIN" app install --non-interactive --dry-run
+          # No cluster exists yet, so an install (even --dry-run) correctly exits
+          # non-zero ("no cluster selected"); this just smokes that it reaches the
+          # cluster check without crashing.
+          "$OF_BIN" app install --non-interactive --dry-run || echo "app install without a cluster exits non-zero (expected pre-create)"
 
       # Guard: --silent must suppress non-error output. A dry-run create
       # normally prints an INFO "Configuration Summary" box; with --silent it must

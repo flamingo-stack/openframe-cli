@@ -57,8 +57,7 @@ The cluster is always a local k3d cluster.
   the OpenFrame app on an existing, online cluster. `upgrade` re-deploys the
   app-of-apps at a new git ref (`--ref`) or forces an ArgoCD hard refresh + sync
   (`--sync`); `access` prints the ArgoCD admin credentials and how to open the
-  UI. (`app` was previously `chart`; `chart` remains a hidden alias for
-  backward compatibility.)
+  UI. (`app` was previously named `chart`.)
 - `openframe prerequisites check|install [cluster|app]` — the prerequisite
   checks/installs as first-class commands.
 - `openframe update` — self-update of the CLI binary (checksum + cosign verified,
@@ -125,10 +124,10 @@ rather than raw errors.
 
 ## Target layout
 
-```
+```text
 cmd/
   cluster/         create, delete, list, status, cleanup
-  app/             install, upgrade, status, access, uninstall   (alias: chart)
+  app/             install, upgrade, status, access, uninstall
   prerequisites/   check, install
   bootstrap/       orchestrator (prerequisites → cluster create → app install)
   update/          self-update: (update), check, rollback
