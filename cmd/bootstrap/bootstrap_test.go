@@ -36,7 +36,7 @@ func TestBootstrapCommandStructure(t *testing.T) {
 	assert.Contains(t, cmd.Short, "Bootstrap complete OpenFrame environment")
 	assert.Contains(t, cmd.Long, "This command performs a complete OpenFrame setup")
 	assert.Contains(t, cmd.Long, "openframe cluster create")
-	assert.Contains(t, cmd.Long, "openframe chart install")
+	assert.Contains(t, cmd.Long, "openframe app install")
 
 	// Test examples are present
 	assert.Contains(t, cmd.Long, "Examples:")

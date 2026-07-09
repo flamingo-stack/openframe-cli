@@ -31,11 +31,11 @@ The cluster must exist before running this command.
 Certificates are automatically regenerated during installation.
 
 Examples:
-  openframe chart install                                    # Interactive mode (default)
-  openframe chart install my-cluster                        # Install on specific cluster
-  openframe chart install --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
-  openframe chart install --github-branch develop          # Use develop branch
-  openframe chart install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
+  openframe app install                                    # Interactive mode (default)
+  openframe app install my-cluster                        # Install on specific cluster
+  openframe app install --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
+  openframe app install --github-branch develop          # Use develop branch
+  openframe app install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
 		SilenceErrors: true, // Errors are handled by our custom error handler
 		SilenceUsage:  true, // Don't show usage on errors

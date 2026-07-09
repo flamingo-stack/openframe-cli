@@ -195,7 +195,7 @@ func getClusterCmd() *cobra.Command {
 	return cluster.GetClusterCmd()
 }
 
-// getAppCmd returns the app command (formerly "chart"; "chart" remains an alias)
+// getAppCmd returns the app command (formerly "chart")
 func getAppCmd() *cobra.Command {
 	return app.GetAppCmd()
 }

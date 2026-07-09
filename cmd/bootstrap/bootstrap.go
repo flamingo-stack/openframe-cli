@@ -18,7 +18,7 @@ func GetBootstrapCmd() *cobra.Command {
 
 This command performs a complete OpenFrame setup by running:
 1. openframe cluster create - Creates a Kubernetes cluster
-2. openframe chart install - Installs ArgoCD and OpenFrame charts
+2. openframe app install - Installs ArgoCD and OpenFrame charts
 
 This is equivalent to running both commands sequentially but provides
 a streamlined experience for getting started with OpenFrame.

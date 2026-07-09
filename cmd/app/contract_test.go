@@ -15,7 +15,7 @@ func TestAppContract_RootShape(t *testing.T) {
 	app := GetAppCmd()
 
 	assert.Equal(t, "app", app.Name())
-	assert.ElementsMatch(t, []string{"chart", "c"}, app.Aliases, "chart/c aliases are part of the contract")
+	assert.Empty(t, app.Aliases, "the chart/c aliases were removed — only 'openframe app' is supported")
 	assert.NotEmpty(t, app.Short)
 
 	testutil.AssertSubcommands(t, app, "install", "upgrade", "status", "access", "uninstall")

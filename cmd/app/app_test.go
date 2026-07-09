@@ -22,8 +22,8 @@ func TestChartRootCommand(t *testing.T) {
 	assert.NotEmpty(t, cmd.Long, "Command should have long description")
 	assert.NotNil(t, cmd.RunE, "App root command should have RunE function")
 
-	// "chart" is retained as a backward-compatible alias
-	assert.Contains(t, cmd.Aliases, "chart", "chart must remain an alias")
+	// The "chart" alias was removed — only "openframe app" is supported.
+	assert.Empty(t, cmd.Aliases, "app must have no aliases")
 
 	// Test that help contains expected content
 	assert.Contains(t, cmd.Short, "OpenFrame application")

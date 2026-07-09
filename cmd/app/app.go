@@ -7,12 +7,10 @@ import (
 )
 
 // GetAppCmd returns the app command and its subcommands.
-// "chart" is kept as a hidden alias for backward compatibility.
 func GetAppCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "app",
-		Aliases: []string{"chart", "c"},
-		Short:   "Deploy the OpenFrame application onto a cluster",
+		Use:   "app",
+		Short: "Deploy the OpenFrame application onto a cluster",
 		Long: `App Management - Install the OpenFrame application (ArgoCD + apps)
 
 This command group deploys the OpenFrame application onto a Kubernetes cluster:

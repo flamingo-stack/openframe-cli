@@ -51,8 +51,8 @@ func TestInstallCommandHelp(t *testing.T) {
 	// Test that help contains expected content
 	assert.Contains(t, cmd.Short, "Install ArgoCD")
 	assert.Contains(t, cmd.Long, "ArgoCD (version 10.1.1)")
-	assert.Contains(t, cmd.Long, "openframe chart install")
-	assert.Contains(t, cmd.Long, "openframe chart install my-cluster")
+	assert.Contains(t, cmd.Long, "openframe app install")
+	assert.Contains(t, cmd.Long, "openframe app install my-cluster")
 }
 
 func TestInstallCommandUsage(t *testing.T) {
