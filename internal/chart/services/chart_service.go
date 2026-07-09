@@ -176,7 +176,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
 		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
-		pterm.Warning.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
+		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
 		chartConfig, err = w.loadExistingConfiguration()
 		if err != nil {
@@ -291,7 +291,7 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
 		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
-		pterm.Warning.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
+		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
 		chartConfig, err = w.loadExistingConfiguration()
 		if err != nil {
