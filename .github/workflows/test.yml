@@ -123,9 +123,14 @@ jobs:
           "$OF_BIN" app upgrade --help
           "$OF_BIN" bootstrap --help
           "$OF_BIN" update --help
+          # Shell-completion generation is pure (no cluster/network) — smoke every shell.
+          for sh in bash zsh fish powershell; do "$OF_BIN" completion "$sh" >/dev/null; done
           # Self-update check needs neither Docker nor k3d, so it runs everywhere
           # (incl. darwin); tolerate transient network issues on the runner.
           "$OF_BIN" update check || echo "update check skipped (network)"
+          # Rollback with no prior update must exit cleanly with a "nothing to roll
+          # back" notice (offline, no download), not error out or hang.
+          "$OF_BIN" update rollback
 
       # Windows only: run the CLI's own prerequisite installer inside WSL. This
       # exercises the apk Docker install path (installAlpine) and installs k3d +
@@ -194,6 +199,19 @@ jobs:
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
           "$OF_BIN" app install --non-interactive --dry-run
 
+      # Finding 6 guard: --silent must suppress non-error output. A dry-run create
+      # normally prints an INFO "Configuration Summary" box; with --silent it must
+      # be gone, while the same run without --silent must still show it.
+      - name: 'CLI: --silent suppresses output (Finding 6)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          "$OF_BIN" --silent cluster create sil-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >silent.out 2>&1 || true
+          "$OF_BIN"          cluster create loud-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >loud.out 2>&1 || true
+          if grep -qi 'Configuration Summary' silent.out; then echo "::error::--silent leaked INFO output (Finding 6 regression)"; cat silent.out; exit 1; fi
+          if ! grep -qi 'Configuration Summary' loud.out; then echo "::error::control run printed no summary — test is moot, check the assertion"; exit 1; fi
+          echo "silent suppressed INFO, control did not — OK"
+
       # --- Complex: real cluster lifecycle (heaviest, last) ------------------
       - name: 'Cluster: create'
         if: matrix.os != 'darwin'
@@ -203,6 +221,8 @@ jobs:
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard
           "$OF_BIN" cluster list
           "$OF_BIN" cluster status "$OF_CLUSTER"
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o json
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o yaml
 
       # Finding 8 guard: --non-interactive with a cluster present but NO cluster
       # name must fail fast, never drop into the interactive picker (which hangs
@@ -263,6 +283,7 @@ jobs:
         shell: bash
         run: |
           "$OF_BIN" app uninstall --context "$OF_CONTEXT" --yes || true
+          "$OF_BIN" cluster cleanup "$OF_CLUSTER" || true
           "$OF_BIN" cluster delete "$OF_CLUSTER" --force || true
 
       - name: Run unit tests
