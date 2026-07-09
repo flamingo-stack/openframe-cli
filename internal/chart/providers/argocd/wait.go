@@ -2,21 +2,17 @@ package argocd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"os/signal"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -38,54 +34,21 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		return fmt.Errorf("operation already cancelled: %w", ctx.Err())
 	}
 
-	// Early exit if context has a short deadline (indicates timeout scenario)
+	// If the deadline is too close to meaningfully verify the applications, do
+	// NOT report success. Returning nil here would mark the platform "ready"
+	// while apps are still syncing (and let cleanup delete the temp values);
+	// surface it as a timeout so the caller sees the truth.
 	if deadline, ok := ctx.Deadline(); ok {
-		if time.Until(deadline) < 5*time.Second {
-			// Context will expire soon - skip ArgoCD applications wait
-			return nil
+		if left := time.Until(deadline); left < 10*time.Second {
+			return fmt.Errorf("insufficient time to verify ArgoCD applications before the deadline (%s left)", left.Round(time.Second))
 		}
 	}
 
-	// Create a derived context that responds to both parent cancellation AND direct signals
-	// This ensures immediate response to Ctrl+C even if parent context isn't propagating fast enough
+	// Derive a cancellable context from the parent. The parent is already
+	// signal-cancelled (root ExecuteContext), so Ctrl-C / SIGTERM propagates
+	// here immediately — no local signal handler required.
 	localCtx, localCancel := context.WithCancel(ctx)
 	defer localCancel()
-
-	// Handle direct interrupt signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
-	go func() {
-		<-sigChan
-		localCancel() // Cancel our local context immediately
-	}()
-
-	// Check if we should start the spinner (skip if context is cancelled or expiring soon)
-	shouldSkipSpinner := false
-
-	// Check if context is cancelled
-	if localCtx.Err() != nil {
-		shouldSkipSpinner = true
-	}
-
-	// Check if original context is cancelled
-	if ctx.Err() != nil {
-		shouldSkipSpinner = true
-	}
-
-	// Check if context deadline is very close (less than 10 seconds)
-	if deadline, ok := ctx.Deadline(); ok {
-		timeLeft := time.Until(deadline)
-		if timeLeft < 10*time.Second {
-			shouldSkipSpinner = true
-		}
-	}
-
-	if shouldSkipSpinner {
-		// Context is cancelled or expiring soon - skip ArgoCD applications wait entirely
-		return nil
-	}
 
 	// Wait for ArgoCD CRD and pods to be ready before checking applications
 	if err := m.waitForArgoCDReady(localCtx, config.Verbose, config.SkipCRDs); err != nil {
@@ -110,12 +73,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}
 
 	// Start pterm spinner only if not in silent/non-interactive mode
-	var spinner *pterm.SpinnerPrinter
+	var spinner *uispinner.Spinner
 	if !config.Silent {
-		spinner, _ = pterm.DefaultSpinner.
-			WithRemoveWhenDone(false).
-			WithShowTimer(true).
-			Start("Installing ArgoCD applications...")
+		spinner = uispinner.New().WithTimer()
+		spinner.Start("Installing ArgoCD applications...")
 	} else {
 		// In non-interactive mode, just show a simple info message
 		pterm.Info.Println("Installing ArgoCD applications...")
@@ -128,7 +89,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	stopSpinner := func() {
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
-		if !spinnerStopped && spinner != nil && spinner.IsActive {
+		if !spinnerStopped && spinner != nil {
 			spinner.Stop()
 			spinnerStopped = true
 		}
@@ -179,7 +140,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Main monitoring phase
 	startTime := time.Now()
-	timeout := 60 * time.Minute
+	timeout := m.waitTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Minute // default, sized for a fresh install
+	}
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
 	clusterHealthCheckInterval := 10 * time.Second
@@ -211,7 +175,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	repoServerRecoveryAttempts := 0
 	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
 	lastRepoServerDiagnostic := time.Time{}
-	repoServerDiagnosticInterval := 2 * time.Minute // Reduced from 3 min for faster CI recovery
+	repoServerDiagnosticInterval := 2 * time.Minute  // Reduced from 3 min for faster CI recovery
 	appsWithRepoServerIssues := make(map[string]int) // Track consecutive failures per app
 	lastRepoServerResourceCheck := time.Now()
 	repoServerResourceCheckInterval := 30 * time.Second // Reduced from 1 min for faster issue detection
@@ -225,7 +189,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// Check timeout
 			if time.Since(startTime) > timeout {
 				spinnerMutex.Lock()
-				if !spinnerStopped && spinner != nil && spinner.IsActive {
+				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
 					spinnerStopped = true
 				}
@@ -359,45 +323,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			}
 
 			// Track applications that have ever been ready during this session
-			currentHealthyCount := 0
-			currentlyReady := 0
-			healthyApps := make([]string, 0)
-			syncedApps := make([]string, 0)
-			notReadyApps := make([]string, 0)
-
-			for _, app := range apps {
-				// Count currently healthy apps for monitoring
-				if app.Health == "Healthy" {
-					currentHealthyCount++
-					healthyApps = append(healthyApps, app.Name)
-				}
-
-				if app.Sync == "Synced" {
-					syncedApps = append(syncedApps, app.Name)
-				}
-
-				// Count currently ready apps (both healthy and synced)
-				if app.Health == "Healthy" && app.Sync == "Synced" {
-					currentlyReady++
-					// Mark apps as "ever ready" if they are currently healthy and synced
-					// Once marked, they stay counted even if they go out of sync later
-					everReadyApps[app.Name] = true
-				} else {
-					// Track apps that are not yet ready with more detailed status
-					if app.Health != "Healthy" || app.Sync != "Synced" {
-						// Show the most important status issue
-						var status string
-						if app.Health != "Healthy" && app.Sync != "Synced" {
-							status = fmt.Sprintf("%s/%s", app.Health, app.Sync)
-						} else if app.Health != "Healthy" {
-							status = fmt.Sprintf("Health: %s", app.Health)
-						} else {
-							status = fmt.Sprintf("Sync: %s", app.Sync)
-						}
-						notReadyApps = append(notReadyApps, fmt.Sprintf("%s (%s)", app.Name, status))
-					}
-				}
-			}
+			assess := assessApplications(apps, everReadyApps)
+			currentlyReady := assess.ready
+			healthyApps := assess.healthyNames
+			notReadyApps := assess.notReady
 
 			// Show verbose logging if enabled
 			if config.Verbose && totalApps > 0 {
@@ -405,7 +334,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 				// Update spinner message with current status
 				spinnerMutex.Lock()
-				if !spinnerStopped && spinner != nil && spinner.IsActive {
+				if !spinnerStopped && spinner != nil {
 					progress := ""
 					if totalApps > 0 {
 						progressPercent := float64(currentlyReady) / float64(totalApps) * 100
@@ -431,24 +360,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						}
 
 						// Check for applications stuck in "Unknown" status or with repo-server issues
-						unknownApps := []Application{}
-						appsWithConditionErrors := []Application{}
-						for _, app := range apps {
-							if app.Health == "Unknown" || app.Sync == "Unknown" {
-								unknownApps = append(unknownApps, app)
-							}
-							// Check for repo-server communication errors in condition messages
-							if app.Condition != "" && (strings.Contains(app.Condition, "EOF") ||
-								strings.Contains(app.Condition, "Unavailable") ||
-								strings.Contains(app.Condition, "error reading from server") ||
-								strings.Contains(app.Condition, "failed to generate manifest")) {
-								appsWithConditionErrors = append(appsWithConditionErrors, app)
-								appsWithRepoServerIssues[app.Name]++
-							} else {
-								// Reset counter if app no longer has the issue
-								delete(appsWithRepoServerIssues, app.Name)
-							}
-						}
+						unknownApps, appsWithConditionErrors := classifyAppIssues(apps, appsWithRepoServerIssues)
 
 						// Check for repo-server issues and attempt recovery
 						if len(appsWithConditionErrors) > 0 && elapsed > 2*time.Minute {
@@ -534,314 +446,20 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 							pterm.Warning.Println("\n  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
 						}
 
-						// DEBUG: Show pod details for stuck applications after 7 min, every 5 minutes
+						// After 7 minutes, log a concise summary of stuck applications
+						// every 5 minutes (in-memory status; no kubectl resource dump).
 						if elapsed > 7*time.Minute && int(elapsed.Seconds())%300 == 0 {
-							stuckApps := []Application{}
 							for _, app := range apps {
-								if app.Health != "Healthy" && app.Health != "Missing" {
-									stuckApps = append(stuckApps, app)
+								if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
+									line := fmt.Sprintf("  Stuck app %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
+									if app.Condition != "" {
+										line += " condition=" + app.Condition
+									}
+									pterm.Warning.Println(line)
 								}
-							}
-
-							if len(stuckApps) > 0 {
-								pterm.Info.Printf("\n=== DEBUG: Found %d stuck application(s) ===\n", len(stuckApps))
-
-								for _, app := range stuckApps {
-									pterm.Info.Printf("\n--- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
-
-									// Get namespace using explicit context
-									nsArgs := m.getKubectlArgs("-n", "argocd", "get", "app", app.Name, "-o", "jsonpath={.spec.destination.namespace}")
-									nsResult, err := m.executor.Execute(localCtx, "kubectl", nsArgs...)
-									if err != nil || nsResult == nil || nsResult.Stdout == "" {
-										pterm.Warning.Printf("Could not get namespace for %s\n", app.Name)
-										continue
-									}
-									ns := strings.TrimSpace(nsResult.Stdout)
-
-									// Get all pods as JSON to avoid Windows WSL escaping issues with jsonpath
-									allPodsArgs := m.getKubectlArgs("-n", ns, "get", "pods", "-o", "json")
-									allPodsResult, _ := m.executor.Execute(localCtx, "kubectl", allPodsArgs...)
-
-									problemPods := make(map[string]bool)
-									allPods := make(map[string]string) // podName -> status summary
-
-									// Parse pods from JSON and identify problematic ones
-									var podList corev1.PodList
-									if allPodsResult != nil && allPodsResult.Stdout != "" {
-										if err := json.Unmarshal([]byte(allPodsResult.Stdout), &podList); err == nil {
-											for _, pod := range podList.Items {
-												// Build status summary for all pods
-												statusSummary := string(pod.Status.Phase)
-												if len(pod.Status.ContainerStatuses) > 0 {
-													var containerStates []string
-													for _, cs := range pod.Status.ContainerStatuses {
-														if cs.State.Waiting != nil {
-															containerStates = append(containerStates, cs.State.Waiting.Reason)
-														} else if cs.State.Terminated != nil {
-															containerStates = append(containerStates, cs.State.Terminated.Reason)
-														} else if cs.Ready {
-															containerStates = append(containerStates, "Ready")
-														}
-													}
-													if len(containerStates) > 0 {
-														statusSummary += "/" + strings.Join(containerStates, ",")
-													}
-												}
-												// Check init container status
-												for _, ics := range pod.Status.InitContainerStatuses {
-													if ics.State.Waiting != nil {
-														statusSummary += " (init:" + ics.State.Waiting.Reason + ")"
-													} else if ics.State.Running != nil {
-														statusSummary += " (init:Running)"
-													}
-												}
-												allPods[pod.Name] = statusSummary
-
-												// Non-running pods are problematic
-												if pod.Status.Phase != corev1.PodRunning {
-													problemPods[pod.Name] = true
-													continue
-												}
-												// Pods stuck in init containers are problematic
-												for _, ics := range pod.Status.InitContainerStatuses {
-													if ics.State.Waiting != nil || ics.State.Running != nil {
-														problemPods[pod.Name] = true
-														break
-													}
-												}
-												// Check for restarts in running pods
-												for _, cs := range pod.Status.ContainerStatuses {
-													if cs.RestartCount > 0 {
-														problemPods[pod.Name] = true
-														break
-													}
-												}
-											}
-										}
-									}
-
-									// Get StatefulSets to identify missing pods
-									stsArgs := m.getKubectlArgs("-n", ns, "get", "statefulsets", "-o", "json")
-									stsResult, _ := m.executor.Execute(localCtx, "kubectl", stsArgs...)
-									missingPods := []string{}
-									if stsResult != nil && stsResult.Stdout != "" {
-										var stsList appsv1.StatefulSetList
-										if err := json.Unmarshal([]byte(stsResult.Stdout), &stsList); err == nil {
-											for _, sts := range stsList.Items {
-												expectedReplicas := int32(1)
-												if sts.Spec.Replicas != nil {
-													expectedReplicas = *sts.Spec.Replicas
-												}
-												for i := int32(0); i < expectedReplicas; i++ {
-													expectedPodName := fmt.Sprintf("%s-%d", sts.Name, i)
-													if _, exists := allPods[expectedPodName]; !exists {
-														missingPods = append(missingPods, expectedPodName)
-													}
-												}
-											}
-										}
-									}
-
-									// Get Deployments to identify missing pods
-									deployArgs := m.getKubectlArgs("-n", ns, "get", "deployments", "-o", "json")
-									deployResult, _ := m.executor.Execute(localCtx, "kubectl", deployArgs...)
-									if deployResult != nil && deployResult.Stdout != "" {
-										var deployList appsv1.DeploymentList
-										if err := json.Unmarshal([]byte(deployResult.Stdout), &deployList); err == nil {
-											for _, deploy := range deployList.Items {
-												expectedReplicas := int32(1)
-												if deploy.Spec.Replicas != nil {
-													expectedReplicas = *deploy.Spec.Replicas
-												}
-												// Count pods matching this deployment
-												matchingPods := 0
-												for podName := range allPods {
-													if strings.HasPrefix(podName, deploy.Name+"-") {
-														matchingPods++
-													}
-												}
-												if int32(matchingPods) < expectedReplicas {
-													missingPods = append(missingPods, fmt.Sprintf("%s (want %d, have %d)", deploy.Name, expectedReplicas, matchingPods))
-												}
-											}
-										}
-									}
-
-									// Show namespace summary first
-									pterm.Info.Printf("  Namespace %s summary:\n", ns)
-									if len(allPods) == 0 {
-										pterm.Warning.Println("    No pods found in namespace!")
-									} else {
-										// Group pods by status
-										readyPods := []string{}
-										pendingPods := []string{}
-										otherPods := []string{}
-										for podName, status := range allPods {
-											if strings.Contains(status, "Running") && strings.Contains(status, "Ready") && !strings.Contains(status, "init:") {
-												readyPods = append(readyPods, podName)
-											} else if strings.Contains(status, "Pending") || strings.Contains(status, "init:") {
-												pendingPods = append(pendingPods, fmt.Sprintf("%s (%s)", podName, status))
-											} else {
-												otherPods = append(otherPods, fmt.Sprintf("%s (%s)", podName, status))
-											}
-										}
-										pterm.Info.Printf("    Ready: %d, Pending/Init: %d, Other: %d\n", len(readyPods), len(pendingPods), len(otherPods))
-										if len(pendingPods) > 0 {
-											pterm.Info.Printf("    Pending/Init pods: %v\n", pendingPods)
-										}
-										if len(otherPods) > 0 {
-											pterm.Info.Printf("    Other pods: %v\n", otherPods)
-										}
-									}
-
-									// Show missing pods (expected but not created)
-									if len(missingPods) > 0 {
-										pterm.Warning.Printf("    Missing pods (expected but not created): %v\n", missingPods)
-
-										// For missing StatefulSet pods, check the StatefulSet events and PVC status
-										for _, missingPod := range missingPods {
-											// Skip deployment-style missing pods (they have different format)
-											if strings.Contains(missingPod, "(want") {
-												continue
-											}
-											// Extract StatefulSet name from pod name (e.g., "tactical-backend-0" -> "tactical-backend")
-											parts := strings.Split(missingPod, "-")
-											if len(parts) >= 2 {
-												stsName := strings.Join(parts[:len(parts)-1], "-")
-
-												pterm.Info.Printf("\n    Checking StatefulSet %s:\n", stsName)
-
-												// Get StatefulSet status
-												stsStatusArgs := m.getKubectlArgs("-n", ns, "get", "statefulset", stsName, "-o", "json")
-												stsStatusResult, _ := m.executor.Execute(localCtx, "kubectl", stsStatusArgs...)
-												if stsStatusResult != nil && stsStatusResult.Stdout != "" {
-													var sts appsv1.StatefulSet
-													if err := json.Unmarshal([]byte(stsStatusResult.Stdout), &sts); err == nil {
-														pterm.Info.Printf("      Replicas: %d desired, %d ready, %d current\n",
-															func() int32 { if sts.Spec.Replicas != nil { return *sts.Spec.Replicas }; return 1 }(),
-															sts.Status.ReadyReplicas, sts.Status.CurrentReplicas)
-														if len(sts.Status.Conditions) > 0 {
-															for _, cond := range sts.Status.Conditions {
-																if cond.Status != "True" || cond.Type == "Available" {
-																	pterm.Info.Printf("      Condition: %s=%s (%s)\n", cond.Type, cond.Status, cond.Message)
-																}
-															}
-														}
-													}
-												}
-
-												// Get events for the StatefulSet
-												stsEventsArgs := m.getKubectlArgs("-n", ns, "get", "events", "--field-selector", "involvedObject.name="+stsName, "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message", "--no-headers")
-												stsEventsResult, _ := m.executor.Execute(localCtx, "kubectl", stsEventsArgs...)
-												if stsEventsResult != nil && strings.TrimSpace(stsEventsResult.Stdout) != "" {
-													eventLines := strings.Split(strings.TrimSpace(stsEventsResult.Stdout), "\n")
-													if len(eventLines) > 3 {
-														eventLines = eventLines[len(eventLines)-3:]
-													}
-													pterm.Info.Println("      Recent Events:")
-													for _, event := range eventLines {
-														if event != "" {
-															pterm.Info.Printf("        %s\n", event)
-														}
-													}
-												}
-
-												// Check PVC status for this StatefulSet
-												pvcName := stsName // Common pattern: PVC name matches StatefulSet name
-												pvcArgs := m.getKubectlArgs("-n", ns, "get", "pvc", pvcName, "-o", "json")
-												pvcResult, _ := m.executor.Execute(localCtx, "kubectl", pvcArgs...)
-												if pvcResult != nil && pvcResult.Stdout != "" {
-													var pvc corev1.PersistentVolumeClaim
-													if err := json.Unmarshal([]byte(pvcResult.Stdout), &pvc); err == nil {
-														pterm.Info.Printf("      PVC %s: Phase=%s", pvcName, pvc.Status.Phase)
-														if pvc.Status.Phase != corev1.ClaimBound {
-															pterm.Warning.Printf(" (not bound!)")
-														}
-														pterm.Println()
-													}
-												} else {
-													// Try volumeClaimTemplate pattern: data-{stsname}-0
-													pvcName = "data-" + stsName + "-0"
-													pvcArgs = m.getKubectlArgs("-n", ns, "get", "pvc", pvcName, "-o", "json")
-													pvcResult, _ = m.executor.Execute(localCtx, "kubectl", pvcArgs...)
-													if pvcResult != nil && pvcResult.Stdout != "" {
-														var pvc corev1.PersistentVolumeClaim
-														if err := json.Unmarshal([]byte(pvcResult.Stdout), &pvc); err == nil {
-															pterm.Info.Printf("      PVC %s: Phase=%s", pvcName, pvc.Status.Phase)
-															if pvc.Status.Phase != corev1.ClaimBound {
-																pterm.Warning.Printf(" (not bound!)")
-															}
-															pterm.Println()
-														}
-													}
-												}
-											}
-										}
-									}
-
-									if len(problemPods) == 0 && len(missingPods) == 0 {
-										pterm.Info.Println("  No problematic pods found (may be an ArgoCD sync issue)")
-										continue
-									}
-
-									pterm.Info.Printf("  Found %d pod(s) with issues\n", len(problemPods))
-
-									for podName := range problemPods {
-										pterm.Info.Printf("\n  Pod: %s\n", podName)
-
-										// Get pod status as JSON to avoid Windows WSL escaping issues
-										podStatusArgs := m.getKubectlArgs("-n", ns, "get", "pod", podName, "-o", "json")
-										podStatusResult, _ := m.executor.Execute(localCtx, "kubectl", podStatusArgs...)
-										if podStatusResult != nil && podStatusResult.Stdout != "" {
-											var pod corev1.Pod
-											if err := json.Unmarshal([]byte(podStatusResult.Stdout), &pod); err == nil {
-												// Build status string similar to the old jsonpath output
-												var states []string
-												for _, cs := range pod.Status.ContainerStatuses {
-													if cs.State.Waiting != nil {
-														states = append(states, fmt.Sprintf("waiting(%s)", cs.State.Waiting.Reason))
-													} else if cs.State.Running != nil {
-														states = append(states, "running")
-													} else if cs.State.Terminated != nil {
-														states = append(states, fmt.Sprintf("terminated(%s)", cs.State.Terminated.Reason))
-													}
-												}
-												pterm.Info.Printf("  Status: %s/%s\n", pod.Status.Phase, strings.Join(states, ","))
-											}
-										}
-
-										// Get recent events for this pod using explicit context
-										eventsArgs := m.getKubectlArgs("-n", ns, "get", "events", "--field-selector", "involvedObject.name="+podName, "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message", "--no-headers")
-										eventsResult, _ := m.executor.Execute(localCtx, "kubectl", eventsArgs...)
-										if eventsResult != nil && eventsResult.Stdout != "" {
-											eventLines := strings.Split(strings.TrimSpace(eventsResult.Stdout), "\n")
-											if len(eventLines) > 5 {
-												eventLines = eventLines[len(eventLines)-5:]
-											}
-											pterm.Info.Println("  Recent Events:")
-											for _, event := range eventLines {
-												if event != "" {
-													pterm.Info.Printf("    %s\n", event)
-												}
-											}
-										}
-
-										// Get last 20 lines of logs using explicit context
-										logsArgs := m.getKubectlArgs("-n", ns, "logs", podName, "--tail=20", "--all-containers=true", "--prefix=true")
-										logsResult, _ := m.executor.Execute(localCtx, "kubectl", logsArgs...)
-										if logsResult != nil && logsResult.Stdout != "" {
-											pterm.Info.Println("  Recent Logs:")
-											for _, line := range strings.Split(logsResult.Stdout, "\n") {
-												if line != "" {
-													pterm.Info.Printf("    %s\n", line)
-												}
-											}
-										}
-									}
-								}
-								pterm.Info.Println("\n=== End Debug ===")
 							}
 						}
+
 					}
 
 					// Show recently completed applications
@@ -862,14 +480,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				maxAppsSeenReady = readyCount
 			}
 
-			// Check if deployment is complete - ALL currently detected apps must be healthy and synced
-			// All apps must be currently ready (not just "ever ready")
-			// Additionally, totalApps must be >= the highest count we've ever seen (high-water-mark guard)
-			// to prevent declaring success when the API momentarily returns fewer apps
-			allReady := false
-			if totalApps > 0 && currentlyReady == totalApps && totalApps >= maxAppsSeenTotal {
-				allReady = true
-			} else if totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
+			// Check if deployment is complete — ALL currently detected apps must be
+			// healthy and synced (not just "ever ready"), guarded by the high-water
+			// mark of the app count (see isDeploymentComplete).
+			allReady := isDeploymentComplete(totalApps, currentlyReady, maxAppsSeenTotal)
+			if !allReady && totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
 				pterm.Warning.Printf("Application count dropped: %d visible vs %d previously seen — waiting for all apps to reappear\n", totalApps, maxAppsSeenTotal)
 			}
 
@@ -887,7 +502,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 				if consecutiveAllReady >= stabilizationChecks {
 					spinnerMutex.Lock()
-					if !spinnerStopped && spinner != nil && spinner.IsActive {
+					if !spinnerStopped && spinner != nil {
 						spinner.Stop()
 						spinnerStopped = true
 					}
@@ -908,13 +523,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 // waitForArgoCDReady waits for ArgoCD CRD and pods to be ready using native Go clients
 // This reduces reliance on external kubectl binary
 func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs bool) error {
-	// On Windows/WSL2, always use kubectl because native Go client can't reliably
-	// reach the cluster running inside WSL due to networking bridge issues
-	if runtime.GOOS == "windows" {
-		if verbose {
-			pterm.Info.Println("Using kubectl for ArgoCD readiness check (Windows/WSL2 mode)")
-		}
-		return m.waitForArgoCDReadyViaKubectl(ctx, verbose, skipCRDs)
+	// On Windows the cluster lives in WSL2 and must be reached from inside WSL.
+	if err := platform.WSLClusterHint("wait for ArgoCD to be ready"); err != nil {
+		return err
 	}
 
 	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
@@ -922,10 +533,7 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 
 	// Initialize Kubernetes clients for native API access
 	if err := m.initKubernetesClients(); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to initialize native clients, falling back to kubectl: %v\n", err)
-		}
-		return m.waitForArgoCDReadyViaKubectl(ctx, verbose, skipCRDs)
+		return fmt.Errorf("failed to initialize the Kubernetes client: %w", err)
 	}
 
 	// Skip CRD wait if CRDs installation was skipped (e.g., in non-interactive/CI mode)
@@ -992,7 +600,7 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		}
 
 		// List ArgoCD pods using native client
-		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+		podList, err := m.kubeClient.CoreV1().Pods(ArgoCDNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app.kubernetes.io/part-of=argocd",
 		})
 
@@ -1028,7 +636,7 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		default:
 		}
 
-		podList, err := m.kubeClient.CoreV1().Pods("argocd").List(ctx, metav1.ListOptions{
+		podList, err := m.kubeClient.CoreV1().Pods(ArgoCDNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app.kubernetes.io/part-of=argocd",
 		})
 
@@ -1060,690 +668,4 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 
 	m.printArgoCDPodDiagnostics(ctx)
 	return fmt.Errorf("timeout waiting for ArgoCD pods to be ready")
-}
-
-// isPodReady checks if a pod has the Ready condition set to True
-// Completed Job pods (like argocd-redis-secret-init) are considered "ready" since they finished successfully
-func isPodReady(pod *corev1.Pod) bool {
-	// Completed pods (from Jobs) are considered ready - they finished their work successfully
-	if pod.Status.Phase == corev1.PodSucceeded {
-		return true
-	}
-
-	if pod.Status.Phase != corev1.PodRunning {
-		return false
-	}
-
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-	return false
-}
-
-// waitForArgoCDReadyViaKubectl is the fallback method using kubectl
-func (m *Manager) waitForArgoCDReadyViaKubectl(ctx context.Context, verbose bool, skipCRDs bool) error {
-	maxRetries := 100
-	retryInterval := 3 * time.Second
-
-	if skipCRDs {
-		if verbose {
-			pterm.Info.Println("Skipping ArgoCD CRD wait (CRDs managed by Helm chart)")
-		}
-	} else {
-		if verbose {
-			pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
-		}
-
-		for i := 0; i < maxRetries; i++ {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("operation cancelled: %w", ctx.Err())
-			default:
-			}
-
-			clusterCheckArgs := m.getKubectlArgs("cluster-info")
-			clusterResult, clusterErr := m.executor.Execute(ctx, "kubectl", clusterCheckArgs...)
-			if clusterErr != nil || clusterResult.ExitCode != 0 {
-				if verbose {
-					pterm.Warning.Printf("Cluster connectivity issue detected, waiting... (attempt %d/%d)\n", i+1, maxRetries)
-				}
-				time.Sleep(retryInterval)
-				continue
-			}
-
-			crdArgs := m.getKubectlArgs("get", "crd", "applications.argoproj.io")
-			result, err := m.executor.Execute(ctx, "kubectl", crdArgs...)
-			if err == nil && result.ExitCode == 0 {
-				if verbose {
-					pterm.Success.Println("ArgoCD CRD applications.argoproj.io is ready")
-				}
-				break
-			}
-
-			if i == maxRetries-1 {
-				return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
-			}
-
-			if verbose && i%5 == 0 {
-				pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
-			}
-
-			time.Sleep(retryInterval)
-		}
-	}
-
-	if verbose {
-		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
-	}
-
-	podExistenceTimeout := 120 * time.Second
-	podExistenceInterval := 3 * time.Second
-	podExistenceStart := time.Now()
-	podsExist := false
-
-	for time.Since(podExistenceStart) < podExistenceTimeout {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled: %w", ctx.Err())
-		default:
-		}
-
-		// Use -o json to avoid Windows WSL escaping issues with jsonpath
-		checkArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
-			"-l", "app.kubernetes.io/part-of=argocd",
-			"-o", "json")
-		checkResult, checkErr := m.executor.Execute(ctx, "kubectl", checkArgs...)
-
-		if checkErr == nil && checkResult != nil && strings.TrimSpace(checkResult.Stdout) != "" {
-			var podList corev1.PodList
-			podNames := []string{}
-			if jsonErr := json.Unmarshal([]byte(checkResult.Stdout), &podList); jsonErr == nil {
-				for _, p := range podList.Items {
-					podNames = append(podNames, p.Name)
-				}
-			}
-			if len(podNames) > 0 {
-				if verbose {
-					pterm.Info.Printf("Found %d ArgoCD pod(s), waiting for them to be ready...\n", len(podNames))
-				}
-				podsExist = true
-				break
-			}
-		}
-
-		if verbose && int(time.Since(podExistenceStart).Seconds())%15 == 0 {
-			pterm.Info.Println("Waiting for ArgoCD pods to be created...")
-		}
-
-		time.Sleep(podExistenceInterval)
-	}
-
-	if !podsExist {
-		pterm.Warning.Println("No ArgoCD pods found after waiting. Collecting diagnostics...")
-		m.printArgoCDPodDiagnostics(ctx)
-		return fmt.Errorf("timeout waiting for ArgoCD pods to be created (no pods found with label app.kubernetes.io/part-of=argocd)")
-	}
-
-	// Wait for pods to be ready using a polling approach instead of kubectl wait
-	// This allows us to properly handle completed Job pods (like argocd-redis-secret-init)
-	// which don't have a Ready condition but are considered "done"
-	podReadyTimeout := 5 * time.Minute
-	podReadyStart := time.Now()
-
-	for time.Since(podReadyStart) < podReadyTimeout {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled: %w", ctx.Err())
-		default:
-		}
-
-		// Get all ArgoCD pods as JSON
-		podsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods",
-			"-l", "app.kubernetes.io/part-of=argocd",
-			"-o", "json")
-		podsResult, err := m.executor.Execute(ctx, "kubectl", podsArgs...)
-
-		if err != nil {
-			if verbose {
-				pterm.Warning.Printf("Failed to list pods: %v\n", err)
-			}
-			time.Sleep(retryInterval)
-			continue
-		}
-
-		if podsResult == nil || podsResult.Stdout == "" {
-			time.Sleep(retryInterval)
-			continue
-		}
-
-		var podList corev1.PodList
-		if err := json.Unmarshal([]byte(podsResult.Stdout), &podList); err != nil {
-			if verbose {
-				pterm.Warning.Printf("Failed to parse pod list: %v\n", err)
-			}
-			time.Sleep(retryInterval)
-			continue
-		}
-
-		allReady := true
-		for _, pod := range podList.Items {
-			if !isPodReady(&pod) {
-				allReady = false
-				break
-			}
-		}
-
-		if allReady && len(podList.Items) > 0 {
-			if verbose {
-				pterm.Success.Println("ArgoCD pods are ready")
-			}
-			return nil
-		}
-
-		time.Sleep(retryInterval)
-	}
-
-	m.printArgoCDPodDiagnostics(ctx)
-	return fmt.Errorf("timeout waiting for ArgoCD pods to be ready")
-}
-
-// printArgoCDPodDiagnostics prints diagnostic information about ArgoCD pods when they fail to become ready
-func (m *Manager) printArgoCDPodDiagnostics(ctx context.Context) {
-	pterm.Warning.Println("ArgoCD pods failed to become ready. Collecting diagnostics...")
-
-	// First check Helm release status to understand if ArgoCD was installed correctly
-	helmStatusArgs := []string{"status", "argo-cd", "-n", "argocd"}
-	helmResult, _ := m.executor.Execute(ctx, "helm", helmStatusArgs...)
-	if helmResult != nil && helmResult.Stdout != "" {
-		pterm.Info.Println("\nHelm release status:")
-		// Show just the first few lines of status
-		statusLines := strings.Split(helmResult.Stdout, "\n")
-		for i, line := range statusLines {
-			if i < 10 {
-				pterm.Info.Printf("  %s\n", line)
-			}
-		}
-	} else {
-		pterm.Warning.Println("Could not get Helm release status for argo-cd")
-	}
-
-	// Check for deployments in argocd namespace
-	deployArgs := m.getKubectlArgs("-n", "argocd", "get", "deployments", "-o", "wide")
-	deployResult, _ := m.executor.Execute(ctx, "kubectl", deployArgs...)
-	if deployResult != nil && deployResult.Stdout != "" {
-		pterm.Info.Println("\nArgoCD deployments:")
-		for _, line := range strings.Split(strings.TrimSpace(deployResult.Stdout), "\n") {
-			pterm.Info.Printf("  %s\n", line)
-		}
-	}
-
-	// Get all pods in argocd namespace with their status
-	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-o", "wide")
-	podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
-	if podResult != nil && podResult.Stdout != "" {
-		pterm.Info.Println("ArgoCD pods status:")
-		for _, line := range strings.Split(strings.TrimSpace(podResult.Stdout), "\n") {
-			pterm.Info.Printf("  %s\n", line)
-		}
-	}
-
-	// Get pods that are not ready and show their details
-	// Use --field-selector instead of jsonpath to avoid Windows WSL escaping issues
-	notReadyArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase!=Running", "-o", "name")
-	notReadyResult, _ := m.executor.Execute(ctx, "kubectl", notReadyArgs...)
-
-	var problemPods []string
-	if notReadyResult != nil && notReadyResult.Stdout != "" {
-		for _, pod := range strings.Split(strings.TrimSpace(notReadyResult.Stdout), "\n") {
-			if pod != "" {
-				// Strip "pod/" prefix from -o name output
-				podName := strings.TrimPrefix(pod, "pod/")
-				problemPods = append(problemPods, podName)
-			}
-		}
-	}
-
-	// Also check for pods that are Running but not Ready (container issues)
-	// Use -o json and parse in Go to avoid Windows WSL escaping issues with jsonpath
-	runningPodsArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "--field-selector=status.phase=Running", "-o", "json")
-	runningPodsResult, _ := m.executor.Execute(ctx, "kubectl", runningPodsArgs...)
-	if runningPodsResult != nil && runningPodsResult.Stdout != "" {
-		var podList corev1.PodList
-		if err := json.Unmarshal([]byte(runningPodsResult.Stdout), &podList); err == nil {
-			for _, pod := range podList.Items {
-				// Check if the Ready condition is not True
-				for _, cond := range pod.Status.Conditions {
-					if cond.Type == corev1.PodReady && cond.Status != corev1.ConditionTrue {
-						problemPods = append(problemPods, pod.Name)
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Show details for problem pods
-	for _, podName := range problemPods {
-		pterm.Info.Printf("\n--- Pod: %s ---\n", podName)
-
-		// Get pod details as JSON to avoid Windows WSL escaping issues with jsonpath
-		podArgs := m.getKubectlArgs("-n", "argocd", "get", "pod", podName, "-o", "json")
-		podResult, _ := m.executor.Execute(ctx, "kubectl", podArgs...)
-		if podResult != nil && podResult.Stdout != "" {
-			var pod corev1.Pod
-			if err := json.Unmarshal([]byte(podResult.Stdout), &pod); err == nil {
-				// Print phase
-				pterm.Info.Printf("Phase: %s\n", pod.Status.Phase)
-
-				// Print conditions
-				pterm.Info.Println("Conditions:")
-				for _, cond := range pod.Status.Conditions {
-					reason := string(cond.Reason)
-					if reason == "" {
-						reason = "-"
-					}
-					pterm.Info.Printf("  %s=%s (%s)\n", cond.Type, cond.Status, reason)
-				}
-
-				// Print container statuses
-				pterm.Info.Println("Containers:")
-				for _, cs := range pod.Status.ContainerStatuses {
-					pterm.Info.Printf("  %s: ready=%t, restarts=%d\n", cs.Name, cs.Ready, cs.RestartCount)
-				}
-			}
-		}
-
-		// Get recent events for this pod
-		eventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
-			"--field-selector", "involvedObject.name="+podName,
-			"--sort-by=.lastTimestamp",
-			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,REASON:.reason,MESSAGE:.message",
-			"--no-headers")
-		eventsResult, _ := m.executor.Execute(ctx, "kubectl", eventsArgs...)
-		if eventsResult != nil && eventsResult.Stdout != "" {
-			eventLines := strings.Split(strings.TrimSpace(eventsResult.Stdout), "\n")
-			// Show last 5 events
-			if len(eventLines) > 5 {
-				eventLines = eventLines[len(eventLines)-5:]
-			}
-			pterm.Info.Println("Recent Events:")
-			for _, event := range eventLines {
-				if event != "" {
-					pterm.Info.Printf("  %s\n", event)
-				}
-			}
-		}
-
-		// Get container logs if pod exists
-		logsArgs := m.getKubectlArgs("-n", "argocd", "logs", podName, "--tail=10", "--all-containers=true")
-		logsResult, _ := m.executor.Execute(ctx, "kubectl", logsArgs...)
-		if logsResult != nil && logsResult.Stdout != "" {
-			pterm.Info.Println("Recent Logs (last 10 lines):")
-			for _, line := range strings.Split(strings.TrimSpace(logsResult.Stdout), "\n") {
-				pterm.Info.Printf("  %s\n", line)
-			}
-		}
-	}
-
-	// If no specific problem pods found, show general namespace events
-	if len(problemPods) == 0 {
-		pterm.Info.Println("\nNo specific problem pods found. Showing recent namespace events:")
-		nsEventsArgs := m.getKubectlArgs("-n", "argocd", "get", "events",
-			"--sort-by=.lastTimestamp",
-			"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,OBJECT:.involvedObject.name,REASON:.reason,MESSAGE:.message",
-			"--no-headers")
-		nsEventsResult, _ := m.executor.Execute(ctx, "kubectl", nsEventsArgs...)
-		if nsEventsResult != nil && nsEventsResult.Stdout != "" {
-			eventLines := strings.Split(strings.TrimSpace(nsEventsResult.Stdout), "\n")
-			if len(eventLines) > 10 {
-				eventLines = eventLines[len(eventLines)-10:]
-			}
-			for _, event := range eventLines {
-				if event != "" {
-					pterm.Info.Printf("  %s\n", event)
-				}
-			}
-		}
-	}
-}
-
-// checkClusterConnectivity performs a quick health check on the Kubernetes cluster
-func (m *Manager) checkClusterConnectivity(ctx context.Context, verbose bool) error {
-	// Use kubectl cluster-info as a quick connectivity check
-	clusterInfoArgs := m.getKubectlArgs("cluster-info")
-	result, err := m.executor.Execute(ctx, "kubectl", clusterInfoArgs...)
-
-	if err != nil {
-		return fmt.Errorf("kubectl execution failed: %w", err)
-	}
-
-	if result.ExitCode != 0 {
-		errMsg := result.Stderr
-		if errMsg == "" {
-			errMsg = result.Stdout
-		}
-		return fmt.Errorf("cluster unreachable (exit code %d): %s", result.ExitCode, errMsg)
-	}
-
-	if verbose {
-		pterm.Debug.Println("Cluster connectivity check passed")
-	}
-
-	return nil
-}
-
-// printClusterDiagnostics prints diagnostic information when the cluster becomes unreachable
-func (m *Manager) printClusterDiagnostics(ctx context.Context) {
-	pterm.Error.Println("Cluster became unreachable. Collecting diagnostics...")
-
-	// Check if we're on Windows/WSL
-	if runtime.GOOS == "windows" {
-		pterm.Info.Println("\n=== WSL/Docker Diagnostics ===")
-
-		// Check WSL status
-		wslResult, _ := m.executor.Execute(ctx, "wsl", "--list", "--verbose")
-		if wslResult != nil && wslResult.Stdout != "" {
-			pterm.Info.Println("WSL distributions:")
-			pterm.Println(wslResult.Stdout)
-		}
-
-		// === Resource Checks for Windows/WSL ===
-		pterm.Info.Println("\n=== System Resources ===")
-
-		// Check memory usage in WSL
-		memResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"free -h 2>/dev/null || echo 'Could not get memory info'")
-		if memResult != nil && memResult.Stdout != "" {
-			pterm.Info.Println("Memory usage (WSL):")
-			pterm.Println(memResult.Stdout)
-		}
-
-		// Check disk space in WSL
-		diskResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"df -h / /tmp 2>/dev/null | head -5 || echo 'Could not get disk info'")
-		if diskResult != nil && diskResult.Stdout != "" {
-			pterm.Info.Println("Disk space (WSL):")
-			pterm.Println(diskResult.Stdout)
-		}
-
-		// Check Docker system resources
-		dockerStatsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"sudo docker stats --no-stream --format 'table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.MemPerc}}' 2>/dev/null | head -10 || echo 'Could not get Docker stats'")
-		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
-			pterm.Info.Println("Docker container resource usage:")
-			pterm.Println(dockerStatsResult.Stdout)
-		}
-
-		// Check Docker system info (total resources)
-		dockerInfoResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"sudo docker info 2>/dev/null | grep -E '(CPUs|Total Memory|Docker Root Dir)' || echo 'Could not get Docker info'")
-		if dockerInfoResult != nil && dockerInfoResult.Stdout != "" {
-			pterm.Info.Println("Docker system info:")
-			pterm.Println(dockerInfoResult.Stdout)
-		}
-
-		// Check for OOM kills
-		oomResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"dmesg 2>/dev/null | grep -i 'out of memory\\|oom\\|killed process' | tail -5 || echo 'No OOM events found (or dmesg not accessible)'")
-		if oomResult != nil && oomResult.Stdout != "" {
-			pterm.Info.Println("Recent OOM events:")
-			pterm.Println(oomResult.Stdout)
-		}
-
-		pterm.Info.Println("\n=== Container Status ===")
-
-		// Check if Docker is running inside WSL
-		dockerResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Size}}' 2>&1 || echo 'Docker not accessible'")
-		if dockerResult != nil && dockerResult.Stdout != "" {
-			pterm.Info.Println("Docker containers in WSL:")
-			pterm.Println(dockerResult.Stdout)
-		}
-
-		// Check k3d cluster status
-		k3dResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo -E k3d cluster list 2>&1 || echo 'k3d not accessible'")
-		if k3dResult != nil && k3dResult.Stdout != "" {
-			pterm.Info.Println("k3d clusters:")
-			pterm.Println(k3dResult.Stdout)
-		}
-
-		// Check port connectivity
-		portResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "nc -zv 127.0.0.1 6550 2>&1 || echo 'Port 6550 not reachable'")
-		if portResult != nil {
-			pterm.Info.Println("Port 6550 connectivity:")
-			output := portResult.Stdout
-			if portResult.Stderr != "" {
-				output = portResult.Stderr
-			}
-			pterm.Println(output)
-		}
-
-		// Check Docker logs for k3d server container
-		dockerLogsResult, _ := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "bash", "-c",
-			"sudo docker logs --tail 50 k3d-"+m.clusterName+"-server-0 2>&1 || echo 'Could not get container logs'")
-		if dockerLogsResult != nil && dockerLogsResult.Stdout != "" {
-			pterm.Info.Println("k3d server container logs (last 50 lines):")
-			pterm.Println(dockerLogsResult.Stdout)
-		}
-	} else {
-		// Linux/macOS diagnostics
-		pterm.Info.Println("\n=== Cluster Diagnostics ===")
-
-		// === Resource Checks for Linux/macOS ===
-		pterm.Info.Println("\n=== System Resources ===")
-
-		// Check memory usage
-		memResult, _ := m.executor.Execute(ctx, "bash", "-c", "free -h 2>/dev/null || vm_stat 2>/dev/null | head -10 || echo 'Could not get memory info'")
-		if memResult != nil && memResult.Stdout != "" {
-			pterm.Info.Println("Memory usage:")
-			pterm.Println(memResult.Stdout)
-		}
-
-		// Check disk space
-		diskResult, _ := m.executor.Execute(ctx, "df", "-h", "/", "/tmp", "/var")
-		if diskResult != nil && diskResult.Stdout != "" {
-			pterm.Info.Println("Disk space:")
-			pterm.Println(diskResult.Stdout)
-		}
-
-		// Check Docker system resources
-		dockerStatsResult, _ := m.executor.Execute(ctx, "docker", "stats", "--no-stream", "--format", "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}")
-		if dockerStatsResult != nil && dockerStatsResult.Stdout != "" {
-			pterm.Info.Println("Docker container resource usage:")
-			pterm.Println(dockerStatsResult.Stdout)
-		}
-
-		// Check Docker system info
-		dockerInfoResult, _ := m.executor.Execute(ctx, "bash", "-c", "docker info 2>/dev/null | grep -E '(CPUs|Total Memory|Docker Root Dir)' || echo 'Could not get Docker info'")
-		if dockerInfoResult != nil && dockerInfoResult.Stdout != "" {
-			pterm.Info.Println("Docker system info:")
-			pterm.Println(dockerInfoResult.Stdout)
-		}
-
-		// Check for OOM kills (Linux only)
-		oomResult, _ := m.executor.Execute(ctx, "bash", "-c", "dmesg 2>/dev/null | grep -i 'out of memory\\|oom\\|killed process' | tail -5 || echo 'No OOM events found'")
-		if oomResult != nil && oomResult.Stdout != "" {
-			pterm.Info.Println("Recent OOM events:")
-			pterm.Println(oomResult.Stdout)
-		}
-
-		pterm.Info.Println("\n=== Container Status ===")
-
-		// Check Docker status
-		dockerResult, _ := m.executor.Execute(ctx, "docker", "ps", "-a", "--format", "table {{.Names}}\t{{.Status}}\t{{.Size}}")
-		if dockerResult != nil && dockerResult.Stdout != "" {
-			pterm.Info.Println("Docker containers:")
-			pterm.Println(dockerResult.Stdout)
-		}
-
-		// Check k3d cluster status
-		k3dResult, _ := m.executor.Execute(ctx, "k3d", "cluster", "list")
-		if k3dResult != nil && k3dResult.Stdout != "" {
-			pterm.Info.Println("k3d clusters:")
-			pterm.Println(k3dResult.Stdout)
-		}
-
-		// Check Docker logs for k3d server container
-		dockerLogsResult, _ := m.executor.Execute(ctx, "docker", "logs", "--tail", "50", "k3d-"+m.clusterName+"-server-0")
-		if dockerLogsResult != nil && dockerLogsResult.Stdout != "" {
-			pterm.Info.Println("k3d server container logs (last 50 lines):")
-			pterm.Println(dockerLogsResult.Stdout)
-		}
-	}
-
-	// Try to get Kubernetes node resource status if cluster is still partially accessible
-	pterm.Info.Println("\n=== Kubernetes Node Resources ===")
-	nodeArgs := m.getKubectlArgs("top", "nodes")
-	nodeResult, _ := m.executor.Execute(ctx, "kubectl", nodeArgs...)
-	if nodeResult != nil && nodeResult.Stdout != "" && nodeResult.ExitCode == 0 {
-		pterm.Info.Println("Node resource usage:")
-		pterm.Println(nodeResult.Stdout)
-	} else {
-		pterm.Warning.Println("Could not get node resource usage (cluster may be unreachable)")
-	}
-
-	// Try to get pod resource usage
-	podTopArgs := m.getKubectlArgs("top", "pods", "-A", "--sort-by=memory")
-	podTopResult, _ := m.executor.Execute(ctx, "kubectl", podTopArgs...)
-	if podTopResult != nil && podTopResult.Stdout != "" && podTopResult.ExitCode == 0 {
-		pterm.Info.Println("Top pods by memory usage:")
-		// Only show top 15 pods
-		lines := strings.Split(podTopResult.Stdout, "\n")
-		if len(lines) > 16 {
-			lines = lines[:16]
-		}
-		pterm.Println(strings.Join(lines, "\n"))
-	}
-
-	pterm.Info.Println("\n=== End Diagnostics ===")
-}
-
-// RepoServerIssue represents a detected issue with the ArgoCD repo-server
-type RepoServerIssue struct {
-	Type        string // "communication", "resource", "git", "timeout"
-	Message     string
-	Recoverable bool
-}
-
-// checkRepoServerHealth checks the health of the ArgoCD repo-server and returns any issues found
-func (m *Manager) checkRepoServerHealth(ctx context.Context, verbose bool) *RepoServerIssue {
-	// Get repo-server pod status
-	podArgs := m.getKubectlArgs("-n", "argocd", "get", "pods", "-l", "app.kubernetes.io/name=argocd-repo-server", "-o", "json")
-	podResult, err := m.executor.Execute(ctx, "kubectl", podArgs...)
-	if err != nil {
-		return &RepoServerIssue{
-			Type:        "communication",
-			Message:     fmt.Sprintf("Failed to get repo-server pod status: %v", err),
-			Recoverable: true,
-		}
-	}
-
-	if podResult == nil || podResult.Stdout == "" {
-		return &RepoServerIssue{
-			Type:        "communication",
-			Message:     "No repo-server pods found",
-			Recoverable: false,
-		}
-	}
-
-	var podList corev1.PodList
-	if err := json.Unmarshal([]byte(podResult.Stdout), &podList); err != nil {
-		return nil // Can't parse, assume OK
-	}
-
-	for _, pod := range podList.Items {
-		// Check for restarts (indicates crash loops or OOM)
-		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.RestartCount > 0 {
-				return &RepoServerIssue{
-					Type:        "resource",
-					Message:     fmt.Sprintf("repo-server container '%s' has restarted %d time(s) - may indicate OOM or crash", cs.Name, cs.RestartCount),
-					Recoverable: true,
-				}
-			}
-
-			// Check for waiting state with specific reasons
-			if cs.State.Waiting != nil {
-				reason := cs.State.Waiting.Reason
-				if reason == "CrashLoopBackOff" || reason == "OOMKilled" {
-					return &RepoServerIssue{
-						Type:        "resource",
-						Message:     fmt.Sprintf("repo-server container '%s' is in %s state", cs.Name, reason),
-						Recoverable: reason != "OOMKilled", // OOM needs resource adjustment
-					}
-				}
-			}
-		}
-
-		// Check pod phase
-		if pod.Status.Phase != corev1.PodRunning {
-			return &RepoServerIssue{
-				Type:        "resource",
-				Message:     fmt.Sprintf("repo-server pod is in %s phase (expected Running)", pod.Status.Phase),
-				Recoverable: true,
-			}
-		}
-	}
-
-	return nil
-}
-
-// checkRepoServerResources checks resource usage of the repo-server
-func (m *Manager) checkRepoServerResources(ctx context.Context) (memoryUsage string, cpuUsage string, err error) {
-	// Try to get resource usage via kubectl top
-	topArgs := m.getKubectlArgs("top", "pods", "-n", "argocd", "-l", "app.kubernetes.io/name=argocd-repo-server", "--no-headers")
-	topResult, err := m.executor.Execute(ctx, "kubectl", topArgs...)
-	if err != nil || topResult == nil || topResult.ExitCode != 0 {
-		return "", "", fmt.Errorf("metrics not available")
-	}
-
-	// Parse output: NAME CPU(cores) MEMORY(bytes)
-	lines := strings.Split(strings.TrimSpace(topResult.Stdout), "\n")
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			return fields[2], fields[1], nil // memory, cpu
-		}
-	}
-
-	return "", "", fmt.Errorf("could not parse metrics output")
-}
-
-// triggerRepoServerRecovery attempts to recover from repo-server issues
-func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string) bool {
-	// Delete the repo-server pod to force a restart
-	deleteArgs := m.getKubectlArgs("-n", "argocd", "delete", "pod", "-l", "app.kubernetes.io/name=argocd-repo-server", "--wait=false")
-	deleteResult, err := m.executor.Execute(ctx, "kubectl", deleteArgs...)
-	if err != nil || (deleteResult != nil && deleteResult.ExitCode != 0) {
-		return false
-	}
-
-	// Wait for repo-server to come back up (max 60 seconds)
-	for i := 0; i < 20; i++ {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(3 * time.Second):
-		}
-
-		// Check if repo-server is running again
-		issue := m.checkRepoServerHealth(ctx, false)
-		if issue == nil {
-			// Force a refresh of the application if specified
-			if appName != "" {
-				refreshArgs := m.getKubectlArgs("-n", "argocd", "patch", "application", appName,
-					"--type", "merge", "-p", `{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
-				m.executor.Execute(ctx, "kubectl", refreshArgs...)
-			}
-			return true
-		}
-	}
-
-	return false
-}
-
-// logResourceStatus is a no-op placeholder for resource status logging
-func (m *Manager) logResourceStatus(ctx context.Context, verbose bool) {
-	// Resource logging disabled to reduce noise
 }

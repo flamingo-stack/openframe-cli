@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"strings"
+	stderrors "errors"
 	"sync"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
@@ -61,32 +61,24 @@ func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) 
 
 		// Execute the command
 		err := runFunc(cmd, args)
-		if err != nil {
-			// Check if error has already been handled by global error handler
-			if alreadyHandledErr, isAlreadyHandled := err.(*errors.AlreadyHandledError); isAlreadyHandled {
-				// Error has already been displayed by HandleGlobalError
-				// Return the original error so test framework can detect failure
-				return alreadyHandledErr.OriginalError
-			}
-
-			// Handle error with proper context - show user-friendly message
-			verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
-			handler := errors.NewErrorHandler(verbose)
-			handler.HandleError(err)
-
-			// For validation errors and critical failures, return error for proper exit code
-			if errors.IsValidationError(err) ||
-				strings.Contains(err.Error(), "not found") ||
-				strings.Contains(err.Error(), "cluster create operation failed") ||
-				strings.Contains(err.Error(), "cluster name") || // Cluster name validation errors
-				strings.Contains(err.Error(), "node count must") { // Node count validation errors
-				return err // Return error for proper exit code
-			}
-
-			// For other errors, return nil to prevent Cobra double-printing
+		if err == nil {
 			return nil
 		}
-		return err
+
+		// Already displayed inside runFunc (e.g. via HandleGlobalError): keep the
+		// sentinel so main.go exits non-zero without re-printing.
+		var handled *errors.AlreadyHandledError
+		if stderrors.As(err, &handled) {
+			return err
+		}
+
+		// Otherwise display it once here and mark it handled. Every command error
+		// now yields a non-zero exit code (previously only string-matched errors
+		// did, so genuine failures could exit 0) — the root has SilenceErrors, so
+		// cobra will not re-print, and main.go skips the sentinel.
+		verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
+		errors.NewErrorHandler(verbose).HandleError(err)
+		return &errors.AlreadyHandledError{OriginalError: err}
 	}
 }
 

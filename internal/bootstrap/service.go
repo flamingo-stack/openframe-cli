@@ -1,19 +1,24 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
 
+	chartmodels "github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
+
+// defaultClusterName is used when the user doesn't name the cluster.
+const defaultClusterName = "openframe-dev"
 
 // Service provides bootstrap functionality
 type Service struct{}
@@ -48,18 +53,8 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate deployment mode
-	if deploymentMode != "" {
-		validModes := []string{"oss-tenant", "saas-tenant", "saas-shared"}
-		isValid := false
-		for _, mode := range validModes {
-			if deploymentMode == mode {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			return fmt.Errorf("invalid deployment mode: %s. Valid options: oss-tenant, saas-tenant, saas-shared", deploymentMode)
-		}
+	if err := utilTypes.ValidateDeploymentMode(deploymentMode); err != nil {
+		return err
 	}
 
 	// Validate non-interactive requires deployment mode
@@ -73,7 +68,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 		clusterName = strings.TrimSpace(args[0])
 	}
 
-	err = s.bootstrap(clusterName, deploymentMode, nonInteractive, verbose)
+	err = s.bootstrap(cmd.Context(), clusterName, deploymentMode, nonInteractive, verbose)
 	if err != nil {
 		// Use shared error handler for consistent error display (same as chart install)
 		return sharedErrors.HandleGlobalError(err, verbose)
@@ -82,7 +77,7 @@ func (s *Service) Execute(cmd *cobra.Command, args []string) error {
 }
 
 // bootstrap executes cluster create followed by chart install
-func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, verbose bool) error {
+func (s *Service) bootstrap(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool) error {
 	// On Windows, initialize WSL2 first before anything else
 	if runtime.GOOS == "windows" {
 		if err := s.initializeWSL(verbose); err != nil {
@@ -91,11 +86,13 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	}
 
 	// Normalize cluster name (use default if empty)
-	config := s.buildClusterConfig(clusterName)
-	actualClusterName := config.Name
+	actualClusterName := clusterName
+	if actualClusterName == "" {
+		actualClusterName = defaultClusterName
+	}
 
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
-	kubeConfig, err := s.createClusterSuppressed(actualClusterName, verbose, nonInteractive)
+	kubeConfig, err := s.createClusterSuppressed(ctx, actualClusterName, verbose, nonInteractive)
 	if err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
@@ -105,7 +102,7 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 	fmt.Println()
 
 	// Step 2: Install charts with deployment mode flags on the created cluster
-	if err := s.installChartWithMode(actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
+	if err := s.installChartWithMode(ctx, actualClusterName, deploymentMode, nonInteractive, verbose, kubeConfig); err != nil {
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
 
@@ -114,39 +111,28 @@ func (s *Service) bootstrap(clusterName, deploymentMode string, nonInteractive, 
 
 // createClusterSuppressed creates a cluster with suppressed UI elements
 // Returns the *rest.Config for the created cluster
-func (s *Service) createClusterSuppressed(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
+func (s *Service) createClusterSuppressed(ctx context.Context, clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Use the wrapper function that includes prerequisite checks
-	return cluster.CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, nonInteractive)
-}
-
-// buildClusterConfig builds a cluster configuration from the cluster name
-func (s *Service) buildClusterConfig(clusterName string) models.ClusterConfig {
-	if clusterName == "" {
-		clusterName = "openframe-dev" // default name
-	}
-
-	return models.ClusterConfig{
-		Name:       clusterName,
-		Type:       models.ClusterTypeK3d,
-		K8sVersion: "",
-		NodeCount:  4,
-	}
+	return cluster.CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, nonInteractive)
 }
 
 // installChartWithMode installs charts with deployment mode flags
-func (s *Service) installChartWithMode(clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
+func (s *Service) installChartWithMode(ctx context.Context, clusterName, deploymentMode string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
 	// Use the chart installation function with deployment mode flags
-	return chartServices.InstallChartsWithConfig(utilTypes.InstallationRequest{
+	return chartServices.InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
 		DryRun:         false,
 		Verbose:        verbose,
-		GitHubRepo:     "https://github.com/flamingo-stack/openframe-oss-tenant", // Default repository
-		GitHubBranch:   "main",                                                   // Default branch
-		CertDir:        "",                                                       // Auto-detected
+		GitHubRepo:     chartmodels.RepoOSSTenant,    // Default repository
+		GitHubBranch:   chartmodels.DefaultGitBranch, // Default branch
+		CertDir:        "",                           // Auto-detected
 		DeploymentMode: deploymentMode,
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
+		// Inject cluster access from the orchestrator (composition root) so the
+		// app subsystem stays isolated from cluster-creation code (req 18/19).
+		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
 	})
 }
 

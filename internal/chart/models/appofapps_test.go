@@ -43,6 +43,55 @@ func TestAppOfAppsConfig_GetGitURL_WithGitSuffix(t *testing.T) {
 	assert.Equal(t, expected, gitURL)
 }
 
+func TestAppOfAppsConfig_GetGitURL_StripsEmbeddedToken(t *testing.T) {
+	// A PAT embedded in the repo URL (x-access-token:TOKEN@) must never appear
+	// in the helm-git URL (audit I1).
+	config := &AppOfAppsConfig{
+		GitHubRepo:   "https://x-access-token:ghp_supersecret@github.com/test/private-repo",
+		GitHubBranch: "main",
+		ChartPath:    "manifests/app-of-apps",
+	}
+
+	gitURL := config.GetGitURL()
+
+	assert.Equal(t, "git+https://github.com/test/private-repo@manifests/app-of-apps?ref=main", gitURL)
+	assert.NotContains(t, gitURL, "ghp_supersecret")
+	assert.NotContains(t, gitURL, "x-access-token")
+	assert.NotContains(t, gitURL, "@github.com", "userinfo separator must be gone")
+}
+
+func TestAppOfAppsConfig_GetGitURL_StripsTokenWithGitSuffix(t *testing.T) {
+	config := &AppOfAppsConfig{
+		GitHubRepo:   "https://x-access-token:ghp_tok@github.com/test/private-repo.git",
+		GitHubBranch: "develop",
+		ChartPath:    "charts",
+	}
+
+	gitURL := config.GetGitURL()
+
+	assert.Equal(t, "git+https://github.com/test/private-repo@charts?ref=develop", gitURL)
+	assert.NotContains(t, gitURL, "ghp_tok")
+}
+
+func TestStripURLCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no credential", "https://github.com/org/repo", "https://github.com/org/repo"},
+		{"token userinfo", "https://x-access-token:ghp_x@github.com/org/repo", "https://github.com/org/repo"},
+		{"username only", "https://user@github.com/org/repo", "https://github.com/org/repo"},
+		{"empty string", "", ""},
+		{"not a url", "::not a url::", "::not a url::"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, stripURLCredentials(tc.in))
+		})
+	}
+}
+
 func TestAppOfAppsConfig_Fields(t *testing.T) {
 	config := &AppOfAppsConfig{}
 

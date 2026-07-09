@@ -25,12 +25,15 @@ type ClusterLister interface {
 	ListClusters() ([]clusterDomain.ClusterInfo, error)
 }
 
-// HelmProvider manages Helm chart operations
-type HelmProvider interface {
-	InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error
-	InstallAppOfAppsFromLocal(ctx context.Context, config config.ChartInstallConfig, certFile, keyFile string) error
-	IsChartInstalled(ctx context.Context, releaseName, namespace string) (bool, error)
-	GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error)
+// ClusterAccess provides the read-only cluster capabilities the app subsystem
+// needs — listing clusters and resolving a rest.Config for one — WITHOUT
+// depending on cluster-creation code. Keeping the app (chart) subsystem behind
+// this interface isolates it from the cluster subsystem (req 18/19); the
+// concrete implementation is injected by the composition root (cmd / bootstrap),
+// which is allowed to import both.
+type ClusterAccess interface {
+	ClusterLister
+	GetRestConfig(name string) (*rest.Config, error)
 }
 
 // GitProvider manages Git repository operations
@@ -142,8 +145,18 @@ type InstallationRequest struct {
 	Verbose        bool
 	GitHubRepo     string
 	GitHubBranch   string
-	CertDir        string
+	// GitHubRefExplicit is true when the operator explicitly set --ref/--github-branch.
+	// When set, GitHubBranch is pinned into the helm values (repository.branch) so it
+	// wins over the values-file branch and both the app-of-apps clone and the child
+	// Applications' targetRevision track that ref.
+	GitHubRefExplicit bool
+	CertDir           string
 	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
 	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
 	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
+	// ClusterAccess resolves clusters and their rest.Config for the install
+	// target. Injected by the composition root so the app subsystem never imports
+	// cluster-creation code (req 18/19). Required for interactive/named-cluster
+	// installs; may be nil when KubeConfig is supplied directly.
+	ClusterAccess ClusterAccess
 }

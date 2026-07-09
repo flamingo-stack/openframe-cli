@@ -14,15 +14,15 @@ func TestShowLogo_TestMode(t *testing.T) {
 	// Save original state
 	originalTestMode := TestMode
 	defer func() { TestMode = originalTestMode }()
-	
+
 	// Enable test mode
 	TestMode = true
-	
+
 	// Capture output
 	output := captureOutput(func() {
 		ShowLogo()
 	})
-	
+
 	// In test mode, nothing should be printed
 	assert.Empty(t, output)
 }
@@ -31,17 +31,17 @@ func TestShowLogo_PlainMode(t *testing.T) {
 	// Save original state
 	originalTestMode := TestMode
 	defer func() { TestMode = originalTestMode }()
-	
+
 	// Disable test mode and force plain logo
 	TestMode = false
 	os.Setenv("OPENFRAME_FANCY_LOGO", "false")
 	defer os.Unsetenv("OPENFRAME_FANCY_LOGO")
-	
+
 	// Capture output
 	output := captureOutput(func() {
 		ShowLogo()
 	})
-	
+
 	// Should contain logo elements
 	assert.Contains(t, output, "OpenFrame Platform Bootstrapper")
 	assert.Contains(t, output, "██████╗")
@@ -52,12 +52,12 @@ func TestShowLogo_FancyMode(t *testing.T) {
 	// Save original state
 	originalTestMode := TestMode
 	defer func() { TestMode = originalTestMode }()
-	
+
 	// Disable test mode and force fancy logo
 	TestMode = false
 	os.Setenv("OPENFRAME_FANCY_LOGO", "true")
 	defer os.Unsetenv("OPENFRAME_FANCY_LOGO")
-	
+
 	// Capture output - fancy mode uses pterm which might not work in tests
 	// So we just verify the function doesn't panic
 	assert.NotPanics(t, func() {
@@ -144,12 +144,12 @@ func TestCenterText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := centerText(tt.text, tt.width)
 			assert.Equal(t, tt.expected, result)
-			
+
 			// Verify the result length matches expected width (unless text is longer or width <= 0)
 			if len(tt.text) <= tt.width && tt.width > 0 {
 				assert.Equal(t, tt.width, len(result))
 			}
-			
+
 			// Verify that non-empty text always produces non-empty result
 			if tt.text != "" {
 				assert.Contains(t, result, tt.text)
@@ -163,12 +163,12 @@ func TestShowPlainLogo(t *testing.T) {
 	output := captureOutput(func() {
 		showPlainLogo()
 	})
-	
+
 	// Verify logo components are present
 	assert.Contains(t, output, "OpenFrame Platform Bootstrapper")
 	assert.Contains(t, output, "████")
 	assert.Contains(t, output, "─────")
-	
+
 	// Verify it contains multiple lines of the logo art
 	lines := strings.Split(output, "\n")
 	logoLines := 0
@@ -194,11 +194,11 @@ func TestLogoConstants(t *testing.T) {
 	assert.Equal(t, "━", borderChar)
 	assert.Equal(t, 84, borderLength)
 	assert.Equal(t, 2, logoLeftPadding)
-	
+
 	// Verify logo art is not empty
 	assert.NotEmpty(t, logoArt)
 	assert.Greater(t, len(logoArt), 5, "Logo should have multiple lines")
-	
+
 	// Verify each line contains Unicode characters and is not empty
 	for i, line := range logoArt {
 		assert.NotEmpty(t, line, "Logo line %d should not be empty", i)
@@ -212,11 +212,11 @@ func TestTestModeVariable(t *testing.T) {
 	// Save original state
 	originalTestMode := TestMode
 	defer func() { TestMode = originalTestMode }()
-	
+
 	// Test setting and getting TestMode
 	TestMode = true
 	assert.True(t, TestMode)
-	
+
 	TestMode = false
 	assert.False(t, TestMode)
 }
@@ -260,8 +260,8 @@ func BenchmarkShowPlainLogo(b *testing.B) {
 }
 
 func BenchmarkCenterText(b *testing.B) {
-	tests := []struct{
-		text string
+	tests := []struct {
+		text  string
 		width int
 	}{
 		{"short", 10},
@@ -280,9 +280,9 @@ func TestShowLogo_EnvironmentVariables(t *testing.T) {
 	// Save original state
 	originalTestMode := TestMode
 	defer func() { TestMode = originalTestMode }()
-	
+
 	TestMode = false
-	
+
 	tests := []struct {
 		name    string
 		envVar  string
@@ -290,33 +290,33 @@ func TestShowLogo_EnvironmentVariables(t *testing.T) {
 		cleanup func()
 	}{
 		{
-			name:   "explicit fancy true",
-			envVar: "OPENFRAME_FANCY_LOGO",
-			envVal: "true",
+			name:    "explicit fancy true",
+			envVar:  "OPENFRAME_FANCY_LOGO",
+			envVal:  "true",
 			cleanup: func() { os.Unsetenv("OPENFRAME_FANCY_LOGO") },
 		},
 		{
-			name:   "explicit fancy false",
-			envVar: "OPENFRAME_FANCY_LOGO", 
-			envVal: "false",
+			name:    "explicit fancy false",
+			envVar:  "OPENFRAME_FANCY_LOGO",
+			envVal:  "false",
 			cleanup: func() { os.Unsetenv("OPENFRAME_FANCY_LOGO") },
 		},
 		{
-			name:   "no environment variable",
-			envVar: "",
-			envVal: "",
+			name:    "no environment variable",
+			envVar:  "",
+			envVal:  "",
 			cleanup: func() {},
 		},
 		{
-			name:   "invalid environment value",
-			envVar: "OPENFRAME_FANCY_LOGO",
-			envVal: "invalid",
+			name:    "invalid environment value",
+			envVar:  "OPENFRAME_FANCY_LOGO",
+			envVal:  "invalid",
 			cleanup: func() { os.Unsetenv("OPENFRAME_FANCY_LOGO") },
 		},
 		{
-			name:   "empty environment value",
-			envVar: "OPENFRAME_FANCY_LOGO",
-			envVal: "",
+			name:    "empty environment value",
+			envVar:  "OPENFRAME_FANCY_LOGO",
+			envVal:  "",
 			cleanup: func() { os.Unsetenv("OPENFRAME_FANCY_LOGO") },
 		},
 	}
@@ -327,7 +327,7 @@ func TestShowLogo_EnvironmentVariables(t *testing.T) {
 				os.Setenv(tt.envVar, tt.envVal)
 			}
 			defer tt.cleanup()
-			
+
 			// Should not panic regardless of environment
 			assert.NotPanics(t, func() {
 				ShowLogo()

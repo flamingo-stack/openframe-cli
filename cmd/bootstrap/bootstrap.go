@@ -1,7 +1,11 @@
 package bootstrap
 
 import (
+	"strings"
+
 	"github.com/flamingo-stack/openframe-cli/internal/bootstrap"
+	clustermodels "github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -28,15 +32,23 @@ Examples:
   openframe bootstrap -v --deployment-mode=oss-tenant  # Verbose mode with pre-selected deployment`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate the cluster name at the boundary (RFC1123) so nothing
+			// unsafe reaches the cluster-creation shell-outs downstream.
+			if len(args) > 0 {
+				if err := clustermodels.ValidateClusterName(strings.TrimSpace(args[0])); err != nil {
+					verbose, _ := cmd.Flags().GetBool("verbose")
+					return sharedErrors.HandleGlobalError(err, verbose)
+				}
+			}
 			// Logo will be shown by cluster wrapper before prerequisites
 			return bootstrap.NewService().Execute(cmd, args)
 		},
 	}
 
 	// Add deployment mode flags
-	cmd.Flags().String("deployment-mode", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
+	cmd.Flags().StringP("deployment-mode", "m", "", "Deployment mode: oss-tenant, saas-tenant, saas-shared (skips deployment selection)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing helm-values.yaml")
-	cmd.Flags().BoolP("verbose", "v", false, "Show detailed logging including ArgoCD sync progress")
+	// --verbose/-v is the root persistent flag; read here via cmd.Flags().GetBool.
 
 	return cmd
 }

@@ -7,17 +7,17 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
 )
 
 func TestNewPrerequisiteChecker(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	if len(checker.requirements) != 4 {
-		t.Errorf("Expected 4 requirements, got %d", len(checker.requirements))
+	if len(checker.requirements) != 3 {
+		t.Errorf("Expected 3 requirements, got %d", len(checker.requirements))
 	}
 
-	expectedNames := []string{"Docker", "kubectl", "k3d", "helm"}
+	// kubectl is intentionally absent — the CLI uses client-go, not the binary.
+	expectedNames := []string{"Docker", "k3d", "helm"}
 	for i, req := range checker.requirements {
 		if req.Name != expectedNames[i] {
 			t.Errorf("Expected requirement %d to be %s, got %s", i, expectedNames[i], req.Name)
@@ -40,7 +40,6 @@ func TestInstallHelp(t *testing.T) {
 		helpFunc func() string
 	}{
 		{"docker", docker.NewDockerInstaller().GetInstallHelp},
-		{"kubectl", kubectl.NewKubectlInstaller().GetInstallHelp},
 		{"k3d", k3d.NewK3dInstaller().GetInstallHelp},
 		{"helm", helm.NewHelmInstaller().GetInstallHelp},
 	}
@@ -86,11 +85,10 @@ func containsAny(str string, substrings []string) bool {
 func TestCheckAllWithMissingTools(t *testing.T) {
 	checker := NewPrerequisiteChecker()
 
-	// Set all 4 requirements explicitly to ensure test consistency
+	// Requirements order: Docker(0), k3d(1), helm(2).
 	checker.requirements[0].IsInstalled = func() bool { return false } // Docker - missing
-	checker.requirements[1].IsInstalled = func() bool { return true }  // kubectl - installed
-	checker.requirements[2].IsInstalled = func() bool { return false } // k3d - missing
-	checker.requirements[3].IsInstalled = func() bool { return true }  // helm - installed
+	checker.requirements[1].IsInstalled = func() bool { return false } // k3d - missing
+	checker.requirements[2].IsInstalled = func() bool { return true }  // helm - installed
 
 	allPresent, missing := checker.CheckAll()
 

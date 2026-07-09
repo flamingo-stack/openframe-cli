@@ -132,4 +132,6 @@ func TestConfigurationWizard_GHCRCredentialsInConfig(t *testing.T) {
 	assert.Equal(t, "ghcr-user", config.DockerRegistry.Username)
 	assert.Equal(t, "ghcr-pass", config.DockerRegistry.Password)
 	assert.Equal(t, "ghcr@example.com", config.DockerRegistry.Email)
+	assert.Equal(t, []string{"docker"}, config.ModifiedSections)
+	assert.Equal(t, map[string]interface{}{}, config.ExistingValues)
 }

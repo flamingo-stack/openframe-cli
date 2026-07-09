@@ -66,10 +66,8 @@ func TestBranchConfigurator_Configure_CustomBranch(t *testing.T) {
 	err := modifier.ApplyConfiguration(existingValues, config)
 	assert.NoError(t, err)
 
-	// Verify branch was updated in deployment structure
-	deployment := existingValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	repository := oss["repository"].(map[string]interface{})
+	// Verify branch was updated at the top-level repository.branch
+	repository := existingValues["repository"].(map[string]interface{})
 	assert.Equal(t, "develop", repository["branch"])
 }
 
@@ -96,12 +94,8 @@ func TestBranchConfigurator_Configure_WithEmptyValues(t *testing.T) {
 	err := modifier.ApplyConfiguration(existingValues, config)
 	assert.NoError(t, err)
 
-	// Verify deployment structure was created
-	deployment, ok := existingValues["deployment"].(map[string]interface{})
-	assert.True(t, ok)
-	oss, ok := deployment["oss"].(map[string]interface{})
-	assert.True(t, ok)
-	repository, ok := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository section was created
+	repository, ok := existingValues["repository"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "feature-branch", repository["branch"])
 }
@@ -128,12 +122,8 @@ func TestBranchConfigurator_Configure_BranchValidation(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			existingValues := map[string]interface{}{
-				"deployment": map[string]interface{}{
-					"oss": map[string]interface{}{
-						"repository": map[string]interface{}{
-							"branch": "main",
-						},
-					},
+				"repository": map[string]interface{}{
+					"branch": "main",
 				},
 			}
 
@@ -149,9 +139,7 @@ func TestBranchConfigurator_Configure_BranchValidation(t *testing.T) {
 				err := modifier.ApplyConfiguration(existingValues, config)
 				assert.NoError(t, err)
 
-				deployment := existingValues["deployment"].(map[string]interface{})
-				oss := deployment["oss"].(map[string]interface{})
-				repository := oss["repository"].(map[string]interface{})
+				repository := existingValues["repository"].(map[string]interface{})
 				assert.Equal(t, tc.branch, repository["branch"])
 			}
 		})

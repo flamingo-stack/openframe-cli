@@ -1,6 +1,6 @@
 # OpenFrame CLI Makefile
 
-.PHONY: build build-all clean test test-unit test-integration help
+.PHONY: build build-all clean test test-unit test-race test-integration lint help
 
 # Variables
 BINARY_NAME := openframe
@@ -26,10 +26,21 @@ build-all:
 	@GOOS=darwin GOARCH=arm64 $(GO_BUILD) -o $(BINARY_NAME)-darwin-arm64 .
 	@GOOS=windows GOARCH=amd64 $(GO_BUILD) -o $(BINARY_NAME)-windows-amd64.exe .
 
-## Run unit tests
+## Run unit tests (vet enabled; -vet=off removed per audit remediation §0)
 test-unit:
 	@echo "Running unit tests..."
-	@go test -v -count=1 -vet=off ./cmd/... ./internal/...
+	@go test -count=1 ./cmd/... ./internal/...
+
+## Run unit tests with the race detector (CGO required)
+test-race:
+	@echo "Running unit tests with -race..."
+	@CGO_ENABLED=1 go test -race -count=1 ./cmd/... ./internal/...
+
+## Run golangci-lint (static-analysis gate: govet, staticcheck, errcheck, gosec, ineffassign)
+lint:
+	@echo "Running golangci-lint..."
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed: https://golangci-lint.run/usage/install/"; exit 1; }
+	@golangci-lint run ./...
 
 ## Run integration tests
 test-integration:
@@ -50,6 +61,8 @@ help:
 	@echo "  build            - Build binary for current platform (default)"
 	@echo "  build-all        - Build binaries for all platforms"
 	@echo "  test             - Run all tests"
-	@echo "  test-unit        - Run unit tests"
+	@echo "  test-unit        - Run unit tests (vet enabled)"
+	@echo "  test-race        - Run unit tests with the race detector"
+	@echo "  lint             - Run golangci-lint static-analysis gate"
 	@echo "  test-integration - Run integration tests"
 	@echo "  clean            - Clean build artifacts"

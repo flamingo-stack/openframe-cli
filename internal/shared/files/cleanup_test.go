@@ -114,6 +114,26 @@ func TestFileCleanup_CleanupOnSuccessOnly_Behavior(t *testing.T) {
 	})
 }
 
+// TestFileCleanup_ForcedRestoreRemovesSecretTempOnError locks in the security
+// guarantee: the production error/interruption path calls RestoreFiles (forced),
+// which must remove a registered temp file even in success-only mode — so a
+// secret-bearing temp file (e.g. helm-values-tmp.yaml) never leaks on failure or
+// Ctrl-C (audit I2 / req 25).
+func TestFileCleanup_ForcedRestoreRemovesSecretTempOnError(t *testing.T) {
+	cleanup := NewFileCleanup()
+	cleanup.SetCleanupOnSuccessOnly(true) // even in this mode…
+
+	tmpDir := t.TempDir()
+	tempFile := filepath.Join(tmpDir, "helm-values-tmp.yaml")
+	require.NoError(t, os.WriteFile(tempFile, []byte("password: s3cret"), 0o600))
+	require.NoError(t, cleanup.RegisterTempFile(tempFile))
+	require.FileExists(t, tempFile)
+
+	// …the error/interruption path (RestoreFiles, forced) must still delete it.
+	require.NoError(t, cleanup.RestoreFiles(false))
+	assert.NoFileExists(t, tempFile, "forced restore must remove the secret temp file even in success-only mode")
+}
+
 func TestFileCleanup_RegularMode_AlwaysCleanup(t *testing.T) {
 	cleanup := NewFileCleanup()
 	// Default mode (not success-only) - should always cleanup

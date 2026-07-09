@@ -11,10 +11,10 @@ import (
 func TestInitializeCLI(t *testing.T) {
 	err := InitializeCLI()
 	// Note: Not calling CleanupCLI() here to avoid interfering with other test packages
-	
+
 	require.NoError(t, err)
 	assert.NotEmpty(t, cliBinary)
-	
+
 	// Verify binary exists
 	_, err = os.Stat(cliBinary)
 	assert.NoError(t, err)
@@ -24,9 +24,9 @@ func TestRunCLI_Help(t *testing.T) {
 	err := InitializeCLI()
 	require.NoError(t, err)
 	// Note: Not calling CleanupCLI() here to avoid interfering with other test packages
-	
+
 	result := RunCLI("--help")
-	
+
 	assert.True(t, result.Success())
 	assert.Contains(t, result.Stdout, "OpenFrame CLI")
 }
@@ -35,9 +35,9 @@ func TestRunCLI_Error(t *testing.T) {
 	err := InitializeCLI()
 	require.NoError(t, err)
 	// Note: Not calling CleanupCLI() here to avoid interfering with other test packages
-	
+
 	result := RunCLI("--invalid-flag")
-	
+
 	assert.True(t, result.Failed())
 	assert.NotZero(t, result.ExitCode)
 }
@@ -49,7 +49,7 @@ func TestCLIResult_Methods(t *testing.T) {
 		ExitCode: 1,
 		Error:    assert.AnError,
 	}
-	
+
 	assert.False(t, result.Success())
 	assert.True(t, result.Failed())
 	assert.Equal(t, "test outputtest error", result.Output())

@@ -12,34 +12,50 @@ import (
 	"golang.org/x/term"
 )
 
-// ConfirmActionInteractive prompts the user with a polished interactive confirmation
-// Uses pterm's interactive confirm with colored styling and clear y/N format
-func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {
+// IsNonInteractive reports whether the CLI must avoid interactive prompts:
+// either a recognized CI environment, or stdin is not a terminal (piped /
+// redirected, as in CI). Prompt-driven flows (e.g. the prerequisite gate) should
+// take their non-interactive path so they never block waiting for a Y/N that
+// no one can type.
+func IsNonInteractive() bool {
+	for _, v := range []string{"CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI"} {
+		if os.Getenv(v) != "" {
+			return true
+		}
+	}
+	return !term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// confirm shows pterm's styled interactive y/N confirmation with the given
+// default. It is the single implementation behind the exported confirm helpers.
+func confirm(message string, defaultYes bool) (bool, error) {
 	return pterm.DefaultInteractiveConfirm.
 		WithDefaultText(message).
-		WithDefaultValue(defaultValue).
+		WithDefaultValue(defaultYes).
 		Show()
 }
 
-// ConfirmDeletion prompts for deletion confirmation with consistent styling
+// ConfirmActionInteractive prompts the user with a polished interactive
+// confirmation (colored styling, clear y/N format) defaulting to defaultValue.
+func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {
+	return confirm(message, defaultValue)
+}
+
+// ConfirmDeletion prompts for deletion confirmation (defaults to No).
 func ConfirmDeletion(resourceType, resourceName string) (bool, error) {
-	message := fmt.Sprintf("Are you sure you want to delete %s '%s'?", resourceType, pterm.Cyan(resourceName))
-	return pterm.DefaultInteractiveConfirm.
-		WithDefaultText(message).
-		WithDefaultValue(false).
-		Show()
+	return confirm(fmt.Sprintf("Are you sure you want to delete %s '%s'?", resourceType, pterm.Cyan(resourceName)), false)
 }
 
 // ConfirmAction prompts the user to confirm an action with friendly UX:
 // - Enter = yes (default)
-// - y = yes (immediate, no Enter needed)  
+// - y = yes (immediate, no Enter needed)
 // - n = no (immediate, no Enter needed)
 func ConfirmAction(message string) (bool, error) {
 	fmt.Printf("%s (Y/n): ", pterm.Bold.Sprint(message))
-	
+
 	// Get the file descriptor for stdin
 	fd := int(os.Stdin.Fd())
-	
+
 	// Check if stdin is a terminal
 	if !term.IsTerminal(fd) {
 		// Fallback for non-terminal input (like pipes/tests)
@@ -51,93 +67,72 @@ func ConfirmAction(message string) (bool, error) {
 		input = strings.ToLower(strings.TrimSpace(input))
 		return input == "" || input == "y" || input == "yes", nil
 	}
-	
+
 	// Save the current terminal state
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return false, err
 	}
-	
+
+	// restore returns the terminal to its cooked state. It is called before any
+	// output on every exit path (so prints get normal newline handling) rather
+	// than deferred. A failure would leave the terminal in raw mode — surface it
+	// (Debug) instead of silently dropping it; the user's captured choice is the
+	// function's real result, so we don't return the restore error.
+	restore := func() {
+		if err := term.Restore(fd, oldState); err != nil {
+			pterm.Debug.Printf("failed to restore terminal state (it may be left in raw mode): %v\n", err)
+		}
+	}
+
 	// Read single character
 	buf := make([]byte, 1)
 	for {
 		_, err := os.Stdin.Read(buf)
 		if err != nil {
-			term.Restore(fd, oldState)
+			restore()
 			return false, err
 		}
-		
+
 		char := buf[0]
-		
+
 		switch char {
 		case '\r', '\n': // Enter key
-			term.Restore(fd, oldState)
+			restore()
 			fmt.Println()
 			return true, nil // Default to yes
 		case 'y', 'Y':
-			term.Restore(fd, oldState)
+			restore()
 			fmt.Println("y")
 			return true, nil
 		case 'n', 'N':
-			term.Restore(fd, oldState)
+			restore()
 			fmt.Println("n")
 			return false, nil
 		case 3: // Ctrl+C
-			term.Restore(fd, oldState)
+			restore()
 			fmt.Println()
 			return false, fmt.Errorf("interrupted")
-		// Ignore other characters and continue reading
+			// Ignore other characters and continue reading
 		}
 	}
 }
 
-// SelectFromList prompts the user to select from a list of options
+// selectTemplates is the shared styling for the interactive list selectors.
+var selectTemplates = &promptui.SelectTemplates{
+	Label:    "{{ . }}?",
+	Active:   "→ {{ . | cyan }}",
+	Inactive: "  {{ . | white }}",
+	Selected: "✓ {{ . | green }}",
+}
+
+// SelectFromList prompts the user to select from a list of options.
 func SelectFromList(label string, items []string) (int, string, error) {
-	prompt := promptui.Select{
-		Label: label,
-		Items: items,
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-			Active:   "\U00002192 {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "\U00002713 {{ . | green }}",
-		},
-	}
-
-	return prompt.Run()
-}
-
-// SelectFromListWithSearch prompts the user to select from a list with search/filter capability
-func SelectFromListWithSearch(label string, items []string) (int, string, error) {
-	prompt := promptui.Select{
-		Label: label,
-		Items: items,
-		Size:  5, // Show max 5 items at once
-		Searcher: func(input string, index int) bool {
-			item := items[index]
-			name := strings.ToLower(item)
-			input = strings.ToLower(input)
-			return strings.Contains(name, input)
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-			Active:   "\U00002192 {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "\U00002713 {{ . | green }}",
-		},
-	}
-
-	return prompt.Run()
-}
-
-// SelectFromListWithCustomTemplates provides more control over selection styling
-func SelectFromListWithCustomTemplates(label string, items []string, templates *promptui.SelectTemplates) (int, string, error) {
 	prompt := promptui.Select{
 		Label:     label,
 		Items:     items,
-		Templates: templates,
+		Templates: selectTemplates,
 	}
-
 	return prompt.Run()
 }
 
@@ -172,11 +167,10 @@ func GetMultiChoice(label string, items []string, defaults []bool) ([]bool, erro
 	return results, nil
 }
 
-// HandleResourceSelection handles the common pattern of getting a resource name from args or interactive selection
-// If args provided, validates the first arg is not empty and returns it
-// If no args, uses SelectFromList to let user choose from available items
+// HandleResourceSelection resolves a resource name from args or interactive
+// selection: it returns the first non-empty arg if given, otherwise prompts the
+// user to pick from items via SelectFromList.
 func HandleResourceSelection(args []string, items []string, prompt string) (string, error) {
-	// If resource name provided as argument, use it directly
 	if len(args) > 0 {
 		resourceName := strings.TrimSpace(args[0])
 		if resourceName == "" {
@@ -184,18 +178,13 @@ func HandleResourceSelection(args []string, items []string, prompt string) (stri
 		}
 		return resourceName, nil
 	}
-
-	// Check if items are available
 	if len(items) == 0 {
 		return "", fmt.Errorf("no items available for selection")
 	}
-
-	// Use interactive selection
 	_, selected, err := SelectFromList(prompt, items)
 	if err != nil {
 		return "", fmt.Errorf("selection failed: %w", err)
 	}
-
 	return selected, nil
 }
 
@@ -221,12 +210,4 @@ func ValidateIntRange(min, max int, fieldName string) func(string) error {
 		}
 		return nil
 	}
-}
-
-// boolToString converts boolean to y/N format (helper function)
-func boolToString(b bool) string {
-	if b {
-		return "y"
-	}
-	return "N"
 }

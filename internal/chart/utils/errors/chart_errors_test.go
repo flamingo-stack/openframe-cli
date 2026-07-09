@@ -60,9 +60,9 @@ func TestChartError_ErrorWithCluster(t *testing.T) {
 func TestChartError_WithCluster(t *testing.T) {
 	cause := errors.New("test error")
 	chartErr := NewChartError("installation", "ArgoCD", cause)
-	
+
 	result := chartErr.WithCluster("test-cluster")
-	
+
 	assert.Equal(t, chartErr, result) // Should return same instance
 	assert.Equal(t, "test-cluster", chartErr.ClusterName)
 }
@@ -71,9 +71,9 @@ func TestChartError_WithRecovery(t *testing.T) {
 	cause := errors.New("test error")
 	chartErr := NewChartError("installation", "ArgoCD", cause)
 	retryAfter := 45 * time.Second
-	
+
 	result := chartErr.WithRecovery(retryAfter)
-	
+
 	assert.Equal(t, chartErr, result) // Should return same instance
 	assert.True(t, chartErr.Recoverable)
 	assert.Equal(t, retryAfter, chartErr.RetryAfter)
@@ -93,10 +93,10 @@ func TestNewInstallationError(t *testing.T) {
 
 	assert.NotNil(t, instErr)
 	assert.NotNil(t, instErr.ChartError)
-	assert.Equal(t, "installation", instErr.ChartError.Operation)
-	assert.Equal(t, "ArgoCD", instErr.ChartError.Component)
+	assert.Equal(t, "installation", instErr.Operation)
+	assert.Equal(t, "ArgoCD", instErr.Component)
 	assert.Equal(t, "helm-install", instErr.Phase)
-	assert.Equal(t, cause, instErr.ChartError.Cause)
+	assert.Equal(t, cause, instErr.Cause)
 }
 
 func TestInstallationError_Error(t *testing.T) {
@@ -112,7 +112,7 @@ func TestInstallationError_Error(t *testing.T) {
 func TestInstallationError_GetTroubleshootingSteps(t *testing.T) {
 	cause := errors.New("installation failed")
 	instErr := NewInstallationError("ArgoCD", "helm-install", cause)
-	
+
 	steps := instErr.GetTroubleshootingSteps()
 	assert.NotEmpty(t, steps)
 	assert.Contains(t, steps[0], "kubectl cluster-info")
@@ -124,12 +124,12 @@ func TestInstallationError_WithSuggestions(t *testing.T) {
 	cause := errors.New("installation failed")
 	instErr := NewInstallationError("ArgoCD", "helm-install", cause)
 	suggestions := []string{"Check network connectivity", "Verify permissions"}
-	
+
 	result := instErr.WithSuggestions(suggestions)
-	
+
 	assert.Equal(t, instErr, result)
 	assert.Equal(t, suggestions, instErr.Suggestions)
-	
+
 	steps := instErr.GetTroubleshootingSteps()
 	assert.Contains(t, steps, "Check network connectivity")
 	assert.Contains(t, steps, "Verify permissions")
@@ -139,8 +139,8 @@ func TestNewValidationError(t *testing.T) {
 	valErr := NewValidationError("github-repo", "", "URL is required")
 
 	assert.NotNil(t, valErr)
-	assert.Equal(t, "validation", valErr.ChartError.Operation)
-	assert.Equal(t, "configuration", valErr.ChartError.Component)
+	assert.Equal(t, "validation", valErr.Operation)
+	assert.Equal(t, "configuration", valErr.Component)
 	assert.Equal(t, "github-repo", valErr.Field)
 	assert.Equal(t, "", valErr.Value)
 	assert.Equal(t, "URL is required", valErr.Constraint)
@@ -161,20 +161,20 @@ func TestNewConfigurationError(t *testing.T) {
 	configErr := NewConfigurationError("values.yaml", "database", cause)
 
 	assert.NotNil(t, configErr)
-	assert.Equal(t, "configuration", configErr.ChartError.Operation)
-	assert.Equal(t, "validation", configErr.ChartError.Component)
+	assert.Equal(t, "configuration", configErr.Operation)
+	assert.Equal(t, "validation", configErr.Component)
 	assert.Equal(t, "values.yaml", configErr.ConfigFile)
 	assert.Equal(t, "database", configErr.Section)
-	assert.Equal(t, cause, configErr.ChartError.Cause)
+	assert.Equal(t, cause, configErr.Cause)
 }
 
 func TestConfigurationError_WithMissingKeys(t *testing.T) {
 	cause := errors.New("missing keys")
 	configErr := NewConfigurationError("values.yaml", "database", cause)
 	missingKeys := []string{"host", "port", "password"}
-	
+
 	result := configErr.WithMissingKeys(missingKeys)
-	
+
 	assert.Equal(t, configErr, result)
 	assert.Equal(t, missingKeys, configErr.GetMissingKeys())
 }

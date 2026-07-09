@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -9,7 +10,7 @@ import (
 type AppOfAppsConfig struct {
 	// GitHub repository configuration
 	GitHubRepo   string // Repository URL (e.g., "https://github.com/flamingo-stack/openframe-oss-tenant")
-	GitHubBranch string // Branch to use (e.g., "main", "develop")
+	GitHubBranch string // Git ref to use: branch ("main", "develop") or release tag ("v1.2.3")
 	ChartPath    string // Path to chart in repository (e.g., "manifests/app-of-apps")
 	// Certificate configuration
 	CertDir string // Directory containing certificates for TLS configuration
@@ -23,8 +24,8 @@ type AppOfAppsConfig struct {
 // NewAppOfAppsConfig creates a new AppOfAppsConfig with defaults
 func NewAppOfAppsConfig() *AppOfAppsConfig {
 	return &AppOfAppsConfig{
-		GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant",
-		GitHubBranch: "main",
+		GitHubRepo:   RepoOSSTenant,
+		GitHubBranch: DefaultGitBranch,
 		ChartPath:    "manifests/app-of-apps",
 		Namespace:    "argocd",
 		Timeout:      "60m",
@@ -34,7 +35,23 @@ func NewAppOfAppsConfig() *AppOfAppsConfig {
 // GetGitURL returns the formatted git URL for helm-git plugin
 func (a *AppOfAppsConfig) GetGitURL() string {
 	// helm-git plugin v1.4.0 format: git+https://github.com/org/repo@path?ref=branch
-	// Authentication should be handled via environment variables or Git credentials
-	baseURL := strings.TrimSuffix(a.GitHubRepo, ".git")
+	//
+	// Any embedded credential (e.g. an "x-access-token:PAT@" userinfo) is
+	// stripped here so a token can never leak into the helm-git URL — and from
+	// there into helm values, argv, or logs (audit I1). Authentication must be
+	// supplied out of band (Git credentials / environment).
+	baseURL := stripURLCredentials(strings.TrimSuffix(a.GitHubRepo, ".git"))
 	return fmt.Sprintf("git+%s@%s?ref=%s", baseURL, a.ChartPath, a.GitHubBranch)
+}
+
+// stripURLCredentials removes any userinfo (username[:password]) from an
+// absolute URL. It returns the input unchanged when it does not parse as a URL
+// or carries no credential.
+func stripURLCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }

@@ -100,13 +100,13 @@ func TestInstallationRequest_DefaultValues(t *testing.T) {
 
 func TestInstallationRequest_WithValues(t *testing.T) {
 	req := &InstallationRequest{
-		Args:           []string{"test-cluster"},
-		Force:          true,
-		DryRun:         false,
-		Verbose:        true,
-		GitHubRepo:     "https://github.com/test/repo",
-		GitHubBranch:   "main",
-		CertDir:        "/path/to/certs",
+		Args:         []string{"test-cluster"},
+		Force:        true,
+		DryRun:       false,
+		Verbose:      true,
+		GitHubRepo:   "https://github.com/test/repo",
+		GitHubBranch: "main",
+		CertDir:      "/path/to/certs",
 	}
 
 	assert.Equal(t, []string{"test-cluster"}, req.Args)
@@ -248,7 +248,7 @@ func TestWorkflowResult_SuccessfulCompletion(t *testing.T) {
 // Test interface completeness by verifying struct field counts
 func TestStructFieldCounts(t *testing.T) {
 	// These tests help ensure we don't accidentally remove fields without updating tests
-	
+
 	// WorkflowResult should have 5 fields
 	result := WorkflowResult{}
 	_ = result.Success

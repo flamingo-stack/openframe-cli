@@ -8,6 +8,7 @@ type ClusterType string
 const (
 	ClusterTypeK3d ClusterType = "k3d"
 	ClusterTypeGKE ClusterType = "gke"
+	ClusterTypeEKS ClusterType = "eks"
 )
 
 // ClusterConfig holds cluster configuration
@@ -53,4 +54,3 @@ type GKEOptions struct {
 	Zone    string `json:"zone"`
 	Project string `json:"project"`
 }
-

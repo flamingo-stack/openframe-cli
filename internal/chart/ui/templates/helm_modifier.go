@@ -24,7 +24,7 @@ func (h *HelmValuesModifier) LoadExistingValues(helmValuesPath string) (map[stri
 	}
 
 	// Read file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		return nil, fmt.Errorf("failed to read helm values file: %w", err)
 	}
@@ -58,15 +58,25 @@ func (h *HelmValuesModifier) LoadOrCreateBaseValues() (map[string]interface{}, e
 	return emptyValues, nil
 }
 
-// CreateTemporaryValuesFile creates a temporary helm values file in current directory
+// CreateTemporaryValuesFile creates a temporary helm values file in the OS
+// temp directory (never the user's working directory, which it must not
+// pollute). It uses a unique name via os.CreateTemp (O_EXCL, 0600) rather than
+// a fixed filename: this avoids clobbering between concurrent runs and prevents
+// a pre-created file / symlink from redirecting the write (the file can hold
+// registry and repository secrets). The caller registers the returned absolute
+// path for cleanup so it does not persist past the install; on Windows the helm
+// manager converts the path for WSL before use.
 func (h *HelmValuesModifier) CreateTemporaryValuesFile(values map[string]interface{}) (string, error) {
-	// Create temporary file in current directory
-	tempFile := "helm-values-tmp.yaml"
-
-	// Write values to temporary file
-	err := h.WriteValues(values, tempFile)
+	f, err := os.CreateTemp("", "helm-values-tmp-*.yaml")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary values file: %w", err)
+	}
+	tempFile := f.Name()
+	_ = f.Close()
+
+	if err := h.WriteValues(values, tempFile); err != nil {
+		_ = os.Remove(tempFile)
+		return "", fmt.Errorf("failed to write temporary values file: %w", err)
 	}
 
 	return tempFile, nil
@@ -83,7 +93,7 @@ func (h *HelmValuesModifier) ApplyConfiguration(values map[string]interface{}, c
 
 	// Update branch if it was modified - handle deployment-specific branches
 	if config.Branch != nil {
-		// For OSS deployment, update deployment.oss.repository.branch
+		// For OSS deployment, update the top-level repository.branch.
 		if config.DeploymentMode != nil && *config.DeploymentMode == types.DeploymentModeOSS {
 			if err := h.updateOSSBranch(values, *config.Branch); err != nil {
 				return fmt.Errorf("failed to update OSS branch: %w", err)
@@ -220,33 +230,29 @@ func (h *HelmValuesModifier) applySaaSConfig(values map[string]interface{}, saas
 	return nil
 }
 
-// updateOSSBranch updates the OSS repository branch
+// updateOSSBranch updates the app-of-apps repository branch.
 func (h *HelmValuesModifier) updateOSSBranch(values map[string]interface{}, branch string) error {
-	// Ensure deployment section exists
-	deployment, ok := values["deployment"].(map[string]interface{})
-	if !ok {
-		deployment = make(map[string]interface{})
-		values["deployment"] = deployment
-	}
+	h.setRepositoryBranch(values, branch)
+	return nil
+}
 
-	// Ensure OSS section exists
-	oss, ok := deployment["oss"].(map[string]interface{})
-	if !ok {
-		oss = make(map[string]interface{})
-		deployment["oss"] = oss
-	}
+// SetRepositoryBranch pins the app-of-apps repository branch/ref. The flattened
+// chart schema uses a single top-level repository.branch regardless of
+// deployment mode (openframe-oss-tenant flattened deployment.oss.repository.* to
+// repository.*), so the deployment mode no longer selects a section.
+func (h *HelmValuesModifier) SetRepositoryBranch(values map[string]interface{}, _, branch string) {
+	h.setRepositoryBranch(values, branch)
+}
 
-	// Ensure repository section exists
-	repository, ok := oss["repository"].(map[string]interface{})
+// setRepositoryBranch pins the app-of-apps source at the top-level
+// repository.branch, creating the map as needed.
+func (h *HelmValuesModifier) setRepositoryBranch(values map[string]interface{}, branch string) {
+	repository, ok := values["repository"].(map[string]interface{})
 	if !ok {
 		repository = make(map[string]interface{})
-		oss["repository"] = repository
+		values["repository"] = repository
 	}
-
-	// Set the branch
 	repository["branch"] = branch
-
-	return nil
 }
 
 // WriteValues writes updated values back to the Helm values file
@@ -257,8 +263,10 @@ func (h *HelmValuesModifier) WriteValues(values map[string]interface{}, helmValu
 		return fmt.Errorf("failed to marshal updated helm values: %w", err)
 	}
 
-	// Write updated values back to file
-	if err := os.WriteFile(helmValuesPath, updatedData, 0644); err != nil {
+	// Write updated values back to file with owner-only permissions (0600):
+	// the values may contain secrets (SaaS repository PAT, docker registry
+	// password), so the file must not be world-readable (audit I2).
+	if err := os.WriteFile(helmValuesPath, updatedData, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated helm values file: %w", err)
 	}
 
@@ -280,15 +288,12 @@ func (h *HelmValuesModifier) GetCurrentBranch(values map[string]interface{}) str
 	return "main" // default fallback
 }
 
-// GetCurrentOSSBranch extracts the current OSS repository branch from Helm values
+// GetCurrentOSSBranch extracts the current repository branch from the top-level
+// repository.branch (the flattened chart schema).
 func (h *HelmValuesModifier) GetCurrentOSSBranch(values map[string]interface{}) string {
-	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
-			if repository, ok := oss["repository"].(map[string]interface{}); ok {
-				if branch, ok := repository["branch"].(string); ok {
-					return branch
-				}
-			}
+	if repo, ok := values["repository"].(map[string]interface{}); ok {
+		if branch, ok := repo["branch"].(string); ok && branch != "" {
+			return branch
 		}
 	}
 	return "main" // default fallback
@@ -322,20 +327,18 @@ func (h *HelmValuesModifier) GetCurrentDockerSettings(values map[string]interfac
 // GetCurrentIngressSettings extracts current ingress settings from Helm values
 func (h *HelmValuesModifier) GetCurrentIngressSettings(values map[string]interface{}) string {
 	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
-			if ingress, ok := oss["ingress"].(map[string]interface{}); ok {
-				// Check if ngrok is enabled
-				if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
-					if enabled, ok := ngrok["enabled"].(bool); ok && enabled {
-						return "ngrok"
-					}
+		if ingress, ok := deployment["ingress"].(map[string]interface{}); ok {
+			// Check if ngrok is enabled
+			if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
+				if enabled, ok := ngrok["enabled"].(bool); ok && enabled {
+					return "ngrok"
 				}
+			}
 
-				// Check if localhost is enabled
-				if localhost, ok := ingress["localhost"].(map[string]interface{}); ok {
-					if enabled, ok := localhost["enabled"].(bool); ok && enabled {
-						return "localhost"
-					}
+			// Check if localhost is enabled
+			if localhost, ok := ingress["localhost"].(map[string]interface{}); ok {
+				if enabled, ok := localhost["enabled"].(bool); ok && enabled {
+					return "localhost"
 				}
 			}
 		}

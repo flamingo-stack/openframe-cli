@@ -45,6 +45,7 @@ func TestDockerConfigurator_Configure_DefaultCredentials(t *testing.T) {
 	// When user selects default credentials, no changes should be made
 	// config.ModifiedSections should remain empty
 	assert.Empty(t, config.ModifiedSections)
+	assert.Equal(t, existingValues, config.ExistingValues)
 }
 
 func TestDockerConfigurator_Configure_CustomCredentials(t *testing.T) {

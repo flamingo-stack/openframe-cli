@@ -1,6 +1,30 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
+)
+
+// ValidDeploymentModes are the accepted --deployment-mode flag values.
+var ValidDeploymentModes = []string{"oss-tenant", "saas-tenant", "saas-shared"}
+
+// ValidateDeploymentMode returns an error if mode is non-empty and not one of
+// the accepted deployment modes. An empty mode is allowed (interactive selection
+// or defaulting).
+func ValidateDeploymentMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	for _, m := range ValidDeploymentModes {
+		if mode == m {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid deployment mode: %s. Valid options: %s", mode, strings.Join(ValidDeploymentModes, ", "))
+}
 
 // DockerRegistryConfig holds Docker registry settings
 type DockerRegistryConfig struct {
@@ -57,7 +81,7 @@ type IngressConfig struct {
 }
 
 // NgrokRegistrationURLs contains the URLs for Ngrok registration and documentation
-var NgrokRegistrationURLs = struct {
+var NgrokRegistrationURLs = struct { // #nosec G101 -- public ngrok documentation URLs, not credentials
 	SignUp        string
 	Dashboard     string
 	APIKeyDocs    string
@@ -88,13 +112,13 @@ type ChartConfiguration struct {
 func GetRepositoryURL(mode DeploymentMode) string {
 	switch mode {
 	case DeploymentModeSaaSShared:
-		return "https://github.com/flamingo-stack/openframe-saas-shared"
+		return models.RepoSaaSShared
 	case DeploymentModeSaaS:
-		return "https://github.com/flamingo-stack/openframe-saas-tenant"
+		return models.RepoSaaSTenant
 	case DeploymentModeOSS:
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
+		return models.RepoOSSTenant
 	default:
 		// Default to OSS repository
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
+		return models.RepoOSSTenant
 	}
 }

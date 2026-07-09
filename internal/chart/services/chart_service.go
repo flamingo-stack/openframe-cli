@@ -2,11 +2,9 @@ package services
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites"
@@ -18,11 +16,10 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
-	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/files"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
@@ -30,7 +27,7 @@ import (
 // ChartService handles high-level chart operations
 type ChartService struct {
 	executor       executor.CommandExecutor
-	clusterService utilTypes.ClusterLister
+	clusterService types.ClusterAccess
 	configService  *config.Service
 	operationsUI   *chartUI.OperationsUI
 	displayService *chartUI.DisplayService
@@ -40,14 +37,15 @@ type ChartService struct {
 
 // NewChartService creates a new chart service with the given rest.Config
 // The config is used to create the Kubernetes client for native API operations
-func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartService, error) {
-	// Create executors
-	clusterExec := executor.NewRealCommandExecutor(false, verbose)
+func NewChartService(clusterAccess types.ClusterAccess, kubeConfig *rest.Config, dryRun, verbose bool) (*ChartService, error) {
+	// Create executor
 	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	if err := configService.Initialize(); err != nil {
+		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+	}
 
 	// Create HelmManager with the rest.Config
 	helmManager, err := helm.NewHelmManager(chartExec, kubeConfig, verbose)
@@ -57,34 +55,35 @@ func NewChartService(kubeConfig *rest.Config, dryRun, verbose bool) (*ChartServi
 
 	return &ChartService{
 		executor:       chartExec,
-		clusterService: cluster.NewClusterService(clusterExec),
+		clusterService: clusterAccess,
 		configService:  configService,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
 		helmManager:    helmManager,
-		gitRepository:  git.NewRepository(chartExec),
+		gitRepository:  git.NewRepository(),
 	}, nil
 }
 
 // NewChartServiceDeferred creates a chart service without initializing HelmManager
 // The HelmManager will be initialized later after cluster selection
-func NewChartServiceDeferred(dryRun, verbose bool) (*ChartService, error) {
-	// Create executors
-	clusterExec := executor.NewRealCommandExecutor(false, verbose)
+func NewChartServiceDeferred(clusterAccess types.ClusterAccess, dryRun, verbose bool) (*ChartService, error) {
+	// Create executor
 	chartExec := executor.NewRealCommandExecutor(dryRun, verbose)
 
 	// Initialize configuration service
 	configService := config.NewService()
-	configService.Initialize()
+	if err := configService.Initialize(); err != nil {
+		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+	}
 
 	return &ChartService{
 		executor:       chartExec,
-		clusterService: cluster.NewClusterService(clusterExec),
+		clusterService: clusterAccess,
 		configService:  configService,
 		operationsUI:   chartUI.NewOperationsUI(),
 		displayService: chartUI.NewDisplayService(),
 		helmManager:    nil, // Will be initialized after cluster selection
-		gitRepository:  git.NewRepository(chartExec),
+		gitRepository:  git.NewRepository(),
 	}, nil
 }
 
@@ -100,12 +99,7 @@ func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose b
 	return nil
 }
 
-// Install performs the complete chart installation process
-func (cs *ChartService) Install(req utilTypes.InstallationRequest) error {
-	return cs.InstallWithContext(context.Background(), req)
-}
-
-func (cs *ChartService) InstallWithContext(ctx context.Context, req utilTypes.InstallationRequest) error {
+func (cs *ChartService) InstallWithContext(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -129,7 +123,7 @@ func (cs *ChartService) InstallWithContext(ctx context.Context, req utilTypes.In
 
 // InstallWithContextDeferred performs installation with deferred HelmManager initialization
 // This is used when KubeConfig is not available upfront (e.g., standalone chart install)
-func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req utilTypes.InstallationRequest) error {
+func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -154,52 +148,30 @@ func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req util
 // InstallationWorkflow orchestrates the installation process
 type InstallationWorkflow struct {
 	chartService   *ChartService
-	clusterService utilTypes.ClusterLister
+	clusterService types.ClusterAccess
 	fileCleanup    *files.FileCleanup
 }
 
-// Execute runs the installation workflow
-func (w *InstallationWorkflow) Execute(req utilTypes.InstallationRequest) error {
-	return w.ExecuteWithContext(context.Background(), req)
-}
-
-func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req utilTypes.InstallationRequest) error {
-	// Set up signal handling for graceful cleanup on interruption
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan) // Clean up signal handler
-
-	// Create a context that can be cancelled on signal OR parent context
+func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req types.InstallationRequest) error {
+	// parentCtx is already signal-cancelled (the root runs via ExecuteContext),
+	// so Ctrl-C / SIGTERM cancels it directly — no local signal handler needed.
+	// A derived cancellable context lets us stop remaining work early.
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-
-	// Track if we've been interrupted
-	interrupted := false
-
-	// Start signal handler goroutine
-	go func() {
-		<-sigChan
-		interrupted = true
-		// Signal received - clean cancellation handled by error handler
-		cancel()
-		// No delay - immediate cancellation
-	}()
 
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
 	if req.DryRun {
-		// Create minimal configuration for dry-run mode using base values from current directory
-		modifier := templates.NewHelmValuesModifier()
-		baseValues, err := modifier.LoadOrCreateBaseValues()
+		var err error
+		chartConfig, err = w.dryRunConfiguration()
 		if err != nil {
-			return fmt.Errorf("failed to load base values for dry-run: %w", err)
+			return err
 		}
-
-		chartConfig = &types.ChartConfiguration{
-			BaseHelmValuesPath: "helm-values.yaml",
-			TempHelmValuesPath: "helm-values-tmp.yaml", // Use tmp file in current directory for dry-run
-			ExistingValues:     baseValues,
-			ModifiedSections:   make([]string, 0),
+		// dry-run writes a real values file too, so register it for cleanup.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
@@ -261,9 +233,8 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Step 4: Regenerate certificates after configuration and cluster selection
 	// Skip certificate regeneration in non-interactive mode
 	if !req.NonInteractive {
-		if err := w.regenerateCertificates(); err != nil {
-			// Non-fatal - continue anyway as logged in the method
-		}
+		// Non-fatal: failures are logged inside the method, continue regardless.
+		_ = w.regenerateCertificates()
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}
@@ -287,10 +258,10 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		return err
 	}
 
-	// Check if cancelled by signal (CTRL-C)
-	if interrupted || ctx.Err() != nil {
+	// Check if cancelled by signal (CTRL-C) — the context is signal-cancelled.
+	if ctx.Err() != nil {
 		// User interrupted - clean up temporary files silently
-		w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
+		_ = w.fileCleanup.RestoreFiles(false) // Always clean up silently on interruption
 		return fmt.Errorf("installation cancelled by user")
 	}
 
@@ -307,40 +278,25 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 
 // ExecuteWithContextDeferred runs the installation workflow with deferred HelmManager initialization
 // This is used when KubeConfig is not available upfront (e.g., standalone chart install)
-func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req utilTypes.InstallationRequest) error {
-	// Set up signal handling for graceful cleanup on interruption
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan) // Clean up signal handler
-
-	// Create a context that can be cancelled on signal OR parent context
+func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req types.InstallationRequest) error {
+	// parentCtx is already signal-cancelled (root ExecuteContext); a derived
+	// cancellable context is enough to stop remaining work on Ctrl-C / SIGTERM.
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-
-	// Track if we've been interrupted
-	interrupted := false
-
-	// Start signal handler goroutine
-	go func() {
-		<-sigChan
-		interrupted = true
-		cancel()
-	}()
 
 	// Step 1: Determine configuration mode and run appropriate workflow
 	var chartConfig *types.ChartConfiguration
 	if req.DryRun {
-		modifier := templates.NewHelmValuesModifier()
-		baseValues, err := modifier.LoadOrCreateBaseValues()
+		var err error
+		chartConfig, err = w.dryRunConfiguration()
 		if err != nil {
-			return fmt.Errorf("failed to load base values for dry-run: %w", err)
+			return err
 		}
-
-		chartConfig = &types.ChartConfiguration{
-			BaseHelmValuesPath: "helm-values.yaml",
-			TempHelmValuesPath: "helm-values-tmp.yaml",
-			ExistingValues:     baseValues,
-			ModifiedSections:   make([]string, 0),
+		// dry-run writes a real values file too, so register it for cleanup.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
@@ -384,13 +340,10 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return err
 	}
 
-	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager
-	// This is the key difference from the regular workflow
-	clusterSvc, ok := w.clusterService.(*cluster.ClusterService)
-	if !ok {
-		return fmt.Errorf("cannot get rest.Config: cluster service is not a ClusterService")
-	}
-	kubeConfig, err := clusterSvc.GetRestConfig(clusterName)
+	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager.
+	// Resolved through the injected ClusterAccess interface so this workflow does
+	// not depend on the concrete cluster service (req 18/19).
+	kubeConfig, err := w.clusterService.GetRestConfig(clusterName)
 	if err != nil {
 		return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, err)
 	}
@@ -408,9 +361,8 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 
 	// Step 4: Regenerate certificates
 	if !req.NonInteractive {
-		if err := w.regenerateCertificates(); err != nil {
-			// Non-fatal
-		}
+		// Non-fatal: failures are logged inside the method, continue regardless.
+		_ = w.regenerateCertificates()
 	} else {
 		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
 	}
@@ -433,8 +385,8 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		return err
 	}
 
-	if interrupted || ctx.Err() != nil {
-		w.fileCleanup.RestoreFiles(false)
+	if ctx.Err() != nil {
+		_ = w.fileCleanup.RestoreFiles(false)
 		return fmt.Errorf("installation cancelled by user")
 	}
 
@@ -455,7 +407,8 @@ func (w *InstallationWorkflow) selectCluster(args []string, verbose bool) (strin
 func (w *InstallationWorkflow) confirmInstallationOnCluster(clusterName string) bool {
 	confirmed, err := w.chartService.operationsUI.ConfirmInstallationOnCluster(clusterName)
 	if err != nil {
-		sharedErrors.HandleConfirmationError(err)
+		// Treat a prompt error/interruption as "not confirmed"; the caller turns
+		// that into a cancellation error that exits non-zero (no os.Exit here).
 		return false
 	}
 	return confirmed
@@ -481,6 +434,30 @@ func (w *InstallationWorkflow) runConfigurationWizard() (*types.ChartConfigurati
 }
 
 // loadExistingConfiguration loads existing helm-values.yaml for non-interactive mode
+// dryRunConfiguration builds the chart configuration for a dry-run. Like every
+// other mode, it writes the base helm values to a real temporary file and
+// points TempHelmValuesPath at it — previously dry-run set a fixed
+// "helm-values-tmp.yaml" that nothing ever wrote, so the app-of-apps step ran
+// `helm --dry-run -f helm-values-tmp.yaml` against a non-existent file. The
+// caller registers the returned path for cleanup.
+func (w *InstallationWorkflow) dryRunConfiguration() (*types.ChartConfiguration, error) {
+	modifier := templates.NewHelmValuesModifier()
+	baseValues, err := modifier.LoadOrCreateBaseValues()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load base values for dry-run: %w", err)
+	}
+	tempFilePath, err := modifier.CreateTemporaryValuesFile(baseValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary values file for dry-run: %w", err)
+	}
+	return &types.ChartConfiguration{
+		BaseHelmValuesPath: "helm-values.yaml",
+		TempHelmValuesPath: tempFilePath,
+		ExistingValues:     baseValues,
+		ModifiedSections:   make([]string, 0),
+	}, nil
+}
+
 func (w *InstallationWorkflow) loadExistingConfiguration(deploymentModeStr string) (*types.ChartConfiguration, error) {
 	modifier := templates.NewHelmValuesModifier()
 
@@ -566,35 +543,8 @@ func (w *InstallationWorkflow) runPartialConfigurationWizard(deploymentModeStr s
 	return wizard.ConfigureHelmValuesWithMode(deploymentMode)
 }
 
-// waitForArgoCDSync waits for ArgoCD applications to be synced
-func (w *InstallationWorkflow) waitForArgoCDSync(ctx context.Context, config config.ChartInstallConfig) error {
-	if !config.HasAppOfApps() {
-		// No ArgoCD apps to wait for
-		return nil
-	}
-
-	// pterm.Info.Println("🔄 Waiting for ArgoCD applications to sync...")
-
-	// Create ArgoCD service to wait for applications
-	pathResolver := w.chartService.configService.GetPathResolver()
-	argoCDService := NewArgoCD(w.chartService.helmManager, pathResolver, w.chartService.executor)
-
-	// Wait for applications to be synced with context for cancellation
-	if err := argoCDService.WaitForApplications(ctx, config); err != nil {
-		// Check if it was cancelled by user
-		if ctx.Err() == context.Canceled {
-			pterm.Info.Println("ArgoCD sync cancelled by user")
-			return fmt.Errorf("ArgoCD sync cancelled by user")
-		}
-		return fmt.Errorf("ArgoCD applications sync failed: %w", err)
-	}
-
-	// pterm.Success.Println("✅ All ArgoCD applications synced successfully")
-	return nil
-}
-
 // buildConfiguration constructs the installation configuration
-func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
+func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest, clusterName string, chartConfig *types.ChartConfiguration) (config.ChartInstallConfig, error) {
 	configBuilder := config.NewBuilder(w.chartService.operationsUI)
 
 	// Determine repository URL based on deployment mode
@@ -606,9 +556,11 @@ func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequ
 
 		// Inject authentication token for private SaaS repositories (both Shared and Tenant)
 		if (*chartConfig.DeploymentMode == types.DeploymentModeSaaSShared || *chartConfig.DeploymentMode == types.DeploymentModeSaaS) && chartConfig.SaaSConfig != nil && chartConfig.SaaSConfig.RepositoryPassword != "" {
+			// Register the token so it is scrubbed from any verbose/debug command logging.
+			redact.RegisterSecret(chartConfig.SaaSConfig.RepositoryPassword)
 			// Replace https:// with https://x-access-token:TOKEN@
 			// This format is required for GitHub PAT authentication in non-interactive mode
-			githubRepo = strings.Replace(githubRepo, "https://", "https://x-access-token:"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
+			githubRepo = strings.Replace(githubRepo, "https://", "https://"+git.GitTokenUser+":"+chartConfig.SaaSConfig.RepositoryPassword+"@", 1)
 		}
 	}
 
@@ -616,6 +568,28 @@ func (w *InstallationWorkflow) buildConfiguration(req utilTypes.InstallationRequ
 	var deploymentModeStr string
 	if chartConfig.DeploymentMode != nil {
 		deploymentModeStr = string(*chartConfig.DeploymentMode)
+	}
+
+	// When the operator explicitly pins a ref (--ref/--github-branch), write it into
+	// the temp helm-values' repository.branch BEFORE the builder reads it back. This
+	// makes the explicit ref win over the values-file branch and keeps BOTH the
+	// app-of-apps clone and the child Applications' targetRevision on that ref
+	// (otherwise the values-file branch silently overrides --ref).
+	if ref := strings.TrimSpace(req.GitHubBranch); req.GitHubRefExplicit && ref != "" && chartConfig.TempHelmValuesPath != "" {
+		modifier := templates.NewHelmValuesModifier()
+		values := chartConfig.ExistingValues
+		if values == nil {
+			loaded, lerr := modifier.LoadExistingValues(chartConfig.TempHelmValuesPath)
+			if lerr != nil {
+				return config.ChartInstallConfig{}, fmt.Errorf("pinning ref %q: %w", ref, lerr)
+			}
+			values = loaded
+		}
+		modifier.SetRepositoryBranch(values, deploymentModeStr, ref)
+		if werr := modifier.WriteValues(values, chartConfig.TempHelmValuesPath); werr != nil {
+			return config.ChartInstallConfig{}, fmt.Errorf("pinning ref %q into helm values: %w", ref, werr)
+		}
+		pterm.Info.Printf("Pinning platform to ref %q\n", ref)
 	}
 
 	return configBuilder.BuildInstallConfigWithCustomHelmPath(
@@ -641,7 +615,8 @@ func (w *InstallationWorkflow) performInstallation(ctx context.Context, config c
 	err := installer.InstallChartsWithContext(ctx, config)
 	if err != nil {
 		// Check if this is a branch not found error
-		if _, ok := err.(*sharedErrors.BranchNotFoundError); ok {
+		var bnfErr *sharedErrors.BranchNotFoundError
+		if stderrors.As(err, &bnfErr) {
 			return err // Return as-is, don't wrap
 		}
 		return errors.WrapAsChartError("installation", "chart", err).WithCluster(config.ClusterName)
@@ -670,40 +645,9 @@ func (w *InstallationWorkflow) performInstallationWithRetry(parentCtx context.Co
 	})
 }
 
-// InstallChartsWithPrerequisites installs charts after checking prerequisites
-// This is a wrapper function for bootstrap and other automated flows
-func InstallChartsWithPrerequisites(clusterName string, verbose bool) error {
-	return InstallChartsWithDefaults([]string{clusterName}, false, false, verbose)
-}
-
-// InstallChartsWithDefaults installs charts with default GitHub configuration
-// This is the common logic used by both chart install command and bootstrap
-func InstallChartsWithDefaults(args []string, force, dryRun, verbose bool) error {
-	return InstallChartsWithDefaultsContext(context.Background(), args, force, dryRun, verbose)
-}
-
-// InstallChartsWithDefaultsContext installs charts with default GitHub configuration and context support
-func InstallChartsWithDefaultsContext(ctx context.Context, args []string, force, dryRun, verbose bool) error {
-	return InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
-		Args:         args,
-		Force:        force,
-		DryRun:       dryRun,
-		Verbose:      verbose,
-		GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant", // Default repository
-		GitHubBranch: "main",                                                   // Default branch
-		CertDir:      "",                                                       // Auto-detected
-	})
-}
-
-// InstallChartsWithConfig installs charts with the given configuration
-// This is the common installation logic used by all flows
-func InstallChartsWithConfig(req utilTypes.InstallationRequest) error {
-	return InstallChartsWithConfigContext(context.Background(), req)
-}
-
 // InstallChartsWithConfigContext installs charts with the given configuration and context support
 // If KubeConfig is nil, it will be obtained after cluster selection (for standalone chart install)
-func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.InstallationRequest) error {
+func InstallChartsWithConfigContext(ctx context.Context, req types.InstallationRequest) error {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -728,16 +672,20 @@ func InstallChartsWithConfigContext(ctx context.Context, req utilTypes.Installat
 	// Otherwise, defer to the chart service to get it after cluster selection
 	if req.KubeConfig != nil {
 		// Create a chart service with the KubeConfig and perform the installation with context
-		chartService, err := NewChartService(req.KubeConfig, req.DryRun, req.Verbose)
+		chartService, err := NewChartService(req.ClusterAccess, req.KubeConfig, req.DryRun, req.Verbose)
 		if err != nil {
 			return fmt.Errorf("failed to create chart service: %w", err)
 		}
 		return chartService.InstallWithContext(ctx, req)
 	}
 
-	// No KubeConfig provided - use deferred initialization
-	// This creates a minimal chart service that will get the config after cluster selection
-	chartService, err := NewChartServiceDeferred(req.DryRun, req.Verbose)
+	// No KubeConfig provided - use deferred initialization. This path selects a
+	// cluster and resolves its rest.Config, so it needs cluster access injected
+	// by the caller (req 18/19 keeps this out of internal/cluster).
+	if req.ClusterAccess == nil {
+		return fmt.Errorf("cluster access is required to install without an explicit kubeconfig")
+	}
+	chartService, err := NewChartServiceDeferred(req.ClusterAccess, req.DryRun, req.Verbose)
 	if err != nil {
 		return fmt.Errorf("failed to create chart service: %w", err)
 	}

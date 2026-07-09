@@ -6,22 +6,23 @@ import (
 	"sync"
 	"time"
 
+	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 )
 
 // Tracker provides comprehensive progress tracking for long-running operations
 type Tracker struct {
-	operation    string
-	steps        []Step
-	currentStep  int
-	startTime    time.Time
-	spinner      *pterm.SpinnerPrinter
-	progressBar  *pterm.ProgressbarPrinter
-	mu           sync.Mutex
-	completed    bool
-	cancelled    bool
-	context      context.Context
-	cancelFunc   context.CancelFunc
+	operation   string
+	steps       []Step
+	currentStep int
+	startTime   time.Time
+	spinner     *uispinner.Spinner
+	progressBar *pterm.ProgressbarPrinter
+	mu          sync.Mutex
+	completed   bool
+	cancelled   bool
+	context     context.Context
+	cancelFunc  context.CancelFunc
 }
 
 // Step represents a single step in a multi-step operation
@@ -67,13 +68,13 @@ func (s StepStatus) String() string {
 // NewTracker creates a new progress tracker for the given operation
 func NewTracker(operation string, steps []Step) *Tracker {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &Tracker{
-		operation:  operation,
-		steps:      steps,
+		operation:   operation,
+		steps:       steps,
 		currentStep: -1,
-		context:    ctx,
-		cancelFunc: cancel,
+		context:     ctx,
+		cancelFunc:  cancel,
 	}
 }
 
@@ -83,9 +84,8 @@ func (t *Tracker) Start() {
 	defer t.mu.Unlock()
 
 	t.startTime = time.Now()
-	t.spinner, _ = pterm.DefaultSpinner.
-		WithText(fmt.Sprintf("Starting %s...", t.operation)).
-		Start()
+	t.spinner = uispinner.New()
+	t.spinner.Start(fmt.Sprintf("Starting %s...", t.operation))
 }
 
 // StartStep begins execution of a specific step
@@ -132,8 +132,8 @@ func (t *Tracker) CompleteStep(stepIndex int) error {
 	t.steps[stepIndex].Duration = t.steps[stepIndex].EndTime.Sub(t.steps[stepIndex].StartTime)
 
 	// Show completion message
-	pterm.Success.Printf("✅ %s completed (%s)\n", 
-		t.steps[stepIndex].Name, 
+	pterm.Success.Printf("✅ %s completed (%s)\n",
+		t.steps[stepIndex].Name,
 		t.steps[stepIndex].Duration.Round(time.Millisecond))
 
 	return nil
@@ -154,8 +154,8 @@ func (t *Tracker) FailStep(stepIndex int, err error) error {
 	t.steps[stepIndex].Duration = t.steps[stepIndex].EndTime.Sub(t.steps[stepIndex].StartTime)
 
 	// Show error message
-	pterm.Error.Printf("❌ %s failed: %v (%s)\n", 
-		t.steps[stepIndex].Name, 
+	pterm.Error.Printf("❌ %s failed: %v (%s)\n",
+		t.steps[stepIndex].Name,
 		err,
 		t.steps[stepIndex].Duration.Round(time.Millisecond))
 
@@ -231,7 +231,7 @@ func (t *Tracker) Complete() {
 		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	// Show completion summary
@@ -256,7 +256,7 @@ func (t *Tracker) Fail(err error) {
 		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	// Show failure message
@@ -282,7 +282,7 @@ func (t *Tracker) Cancel() {
 		t.spinner.Stop()
 	}
 	if t.progressBar != nil {
-		t.progressBar.Stop()
+		_, _ = t.progressBar.Stop()
 	}
 
 	pterm.Warning.Printf("⏹️  %s cancelled by user\n", t.operation)
@@ -349,7 +349,7 @@ func (t *Tracker) GetEstimatedTimeRemaining() time.Duration {
 func (t *Tracker) showSummary(totalDuration time.Duration) {
 	fmt.Println()
 	pterm.Info.Println("📊 Operation Summary:")
-	
+
 	completedCount := 0
 	failedCount := 0
 	skippedCount := 0
@@ -372,6 +372,6 @@ func (t *Tracker) showSummary(totalDuration time.Duration) {
 
 	fmt.Println()
 	pterm.Info.Printf("Total Duration: %s\n", totalDuration.Round(time.Millisecond))
-	pterm.Info.Printf("Steps: %d completed, %d failed, %d skipped, %d total\n", 
+	pterm.Info.Printf("Steps: %d completed, %d failed, %d skipped, %d total\n",
 		completedCount, failedCount, skippedCount, len(t.steps))
 }

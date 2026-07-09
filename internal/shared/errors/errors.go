@@ -1,8 +1,9 @@
 package errors
 
 import (
+	"context"
+	stderrors "errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pterm/pterm"
@@ -66,13 +67,16 @@ func (eh *ErrorHandler) HandleError(err error) {
 		return
 	}
 
-	switch e := err.(type) {
-	case *ValidationError:
-		eh.handleValidationError(e)
-	case *CommandError:
-		eh.handleCommandError(e)
-	case *BranchNotFoundError:
-		eh.handleBranchNotFoundError(e)
+	var validationErr *ValidationError
+	var commandErr *CommandError
+	var branchErr *BranchNotFoundError
+	switch {
+	case stderrors.As(err, &validationErr):
+		eh.handleValidationError(validationErr)
+	case stderrors.As(err, &commandErr):
+		eh.handleCommandError(commandErr)
+	case stderrors.As(err, &branchErr):
+		eh.handleBranchNotFoundError(branchErr)
 	default:
 		eh.handleGenericError(err)
 	}
@@ -93,7 +97,7 @@ func (eh *ErrorHandler) handleCommandError(err *CommandError) {
 	if len(err.Args) > 0 {
 		pterm.Printf("  Arguments: %v\n", err.Args)
 	}
-	
+
 	if eh.verbose {
 		pterm.Printf("  Details: %v\n", err.Err)
 	} else {
@@ -108,19 +112,20 @@ func (eh *ErrorHandler) handleBranchNotFoundError(err *BranchNotFoundError) {
 func (eh *ErrorHandler) handleGenericError(err error) {
 	// Clean up common error patterns for better user experience
 	errorMsg := err.Error()
-	
-	// Handle user interruptions (Ctrl+C)
-	if eh.isUserInterruption(errorMsg) {
+
+	// Handle user interruptions (Ctrl+C). Do NOT os.Exit here — returning lets
+	// the caller's deferred cleanup run and the process exit via the normal
+	// error-return path.
+	if eh.isUserInterruption(err) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
-		os.Exit(1)
 		return
 	}
-	
+
 	// Extract meaningful error from complex error chains
 	if strings.Contains(errorMsg, "cluster create operation failed") {
 		pterm.Error.Printf("❌ Failed to create cluster\n")
-		
+
 		// Try to extract the actual k3d error and give helpful advice
 		if strings.Contains(errorMsg, "exit status 1") && strings.Contains(errorMsg, "k3d cluster create") {
 			pterm.Printf("  Issue: k3d cluster creation failed\n")
@@ -143,32 +148,39 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 			// Show only the essential error message
 			pterm.Printf("  Error: %s\n", errorMsg)
 		}
+		// Add a plain-language next step for common failures (req 30).
+		if hint := friendlyHint(err); hint != "" {
+			pterm.Info.Printf("💡 %s\n", hint)
+		}
 	}
 }
 
-// isUserInterruption checks if the error represents a user interruption (Ctrl+C)
-func (eh *ErrorHandler) isUserInterruption(errorMsg string) bool {
-	// Common interruption patterns
-	interruptions := []string{
-		"interrupted",
-		"interrupt",
-		"^C",
-		"cluster selection failed: ^C",
-		"selection failed: ^C",
-		"confirmation failed: ^C",
-		"operation cancelled",
-		"user cancelled",
-		"context canceled",
+// isInterruption reports whether err represents a user interruption (Ctrl+C).
+//
+// It is structural first: errors.Is(context.Canceled) matches the signal-
+// cancelled root context and anything that %w-wraps ctx.Err() (e.g. "operation
+// cancelled: <ctx.Err()>"). Crucially it does NOT match context.DeadlineExceeded,
+// so a real timeout is not mislabeled as a user cancellation — and it won't
+// false-match an unrelated error that merely mentions "context canceled" in its
+// text. The remaining string checks cover promptui's Ctrl-C at an interactive
+// prompt ("^C") and the exact "interrupted" some prompt sites return. "interrupted"
+// is matched exactly (not as a substring) so an unrelated "connection was
+// interrupted" network error is not mislabeled as a user cancellation.
+func isInterruption(err error) bool {
+	if err == nil {
+		return false
 	}
-	
-	errorLower := strings.ToLower(errorMsg)
-	for _, pattern := range interruptions {
-		if strings.Contains(errorLower, strings.ToLower(pattern)) {
-			return true
-		}
+	if stderrors.Is(err, context.Canceled) {
+		return true
 	}
-	
-	return false
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return msg == "interrupted" || strings.Contains(msg, "^c")
+}
+
+// isUserInterruption reports whether err is a user interruption (Ctrl+C), so the
+// handler can print a friendly "cancelled" message instead of a failure.
+func (eh *ErrorHandler) isUserInterruption(err error) bool {
+	return isInterruption(err)
 }
 
 // CreateValidationError creates a new validation error
@@ -205,14 +217,14 @@ func CreateCommandError(command string, args []string, err error) *CommandError 
 
 // IsValidationError checks if an error is a validation error
 func IsValidationError(err error) bool {
-	_, ok := err.(*ValidationError)
-	return ok
+	var target *ValidationError
+	return stderrors.As(err, &target)
 }
 
 // IsCommandError checks if an error is a command error
 func IsCommandError(err error) bool {
-	_, ok := err.(*CommandError)
-	return ok
+	var target *CommandError
+	return stderrors.As(err, &target)
 }
 
 // HandleGlobalError provides a global error handling entry point
@@ -223,20 +235,17 @@ func HandleGlobalError(err error, verbose bool) error {
 	}
 
 	handler := NewErrorHandler(verbose)
-	
-	// Check if this is a user interruption - these should exit cleanly
-	if handler.isUserInterruption(err.Error()) {
+
+	// Display the error (interruptions get a friendly "cancelled" message). We
+	// return an AlreadyHandledError rather than calling os.Exit: the RunE caller
+	// returns it, cobra/main map it to a non-zero exit code, and every deferred
+	// cleanup (signal.Stop, cancel, temp-file restore) still runs. main.go
+	// recognises the sentinel and does not re-print the message.
+	if handler.isUserInterruption(err) {
 		fmt.Println()
 		pterm.Info.Println("Operation cancelled by user.")
-		os.Exit(1)
-		return nil // Won't be reached
+	} else {
+		handler.HandleError(err)
 	}
-	
-	// Display the error
-	handler.HandleError(err)
-	
-	// Don't return the error to prevent double display
-	// Exit with code 1 to indicate failure
-	os.Exit(1)
-	return nil // Won't be reached
+	return &AlreadyHandledError{OriginalError: err}
 }

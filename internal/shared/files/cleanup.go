@@ -57,7 +57,7 @@ func (fc *FileCleanup) BackupFile(filePath string, useMemoryOnly bool) error {
 
 		if useMemoryOnly {
 			// Store content in memory
-			content, err := os.ReadFile(filePath)
+			content, err := os.ReadFile(filePath) // #nosec G304 -- backs up a program-tracked file, read as invoking user
 			if err != nil {
 				return fmt.Errorf("failed to read file for backup: %w", err)
 			}
@@ -170,7 +170,7 @@ func (fc *FileCleanup) restoreFile(backup FileBackup, verbose bool) error {
 	if backup.FileExisted {
 		if backup.ContentOnly {
 			// Restore from memory
-			if err := os.WriteFile(backup.OriginalPath, backup.OriginalContent, 0644); err != nil {
+			if err := os.WriteFile(backup.OriginalPath, backup.OriginalContent, 0600); err != nil {
 				return fmt.Errorf("failed to restore file from memory: %w", err)
 			}
 		} else {
@@ -231,18 +231,18 @@ func (fc *FileCleanup) SetCleanupOnSuccessOnly(enabled bool) {
 
 // copyFile copies a file from src to dst
 func (fc *FileCleanup) copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
+	sourceFile, err := os.Open(src) // #nosec G304 -- copies a program-tracked backup file
 	if err != nil {
 		return err
 	}
 	defer sourceFile.Close()
 
 	// Create destination directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 		return err
 	}
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.Create(dst) // #nosec G304 -- restores to a program-tracked backup path
 	if err != nil {
 		return err
 	}

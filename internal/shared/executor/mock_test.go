@@ -10,12 +10,12 @@ import (
 
 func TestNewMockCommandExecutor(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	assert.NotNil(t, mockExec)
 	assert.NotNil(t, mockExec.responses)
 	assert.NotNil(t, mockExec.defaultResult)
 	assert.Empty(t, mockExec.commands)
-	
+
 	// Verify it implements the interface
 	var _ CommandExecutor = mockExec
 }
@@ -61,14 +61,14 @@ func TestMockCommandExecutor_Execute_DefaultResult(t *testing.T) {
 
 func TestMockCommandExecutor_Execute_ShouldFail(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Configure to fail
 	mockExec.SetShouldFail(true, "mock failure")
-	
+
 	// Execute
 	ctx := context.Background()
 	result, err := mockExec.Execute(ctx, "fail")
-	
+
 	// Assertions
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "mock failure")
@@ -110,23 +110,23 @@ func TestMockCommandExecutor_ExecuteWithOptions(t *testing.T) {
 
 func TestMockCommandExecutor_SetResponse(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Set specific response
 	result := &CommandResult{
 		ExitCode: 0,
 		Stdout:   "specific output",
 		Duration: 50 * time.Millisecond,
 	}
-	
+
 	mockExec.SetResponse("specific", result)
-	
+
 	ctx := context.Background()
-	
+
 	// Execute matching command
 	actualResult, err := mockExec.Execute(ctx, "run", "specific", "command")
 	assert.NoError(t, err)
 	assert.Equal(t, "specific output", actualResult.Stdout)
-	
+
 	// Execute non-matching command (should use default)
 	defaultResult, err := mockExec.Execute(ctx, "other", "command")
 	assert.NoError(t, err)
@@ -135,52 +135,52 @@ func TestMockCommandExecutor_SetResponse(t *testing.T) {
 
 func TestMockCommandExecutor_SetDefaultResult(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Set custom default with successful exit code
 	customDefault := &CommandResult{
 		ExitCode: 0,
 		Stdout:   "custom default",
 		Duration: 75 * time.Millisecond,
 	}
-	
+
 	mockExec.SetDefaultResult(customDefault)
-	
+
 	ctx := context.Background()
 	result, err := mockExec.Execute(ctx, "unknown", "command")
-	
+
 	assert.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(t, "custom default", result.Stdout)
-	
+
 	// Test with error exit code - note that default result doesn't check exit code
 	errorDefault := &CommandResult{
 		ExitCode: 2,
 		Stdout:   "error default",
 		Duration: 75 * time.Millisecond,
 	}
-	
+
 	mockExec.SetDefaultResult(errorDefault)
-	
+
 	result2, err2 := mockExec.Execute(ctx, "another", "command")
-	
+
 	// Default result path doesn't check exit code, so no error is returned
-	assert.NoError(t, err2) 
+	assert.NoError(t, err2)
 	assert.Equal(t, 2, result2.ExitCode)
 	assert.Equal(t, "error default", result2.Stdout)
 }
 
 func TestMockCommandExecutor_GetExecutedCommands(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	ctx := context.Background()
-	
+
 	// Execute some commands
 	mockExec.Execute(ctx, "echo", "hello")
 	mockExec.Execute(ctx, "ls", "-la")
 	mockExec.Execute(ctx, "pwd")
-	
+
 	commands := mockExec.GetExecutedCommands()
-	
+
 	assert.Len(t, commands, 3)
 	assert.Contains(t, commands, "echo hello")
 	assert.Contains(t, commands, "ls -la")
@@ -189,24 +189,24 @@ func TestMockCommandExecutor_GetExecutedCommands(t *testing.T) {
 
 func TestMockCommandExecutor_GetCommandCount(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	assert.Equal(t, 0, mockExec.GetCommandCount())
-	
+
 	ctx := context.Background()
 	mockExec.Execute(ctx, "test1")
 	assert.Equal(t, 1, mockExec.GetCommandCount())
-	
+
 	mockExec.Execute(ctx, "test2")
 	assert.Equal(t, 2, mockExec.GetCommandCount())
 }
 
 func TestMockCommandExecutor_WasCommandExecuted(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	ctx := context.Background()
 	mockExec.Execute(ctx, "echo", "hello", "world")
 	mockExec.Execute(ctx, "ls", "-la")
-	
+
 	assert.True(t, mockExec.WasCommandExecuted("echo"))
 	assert.True(t, mockExec.WasCommandExecuted("hello"))
 	assert.True(t, mockExec.WasCommandExecuted("ls -la"))
@@ -216,42 +216,42 @@ func TestMockCommandExecutor_WasCommandExecuted(t *testing.T) {
 
 func TestMockCommandExecutor_GetLastCommand(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// No commands executed yet
 	assert.Equal(t, "", mockExec.GetLastCommand())
-	
+
 	ctx := context.Background()
 	mockExec.Execute(ctx, "first")
 	assert.Equal(t, "first", mockExec.GetLastCommand())
-	
+
 	mockExec.Execute(ctx, "second", "command")
 	assert.Equal(t, "second command", mockExec.GetLastCommand())
 }
 
 func TestMockCommandExecutor_Reset(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Set up some state
 	mockExec.SetShouldFail(true, "error")
 	mockExec.SetResponse("test", &CommandResult{Stdout: "test"})
-	
+
 	ctx := context.Background()
 	mockExec.Execute(ctx, "some", "command")
-	
+
 	// Verify state exists by checking behavior
 	assert.Equal(t, 1, mockExec.GetCommandCount())
-	
+
 	// Test that failure is configured
 	_, err := mockExec.Execute(ctx, "fail")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error")
-	
+
 	// Reset
 	mockExec.Reset()
-	
+
 	// Verify state is cleared by checking behavior
 	assert.Equal(t, 0, mockExec.GetCommandCount())
-	
+
 	// Test that failure is no longer configured
 	_, err = mockExec.Execute(ctx, "test")
 	assert.NoError(t, err)
@@ -259,20 +259,20 @@ func TestMockCommandExecutor_Reset(t *testing.T) {
 
 func TestMockCommandExecutor_PatternMatching(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
-	
+
 	// Set response for pattern
 	result := &CommandResult{Stdout: "pattern matched"}
 	mockExec.SetResponse("kubectl", result)
-	
+
 	ctx := context.Background()
-	
+
 	// Commands containing "kubectl" should match
 	actualResult, _ := mockExec.Execute(ctx, "kubectl", "get", "pods")
 	assert.Equal(t, "pattern matched", actualResult.Stdout)
-	
+
 	actualResult, _ = mockExec.Execute(ctx, "run", "kubectl", "version")
 	assert.Equal(t, "pattern matched", actualResult.Stdout)
-	
+
 	// Commands not containing "kubectl" should use default
 	actualResult, _ = mockExec.Execute(ctx, "docker", "ps")
 	assert.Equal(t, "mock output", actualResult.Stdout)
@@ -314,12 +314,12 @@ func TestMockCommandExecutor_EdgeCases(t *testing.T) {
 				mockExec := NewMockCommandExecutor()
 				mockExec.SetResponse("kubectl", &CommandResult{Stdout: "k8s"})
 				mockExec.SetResponse("docker", &CommandResult{Stdout: "container"})
-				
+
 				ctx := context.Background()
 				result1, _ := mockExec.Execute(ctx, "kubectl", "get", "pods")
 				result2, _ := mockExec.Execute(ctx, "docker", "ps")
 				result3, _ := mockExec.Execute(ctx, "other")
-				
+
 				assert.Equal(t, "k8s", result1.Stdout)
 				assert.Equal(t, "container", result2.Stdout)
 				assert.Equal(t, "mock output", result3.Stdout)
@@ -331,10 +331,10 @@ func TestMockCommandExecutor_EdgeCases(t *testing.T) {
 				mockExec := NewMockCommandExecutor()
 				zeroResult := &CommandResult{} // Zero values
 				mockExec.SetDefaultResult(zeroResult)
-				
+
 				ctx := context.Background()
 				result, err := mockExec.Execute(ctx, "test")
-				
+
 				assert.NoError(t, err)
 				assert.NotNil(t, result)
 				assert.Equal(t, 0, result.ExitCode)
@@ -352,11 +352,11 @@ func TestMockCommandExecutor_EdgeCases(t *testing.T) {
 func TestMockCommandExecutor_ConcurrentAccess(t *testing.T) {
 	mockExec := NewMockCommandExecutor()
 	ctx := context.Background()
-	
+
 	// Test that mock doesn't panic under concurrent access
 	// Note: Mock is not guaranteed to be thread-safe, but shouldn't crash
 	done := make(chan bool, 5)
-	
+
 	for i := 0; i < 5; i++ {
 		go func(n int) {
 			defer func() { done <- true }()
@@ -364,12 +364,12 @@ func TestMockCommandExecutor_ConcurrentAccess(t *testing.T) {
 			assert.NoError(t, err)
 		}(i)
 	}
-	
+
 	// Wait for all goroutines
 	for i := 0; i < 5; i++ {
 		<-done
 	}
-	
+
 	// Just verify that commands were executed (count may vary due to race conditions)
 	assert.Greater(t, mockExec.GetCommandCount(), 0)
 	assert.LessOrEqual(t, mockExec.GetCommandCount(), 5)

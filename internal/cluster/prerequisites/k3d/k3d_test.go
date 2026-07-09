@@ -3,11 +3,13 @@ package k3d
 import (
 	"runtime"
 	"testing"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 )
 
 func TestNewK3dInstaller(t *testing.T) {
 	installer := NewK3dInstaller()
-	
+
 	if installer == nil {
 		t.Error("Expected k3d installer to be created")
 	}
@@ -16,11 +18,11 @@ func TestNewK3dInstaller(t *testing.T) {
 func TestK3dInstaller_GetInstallHelp(t *testing.T) {
 	installer := NewK3dInstaller()
 	help := installer.GetInstallHelp()
-	
+
 	if help == "" {
 		t.Error("Install help should not be empty")
 	}
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		if !containsSubstring(help, "brew") && !containsSubstring(help, "https://") {
@@ -74,56 +76,37 @@ func TestCommandExists(t *testing.T) {
 	if !commandExists("echo") {
 		t.Error("Expected 'echo' command to exist")
 	}
-	
+
 	if commandExists("nonexistentcommand12345") {
 		t.Error("Expected 'nonexistentcommand12345' to not exist")
 	}
 }
 
-func TestInstallScript(t *testing.T) {
-	// Skip this test on non-Linux systems
-	if runtime.GOOS != "linux" {
-		t.Skip("Linux-specific test, skipping on", runtime.GOOS)
+func TestVerifiedInstallHasPinnedAsset(t *testing.T) {
+	// installVerified downloads the pinned k3d binary via
+	// download.InstallPinnedTool; the actual download + checksum verification is
+	// covered by the download package tests. Here we only assert that a verified
+	// asset is pinned for the current platform, so the installer never fails with
+	// a "no verified asset" error on a supported OS. Windows installs via WSL and
+	// does not use the verified path.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows installs k3d via WSL, not the verified download path")
 	}
-	
-	installer := NewK3dInstaller()
-	
-	// This will likely fail in test environment due to network/permissions
-	err := installer.installScript()
-	
-	if err != nil {
-		// Should be a reasonable error message
-		validErrors := []string{
-			"failed to install k3d via script",
-			"exit status",
-			"executable file not found",
-			"permission denied",
-			"no such host",
-		}
-		
-		hasValidError := false
-		for _, validError := range validErrors {
-			if containsSubstring(err.Error(), validError) {
-				hasValidError = true
-				break
-			}
-		}
-		
-		if !hasValidError {
-			t.Errorf("Unexpected error type: %v", err)
-		}
+
+	if _, ok := download.K3d.Asset(runtime.GOOS, runtime.GOARCH); !ok {
+		t.Errorf("no pinned k3d asset for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 }
 
 // Helper function to check if a string contains a substring
 func containsSubstring(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		   func() bool {
-			   for i := 0; i <= len(str)-len(substr); i++ {
-				   if str[i:i+len(substr)] == substr {
-					   return true
-				   }
-			   }
-			   return false
-		   }()
+	return len(str) >= len(substr) &&
+		func() bool {
+			for i := 0; i <= len(str)-len(substr); i++ {
+				if str[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}()
 }

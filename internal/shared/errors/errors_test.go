@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,33 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
+
+// TestIsUserInterruption_Structural locks the fix: real cancellation is detected
+// via errors.Is(context.Canceled) (incl. %w-wrapped), a timeout is NOT mislabeled
+// as a user cancellation, and an unrelated error mentioning "cancel" is not a
+// false positive. Prompt Ctrl-C markers ("^C"/"interrupted") still count.
+func TestIsUserInterruption_Structural(t *testing.T) {
+	eh := NewErrorHandler(false)
+
+	// Genuine cancellation, bare and wrapped.
+	assert.True(t, eh.isUserInterruption(context.Canceled))
+	assert.True(t, eh.isUserInterruption(fmt.Errorf("operation cancelled: %w", context.Canceled)))
+
+	// A timeout is context.DeadlineExceeded — must NOT read as user cancellation.
+	assert.False(t, eh.isUserInterruption(context.DeadlineExceeded))
+	assert.False(t, eh.isUserInterruption(fmt.Errorf("wait timed out: %w", context.DeadlineExceeded)))
+
+	// Coincidental text must not false-match (no wrapped context.Canceled).
+	assert.False(t, eh.isUserInterruption(errors.New("upstream returned: context canceled by peer")))
+	assert.False(t, eh.isUserInterruption(errors.New("cluster create failed")))
+
+	// Prompt Ctrl-C markers still detected.
+	assert.True(t, eh.isUserInterruption(fmt.Errorf("selection failed: %w", errors.New("^C"))))
+	assert.True(t, eh.isUserInterruption(errors.New("interrupted")))
+
+	// nil is safe.
+	assert.False(t, eh.isUserInterruption(nil))
+}
 
 func TestValidationError_Error(t *testing.T) {
 	tests := []struct {
@@ -141,7 +169,7 @@ func TestNewErrorHandler(t *testing.T) {
 
 func TestErrorHandler_HandleError_Nil(t *testing.T) {
 	handler := NewErrorHandler(false)
-	
+
 	// Should not panic with nil error
 	assert.NotPanics(t, func() {
 		handler.HandleError(nil)
@@ -509,7 +537,6 @@ func TestErrorHandler_NilHandling(t *testing.T) {
 		})
 	}
 }
-
 
 // Benchmark tests
 func BenchmarkValidationError_Error(b *testing.B) {

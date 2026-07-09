@@ -1,76 +1,61 @@
 graph TD
-    subgraph "Command Layer"
-        RootCmd[Root Command]
-        BootstrapCmd[Bootstrap Command]
-        ClusterCmd[Cluster Commands]
-        ChartCmd[Chart Commands]
-        DevCmd[Dev Commands]
+    subgraph "Command Layer (cmd/)"
+        RootCmd[root]
+        BootstrapCmd[bootstrap]
+        ClusterCmd[cluster]
+        AppCmd[app]
+        PrereqCmd[prerequisites]
+        UpdateCmd[update]
     end
-    
-    subgraph "Service Orchestration"
-        BootstrapSvc[Bootstrap Service]
+
+    subgraph "Domain (internal/)"
+        ClusterSvc[cluster service]
+        ChartSvc[chart service]
+        K8sAccess[k8s access API]
+        PrereqSvc[prerequisites]
     end
-    
-    subgraph "Domain Services"
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service] 
-        InterceptSvc[Intercept Service]
-        ScaffoldSvc[Scaffold Service]
+
+    subgraph "Providers (internal/*/providers)"
+        K3D[k3d provider]
+        Helm[helm provider]
+        Git[git provider]
+        ArgoCD[argocd dynamic client]
     end
-    
-    subgraph "Provider Implementations"
-        K3DMgr[K3D Manager]
-        HelmMgr[Helm Manager]
-        ArgoCDMgr[ArgoCD Manager]
-        TelepresenceProv[Telepresence Provider]
-        KubectlProv[Kubectl Provider]
-        GitRepo[Git Repository]
+
+    subgraph "Shared (internal/shared/)"
+        Executor[executor]
+        UI[ui]
+        Download[download]
+        SelfUpdate[selfupdate]
+        WSL[wsllauncher]
     end
-    
-    subgraph "Shared Infrastructure"
-        Executor[Command Executor]
-        UI[UI Components]
-        Config[Configuration]
-        Prerequisites[Prerequisites]
-    end
-    
+
     RootCmd --> BootstrapCmd
     RootCmd --> ClusterCmd
-    RootCmd --> ChartCmd
-    RootCmd --> DevCmd
-    
-    BootstrapCmd --> BootstrapSvc
+    RootCmd --> AppCmd
+    RootCmd --> PrereqCmd
+    RootCmd --> UpdateCmd
+    RootCmd --> WSL
+    UpdateCmd --> SelfUpdate
+
+    BootstrapCmd --> PrereqSvc
+    BootstrapCmd --> ClusterSvc
+    BootstrapCmd --> ChartSvc
     ClusterCmd --> ClusterSvc
-    ChartCmd --> ChartSvc
-    DevCmd --> InterceptSvc
-    DevCmd --> ScaffoldSvc
-    
-    BootstrapSvc --> ClusterSvc
-    BootstrapSvc --> ChartSvc
-    
-    ClusterSvc --> K3DMgr
-    ChartSvc --> HelmMgr
-    ChartSvc --> ArgoCDMgr
-    ChartSvc --> GitRepo
-    InterceptSvc --> TelepresenceProv
-    InterceptSvc --> KubectlProv
-    ScaffoldSvc --> KubectlProv
-    
-    K3DMgr --> Executor
-    HelmMgr --> Executor
-    ArgoCDMgr --> Executor
-    TelepresenceProv --> Executor
-    KubectlProv --> Executor
-    GitRepo --> Executor
-    
+    AppCmd --> ChartSvc
+    AppCmd --> K8sAccess
+    PrereqCmd --> PrereqSvc
+
+    ClusterSvc --> K3D
+    ChartSvc --> Git
+    ChartSvc --> Helm
+    ChartSvc --> ArgoCD
+
+    K3D --> Executor
+    Helm --> Executor
+    Git --> Executor
+    PrereqSvc --> Download
+
     ClusterSvc --> UI
     ChartSvc --> UI
-    InterceptSvc --> UI
-    ScaffoldSvc --> UI
-    
-    ClusterSvc --> Config
-    ChartSvc --> Config
-    
-    ClusterSvc --> Prerequisites
-    ChartSvc --> Prerequisites
-    DevCmd --> Prerequisites
+    PrereqSvc --> UI

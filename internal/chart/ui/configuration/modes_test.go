@@ -3,6 +3,7 @@ package configuration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
@@ -20,10 +21,11 @@ func TestConfigurationWizard_ConfigureWithDefaults_OSS(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, values)
 
-	// Test temporary file creation
+	// Test temporary file creation — unique name (not the old fixed filename).
 	tempFile, err := modifier.CreateTemporaryValuesFile(values)
 	assert.NoError(t, err)
-	assert.Equal(t, "helm-values-tmp.yaml", tempFile)
+	assert.Contains(t, tempFile, "helm-values-tmp-")
+	assert.True(t, strings.HasSuffix(tempFile, ".yaml"))
 
 	// Clean up temporary file
 	defer os.Remove(tempFile)
@@ -72,10 +74,8 @@ func TestConfigurationWizard_Integration_LoadAndApply(t *testing.T) {
 	tmpDir := t.TempDir()
 	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
 
-	originalYAML := `deployment:
-  oss:
-    repository:
-      branch: main
+	originalYAML := `repository:
+  branch: main
 registry:
   docker:
     username: default
@@ -124,10 +124,8 @@ registry:
 	updatedValues, err := modifier.LoadExistingValues(tempHelmValuesPath)
 	assert.NoError(t, err)
 
-	// Verify deployment structure changes
-	deployment := updatedValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	repository := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository.branch changed
+	repository := updatedValues["repository"].(map[string]interface{})
 	assert.Equal(t, "develop", repository["branch"])
 
 	registry := updatedValues["registry"].(map[string]interface{})

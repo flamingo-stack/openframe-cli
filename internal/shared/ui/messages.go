@@ -10,21 +10,21 @@ import (
 func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand string) {
 	pterm.Warning.Printf("No %s found for %s operation\n", resourceType, operation)
 	fmt.Println()
-	
+
 	boxContent := fmt.Sprintf(
 		"No %s are currently available.\n\n"+
-		"To get started:\n"+
-		"  • Create a new %s: %s\n"+
-		"  • List existing %s: %s\n\n"+
-		"Need help? Try: %s",
+			"To get started:\n"+
+			"  • Create a new %s: %s\n"+
+			"  • List existing %s: %s\n\n"+
+			"Need help? Try: %s",
 		resourceType,
 		resourceType,
 		pterm.Green(createCommand),
 		resourceType,
-		pterm.Cyan(listCommand), 
+		pterm.Cyan(listCommand),
 		pterm.Gray("--help"),
 	)
-	
+
 	pterm.DefaultBox.
 		WithTitle(fmt.Sprintf(" No %s Available ", resourceType)).
 		WithTitleTopCenter().
@@ -38,7 +38,7 @@ func ShowOperationStart(operation, resourceName string, customMessages map[strin
 	if !exists {
 		message = fmt.Sprintf("Processing '%s' for %s...", operation, pterm.Cyan(resourceName))
 	}
-	
+
 	pterm.Info.Println(message)
 }
 
@@ -48,7 +48,7 @@ func ShowOperationSuccess(operation, resourceName string, customMessages map[str
 	if !exists {
 		message = fmt.Sprintf("Operation '%s' completed for %s", operation, pterm.Cyan(resourceName))
 	}
-	
+
 	pterm.Success.Println(message)
 	fmt.Println()
 }
@@ -57,18 +57,18 @@ func ShowOperationSuccess(operation, resourceName string, customMessages map[str
 func ShowOperationError(operation, resourceName string, err error, troubleshootingTips []TroubleshootingTip) {
 	pterm.Error.Printf("Operation '%s' failed for %s\n", operation, pterm.Cyan(resourceName))
 	pterm.Printf("Error details: %s\n\n", pterm.Red(err.Error()))
-	
+
 	if len(troubleshootingTips) > 0 {
 		// Show helpful suggestions
 		tableData := pterm.TableData{}
-		
+
 		for i, tip := range troubleshootingTips {
 			tableData = append(tableData, []string{
 				fmt.Sprintf("%d.", i+1),
 				pterm.Gray(tip.Description) + " " + pterm.Cyan(tip.Command),
 			})
 		}
-		
+
 		pterm.Info.Println("Troubleshooting Tips:")
 		if err := pterm.DefaultTable.WithData(tableData).Render(); err != nil {
 			pterm.Printf("Troubleshooting:\n")

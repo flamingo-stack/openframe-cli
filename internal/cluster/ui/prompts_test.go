@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 func TestSelectClusterByName(t *testing.T) {
 	t.Run("returns empty string when no clusters provided", func(t *testing.T) {
 		clusters := []ClusterInfo{}
@@ -192,7 +191,6 @@ func TestFormatClusterSuccessMessage(t *testing.T) {
 		}
 	})
 }
-
 
 // Test helper functions for validation logic that can be tested without UI interaction
 func TestValidationLogic(t *testing.T) {

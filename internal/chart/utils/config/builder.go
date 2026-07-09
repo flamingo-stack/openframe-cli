@@ -49,7 +49,7 @@ func (b *Builder) getBranchForDeploymentMode(helmValuesPath string, deploymentMo
 	}
 
 	// Read the YAML file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		return ""
 	}
@@ -92,7 +92,7 @@ func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
 	}
 
 	// Read the YAML file
-	data, err := os.ReadFile(helmValuesPath)
+	data, err := os.ReadFile(helmValuesPath) // #nosec G304 -- helm values path resolved from config/CLI, read as invoking user
 	if err != nil {
 		// If we can't read the file, return empty string (will use default)
 		return ""
@@ -207,8 +207,9 @@ func (b *Builder) BuildInstallConfigWithCustomHelmPath(
 	// Set Silent flag based on NonInteractive mode
 	config.Silent = nonInteractive
 	config.NonInteractive = nonInteractive
-	// Never skip CRDs - they must be installed via native Go client since Helm has crds.install=false
-	// This ensures CRDs are available before ArgoCD pods start, regardless of mode
+	// CRDs are installed by the Argo CD Helm chart itself (crds.install=true).
+	// SkipCRDs is retained only so the readiness check still waits for the
+	// Application CRD to appear before app-of-apps runs.
 	config.SkipCRDs = false
 
 	return config, nil

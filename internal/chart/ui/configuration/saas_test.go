@@ -85,10 +85,14 @@ func TestConfigurationWizard_GetSaaSBranchFromValues(t *testing.T) {
 func TestConfigurationWizard_SaaSBranchExtraction(t *testing.T) {
 	wizard := NewConfigurationWizard()
 
-	// Test complex nested structure
+	// Test complex nested structure: SaaS branch under deployment.saas, OSS branch
+	// at the flattened top-level repository.branch.
 	values := map[string]interface{}{
 		"global": map[string]interface{}{
 			"repoBranch": "global-main",
+		},
+		"repository": map[string]interface{}{
+			"branch": "oss-main",
 		},
 		"deployment": map[string]interface{}{
 			"saas": map[string]interface{}{
@@ -97,12 +101,6 @@ func TestConfigurationWizard_SaaSBranchExtraction(t *testing.T) {
 					"branch":   "saas-develop",
 					"password": "hidden",
 					"url":      "https://github.com/org/saas-repo.git",
-				},
-			},
-			"oss": map[string]interface{}{
-				"enabled": false,
-				"repository": map[string]interface{}{
-					"branch": "oss-main",
 				},
 			},
 		},

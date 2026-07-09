@@ -72,10 +72,10 @@ func (a *ArgoCD) WaitForApplications(ctx context.Context, config config.ChartIns
 
 // IsInstalled checks if ArgoCD is installed
 func (a *ArgoCD) IsInstalled(ctx context.Context) (bool, error) {
-	return a.helmManager.IsChartInstalled(ctx, "argo-cd", "argocd")
+	return a.helmManager.IsChartInstalled(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace)
 }
 
 // GetStatus returns the status of ArgoCD installation
 func (a *ArgoCD) GetStatus(ctx context.Context) (models.ChartInfo, error) {
-	return a.helmManager.GetChartStatus(ctx, "argo-cd", "argocd")
+	return a.helmManager.GetChartStatus(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace)
 }

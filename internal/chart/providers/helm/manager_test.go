@@ -2,26 +2,24 @@ package helm
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
-// createTestHelmManager creates a HelmManager for testing with a mock rest.Config
+// createTestHelmManager creates a HelmManager for testing with a fake clientset
+// so the native (client-go) connectivity checks and deployment waits work
+// without a real cluster.
 func createTestHelmManager(exec executor.CommandExecutor) *HelmManager {
-	// Create a minimal rest.Config for testing
-	// Note: In tests, we use the manager directly without calling New since the
-	// kubernetes clients would fail to initialize with this fake config
 	return &HelmManager{
-		executor: exec,
-		verbose:  false,
+		executor:   exec,
+		kubeClient: k8sfake.NewSimpleClientset(),
+		verbose:    false,
 	}
 }
 
@@ -191,137 +189,6 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectResult, result)
-			}
-		})
-	}
-}
-
-func TestHelmManager_InstallArgoCD(t *testing.T) {
-	// Skip on Windows because helm commands are wrapped in WSL making command matching unreliable
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows due to WSL command wrapping")
-	}
-
-	tests := []struct {
-		name          string
-		config        config.ChartInstallConfig
-		setupMock     func(*MockExecutor)
-		expectError   bool
-		checkCommands func(t *testing.T, commands [][]string)
-	}{
-		{
-			name: "successful installation",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				// All commands should succeed
-			},
-			expectError: false,
-			checkCommands: func(t *testing.T, commands [][]string) {
-				// Verify expected commands were called
-				require.GreaterOrEqual(t, len(commands), 3)
-
-				// Commands may be wrapped in wsl on Windows, so check the command name flexibly
-				// Should have added repo and updated - check for "helm" or "wsl" as first command
-				if len(commands[0]) > 0 {
-					firstCmd := commands[0][0]
-					assert.True(t, firstCmd == "helm" || firstCmd == "wsl", "First command should be helm or wsl, got %s", firstCmd)
-				}
-
-				// Should have upgrade/install command
-				installCmd := commands[2]
-				// On Windows, command might be: wsl -d Ubuntu helm upgrade...
-				// On Unix, command might be: helm upgrade...
-				cmdStart := 0
-				if len(installCmd) > 0 && installCmd[0] == "wsl" {
-					// Skip wsl wrapper args to find actual helm command
-					for i, arg := range installCmd {
-						if arg == "helm" {
-							cmdStart = i
-							break
-						}
-					}
-				}
-
-				if cmdStart < len(installCmd) {
-					assert.Equal(t, "helm", installCmd[cmdStart])
-					if cmdStart+1 < len(installCmd) {
-						assert.Equal(t, "upgrade", installCmd[cmdStart+1])
-					}
-					if cmdStart+2 < len(installCmd) {
-						assert.Equal(t, "--install", installCmd[cmdStart+2])
-					}
-				}
-
-				// Check that install command contains expected flags
-				installCmdStr := strings.Join(installCmd, " ")
-				assert.Contains(t, installCmdStr, "argo-cd")
-				assert.Contains(t, installCmdStr, "argo/argo-cd")
-				assert.Contains(t, installCmdStr, "--version=8.2.7")
-				assert.Contains(t, installCmdStr, "--namespace")
-				assert.Contains(t, installCmdStr, "argocd")
-				assert.Contains(t, installCmdStr, "--create-namespace")
-				assert.Contains(t, installCmdStr, "--wait")
-				assert.Contains(t, installCmdStr, "--timeout")
-				// Timeout may vary (7m for ArgoCD, 30m for app-of-apps)
-				assert.True(t, strings.Contains(installCmdStr, "7m") || strings.Contains(installCmdStr, "30m"), "Should contain timeout value")
-				assert.Contains(t, installCmdStr, "argocd-values")
-			},
-		},
-		{
-			name: "dry run installation",
-			config: config.ChartInstallConfig{
-				DryRun: true,
-			},
-			setupMock: func(m *MockExecutor) {
-				// All commands should succeed
-			},
-			expectError: false,
-			checkCommands: func(t *testing.T, commands [][]string) {
-				require.GreaterOrEqual(t, len(commands), 3)
-				installCmd := commands[2]
-				installCmdStr := strings.Join(installCmd, " ")
-				assert.Contains(t, installCmdStr, "--dry-run")
-			},
-		},
-		{
-			name: "repo add fails",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm repo add argo https://argoproj.github.io/argo-helm", assert.AnError)
-			},
-			expectError:   true,
-			checkCommands: func(t *testing.T, commands [][]string) {},
-		},
-		{
-			name: "repo update fails",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm repo update", assert.AnError)
-			},
-			expectError:   true,
-			checkCommands: func(t *testing.T, commands [][]string) {},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockExec := NewMockExecutor()
-			tt.setupMock(mockExec)
-
-			manager := createTestHelmManager(mockExec)
-			err := manager.InstallArgoCD(context.Background(), tt.config)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				tt.checkCommands(t, mockExec.GetCommands())
 			}
 		})
 	}

@@ -20,10 +20,41 @@ concurrency:
 # =============================================================================
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: golangci-lint
+        # Blocking gate: the audit backlog is cleared (`golangci-lint run ./...`
+        # reports 0 issues), so any NEW finding fails the pipeline.
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          version: latest
+
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 70
+
+    env:
+      # Path to the built binary for this matrix leg. On Windows it forwards the
+      # whole CLI into WSL; on Linux it runs natively. Used by every test step.
+      OF_BIN: ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+      # Cluster used by the lifecycle steps; its k3d kube-context is k3d-<name>.
+      OF_CLUSTER: openframe-test
+      OF_CONTEXT: k3d-openframe-test
 
     strategy:
       fail-fast: false
@@ -41,20 +72,175 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: 'go.mod'
           cache: true
-        
-      - name: Run integration tests
+
+      # The Windows binary re-runs the whole CLI inside WSL2, so the runner needs
+      # a WSL distro that can run Docker (k3d needs a Docker daemon). Alpine is the
+      # lightest official distro; the CLI's Docker installer now supports it (apk).
+      # Only `bash` is pre-installed (the launcher uses `bash -lc`) — Docker itself
+      # is installed by the CLI (`prerequisites install`) below, exercising the new
+      # apk path; the daemon is then started explicitly (WSL has no OpenRC init).
+      - name: Install Alpine in WSL
+        if: matrix.os == 'windows'
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Alpine-3.23
+          set-as-default: 'true'
+          additional-packages: bash
+
+      # --- Build & stage (all platforms, incl. darwin) -----------------------
+      - name: Build & stage CLI
+        shell: bash
+        run: |
+          make build
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            # The cluster and the Kubernetes client live in WSL, so the CLI needs a
+            # *Linux* openframe binary there. `make build` is a dev version with no
+            # published release to auto-download, so build the Linux binary and
+            # stream it into the default WSL distro's ~/.openframe/bin via stdin —
+            # no Windows→WSL path translation, which is where the launcher looks.
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
+            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
+          fi
+
+      # --- Simplest: no cluster, read-only (all platforms, incl. darwin) -----
+      - name: 'CLI: version & help'
+        shell: bash
+        run: |
+          "$OF_BIN" --version
+          "$OF_BIN" --help
+          "$OF_BIN" cluster --help
+          "$OF_BIN" app --help
+          "$OF_BIN" app install --help
+          "$OF_BIN" app upgrade --help
+          "$OF_BIN" bootstrap --help
+          "$OF_BIN" update --help
+          # Self-update check needs neither Docker nor k3d, so it runs everywhere
+          # (incl. darwin); tolerate transient network issues on the runner.
+          "$OF_BIN" update check || echo "update check skipped (network)"
+
+      # Windows only: run the CLI's own prerequisite installer inside WSL. This
+      # exercises the apk Docker install path (installAlpine) and installs k3d +
+      # helm via verified download. The Docker daemon is started separately below
+      # (installAlpine's OpenRC start is a no-op under WSL's initless environment).
+      - name: 'Prereqs: install (WSL, exercises apk Docker install)'
+        if: matrix.os == 'windows'
+        shell: bash
+        run: '"$OF_BIN" prerequisites install || echo "prereq install returned nonzero (daemon is started next)"'
+
+      # Start the Docker daemon inside WSL. Alpine WSL has no OpenRC init, so mount
+      # cgroups and launch dockerd directly (vfs storage driver avoids overlayfs
+      # issues under the WSL2 kernel). Dump the log if it never comes up.
+      - name: 'Start Docker in WSL'
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          # rc-service is unreliable in initless WSL (it returns 0 without actually
+          # bringing up the daemon), so start dockerd directly and detached
+          # (setsid, </dev/null) so it survives this shell and keeps the WSL VM and
+          # daemon alive for later steps. vfs avoids overlayfs issues under WSL2.
+          wsl -u root -- sh -c '
+            command -v dockerd >/dev/null || { echo "dockerd not installed"; exit 1; }
+            rc-service docker stop >/dev/null 2>&1 || true
+            pkill dockerd >/dev/null 2>&1 || true
+            mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
+            setsid dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs </dev/null >/var/log/dockerd.log 2>&1 &
+            sleep 1
+          '
+          for i in $(seq 1 30); do
+            if wsl -u root -- docker info >/dev/null 2>&1; then echo "docker is up"; break; fi
+            echo "waiting for dockerd ($i)..."; sleep 2
+          done
+          if ! wsl -u root -- docker info >/dev/null 2>&1; then
+            echo "=== dockerd did not come up; diagnostics ==="
+            wsl -u root -- cat /var/log/dockerd.log 2>/dev/null || echo "(dockerd wrote no log)"
+            wsl -u root -- sh -c 'command -v dockerd; ls -la /var/run/docker.sock 2>&1; ls /sys/fs/cgroup 2>&1 | head; uname -r'
+            exit 1
+          fi
+          wsl -u root -- docker version
+
+      # Runs on all platforms (incl. darwin): `check` only reports, never installs,
+      # so it is safe on the macOS runner (which has no Docker). Informational —
+      # missing tools are expected pre-bootstrap, hence `|| echo`.
+      - name: 'CLI: prerequisites check'
+        shell: bash
+        run: '"$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"'
+
+      # Everything below needs a Docker daemon + k3d. It runs on linux and on
+      # windows (the Windows binary forwards into WSL, where Docker was started
+      # above), exercising the real cluster lifecycle on both. darwin stays
+      # read-only (no nested Docker on the macOS runner).
+      - name: 'CLI: cluster queries (empty)'
         if: matrix.os != 'darwin'
         shell: bash
-        timeout-minutes: 60
-        run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+        run: |
+          "$OF_BIN" cluster list
+          "$OF_BIN" cluster list -o json
+          "$OF_BIN" cluster list -o yaml
 
+      # --- Medium: dry-run, still no real changes ----------------------------
+      - name: 'CLI: dry-run create & install'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
+          "$OF_BIN" app install --deployment-mode=oss-tenant --non-interactive --dry-run
+
+      # --- Complex: real cluster lifecycle (heaviest, last) ------------------
+      - name: 'Cluster: create'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard
+          "$OF_BIN" cluster list
+          "$OF_BIN" cluster status "$OF_CLUSTER"
+
+      - name: 'App: install'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 40
+        run: '"$OF_BIN" app install "$OF_CLUSTER" --deployment-mode=oss-tenant --non-interactive --verbose'
+
+      - name: 'App: status & access'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          "$OF_BIN" app status --context "$OF_CONTEXT"
+          "$OF_BIN" app status --context "$OF_CONTEXT" -o json
+          "$OF_BIN" app status --context "$OF_CONTEXT" -o yaml
+          "$OF_BIN" app access --context "$OF_CONTEXT"
+
+      - name: 'App: upgrade (dry-run then force-sync)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          "$OF_BIN" app upgrade --context "$OF_CONTEXT" --dry-run
+          "$OF_BIN" app upgrade --context "$OF_CONTEXT" --sync --verbose
+
+      # --- Teardown (runs even if a step above failed) -----------------------
+      - name: 'Teardown: uninstall & delete cluster'
+        if: always() && matrix.os != 'darwin'
+        shell: bash
+        run: |
+          "$OF_BIN" app uninstall --context "$OF_CONTEXT" --yes || true
+          "$OF_BIN" cluster delete "$OF_CLUSTER" --force || true
 
       - name: Run unit tests
         run: make test-unit
+
+      - name: Run unit tests with race detector
+        # Linux only (race detector needs CGO/gcc). Now a blocking gate: the
+        # codebase is race-clean (the pterm spinner was replaced with a
+        # synchronized wrapper in internal/shared/ui/spinner).
+        if: matrix.os == 'linux'
+        run: make test-race

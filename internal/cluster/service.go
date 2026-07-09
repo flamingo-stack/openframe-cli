@@ -9,18 +9,25 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
 // ClusterService provides cluster configuration and management operations
 // This handles cluster lifecycle operations and configuration management
 type ClusterService struct {
-	manager    *k3d.K3dManager
+	manager    provider.Provider
 	executor   executor.CommandExecutor
 	suppressUI bool // Suppress interactive UI elements for automation
 }
@@ -55,7 +62,7 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 }
 
 // NewClusterServiceWithOptions creates a cluster service with custom options
-func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager *k3d.K3dManager) *ClusterService {
+func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager provider.Provider) *ClusterService {
 	return &ClusterService{
 		manager:  manager,
 		executor: exec,
@@ -64,9 +71,7 @@ func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager *k3d.K3
 
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
-func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Config, error) {
-	ctx := context.Background()
-
+func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
 	// Check if cluster already exists
 	if existingInfo, err := s.manager.GetClusterStatus(ctx, config.Name); err == nil {
 		// Cluster already exists - show friendly message
@@ -111,9 +116,10 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 	}
 
 	// Cluster doesn't exist, proceed with creation
-	var spinner *pterm.SpinnerPrinter
+	var sp *spinner.Spinner
 	if !s.suppressUI {
-		spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
+		sp = spinner.New()
+		sp.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
 	} else {
 		// In non-interactive mode, just show a simple info message
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
@@ -121,14 +127,14 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 
 	restConfig, err := s.manager.CreateCluster(ctx, config)
 	if err != nil {
-		if spinner != nil {
-			spinner.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
+		if sp != nil {
+			sp.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
 		}
 		return nil, err
 	}
 
-	if spinner != nil {
-		spinner.Success(fmt.Sprintf("Cluster '%s' created successfully", config.Name))
+	if sp != nil {
+		sp.Success(fmt.Sprintf("Cluster '%s' created successfully", config.Name))
 	} else {
 		pterm.Success.Printf("Cluster '%s' created successfully\n", config.Name)
 	}
@@ -145,27 +151,26 @@ func (s *ClusterService) CreateCluster(config models.ClusterConfig) (*rest.Confi
 }
 
 // DeleteCluster handles cluster deletion business logic
-func (s *ClusterService) DeleteCluster(name string, clusterType models.ClusterType, force bool) error {
-	ctx := context.Background()
-
+func (s *ClusterService) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
 	// Show deletion progress
-	var spinner *pterm.SpinnerPrinter
+	var sp *spinner.Spinner
 	if !s.suppressUI {
-		spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
+		sp = spinner.New()
+		sp.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
 	} else {
 		pterm.Info.Printf("Deleting %s cluster '%s'...\n", clusterType, name)
 	}
 
 	err := s.manager.DeleteCluster(ctx, name, clusterType, force)
 	if err != nil {
-		if spinner != nil {
-			spinner.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
+		if sp != nil {
+			sp.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
 		}
 		return err
 	}
 
-	if spinner != nil {
-		spinner.Stop() // Stop spinner without message - UI layer will show success
+	if sp != nil {
+		sp.Stop() // Stop spinner without message - UI layer will show success
 	}
 
 	// Don't show summary here - let the UI layer handle it
@@ -198,19 +203,17 @@ func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, err
 }
 
 // CleanupCluster handles cluster cleanup business logic
-func (s *ClusterService) CleanupCluster(name string, clusterType models.ClusterType, verbose bool, force bool) error {
+func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool, force bool) error {
 	switch clusterType {
 	case models.ClusterTypeK3d:
-		return s.cleanupK3dCluster(name, verbose, force)
+		return s.cleanupK3dCluster(ctx, name, verbose, force)
 	default:
 		return fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
 	}
 }
 
 // cleanupK3dCluster handles K3d-specific cleanup
-func (s *ClusterService) cleanupK3dCluster(clusterName string, verbose bool, force bool) error {
-	ctx := context.Background()
-
+func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool, force bool) error {
 	if verbose {
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
@@ -224,7 +227,7 @@ func (s *ClusterService) cleanupK3dCluster(clusterName string, verbose bool, for
 	}
 
 	// 2. Clean up Kubernetes resources in common namespaces
-	if err := s.cleanupKubernetesResources(ctx, verbose, force); err != nil {
+	if err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to cleanup Kubernetes resources: %v\n", err)
 		}
@@ -318,31 +321,65 @@ func (s *ClusterService) cleanupHelmReleases(ctx context.Context, verbose bool, 
 	return nil
 }
 
-// cleanupKubernetesResources removes resources from common namespaces
-func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, verbose bool, force bool) error {
-	// List of namespaces commonly used by installed components
-	namespaces := []string{"argocd", "openframe", "kube-system"}
+// protectedNamespaces must never be deleted by cleanup, regardless of --force.
+// Deleting any of these can render the cluster unrecoverable or destroy
+// unrelated workloads (audit I7/M3).
+var protectedNamespaces = map[string]struct{}{
+	"kube-system":     {},
+	"kube-public":     {},
+	"kube-node-lease": {},
+	"default":         {},
+}
 
-	for _, namespace := range namespaces {
-		// Skip kube-system for safety unless force is enabled
-		if namespace == "kube-system" && !force {
-			continue
+// isProtectedNamespace reports whether ns must never be deleted.
+func isProtectedNamespace(ns string) bool {
+	_, ok := protectedNamespaces[ns]
+	return ok
+}
+
+// filterProtectedNamespaces returns raw with every protected/system namespace
+// removed. It is the I7 defense-in-depth guard: even if a protected namespace is
+// added to a cleanup list by mistake, it can never be deleted.
+func filterProtectedNamespaces(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, ns := range raw {
+		if !isProtectedNamespace(ns) {
+			out = append(out, ns)
 		}
+	}
+	return out
+}
 
-		// Check if namespace exists
-		_, err := s.executor.Execute(ctx, "kubectl", "get", "namespace", namespace)
-		if err != nil {
-			// Namespace doesn't exist, skip
-			continue
+// cleanupKubernetesResources removes namespaces created by OpenFrame components
+// via the native Kubernetes client (client-go). It never touches
+// protected/system namespaces.
+func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, clusterName string, verbose bool, _ bool) error {
+	// On Windows the cluster lives in WSL and must be reached from inside WSL.
+	if err := platform.WSLClusterHint("clean up OpenFrame namespaces"); err != nil {
+		return err
+	}
+
+	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster config for cleanup: %w", err)
+	}
+	client, err := kubernetes.NewForConfig(sharedconfig.ApplyInsecureTLSConfig(restConfig))
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+
+	// Namespaces created by OpenFrame component installs. System namespaces are
+	// intentionally absent and are additionally filtered (I7 defense-in-depth).
+	for _, namespace := range filterProtectedNamespaces([]string{"argocd", "openframe"}) {
+		if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+			continue // doesn't exist (or unreachable) — skip
 		}
 
 		if verbose {
 			pterm.Info.Printf("Cleaning up namespace: %s\n", namespace)
 		}
 
-		// Delete the entire namespace (this will clean up all resources in it)
-		_, err = s.executor.Execute(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true")
-		if err != nil {
+		if err := client.CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 			if verbose {
 				pterm.Warning.Printf("Failed to delete namespace %s: %v\n", namespace, err)
 			}
@@ -723,13 +760,13 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 // CreateClusterWithPrerequisites creates a cluster after checking prerequisites
 // This is a wrapper function for bootstrap and other automated flows
 // Returns the *rest.Config for the created cluster
-func CreateClusterWithPrerequisites(clusterName string, verbose bool) (*rest.Config, error) {
-	return CreateClusterWithPrerequisitesNonInteractive(clusterName, verbose, false)
+func CreateClusterWithPrerequisites(ctx context.Context, clusterName string, verbose bool) (*rest.Config, error) {
+	return CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, false)
 }
 
 // CreateClusterWithPrerequisitesNonInteractive creates a cluster with non-interactive support
 // Returns the *rest.Config for the created cluster
-func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
+func CreateClusterWithPrerequisitesNonInteractive(ctx context.Context, clusterName string, verbose bool, nonInteractive bool) (*rest.Config, error) {
 	// Show logo first, then check prerequisites (consistent with individual commands)
 	ui.ShowLogo()
 
@@ -761,5 +798,5 @@ func CreateClusterWithPrerequisitesNonInteractive(clusterName string, verbose bo
 	}
 
 	// Create the cluster and return the rest.Config
-	return service.CreateCluster(config)
+	return service.CreateCluster(ctx, config)
 }

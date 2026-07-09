@@ -1,0 +1,43 @@
+# golangci-lint v2 configuration.
+# Added as part of the audit-remediation effort (§0 of the testing plan):
+# static analysis is the primary drift detector across the codebase.
+#
+# The v2 "standard" default set already includes: errcheck, govet,
+# ineffassign, staticcheck, unused. We add gosec for the security findings
+# called out in the audit (token-in-argv, command construction, file perms,
+# unverified downloads).
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gosec        # security: G204 (subprocess), G304 (file path), G306 (file perms), etc.
+    - bodyclose
+    - errorlint
+    - misspell
+  settings:
+    gosec:
+      # Keep the full default rule set; do not silently exclude security rules.
+      # Remediation items map to: G204 (I3), G304/G306 (I2/I8), G107 (I5 downloads).
+      excludes: []
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment   # noise; not a correctness issue
+        - shadow           # too noisy for this codebase; revisit later
+  exclusions:
+    # Test files legitimately ignore many errors and use weak crypto/fixtures.
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+      # Generated/vendored-style packages, if any, can be added here.
+    presets:
+      - comments
+      - std-error-handling
+
+issues:
+  # Show every finding; the remediation backlog should be visible, not capped.
+  max-issues-per-linter: 0
+  max-same-issues: 0

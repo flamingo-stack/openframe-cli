@@ -116,25 +116,20 @@ func (i *IngressConfigurator) getCurrentNgrokSettings(values map[string]interfac
 	current := &types.NgrokConfig{}
 
 	if deployment, ok := values["deployment"].(map[string]interface{}); ok {
-		if oss, ok := deployment["oss"].(map[string]interface{}); ok {
-			if ingress, ok := oss["ingress"].(map[string]interface{}); ok {
-				if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
-					// Extract URL/Domain
-					if url, ok := ngrok["url"].(string); ok {
-						current.Domain = url
-					}
+		if ingress, ok := deployment["ingress"].(map[string]interface{}); ok {
+			if ngrok, ok := ingress["ngrok"].(map[string]interface{}); ok {
+				// Extract URL/Domain
+				if url, ok := ngrok["url"].(string); ok {
+					current.Domain = url
+				}
 
-					// Extract credentials
-					if credentials, ok := ngrok["credentials"].(map[string]interface{}); ok {
-						if apiKey, ok := credentials["apiKey"].(string); ok {
-							current.APIKey = apiKey
-						}
-						// Check both possible field names for auth token
-						if authtoken, ok := credentials["authtoken"].(string); ok {
-							current.AuthToken = authtoken
-						} else if authtoken, ok := credentials["authtoken"].(string); ok {
-							current.AuthToken = authtoken
-						}
+				// Extract credentials
+				if credentials, ok := ngrok["credentials"].(map[string]interface{}); ok {
+					if apiKey, ok := credentials["apiKey"].(string); ok {
+						current.APIKey = apiKey
+					}
+					if authtoken, ok := credentials["authtoken"].(string); ok {
+						current.AuthToken = authtoken
 					}
 				}
 			}
@@ -250,16 +245,10 @@ func (i *IngressConfigurator) applyLocalhostConfig(values map[string]interface{}
 		values["deployment"] = deployment
 	}
 
-	oss, ok := deployment["oss"].(map[string]interface{})
-	if !ok {
-		oss = make(map[string]interface{})
-		deployment["oss"] = oss
-	}
-
-	ingress, ok := oss["ingress"].(map[string]interface{})
+	ingress, ok := deployment["ingress"].(map[string]interface{})
 	if !ok {
 		ingress = make(map[string]interface{})
-		oss["ingress"] = ingress
+		deployment["ingress"] = ingress
 	}
 
 	// Configure localhost ingress
@@ -291,16 +280,10 @@ func (i *IngressConfigurator) applyNgrokConfig(values map[string]interface{}, ng
 		values["deployment"] = deployment
 	}
 
-	oss, ok := deployment["oss"].(map[string]interface{})
-	if !ok {
-		oss = make(map[string]interface{})
-		deployment["oss"] = oss
-	}
-
-	ingress, ok := oss["ingress"].(map[string]interface{})
+	ingress, ok := deployment["ingress"].(map[string]interface{})
 	if !ok {
 		ingress = make(map[string]interface{})
-		oss["ingress"] = ingress
+		deployment["ingress"] = ingress
 	}
 
 	// Configure ngrok ingress

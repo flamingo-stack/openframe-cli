@@ -2,8 +2,10 @@ package errors
 
 import (
 	"context"
+	stderrors "errors"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -41,12 +43,12 @@ func NewExponentialBackoffPolicy(maxAttempts int, baseDelay time.Duration) *Expo
 		Multiplier:  2.0,
 		Jitter:      true,
 		RetryableErrs: map[string]bool{
-			"network timeout":       true,
-			"connection refused":    true,
-			"temporary failure":     true,
-			"resource not ready":    true,
-			"cluster not ready":     true,
-			"service unavailable":   true,
+			"network timeout":     true,
+			"connection refused":  true,
+			"temporary failure":   true,
+			"resource not ready":  true,
+			"cluster not ready":   true,
+			"service unavailable": true,
 		},
 	}
 }
@@ -57,8 +59,10 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 		return false
 	}
 
-	// Check if it's a recoverable error
-	if recoverableErr, ok := err.(RecoverableError); ok {
+	// Check if it's a recoverable error. errors.As unwraps %w chains, so a
+	// recoverable error stays recognized after being wrapped.
+	var recoverableErr RecoverableError
+	if stderrors.As(err, &recoverableErr) {
 		return recoverableErr.IsRecoverable()
 	}
 
@@ -80,16 +84,20 @@ func (p *ExponentialBackoffPolicy) GetDelay(attempt int) time.Duration {
 	}
 
 	delay := time.Duration(float64(p.BaseDelay) * math.Pow(p.Multiplier, float64(attempt-1)))
-	
+
 	if delay > p.MaxDelay {
 		delay = p.MaxDelay
 	}
 
-	// Add jitter to prevent thundering herd
+	// Add non-negative jitter to prevent thundering herd. Jitter is additive in
+	// [0, 10%] so it never shortens the intended backoff (the previous
+	// [-10%, +10%] form could reduce the delay below the computed value).
 	if p.Jitter {
-		jitterAmount := float64(delay) * 0.1 // 10% jitter
-		jitter := time.Duration(jitterAmount * (2.0*rand.Float64() - 1.0))
-		delay = delay + jitter
+		jitter := time.Duration(float64(delay) * 0.1 * rand.Float64()) //nolint:gosec // jitter, not security-sensitive
+		delay += jitter
+		if delay > p.MaxDelay {
+			delay = p.MaxDelay
+		}
 	}
 
 	return delay
@@ -136,7 +144,7 @@ func (p *LinearBackoffPolicy) GetMaxAttempts() int {
 
 // RetryExecutor handles retry logic with policies
 type RetryExecutor struct {
-	policy RetryPolicy
+	policy  RetryPolicy
 	onRetry func(err error, attempt int, delay time.Duration)
 }
 
@@ -156,7 +164,7 @@ func (r *RetryExecutor) WithRetryCallback(callback func(err error, attempt int, 
 // Execute executes a function with retry logic
 func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) error {
 	var lastErr error
-	
+
 	for attempt := 0; attempt < r.policy.GetMaxAttempts(); attempt++ {
 		// Check context cancellation
 		select {
@@ -207,7 +215,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) err
 func (r *RetryExecutor) ExecuteWithResult(ctx context.Context, operation func() (interface{}, error)) (interface{}, error) {
 	var lastErr error
 	var lastResult interface{}
-	
+
 	for attempt := 0; attempt < r.policy.GetMaxAttempts(); attempt++ {
 		// Check context cancellation
 		select {
@@ -275,8 +283,9 @@ func VerboseRetryCallback() func(error, int, time.Duration) {
 	return func(err error, attempt int, delay time.Duration) {
 		pterm.Warning.Printf("Operation failed on attempt %d: %v\n", attempt, err)
 		pterm.Info.Printf("Waiting %s before retry attempt %d...\n", delay.Round(time.Millisecond), attempt+1)
-		
-		if recoverableErr, ok := err.(RecoverableError); ok && recoverableErr.IsRecoverable() {
+
+		var recoverableErr RecoverableError
+		if stderrors.As(err, &recoverableErr) && recoverableErr.IsRecoverable() {
 			pterm.Debug.Printf("Error is recoverable with suggested retry after %v\n", recoverableErr.GetRetryAfter())
 		}
 	}
@@ -289,11 +298,11 @@ func NetworkRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(5, 2*time.Second)
 	policy.MaxDelay = 30 * time.Second
 	policy.RetryableErrs = map[string]bool{
-		"network timeout":        true,
-		"connection refused":     true,
-		"connection reset":       true,
-		"no route to host":       true,
-		"dns resolution failed":  true,
+		"network timeout":       true,
+		"connection refused":    true,
+		"connection reset":      true,
+		"no route to host":      true,
+		"dns resolution failed": true,
 		"tls handshake timeout": true,
 	}
 	return policy
@@ -304,11 +313,11 @@ func ResourceRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(10, 5*time.Second)
 	policy.MaxDelay = 2 * time.Minute
 	policy.RetryableErrs = map[string]bool{
-		"resource not ready":     true,
-		"cluster not ready":      true,
-		"service unavailable":    true,
+		"resource not ready":      true,
+		"cluster not ready":       true,
+		"service unavailable":     true,
 		"temporarily unavailable": true,
-		"resource busy":          true,
+		"resource busy":           true,
 	}
 	return policy
 }
@@ -318,11 +327,11 @@ func InstallationRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(3, 10*time.Second)
 	policy.MaxDelay = 5 * time.Minute
 	policy.RetryableErrs = map[string]bool{
-		"helm not ready":         true,
-		"tiller not ready":       true,
-		"resource conflict":      true,
-		"temporary failure":      true,
-		"rate limited":           true,
+		"helm not ready":    true,
+		"tiller not ready":  true,
+		"resource conflict": true,
+		"temporary failure": true,
+		"rate limited":      true,
 	}
 	return policy
 }
@@ -331,27 +340,16 @@ func InstallationRetryPolicy() RetryPolicy {
 
 // IsRecoverable checks if an error is recoverable
 func IsRecoverable(err error) bool {
-	if recoverableErr, ok := err.(RecoverableError); ok {
+	var recoverableErr RecoverableError
+	if stderrors.As(err, &recoverableErr) {
 		return recoverableErr.IsRecoverable()
 	}
 	return false
 }
 
-// contains checks if a string contains a substring (case-insensitive)
+// contains reports whether str contains substr, case-insensitively. (The prior
+// hand-rolled implementation was case-sensitive despite its name and duplicated
+// strings.Contains with extra, redundant branches.)
 func contains(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		   (str == substr || 
-		   (len(str) > len(substr) && 
-		    (str[:len(substr)] == substr || 
-		     str[len(str)-len(substr):] == substr ||
-		     containsSubstring(str, substr))))
-}
-
-func containsSubstring(str, substr string) bool {
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(str), strings.ToLower(substr))
 }

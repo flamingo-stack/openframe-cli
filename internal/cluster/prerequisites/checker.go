@@ -1,13 +1,12 @@
 package prerequisites
 
 import (
-	"os"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/kubectl"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 )
 
 type PrerequisiteChecker struct {
@@ -34,12 +33,6 @@ func NewPrerequisiteChecker() *PrerequisiteChecker {
 					}
 					return "Docker is installed but not running. Please start Docker Desktop or the Docker daemon."
 				},
-			},
-			{
-				Name:        "kubectl",
-				Command:     "kubectl",
-				IsInstalled: func() bool { return kubectl.NewKubectlInstaller().IsInstalled() },
-				InstallHelp: func() string { return kubectl.NewKubectlInstaller().GetInstallHelp() },
 			},
 			{
 				Name:        "k3d",
@@ -87,12 +80,6 @@ func (pc *PrerequisiteChecker) GetInstallInstructions(missingTools []string) []s
 }
 
 func CheckPrerequisites() error {
-	installer := NewInstaller()
-	// Check if we're in a CI environment (GitHub Actions, GitLab CI, CircleCI, etc.)
-	nonInteractive := os.Getenv("CI") != "" ||
-		os.Getenv("GITHUB_ACTIONS") != "" ||
-		os.Getenv("GITLAB_CI") != "" ||
-		os.Getenv("CIRCLECI") != ""
-
-	return installer.CheckAndInstallNonInteractive(nonInteractive)
+	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
+	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }
