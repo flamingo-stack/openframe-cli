@@ -42,10 +42,6 @@ jobs:
           # an explicit token instead.
           persist-credentials: false
 
-      - name: Export version
-        run: echo "VERSION=${{ needs.version.outputs.version }}" >> "$GITHUB_ENV"
-
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -82,6 +78,6 @@ jobs:
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ env.VERSION }}
+          GORELEASER_CURRENT_TAG: ${{ needs.version.outputs.version }}
         run: |
           goreleaser release --clean
