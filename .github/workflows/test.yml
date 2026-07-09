@@ -192,7 +192,7 @@ jobs:
         shell: bash
         run: |
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
-          "$OF_BIN" app install --deployment-mode=oss-tenant --non-interactive --dry-run
+          "$OF_BIN" app install --non-interactive --dry-run
 
       # --- Complex: real cluster lifecycle (heaviest, last) ------------------
       - name: 'Cluster: create'
@@ -208,7 +208,7 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         timeout-minutes: 40
-        run: '"$OF_BIN" app install "$OF_CLUSTER" --deployment-mode=oss-tenant --non-interactive --verbose'
+        run: '"$OF_BIN" app install "$OF_CLUSTER" --non-interactive --verbose'
 
       - name: 'App: status & access'
         if: matrix.os != 'darwin'
