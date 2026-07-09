@@ -24,7 +24,7 @@ OpenFrame CLI is part of the broader [OpenFrame](https://openframe.ai) ecosystem
 
 ### 🚀 Complete Environment Bootstrapping
 - **One-command setup**: Bootstrap entire OpenFrame environments with `openframe bootstrap`
-- **Multi-mode deployment**: Support for OSS tenant, SaaS tenant, and SaaS shared modes
+- **OSS-tenant deployment**: Installs the public `openframe-oss-tenant` chart — no credentials or mode selection needed
 - **Automated cluster creation**: Creates K3D clusters with all necessary components
 - **ArgoCD integration**: Automatic chart installation and application management
 
