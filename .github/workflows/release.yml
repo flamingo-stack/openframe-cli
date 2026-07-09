@@ -70,7 +70,7 @@ jobs:
 
       - name: Create and push tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
           # Explicit auth for the push, since the checkout no longer persists it.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
