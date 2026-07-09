@@ -12,21 +12,27 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to Release (e.g., v1.2.3)"
-        required: true
+        description: "Version to Release (x.y.z). Leave empty for auto patch bump."
+        required: false
         type: string
+        default: ''
 
 # =============================================================================
 # JOBS
 # =============================================================================
 
 jobs:
+  version:
+    name: Resolve Version
+    uses: ./.github/workflows/version.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
-    name: "Release ${{ inputs.version }}"
+    name: "Release"
+    needs: [version]
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' && 
-      inputs.version != ''
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -60,7 +66,7 @@ jobs:
 
       - name: Create and push tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
           # Explicit auth for the push, since the checkout no longer persists it.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -72,6 +78,6 @@ jobs:
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ inputs.version }}
+          GORELEASER_CURRENT_TAG: ${{ needs.version.outputs.version }}
         run: |
           goreleaser release --clean
