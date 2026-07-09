@@ -182,6 +182,13 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
 		}
+		// Register the temp values file for cleanup (the dry-run and interactive
+		// paths do the same); otherwise the OS temp dir accumulates one per run.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
+		}
 	} else {
 		// FULLY INTERACTIVE (existing behavior)
 		var err error
@@ -289,6 +296,13 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		chartConfig, err = w.loadExistingConfiguration()
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
+		}
+		// Register the temp values file for cleanup (the dry-run and interactive
+		// paths do the same); otherwise the OS temp dir accumulates one per run.
+		if chartConfig.TempHelmValuesPath != "" {
+			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
+				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
+			}
 		}
 	} else {
 		var err error

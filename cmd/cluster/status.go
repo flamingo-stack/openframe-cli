@@ -57,6 +57,13 @@ func runClusterStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
+	// Reject an invalid format up front — before the interactive picker or a
+	// silent no-cluster exit could mask it.
+	switch output {
+	case "", "text", "json", "yaml":
+	default:
+		return fmt.Errorf("invalid --output %q (want \"text\", \"json\", or \"yaml\")", output)
+	}
 	machine := output == "json" || output == "yaml"
 
 	// Resolve the cluster name. Machine output must never drop into an

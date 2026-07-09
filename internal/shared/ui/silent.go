@@ -28,4 +28,8 @@ func SetSilent() {
 	pterm.DefaultBasicText = *pterm.DefaultBasicText.WithWriter(io.Discard)
 	pterm.DefaultBox = *pterm.DefaultBox.WithWriter(io.Discard)
 	pterm.DefaultHeader = *pterm.DefaultHeader.WithWriter(io.Discard)
+	pterm.DefaultTable = *pterm.DefaultTable.WithWriter(io.Discard)
+	// Interactive prompt printers (DefaultInteractiveConfirm/TextInput) are left
+	// alone on purpose: discarding their writer would hide the prompt text while
+	// it still blocks on stdin — a silent hang, worse than a visible prompt.
 }

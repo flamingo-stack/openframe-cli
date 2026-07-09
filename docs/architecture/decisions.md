@@ -72,7 +72,7 @@ The cluster is always a local k3d cluster.
 `openframe bootstrap [name] [--non-interactive] [--verbose]` stays as a single,
 beginner-friendly command. Internally it only orchestrates:
 
-```
+```text
 prerequisites → cluster create → app install
 ```
 
