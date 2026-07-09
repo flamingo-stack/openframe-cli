@@ -2,6 +2,9 @@
 /build/
 openframe
 openframe-*
+# ...but keep the committed example values (the runtime openframe-helm-values.yaml
+# stays ignored so local values are never committed).
+!openframe-helm-values.example.yaml
 
 # Test coverage
 coverage.out
