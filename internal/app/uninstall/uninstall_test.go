@@ -7,11 +7,19 @@ import (
 )
 
 type fakeApps struct {
-	n   int
-	err error
+	n          int
+	err        error
+	finalizers int
+	finErr     error
+	finCalled  bool
 }
 
 func (f *fakeApps) DeleteApplications(context.Context) (int, error) { return f.n, f.err }
+
+func (f *fakeApps) RemoveApplicationFinalizers(context.Context) (int, error) {
+	f.finCalled = true
+	return f.finalizers, f.finErr
+}
 
 type fakeHelm struct {
 	calls   []string // "release@context"
@@ -41,7 +49,7 @@ func (f *fakeNS) DeleteNamespace(_ context.Context, name string) error {
 }
 
 func TestUninstall_HappyPath(t *testing.T) {
-	apps := &fakeApps{n: 5}
+	apps := &fakeApps{n: 5, finalizers: 3}
 	helm := &fakeHelm{}
 	svc := NewService(apps, helm, &fakeNS{}, "k3d-demo")
 
@@ -57,8 +65,34 @@ func TestUninstall_HappyPath(t *testing.T) {
 	if len(helm.calls) != 2 || helm.calls[0] != want[0] || helm.calls[1] != want[1] {
 		t.Fatalf("helm calls = %v, want %v", helm.calls, want)
 	}
+	// Leftover finalizers are stripped after the releases are removed.
+	if !apps.finCalled {
+		t.Fatal("RemoveApplicationFinalizers must be called")
+	}
+	if res.FinalizersCleared != 3 {
+		t.Fatalf("FinalizersCleared = %d, want 3", res.FinalizersCleared)
+	}
 	if res.NamespaceDeleted {
 		t.Fatal("namespace should not be deleted without the option")
+	}
+}
+
+// A finalizer-removal failure surfaces, and it must run only after the Helm
+// releases are gone (ArgoCD must be removed before we strip its finalizers).
+func TestUninstall_FinalizerErrorSurfacesAfterHelm(t *testing.T) {
+	helm := &fakeHelm{}
+	apps := &fakeApps{n: 1, finErr: errors.New("patch failed")}
+	svc := NewService(apps, helm, &fakeNS{}, "k3d-demo")
+
+	_, err := svc.Uninstall(context.Background(), Options{})
+	if err == nil {
+		t.Fatal("expected the finalizer error to surface")
+	}
+	if len(helm.calls) != 2 {
+		t.Fatalf("both releases must be uninstalled before finalizer removal, got %v", helm.calls)
+	}
+	if !apps.finCalled {
+		t.Fatal("finalizer removal must have been attempted")
 	}
 }
 

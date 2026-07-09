@@ -20,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -457,6 +458,48 @@ func (m *Manager) DeleteApplications(ctx context.Context) (int, error) {
 		deleted++
 	}
 	return deleted, nil
+}
+
+// RemoveApplicationFinalizers strips finalizers from every remaining ArgoCD
+// Application and returns the count cleared. ArgoCD's resources-finalizer keeps a
+// deleted Application in "Terminating" until ArgoCD prunes its workloads; once
+// ArgoCD itself is uninstalled nothing clears it, so the CR (and its namespace)
+// would hang forever. Run this AFTER the Helm releases are removed to unstick any
+// leftovers. Best-effort: a missing CRD/namespace is treated as done, and
+// Applications with no finalizers are skipped.
+func (m *Manager) RemoveApplicationFinalizers(ctx context.Context) (int, error) {
+	if m.dynamicClient == nil {
+		if err := m.initKubernetesClients(); err != nil {
+			return 0, err
+		}
+	}
+	if m.dynamicClient == nil {
+		return 0, fmt.Errorf("dynamic client not available")
+	}
+
+	res := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	list, err := res.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return 0, nil // the CRD/namespace is already gone
+		}
+		return 0, fmt.Errorf("listing applications: %w", err)
+	}
+
+	// Merge patch that drops the finalizers array so the CR can be reaped.
+	patch := []byte(`{"metadata":{"finalizers":null}}`)
+	cleared := 0
+	for i := range list.Items {
+		if len(list.Items[i].GetFinalizers()) == 0 {
+			continue
+		}
+		name := list.Items[i].GetName()
+		if _, perr := res.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); perr != nil && !apierrors.IsNotFound(perr) {
+			return cleared, fmt.Errorf("clearing finalizers on application %q: %w", name, perr)
+		}
+		cleared++
+	}
+	return cleared, nil
 }
 
 // DeleteNamespace deletes a namespace, treating "not found" as success.

@@ -62,6 +62,52 @@ func TestManager_DeleteApplications_Empty(t *testing.T) {
 	}
 }
 
+func TestManager_RemoveApplicationFinalizers(t *testing.T) {
+	stuck := newArgoApp("app-of-apps")
+	stuck.SetFinalizers([]string{"resources-finalizer.argocd.argoproj.io"})
+	clean := newArgoApp("child-no-finalizer")
+
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{applicationGVR: "ApplicationList"},
+		stuck, clean,
+	)
+	m := &Manager{dynamicClient: dc}
+
+	n, err := m.RemoveApplicationFinalizers(context.Background())
+	if err != nil {
+		t.Fatalf("RemoveApplicationFinalizers: %v", err)
+	}
+	// Only the one that actually had finalizers is patched/counted.
+	if n != 1 {
+		t.Fatalf("cleared = %d, want 1", n)
+	}
+
+	got, err := dc.Resource(applicationGVR).Namespace("argocd").Get(context.Background(), "app-of-apps", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get after patch: %v", err)
+	}
+	if len(got.GetFinalizers()) != 0 {
+		t.Fatalf("finalizers should be cleared, got %v", got.GetFinalizers())
+	}
+}
+
+func TestManager_RemoveApplicationFinalizers_Empty(t *testing.T) {
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{applicationGVR: "ApplicationList"},
+	)
+	m := &Manager{dynamicClient: dc}
+
+	n, err := m.RemoveApplicationFinalizers(context.Background())
+	if err != nil {
+		t.Fatalf("on empty: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("cleared = %d, want 0", n)
+	}
+}
+
 func TestManager_DeleteNamespace(t *testing.T) {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "argocd"}}
 	m := &Manager{kubeClient: fake.NewSimpleClientset(ns)}

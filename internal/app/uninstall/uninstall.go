@@ -16,9 +16,11 @@ const namespace = argocd.ArgoCDNamespace
 // (which owns the child Applications) goes before ArgoCD itself.
 var releases = []string{"app-of-apps", argocd.ArgoCDReleaseName}
 
-// ApplicationDeleter deletes ArgoCD Application CRs (cascading their workloads).
+// ApplicationDeleter deletes ArgoCD Application CRs (cascading their workloads)
+// and can strip finalizers from any left stuck in "Terminating".
 type ApplicationDeleter interface {
 	DeleteApplications(ctx context.Context) (int, error)
+	RemoveApplicationFinalizers(ctx context.Context) (int, error)
 }
 
 // ReleaseUninstaller removes a Helm release.
@@ -38,9 +40,10 @@ type Options struct {
 
 // Result records what was removed.
 type Result struct {
-	AppsDeleted      int
-	ReleasesRemoved  []string
-	NamespaceDeleted bool
+	AppsDeleted       int
+	FinalizersCleared int
+	ReleasesRemoved   []string
+	NamespaceDeleted  bool
 }
 
 // Service orchestrates a platform uninstall.
@@ -74,6 +77,15 @@ func (s *Service) Uninstall(ctx context.Context, opts Options) (Result, error) {
 			return res, err
 		}
 		res.ReleasesRemoved = append(res.ReleasesRemoved, rel)
+	}
+
+	// ArgoCD is gone now, so nothing is left to clear its resources-finalizer.
+	// Strip finalizers from any Application still stuck in "Terminating" so the
+	// CRs (and, if requested, the namespace) can actually be reaped.
+	cleared, err := s.apps.RemoveApplicationFinalizers(ctx)
+	res.FinalizersCleared = cleared
+	if err != nil {
+		return res, fmt.Errorf("clearing application finalizers: %w", err)
 	}
 
 	if opts.DeleteNamespace {

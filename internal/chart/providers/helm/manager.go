@@ -167,8 +167,14 @@ func (h *HelmManager) IsChartInstalled(ctx context.Context, releaseName, namespa
 // UninstallRelease removes a Helm release from a namespace. Missing releases are
 // treated as success (--ignore-not-found). kubeContext, when non-empty, targets
 // a specific kube-context (matching how installs pin the context).
+//
+// No --wait: the release owns ArgoCD Application CRs that carry ArgoCD's
+// resources-finalizer, so --wait would block until every child workload is
+// pruned — and hang for good once ArgoCD itself is being removed and can no
+// longer clear the finalizer. Deletion is triggered fire-and-forget; the
+// uninstall flow strips any leftover finalizers afterwards.
 func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespace, kubeContext string) error {
-	args := []string{"uninstall", releaseName, "-n", namespace, "--ignore-not-found", "--wait"}
+	args := []string{"uninstall", releaseName, "-n", namespace, "--ignore-not-found"}
 	if kubeContext != "" {
 		args = append(args, "--kube-context", kubeContext)
 	}
