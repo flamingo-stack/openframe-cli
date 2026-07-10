@@ -16,6 +16,13 @@ var silent bool
 // untouched so failures are still surfaced. It mutates pterm's package-level
 // printers, so it must be called once, early — from the root command's
 // PersistentPreRun — and is not meant to be reversed within a process.
+// IsSilent reports whether --silent was applied. Components that write to
+// stdout through their OWN writer — the spinner prints its final line via
+// pterm.Success.WithWriter(s.out), which overrides the io.Discard writer
+// SetSilent installs on the package-level printers — must consult this, or
+// they leak output that --silent promises to suppress.
+func IsSilent() bool { return silent }
+
 func SetSilent() {
 	silent = true
 	pterm.Info = *pterm.Info.WithWriter(io.Discard)

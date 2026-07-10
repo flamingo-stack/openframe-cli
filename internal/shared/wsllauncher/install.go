@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 )
 
 // localBinaryEnv, when set to the Windows path of a Linux openframe binary,
@@ -129,15 +130,24 @@ func installOpenframeInWSL(version, goarch string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	binary, err := selfupdate.FetchVerifiedLinuxBinary(ctx, version, goarch, nil)
+	// This is the first thing a Windows user ever sees, and it downloads several
+	// megabytes and runs a cosign verification before their command starts.
+	// FetchVerifiedLinuxBinary already narrates each step; the caller passed nil
+	// and dropped every line, so the first run looked frozen.
+	sp := spinner.Start("Preparing the OpenFrame Linux binary for WSL...")
+	binary, err := selfupdate.FetchVerifiedLinuxBinary(ctx, version, goarch, sp.UpdateText)
 	if err != nil {
+		sp.Fail("Could not fetch the OpenFrame Linux binary")
 		return err
 	}
 
+	sp.UpdateText("Installing openframe inside WSL...")
 	cmd := exec.Command("wsl", wslArgv("bash", "-lc", stdinInstallScript())...) // #nosec G204 -- constant script, binary delivered via stdin
 	cmd.Stdin = bytes.NewReader(binary)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		sp.Fail("Installing openframe inside WSL failed")
 		return fmt.Errorf("installing openframe inside WSL failed: %w\n%s", err, string(out))
 	}
+	sp.Success("OpenFrame is installed inside WSL")
 	return nil
 }

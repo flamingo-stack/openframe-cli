@@ -58,10 +58,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Initial repo-server health check - catch issues early
 	initialIssue := m.checkRepoServerHealth(localCtx, true)
 	if initialIssue != nil {
+		// RepoServerIssue.Message explains what is wrong (restart count, OOMKilled,
+		// CrashLoopBackOff). Every caller used to discard it, so the CLI knew the
+		// repo-server was crash-looping and said nothing.
+		pterm.Warning.Printfln("ArgoCD repo-server: %s", initialIssue.Message)
 		// If repo-server has already restarted, proactively restart it to clear any stuck state
 		// This helps CI environments where the pod may have OOM'd during initial setup
 		if initialIssue.Type == "resource" && initialIssue.Recoverable {
+			pterm.Info.Println("Restarting the ArgoCD repo-server to clear the stuck state...")
 			m.triggerRepoServerRecovery(localCtx, "")
+		} else if !initialIssue.Recoverable {
+			pterm.Warning.Println("This is not automatically recoverable — the installation may fail. " +
+				"Check resources with: kubectl describe pods -n argocd -l app.kubernetes.io/component=repo-server")
 		}
 	}
 	// Show initial verbose info if enabled
@@ -185,6 +193,28 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	appsWithRepoServerIssues := make(map[string]int) // Track consecutive failures per app
 	lastRepoServerResourceCheck := time.Now()
 	repoServerResourceCheckInterval := 30 * time.Second // Reduced from 1 min for faster issue detection
+	lastRepoServerMessage := ""                         // de-duplicates the repeated diagnosis line
+
+	// Periodic-output throttles. These are time-based on purpose: the previous
+	// code gated on `int(elapsed.Seconds())%10 == 0`, but the status check runs
+	// every checkInterval (2s), so whether elapsed ever landed on an exact
+	// multiple of 10 was luck. A skipped tick silently skipped that whole cycle.
+	lastProgressPrint := time.Now()
+	lastUnknownWarn := time.Time{}
+	lastStuckSummary := time.Time{}
+
+	// Last observed state, kept so the timeout error can name the applications
+	// that never became ready. The loop had this all along and threw it away:
+	// "timeout waiting for ArgoCD applications after 1h0m0s" told the user
+	// nothing about which of the apps was stuck, or what to run next.
+	var lastNotReadyApps []string
+	lastReadyCount, lastTotalApps := 0, 0
+	// The spinner already animates for interactive users, so the textual line is
+	// mainly a heartbeat for logs and CI; verbose users want it more often.
+	progressPrintInterval := 30 * time.Second
+	if config.Verbose {
+		progressPrintInterval = 10 * time.Second
+	}
 
 	// Main loop
 	for {
@@ -200,7 +230,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()
-				return fmt.Errorf("timeout waiting for ArgoCD applications after %v", timeout)
+				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps)
 			}
 
 			// Periodic cluster health check
@@ -333,6 +363,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			currentlyReady := assess.ready
 			healthyApps := assess.healthyNames
 			notReadyApps := assess.notReady
+			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
 
 			// Stall handling (finding N3): when the state has been bit-for-bit
 			// identical for stallAfter and OutOfSync-but-healthy stragglers
@@ -363,148 +394,118 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 			}
 
-			// Show verbose logging if enabled
-			if config.Verbose && totalApps > 0 {
-				elapsed := time.Since(startTime)
+			elapsed := time.Since(startTime)
 
-				// Update spinner message with current status
+			// Progress belongs in the spinner text, not behind --verbose. Without
+			// this the default experience was a static "Installing ArgoCD
+			// applications..." for up to the full 60m timeout, with no way to tell
+			// a working install from a wedged one.
+			if totalApps > 0 {
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
-					progress := ""
-					if totalApps > 0 {
-						progressPercent := float64(currentlyReady) / float64(totalApps) * 100
-						progress = fmt.Sprintf(" (%.0f%%)", progressPercent)
-					}
-					spinner.UpdateText(fmt.Sprintf("Installing ArgoCD applications... %d/%d ready%s [%s]",
-						currentlyReady, totalApps, progress, elapsed.Round(time.Second)))
+					percent := float64(currentlyReady) / float64(totalApps) * 100
+					spinner.UpdateText(fmt.Sprintf("Installing ArgoCD applications... %d/%d ready (%.0f%%) [%s]",
+						currentlyReady, totalApps, percent, elapsed.Round(time.Second)))
 				}
 				spinnerMutex.Unlock()
+			}
 
-				// Only show detailed status every 10 seconds to avoid spam
-				if int(elapsed.Seconds())%10 == 0 {
-					pterm.Info.Printf("ArgoCD Sync Progress: %d/%d applications ready (%s elapsed)\n",
-						currentlyReady, totalApps, elapsed.Round(time.Second))
+			// Repo-server recovery and issue classification used to sit INSIDE the
+			// `if config.Verbose` block, so a user who did not pass --verbose never
+			// got the recovery at all: a wedged repo-server simply burned the whole
+			// timeout. Recovery is a corrective action, not a diagnostic — it runs
+			// regardless of verbosity, and announces itself when it fires.
+			if totalApps > 0 && len(notReadyApps) > 0 {
+				unknownApps, appsWithConditionErrors := classifyAppIssues(apps, appsWithRepoServerIssues)
 
-					// Always show pending applications when there are any
-					if len(notReadyApps) > 0 {
-						if len(notReadyApps) <= 8 {
-							pterm.Info.Printf("  Still waiting for: %v\n", notReadyApps)
-						} else {
-							pterm.Info.Printf("  Still waiting for %d applications (showing first 5): %v...\n",
-								len(notReadyApps), notReadyApps[:5])
+				if len(appsWithConditionErrors) > 0 && elapsed > 2*time.Minute {
+					if time.Since(lastRepoServerResourceCheck) >= repoServerResourceCheckInterval {
+						lastRepoServerResourceCheck = time.Now()
+						if issue := m.checkRepoServerHealth(localCtx, false); issue != nil && issue.Message != lastRepoServerMessage {
+							// Print each distinct diagnosis once: the check runs every
+							// 30s and would otherwise repeat the same line forever.
+							lastRepoServerMessage = issue.Message
+							pterm.Warning.Printfln("ArgoCD repo-server: %s", issue.Message)
 						}
+					}
 
-						// Check for applications stuck in "Unknown" status or with repo-server issues
-						unknownApps, appsWithConditionErrors := classifyAppIssues(apps, appsWithRepoServerIssues)
+					for _, app := range appsWithConditionErrors {
+						consecutiveIssues := appsWithRepoServerIssues[app.Name]
 
-						// Check for repo-server issues and attempt recovery
-						if len(appsWithConditionErrors) > 0 && elapsed > 2*time.Minute {
-							// More frequent resource checks when repo-server issues are detected
-							if time.Since(lastRepoServerResourceCheck) >= repoServerResourceCheckInterval {
-								lastRepoServerResourceCheck = time.Now()
-								m.checkRepoServerHealth(localCtx, false)
-							}
+						// After 2 consecutive checks with repo-server issues, recover.
+						if consecutiveIssues >= 2 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
+							lastRepoServerDiagnostic = time.Now()
 
-							// Check if any app has had consistent repo-server issues
-							for _, app := range appsWithConditionErrors {
-								consecutiveIssues := appsWithRepoServerIssues[app.Name]
-
-								// After 2 consecutive checks with repo-server issues, run diagnostics
-								if consecutiveIssues >= 2 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
-									lastRepoServerDiagnostic = time.Now()
-
-									// Attempt recovery if we haven't exceeded max attempts
-									if repoServerRecoveryAttempts < maxRepoServerRecoveryAttempts {
-										repoServerRecoveryAttempts++
-										if m.triggerRepoServerRecovery(localCtx, app.Name) {
-											// Reset the issue counter for this app to give it a fresh start
-											delete(appsWithRepoServerIssues, app.Name)
-										}
-									} else if repoServerRecoveryAttempts == maxRepoServerRecoveryAttempts {
-										repoServerRecoveryAttempts++ // Increment to prevent repeated attempts
-									}
-									break // Only recover one app at a time
-								}
-							}
-						}
-
-						// After 5 minutes, warn about Unknown status as it may indicate ArgoCD controller issues
-						if len(unknownApps) > 0 && elapsed > 5*time.Minute {
-							// Show detailed info for each unknown app using data we already have
-							pterm.Warning.Printf("  Applications with 'Unknown' status (%d):\n", len(unknownApps))
-							for _, app := range unknownApps {
-								pterm.Warning.Printf("\n  --- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
-
-								// Show source info
-								if app.RepoURL != "" {
-									pterm.Info.Printf("    Source: %s", app.RepoURL)
-									if app.Path != "" {
-										pterm.Printf(" path=%s", app.Path)
-									}
-									if app.TargetRevision != "" {
-										pterm.Printf(" revision=%s", app.TargetRevision)
-									}
-									pterm.Println()
-								}
-
-								// Show condition error (this is usually the most important info)
-								if app.Condition != "" {
-									condType := app.ConditionType
-									if condType == "" {
-										condType = "Error"
-									}
-									pterm.Warning.Printf("    %s: %s\n", condType, app.Condition)
-								}
-
-								// Show operation state if present
-								if app.OperationPhase != "" {
-									pterm.Info.Printf("    Operation: %s", app.OperationPhase)
-									if app.OperationMessage != "" {
-										pterm.Printf(" - %s", app.OperationMessage)
-									}
-									pterm.Println()
-								}
-
-								// Show health message if present
-								if app.HealthMessage != "" {
-									pterm.Info.Printf("    Health details: %s\n", app.HealthMessage)
-								}
-
-								// Show last reconciliation time
-								if app.ReconciledAt != "" {
-									pterm.Info.Printf("    Last reconciled: %s\n", app.ReconciledAt)
+							if repoServerRecoveryAttempts < maxRepoServerRecoveryAttempts {
+								repoServerRecoveryAttempts++
+								// Restarting the repo-server takes the apps through a
+								// visible wobble; say why, or it reads as a new failure.
+								pterm.Warning.Printfln("ArgoCD repo-server looks stuck (application %q cannot fetch its manifests); restarting it (attempt %d/%d)",
+									app.Name, repoServerRecoveryAttempts, maxRepoServerRecoveryAttempts)
+								if m.triggerRepoServerRecovery(localCtx, app.Name) {
+									pterm.Info.Println("ArgoCD repo-server restarted; applications will re-sync shortly.")
+									delete(appsWithRepoServerIssues, app.Name)
 								} else {
-									pterm.Warning.Println("    Not yet reconciled (ArgoCD hasn't processed this app)")
+									pterm.Warning.Println("Could not restart the ArgoCD repo-server; continuing to wait.")
 								}
+							} else if repoServerRecoveryAttempts == maxRepoServerRecoveryAttempts {
+								repoServerRecoveryAttempts++ // prevent repeated attempts
+								pterm.Warning.Printfln("ArgoCD repo-server did not recover after %d restarts; continuing to wait for the timeout.",
+									maxRepoServerRecoveryAttempts)
 							}
-
-							pterm.Warning.Println("\n  Possible causes: Controller pod not ready, Git repo access issues, or resource constraints.")
+							break // Only recover one app at a time
 						}
+					}
+				}
 
-						// After 7 minutes, log a concise summary of stuck applications
-						// every 5 minutes (in-memory status; no kubectl resource dump).
-						if elapsed > 7*time.Minute && int(elapsed.Seconds())%300 == 0 {
-							for _, app := range apps {
-								if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
-									line := fmt.Sprintf("  Stuck app %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
-									if app.Condition != "" {
-										line += " condition=" + app.Condition
-									}
-									pterm.Warning.Println(line)
-								}
+				// Applications stuck in Unknown for 5 minutes usually mean the ArgoCD
+				// controller is unhealthy or git is unreachable. Warn at any verbosity
+				// (throttled); the per-application dump stays behind --verbose.
+				if len(unknownApps) > 0 && elapsed > 5*time.Minute && time.Since(lastUnknownWarn) >= 5*time.Minute {
+					lastUnknownWarn = time.Now()
+					pterm.Warning.Printfln("  %d application(s) have 'Unknown' status after %s. Possible causes: controller pod not ready, git repository unreachable, or resource constraints.",
+						len(unknownApps), elapsed.Round(time.Second))
+					if config.Verbose {
+						describeUnknownApps(unknownApps)
+					} else {
+						pterm.Info.Println("  Re-run with --verbose for per-application detail.")
+					}
+				}
+
+				// A concise summary of stuck applications, every 5 minutes after the
+				// 7-minute mark (in-memory status; no kubectl resource dump).
+				if elapsed > 7*time.Minute && time.Since(lastStuckSummary) >= 5*time.Minute {
+					lastStuckSummary = time.Now()
+					for _, app := range apps {
+						if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
+							line := fmt.Sprintf("  Stuck app %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
+							if app.Condition != "" {
+								line += " condition=" + app.Condition
 							}
+							pterm.Warning.Println(line)
 						}
-
 					}
+				}
+			}
 
-					// Show recently completed applications
-					if len(healthyApps) > 0 && len(healthyApps) <= 5 {
-						startIdx := 0
-						if len(healthyApps) > 5 {
-							startIdx = len(healthyApps) - 5
-						}
-						pterm.Debug.Printf("  Recently completed: %v\n", healthyApps[startIdx:])
+			// Textual progress heartbeat. The spinner covers interactive users; this
+			// line is what a CI log or a piped session sees, where the spinner is
+			// suppressed entirely and the previous code printed nothing at all.
+			if totalApps > 0 && time.Since(lastProgressPrint) >= progressPrintInterval {
+				lastProgressPrint = time.Now()
+				pterm.Info.Printf("ArgoCD sync progress: %d/%d applications ready (%s elapsed)\n",
+					currentlyReady, totalApps, elapsed.Round(time.Second))
+
+				if len(notReadyApps) > 0 {
+					if len(notReadyApps) <= 8 {
+						pterm.Info.Printf("  Still waiting for: %v\n", notReadyApps)
+					} else {
+						pterm.Info.Printf("  Still waiting for %d applications (showing first 5): %v...\n",
+							len(notReadyApps), notReadyApps[:5])
 					}
+				}
+				if config.Verbose && len(healthyApps) > 0 && len(healthyApps) <= 5 {
+					pterm.Debug.Printf("  Recently completed: %v\n", healthyApps)
 				}
 			}
 
@@ -606,7 +607,15 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 			}
 
 			if i == maxRetries-1 {
-				return fmt.Errorf("timeout waiting for ArgoCD CRD applications.argoproj.io")
+				// The pod-wait path below prints diagnostics on timeout; this one
+				// returned a bare sentence with nothing to act on. The CRD is
+				// installed by the ArgoCD chart, so its absence means the release
+				// itself never landed.
+				return fmt.Errorf("timeout waiting for the ArgoCD CRD applications.argoproj.io to appear.\n"+
+					"The CRD is installed by the ArgoCD Helm release, so this usually means the release failed.\n"+
+					"Check it with: helm status %s -n %s\n"+
+					"And the controller pods with: kubectl get pods -n %s",
+					ArgoCDReleaseName, ArgoCDNamespace, ArgoCDNamespace)
 			}
 
 			if verbose && i%5 == 0 {
@@ -703,4 +712,86 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 
 	m.printArgoCDPodDiagnostics(ctx)
 	return fmt.Errorf("timeout waiting for ArgoCD pods to be ready")
+}
+
+// describeUnknownApps prints the per-application detail for applications stuck
+// in Unknown: source, condition, operation state, health message, and last
+// reconciliation. It is the --verbose expansion of the one-line warning the
+// wait loop emits; the condition line is usually the one that explains it.
+func describeUnknownApps(unknownApps []Application) {
+	for _, app := range unknownApps {
+		pterm.Warning.Printf("\n  --- %s (Health: %s, Sync: %s) ---\n", app.Name, app.Health, app.Sync)
+
+		if app.RepoURL != "" {
+			pterm.Info.Printf("    Source: %s", app.RepoURL)
+			if app.Path != "" {
+				pterm.DefaultBasicText.Printf(" path=%s", app.Path)
+			}
+			if app.TargetRevision != "" {
+				pterm.DefaultBasicText.Printf(" revision=%s", app.TargetRevision)
+			}
+			pterm.DefaultBasicText.Println()
+		}
+
+		if app.Condition != "" {
+			condType := app.ConditionType
+			if condType == "" {
+				condType = "Error"
+			}
+			pterm.Warning.Printf("    %s: %s\n", condType, app.Condition)
+		}
+
+		if app.OperationPhase != "" {
+			pterm.Info.Printf("    Operation: %s", app.OperationPhase)
+			if app.OperationMessage != "" {
+				pterm.DefaultBasicText.Printf(" - %s", app.OperationMessage)
+			}
+			pterm.DefaultBasicText.Println()
+		}
+
+		if app.HealthMessage != "" {
+			pterm.Info.Printf("    Health details: %s\n", app.HealthMessage)
+		}
+
+		if app.ReconciledAt != "" {
+			pterm.Info.Printf("    Last reconciled: %s\n", app.ReconciledAt)
+		} else {
+			pterm.Warning.Println("    Not yet reconciled (ArgoCD hasn't processed this app)")
+		}
+	}
+}
+
+// maxAppsInTimeoutError bounds the application list in the timeout message: a
+// large platform can leave dozens pending, and an unbounded list buries the
+// next-step hint that follows it.
+const maxAppsInTimeoutError = 10
+
+// timeoutError builds the error returned when the wait budget is exhausted.
+//
+// The old message was "timeout waiting for ArgoCD applications after 1h0m0s" —
+// true, and useless: the loop knew exactly which applications never became
+// ready and discarded that. This names them and points at the command that
+// shows why.
+func timeoutError(timeout time.Duration, ready, total int, notReady []string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "timeout after %s waiting for ArgoCD applications", timeout)
+	if total > 0 {
+		fmt.Fprintf(&b, " (%d/%d ready)", ready, total)
+	}
+
+	if len(notReady) > 0 {
+		shown := notReady
+		suffix := ""
+		if len(shown) > maxAppsInTimeoutError {
+			suffix = fmt.Sprintf(" (and %d more)", len(shown)-maxAppsInTimeoutError)
+			shown = shown[:maxAppsInTimeoutError]
+		}
+		fmt.Fprintf(&b, "; still not ready: %s%s", strings.Join(shown, ", "), suffix)
+	}
+
+	b.WriteString("\nInspect them with: kubectl get applications -n argocd")
+	if len(notReady) > 0 {
+		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReady[0])
+	}
+	return fmt.Errorf("%s", b.String())
 }

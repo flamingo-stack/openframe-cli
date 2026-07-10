@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 )
 
@@ -51,15 +53,26 @@ func (a *AppOfApps) Install(ctx context.Context, config config.ChartInstallConfi
 	// minor observation).
 	pterm.Info.Printf("Deploying ref '%s'...\n", appConfig.GitHubBranch)
 
-	// Clone the repository to a temporary directory
+	// Clone the repository to a temporary directory. On a cold cache this is a
+	// full clone over the network and used to run without any indicator.
+	var cloneSpinner *spinner.Spinner
+	if !config.Silent && !config.NonInteractive {
+		cloneSpinner = spinner.Start(fmt.Sprintf("Cloning the OpenFrame chart repository (ref %s)...", appConfig.GitHubBranch))
+	}
 	cloneResult, err := a.gitRepo.CloneChartRepository(ctx, appConfig)
 	if err != nil {
+		if cloneSpinner != nil {
+			cloneSpinner.Fail("Could not clone the chart repository")
+		}
 		// Check if this is a branch not found error
 		if strings.Contains(err.Error(), "branch") && strings.Contains(err.Error(), "does not exist") {
 			// Return the proper error type
 			return sharedErrors.NewBranchNotFoundError(appConfig.GitHubBranch)
 		}
 		return errors.NewRecoverableChartError("clone", "Git repository", err, 10*time.Second).WithCluster(config.ClusterName)
+	}
+	if cloneSpinner != nil {
+		cloneSpinner.Success("Chart repository cloned")
 	}
 
 	// Ensure cleanup happens after installation completes (success or failure)

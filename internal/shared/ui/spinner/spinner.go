@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 	"golang.org/x/term"
 )
@@ -35,6 +36,7 @@ var defaultFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 type Spinner struct {
 	out      io.Writer
 	isTTY    bool
+	silent   bool // --silent: suppress everything except the failure line
 	interval time.Duration
 	frames   []string
 
@@ -62,8 +64,17 @@ func Start(text string) *Spinner {
 	return s
 }
 
-// New returns a Spinner that writes to stdout (animated only on a real terminal).
+// New returns a Spinner that writes to stdout (animated only on a real
+// terminal). Under --silent it writes to io.Discard: the final Success/Fail
+// line goes through pterm.<Printer>.WithWriter(s.out), which overrides the
+// io.Discard writer SetSilent installs on the package-level printers, so a
+// spinner would otherwise print to stdout in a mode that promises silence.
 func New() *Spinner {
+	if ui.IsSilent() {
+		s := NewWithWriter(io.Discard)
+		s.silent = true
+		return s
+	}
 	s := NewWithWriter(os.Stdout)
 	if f, ok := any(os.Stdout).(*os.File); ok {
 		s.isTTY = term.IsTerminal(int(f.Fd()))
@@ -167,6 +178,16 @@ func (s *Spinner) finish(text string, style finalStyle) {
 
 	if s.isTTY {
 		fmt.Fprint(s.out, "\r\033[K") // clear the spinner line
+	}
+
+	// --silent means "suppress all output except errors", so a failure still
+	// speaks — through the package-level Error printer, which SetSilent leaves
+	// pointed at stdout on purpose.
+	if s.silent {
+		if style == styleFail {
+			pterm.Error.Println(text)
+		}
+		return
 	}
 
 	switch style {

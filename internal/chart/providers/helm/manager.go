@@ -584,6 +584,17 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		args = append(args, "--dry-run=client")
 	}
 
+	// This helm call carries `--wait --timeout <appConfig.Timeout>` (60m by
+	// default) and produces no output while it blocks. Without an indicator the
+	// CLI looks hung for the longest phase of an install — mirror the spinner
+	// InstallArgoCDWithProgress uses.
+	var spinner *uispinner.Spinner
+	if !config.Silent && !config.NonInteractive {
+		spinner = uispinner.Start("Installing the OpenFrame app-of-apps chart...")
+	} else {
+		pterm.Info.Println("Installing the OpenFrame app-of-apps chart...")
+	}
+
 	// Execute helm command with local chart path
 	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
@@ -592,6 +603,9 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 	})
 
 	if err != nil {
+		if spinner != nil {
+			spinner.Fail("app-of-apps installation failed")
+		}
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
 			return ctx.Err() // Return context cancellation directly without extra messaging
@@ -602,6 +616,10 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 			return fmt.Errorf("failed to install app-of-apps: %w\nHelm output: %s", err, result.Stderr)
 		}
 		return fmt.Errorf("failed to install app-of-apps: %w", err)
+	}
+
+	if spinner != nil {
+		spinner.Success("app-of-apps chart installed")
 	}
 
 	return nil
