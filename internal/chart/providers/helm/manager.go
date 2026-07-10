@@ -189,6 +189,20 @@ func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespa
 	return nil
 }
 
+// helmKubeContext resolves the kube-context every helm CLI call targets: an
+// explicit cfg.KubeContext (from --context / the interactive target selector)
+// wins, otherwise the context of the selected cluster. One install must never
+// talk to two clusters (audit F4).
+func helmKubeContext(cfg config.ChartInstallConfig) string {
+	if cfg.KubeContext != "" {
+		return cfg.KubeContext
+	}
+	if cfg.ClusterName != "" {
+		return k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), cfg.ClusterName)
+	}
+	return ""
+}
+
 // argoCDInstallArgs builds the `helm upgrade --install argo-cd` argument list.
 // Pure and testable — the CRDs are installed by the chart itself
 // (crds.install=true), so no crds flag is passed.
@@ -202,8 +216,8 @@ func argoCDInstallArgs(cfg config.ChartInstallConfig, valuesFilePath string) []s
 		"--timeout", "7m",
 		"-f", valuesFilePath,
 	}
-	if cfg.ClusterName != "" {
-		args = append(args, "--kube-context", k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), cfg.ClusterName))
+	if kubeContext := helmKubeContext(cfg); kubeContext != "" {
+		args = append(args, "--kube-context", kubeContext)
 	}
 	if cfg.DryRun {
 		// Explicit client-side dry-run: the bare --dry-run form is deprecated in
@@ -537,10 +551,10 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		}
 	}
 
-	// Add explicit kube-context if cluster name is provided (important for Windows/WSL)
-	if config.ClusterName != "" {
-		contextName := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), config.ClusterName)
-		args = append(args, "--kube-context", contextName)
+	// Add the explicit kube-context (important for Windows/WSL; an explicit
+	// --context wins over the cluster-derived one — F4 one-target rule)
+	if kubeContext := helmKubeContext(config); kubeContext != "" {
+		args = append(args, "--kube-context", kubeContext)
 	}
 
 	if config.DryRun {

@@ -103,6 +103,9 @@ func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags,
 			return req, fmt.Errorf("could not use context %q: %w", contextName, cerr)
 		}
 		req.KubeConfig = cfg
+		// Thread the context name too, so the helm CLI targets the same cluster
+		// as the native clients built from KubeConfig (one target per install).
+		req.KubeContext = contextName
 	}
 
 	// Bare interactive run (no cluster name): let the user pick a kube-context and
@@ -121,6 +124,7 @@ func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags,
 		}
 		pterm.Info.Printf("%s OpenFrame into context %q\n", action, res.Context)
 		req.KubeConfig = res.Config
+		req.KubeContext = res.Context
 	}
 
 	return req, nil

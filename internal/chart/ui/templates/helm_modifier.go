@@ -149,21 +149,6 @@ func (h *HelmValuesModifier) WriteValues(values map[string]interface{}, helmValu
 	return nil
 }
 
-// GetCurrentBranch extracts the current branch from Helm values (legacy method)
-func (h *HelmValuesModifier) GetCurrentBranch(values map[string]interface{}) string {
-	// First check for deployment-specific branch
-	if branch := h.GetCurrentOSSBranch(values); branch != "main" {
-		return branch
-	}
-	// Fall back to legacy global setting
-	if global, ok := values["global"].(map[string]interface{}); ok {
-		if branch, ok := global["repoBranch"].(string); ok {
-			return branch
-		}
-	}
-	return "main" // default fallback
-}
-
 // GetCurrentOSSBranch extracts the current repository branch from the top-level
 // repository.branch (the flattened chart schema).
 func (h *HelmValuesModifier) GetCurrentOSSBranch(values map[string]interface{}) string {

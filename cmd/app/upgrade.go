@@ -64,18 +64,26 @@ func runUpgradeCommand(cmd *cobra.Command, args []string) error {
 	}
 	verbose := getVerboseFlag(cmd)
 	sync, _ := cmd.Flags().GetBool("sync")
+	refChanged := cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch")
 
-	if upgradeIsChangeRef(cmd.Flags().Changed("ref"), cmd.Flags().Changed("github-branch"), sync) {
+	// The modes are mutually exclusive. Silently preferring --sync used to
+	// force-sync the CURRENT ref and discard an explicit --ref — the user
+	// believed they had deployed the new version (audit F5/T1-9).
+	if refChanged && sync {
+		return fmt.Errorf("--ref/--github-branch and --sync are mutually exclusive: --ref deploys a new ref (Mode 1), --sync re-syncs the current ref (Mode 2); drop one of them")
+	}
+
+	if upgradeIsChangeRef(refChanged, sync) {
 		return runUpgradeChangeRef(cmd, args, flags, verbose)
 	}
 	return runUpgradeForceSync(cmd, args, flags, verbose)
 }
 
 // upgradeIsChangeRef decides the upgrade mode: a changed --ref/--github-branch
-// means "deploy this ref" (Mode 1); otherwise, or when --sync is explicit,
-// force-sync the current ref (Mode 2).
-func upgradeIsChangeRef(refChanged, branchChanged, sync bool) bool {
-	return (refChanged || branchChanged) && !sync
+// means "deploy this ref" (Mode 1); otherwise force-sync the current ref
+// (Mode 2). The conflicting combination is rejected before this is called.
+func upgradeIsChangeRef(refChanged, sync bool) bool {
+	return refChanged && !sync
 }
 
 // runUpgradeChangeRef re-deploys the platform at a new ref using the EXISTING
@@ -90,6 +98,10 @@ func runUpgradeChangeRef(cmd *cobra.Command, args []string, flags *InstallFlags,
 	if err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
+	// An upgrade must never run against an empty values map: helm would replace
+	// the release values with chart defaults, wiping registry credentials and
+	// ingress settings (audit F3). Fresh installs keep defaults-with-warning.
+	req.RequireExistingValues = true
 
 	pterm.Info.Printf("Upgrading OpenFrame to ref %q\n", flags.resolvedRef())
 	if err := services.InstallChartsWithConfigContext(cmd.Context(), req); err != nil {

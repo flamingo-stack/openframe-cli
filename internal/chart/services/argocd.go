@@ -11,6 +11,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	"k8s.io/client-go/rest"
 )
 
 // ArgoCD handles ArgoCD installation logic
@@ -33,6 +34,37 @@ func NewArgoCD(helmManager *helm.HelmManager, pathResolver *config.PathResolver,
 		argoCDManager: argocd.NewManager(argoCDExecutor),
 		executor:      exec,
 	}
+}
+
+// NewArgoCDForTarget creates an ArgoCD service whose wait manager watches the
+// SAME cluster the install targets: the given rest.Config when available,
+// otherwise the named cluster's context. NewArgoCD's bare manager lazily
+// resolves the kubeconfig's CURRENT context, which during an install may be a
+// completely different cluster — the wait would then time out against (or,
+// worse, report ready from) the wrong target (audit F4).
+func NewArgoCDForTarget(helmManager *helm.HelmManager, pathResolver *config.PathResolver, exec executor.CommandExecutor, kubeConfig *rest.Config, clusterName string) (*ArgoCD, error) {
+	argoCDExecutor := executor.NewRealCommandExecutor(false, false) // Never verbose for internal operations
+
+	var manager *argocd.Manager
+	switch {
+	case kubeConfig != nil:
+		m, err := argocd.NewManagerWithConfig(argoCDExecutor, kubeConfig)
+		if err != nil {
+			return nil, err
+		}
+		manager = m
+	case clusterName != "":
+		manager = argocd.NewManagerWithCluster(argoCDExecutor, clusterName)
+	default:
+		manager = argocd.NewManager(argoCDExecutor)
+	}
+
+	return &ArgoCD{
+		helmManager:   helmManager,
+		pathResolver:  pathResolver,
+		argoCDManager: manager,
+		executor:      exec,
+	}, nil
 }
 
 // Install installs ArgoCD using Helm

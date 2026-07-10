@@ -8,24 +8,38 @@ import (
 )
 
 // TestUpgradeIsChangeRef locks the Mode 1 (change-ref) vs Mode 2 (force-sync)
-// decision: any ref/branch change selects Mode 1 unless --sync forces Mode 2;
-// a bare invocation defaults to Mode 2.
+// decision: a ref/branch change selects Mode 1; a bare invocation defaults to
+// Mode 2. The --ref + --sync combination never reaches this function — it is
+// rejected up front (F5 guard below).
 func TestUpgradeIsChangeRef(t *testing.T) {
 	cases := []struct {
-		name                      string
-		refChanged, branchChanged bool
-		sync                      bool
-		wantChangeRef             bool
+		name          string
+		refChanged    bool
+		sync          bool
+		wantChangeRef bool
 	}{
-		{"bare -> force-sync", false, false, false, false},
-		{"--sync -> force-sync", false, false, true, false},
-		{"--ref -> change-ref", true, false, false, true},
-		{"--github-branch -> change-ref", false, true, false, true},
-		{"--ref with --sync -> force-sync", true, false, true, false},
+		{"bare -> force-sync", false, false, false},
+		{"--sync -> force-sync", false, true, false},
+		{"--ref -> change-ref", true, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.wantChangeRef, upgradeIsChangeRef(tc.refChanged, tc.branchChanged, tc.sync))
+			assert.Equal(t, tc.wantChangeRef, upgradeIsChangeRef(tc.refChanged, tc.sync))
+		})
+	}
+}
+
+// TestUpgradeRejectsRefWithSync is the F5 regression guard: `upgrade --ref X
+// --sync` used to silently discard --ref and force-sync the CURRENT ref — the
+// user believed X was deployed. The combination must be rejected loudly.
+func TestUpgradeRejectsRefWithSync(t *testing.T) {
+	for _, refFlag := range []string{"--ref=v1.2.3", "--github-branch=develop"} {
+		t.Run(refFlag, func(t *testing.T) {
+			cmd := getUpgradeCmd()
+			cmd.SetArgs([]string{refFlag, "--sync"})
+			err := cmd.Execute()
+			require.Error(t, err, "%s with --sync must be rejected", refFlag)
+			assert.Contains(t, err.Error(), "mutually exclusive")
 		})
 	}
 }

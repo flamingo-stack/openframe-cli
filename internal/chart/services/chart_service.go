@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ type ChartService struct {
 	displayService *chartUI.DisplayService
 	helmManager    *helm.HelmManager
 	gitRepository  *git.Repository
+	// kubeConfig is the rest.Config the HelmManager was built with — the single
+	// install target. The ArgoCD wait manager is constructed from it too, so the
+	// helm CLI, the native checks, and the readiness wait all watch the same
+	// cluster (audit F4).
+	kubeConfig *rest.Config
 }
 
 // NewChartService creates a new chart service with the given rest.Config
@@ -61,6 +67,7 @@ func NewChartService(clusterAccess types.ClusterAccess, kubeConfig *rest.Config,
 		displayService: chartUI.NewDisplayService(),
 		helmManager:    helmManager,
 		gitRepository:  git.NewRepository(),
+		kubeConfig:     kubeConfig,
 	}, nil
 }
 
@@ -96,6 +103,7 @@ func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose b
 		return fmt.Errorf("failed to create HelmManager: %w", err)
 	}
 	cs.helmManager = helmManager
+	cs.kubeConfig = kubeConfig
 	return nil
 }
 
@@ -178,7 +186,7 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
 		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
-		chartConfig, err = w.loadExistingConfiguration()
+		chartConfig, err = w.loadExistingConfiguration(req.RequireExistingValues)
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
 		}
@@ -299,7 +307,7 @@ func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Cont
 		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
 		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
 		var err error
-		chartConfig, err = w.loadExistingConfiguration()
+		chartConfig, err = w.loadExistingConfiguration(req.RequireExistingValues)
 		if err != nil {
 			return fmt.Errorf("non-interactive configuration failed: %w", err)
 		}
@@ -455,13 +463,30 @@ func (w *InstallationWorkflow) dryRunConfiguration() (*types.ChartConfiguration,
 	}, nil
 }
 
-func (w *InstallationWorkflow) loadExistingConfiguration() (*types.ChartConfiguration, error) {
+func (w *InstallationWorkflow) loadExistingConfiguration(requireValuesFile bool) (*types.ChartConfiguration, error) {
 	modifier := templates.NewHelmValuesModifier()
 
-	// Load existing openframe-helm-values.yaml
+	if _, err := os.Stat(config.DefaultHelmValuesFile); err != nil {
+		// Upgrades REQUIRE the values file: proceeding with an empty map makes
+		// `helm upgrade` replace the release values with chart defaults —
+		// silently wiping registry credentials and ingress settings when run
+		// from the wrong directory (audit F3/T1-2).
+		if requireValuesFile {
+			return nil, fmt.Errorf(
+				"%s not found in the current directory — upgrading with no values file would deploy chart DEFAULTS and wipe the existing configuration; run from the directory containing the values file: %w",
+				config.DefaultHelmValuesFile, err)
+		}
+		// Fresh non-interactive install/bootstrap: chart defaults are a valid
+		// starting point (a clean machine has no values file yet), but say so
+		// loudly instead of silently pretending a file was used.
+		pterm.Warning.Printf("%s not found in the current directory — deploying chart defaults\n", config.DefaultHelmValuesFile)
+	}
+
+	// Load existing openframe-helm-values.yaml (empty map when absent — allowed
+	// only on the fresh-install path above)
 	values, err := modifier.LoadOrCreateBaseValues()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load openframe-helm-values.yaml: %w", err)
+		return nil, fmt.Errorf("failed to load %s: %w", config.DefaultHelmValuesFile, err)
 	}
 
 	// Create temporary file from the existing values (same as interactive mode)
@@ -516,18 +541,31 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 		pterm.Info.Printf("Pinning platform to ref %q\n", ref)
 	}
 
-	return configBuilder.BuildInstallConfigWithCustomHelmPath(
+	cfg, err := configBuilder.BuildInstallConfigWithCustomHelmPath(
 		req.Force, req.DryRun, req.Verbose, req.NonInteractive, clusterName,
 		githubRepo, req.GitHubBranch, req.CertDir,
 		chartConfig.TempHelmValuesPath,
 	)
+	if err != nil {
+		return cfg, err
+	}
+	// One target per install: an explicit kube-context resolved at the command
+	// layer overrides the ClusterName-derived context in every helm call.
+	cfg.KubeContext = req.KubeContext
+	return cfg, nil
 }
 
 // performInstallation executes the actual installation
 func (w *InstallationWorkflow) performInstallation(ctx context.Context, config config.ChartInstallConfig) error {
-	// Create installer directly without factory
+	// Create installer directly without factory. The ArgoCD wait manager gets
+	// the SAME rest.Config the HelmManager was built with (falling back to the
+	// selected cluster's context) — never the kubeconfig's current context,
+	// which may point at an entirely different cluster (audit F4).
 	pathResolver := w.chartService.configService.GetPathResolver()
-	argoCDService := NewArgoCD(w.chartService.helmManager, pathResolver, w.chartService.executor)
+	argoCDService, err := NewArgoCDForTarget(w.chartService.helmManager, pathResolver, w.chartService.executor, w.chartService.kubeConfig, config.ClusterName)
+	if err != nil {
+		return fmt.Errorf("failed to create ArgoCD service for the install target: %w", err)
+	}
 	appOfAppsService := NewAppOfApps(w.chartService.helmManager, w.chartService.gitRepository, pathResolver)
 
 	installer := &Installer{
@@ -535,7 +573,7 @@ func (w *InstallationWorkflow) performInstallation(ctx context.Context, config c
 		appOfAppsService: appOfAppsService,
 	}
 
-	err := installer.InstallChartsWithContext(ctx, config)
+	err = installer.InstallChartsWithContext(ctx, config)
 	if err != nil {
 		// Check if this is a branch not found error
 		var bnfErr *sharedErrors.BranchNotFoundError

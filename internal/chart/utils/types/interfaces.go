@@ -151,8 +151,22 @@ type InstallationRequest struct {
 	// Applications' targetRevision track that ref.
 	GitHubRefExplicit bool
 	CertDir           string
-	NonInteractive    bool         // Skip all prompts, use existing openframe-helm-values.yaml
-	KubeConfig        *rest.Config // Kubernetes REST config for cluster communication
+	NonInteractive    bool // Skip all prompts, use existing openframe-helm-values.yaml
+	// RequireExistingValues makes a missing openframe-helm-values.yaml a hard
+	// error instead of "deploy chart defaults". Set by upgrade (Mode 1): an
+	// upgrade with an empty values map would replace the release values with
+	// chart defaults, silently wiping registry credentials and ingress settings
+	// when run from the wrong directory (audit F3/T1-2). Fresh installs and
+	// bootstrap keep the defaults-with-warning behavior — a clean machine has no
+	// values file yet.
+	RequireExistingValues bool
+	KubeConfig            *rest.Config // Kubernetes REST config for cluster communication
+	// KubeContext is the kube-context name KubeConfig was resolved from
+	// (--context or the interactive target selector). When set, every helm CLI
+	// call targets it too, so the helm CLI, the native client checks, and the
+	// ArgoCD wait all watch the SAME cluster (audit F4: three different targets
+	// could be used within a single install).
+	KubeContext string
 	// ClusterAccess resolves clusters and their rest.Config for the install
 	// target. Injected by the composition root so the app subsystem never imports
 	// cluster-creation code (req 18/19). Required for interactive/named-cluster
