@@ -69,6 +69,13 @@ func TestCleanupHelmReleases_PinsKubeContext(t *testing.T) {
 	assert.True(t, hasFlagValue(uninstalls[0], "--namespace", "argocd"))
 	assert.Equal(t, "openframe", uninstalls[1][1])
 	assert.True(t, hasFlagValue(uninstalls[1], "--namespace", "openframe"))
+
+	// No --wait, ever: app-of-apps Application CRs carry ArgoCD's
+	// resources-finalizer, and with the controller itself being uninstalled
+	// --wait would block for helm's default 5m per release.
+	for _, argv := range uninstalls {
+		assert.NotContainsf(t, argv, "--wait", "cleanup uninstall must be fire-and-forget: %v", argv)
+	}
 }
 
 // TestCleanupHelmReleases_ForceAddsIgnoreNotFound locks the force-mode flag.

@@ -288,8 +288,19 @@ func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext st
 			pterm.Info.Printf("Uninstalling Helm release: %s (namespace %s)\n", release.Name, release.Namespace)
 		}
 
-		// Always use aggressive uninstall for cleanup
-		args := []string{"uninstall", release.Name, "--namespace", release.Namespace, "--kube-context", kubeContext, "--no-hooks", "--wait"}
+		// Aggressive uninstall, deliberately WITHOUT --wait: the releases here
+		// include argo-cd and app-of-apps, whose Application CRs carry ArgoCD's
+		// resources-finalizer. Once the ArgoCD controller is being removed it
+		// can no longer clear that finalizer, so --wait would block for helm's
+		// default 5m PER RELEASE (see UninstallRelease in
+		// internal/chart/providers/helm for the same rationale).
+		//
+		// Known leftover either way: Application CRs whose finalizer was never
+		// cleared stay Terminating, which can pin the argocd namespace in the
+		// namespace-cleanup phase. The full fix is the finalizer stripping that
+		// `app uninstall` (internal/app/uninstall) performs — tracked in the
+		// backlog; --wait only made the same outcome N×5m slower.
+		args := []string{"uninstall", release.Name, "--namespace", release.Namespace, "--kube-context", kubeContext, "--no-hooks"}
 		if force {
 			// Add even more aggressive flags when force is enabled
 			args = append(args, "--ignore-not-found")
