@@ -383,11 +383,14 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		h.showArgoCDDiagnostics(ctx, config.ClusterName)
 
 		// Include stdout and stderr output for better debugging
-		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both
+		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both.
+		// Stderr is redacted by the executor at population; stdout is NOT (callers
+		// parse it), so redact it here — helm's rendered output can echo values,
+		// including the docker registry password, into a user-facing error.
 		if result != nil {
 			output := result.Stderr
 			if output == "" {
-				output = result.Stdout
+				output = redact.Redact(result.Stdout)
 			}
 			if output != "" {
 				return fmt.Errorf("failed to install ArgoCD: %w\nHelm output: %s", err, output)

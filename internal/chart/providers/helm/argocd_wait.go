@@ -12,6 +12,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	"github.com/pterm/pterm"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -216,10 +217,11 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 		return fmt.Errorf("failed to run helm list: %w", err)
 	}
 
-	// Log the helm list output
+	// Log the helm list output. Redact at the print site (the struct value is
+	// parsed below): helm output may carry values echoed back from the release.
 	if verbose {
 		pterm.Info.Println("Helm list output:")
-		pterm.Println(result.Stdout)
+		pterm.Println(redact.Redact(result.Stdout))
 	}
 
 	// Check if the release exists in the output
@@ -247,7 +249,7 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 
 	if verbose {
 		pterm.Info.Println("Helm status output:")
-		pterm.Println(statusResult.Stdout)
+		pterm.Println(redact.Redact(statusResult.Stdout))
 	}
 
 	pterm.Success.Printf("Helm release '%s' verified successfully\n", releaseName)
