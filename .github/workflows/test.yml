@@ -327,6 +327,36 @@ jobs:
       # name must fail fast, never drop into the interactive picker (which hangs
       # CI until the job timeout). Runs with a short timeout so a regression that
       # reintroduces the prompt is caught as exit 124, not a 40-minute hang.
+      # Validation matrix: invalid parameters must exit non-zero with the
+      # documented message, and machine output must stay parseable. These need
+      # real tools on the runner (the text-mode prerequisite gate), so they
+      # live here rather than in the hermetic unit-level CLI matrix.
+      - name: 'CLI: validation matrix (negative + machine output)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: invalid parameters exit non-zero; JSON stays parseable"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          expect_fail() {
+            desc="$1"; shift
+            if "$OF_BIN" "$@" </dev/null >/tmp/neg.out 2>&1; then
+              cat /tmp/neg.out; fail "expected failure: $desc"
+            fi
+            echo "OK (non-zero): $desc"
+          }
+          expect_fail "status with invalid --output"      cluster status "$OF_CLUSTER" -o bogus
+          expect_fail "list with invalid --output"        cluster list -o bogus
+          expect_fail "machine status without a name"     cluster status -o json
+          expect_fail "status of a nonexistent cluster"   cluster status no-such-cluster -o json
+          # Machine output contract: valid JSON on stdout, parseable by jq.
+          "$OF_BIN" cluster list -o json | jq -e 'type == "array"' >/dev/null \
+            || fail "cluster list -o json is not a JSON array"
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o json | jq -e '.name and (.ready_servers | type == "number") and (.total_servers | type == "number")' >/dev/null \
+            || fail "cluster status -o json lacks name/ready_servers/total_servers"
+          echo "validation matrix OK"
+
       # Guard (verification report N2): an explicit --context IS the install
       # target — it must be accepted in non-interactive mode without a cluster
       # name (0.4.7 failed this exact invocation with "requires a cluster name").
