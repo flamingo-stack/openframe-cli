@@ -11,9 +11,11 @@ package selfupdate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -86,9 +88,39 @@ func (c Client) Latest(ctx context.Context) (Release, error) {
 	return c.getRelease(ctx, "/repos/"+repoOwner+"/"+repoName+"/releases/latest")
 }
 
-// ForTag returns the release for an exact tag (e.g. "v1.2.3").
+// ErrReleaseNotFound reports that no release exists for the requested tag.
+var ErrReleaseNotFound = errors.New("no matching release found")
+
+// ForTag returns the release for a tag. Releases in this repo are tagged with
+// the bare semver ("0.4.7"), but users habitually type "v0.4.7" (and the help
+// text shows that form), so on a not-found miss the alternate spelling — with
+// or without the "v" prefix — is tried before giving up (T0-3).
 func (c Client) ForTag(ctx context.Context, tag string) (Release, error) {
-	return c.getRelease(ctx, "/repos/"+repoOwner+"/"+repoName+"/releases/tags/"+tag)
+	rel, err := c.getRelease(ctx, releaseTagPath(tag))
+	if err == nil || !errors.Is(err, ErrReleaseNotFound) {
+		return rel, err
+	}
+	alt := alternateTag(tag)
+	if alt == tag {
+		return rel, err
+	}
+	relAlt, errAlt := c.getRelease(ctx, releaseTagPath(alt))
+	if errAlt != nil {
+		return Release{}, fmt.Errorf("no release found for tag %q (also tried %q)", tag, alt)
+	}
+	return relAlt, nil
+}
+
+func releaseTagPath(tag string) string {
+	return "/repos/" + repoOwner + "/" + repoName + "/releases/tags/" + url.PathEscape(tag)
+}
+
+// alternateTag toggles the "v" prefix on a tag.
+func alternateTag(tag string) string {
+	if v := strings.TrimPrefix(tag, "v"); v != tag {
+		return v
+	}
+	return "v" + tag
 }
 
 func (c Client) getRelease(ctx context.Context, path string) (Release, error) {
@@ -107,7 +139,7 @@ func (c Client) getRelease(ctx context.Context, path string) (Release, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return Release{}, fmt.Errorf("no matching release found")
+		return Release{}, ErrReleaseNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("release query failed: HTTP %d", resp.StatusCode)

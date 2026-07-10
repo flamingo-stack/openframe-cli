@@ -251,9 +251,11 @@ func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, cluste
 		username = "runner" // fallback to runner
 	}
 
-	// Remove containers matching k3d-<clustername> pattern
+	// Select containers by the k3d.cluster label (exact match). A name= filter
+	// is an unanchored regex: deleting cluster "dev" would also match the
+	// containers of "dev-2", "dev-old", ... (T0-2).
 	cleanupCmd := fmt.Sprintf(
-		"sudo docker ps -aq --filter 'name=k3d-%s' | xargs -r sudo docker rm -f 2>/dev/null || true",
+		"sudo docker ps -aq --filter 'label=k3d.cluster=%s' | xargs -r sudo docker rm -f 2>/dev/null || true",
 		clusterName,
 	)
 	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
@@ -272,8 +274,10 @@ func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, cluste
 
 // forceCleanupDockerContainersDirect removes k3d containers directly (non-Windows)
 func (m *K3dManager) forceCleanupDockerContainersDirect(ctx context.Context, clusterName string) error {
-	// List containers matching k3d-<clustername> pattern
-	result, err := m.executor.Execute(ctx, "docker", "ps", "-aq", "--filter", fmt.Sprintf("name=k3d-%s", clusterName))
+	// Select containers by the k3d.cluster label (exact match). A name= filter
+	// is an unanchored regex: deleting cluster "dev" would also match the
+	// containers of "dev-2", "dev-old", ... (T0-2).
+	result, err := m.executor.Execute(ctx, "docker", "ps", "-aq", "--filter", fmt.Sprintf("label=k3d.cluster=%s", clusterName))
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
 	}

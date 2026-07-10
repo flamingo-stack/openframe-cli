@@ -27,14 +27,13 @@ func isReleaseVersion(version string) bool {
 	return !strings.Contains(version, "-")
 }
 
-// releaseTag reconstructs the git tag for a goreleaser .Version (which has the
-// leading "v" stripped).
+// releaseTag maps a build version to its git tag. This repo tags releases with
+// the BARE semver — release.yml runs `git tag -a "${VERSION}"`, so the tag for
+// 0.4.7 is "0.4.7", not "v0.4.7" — and goreleaser's .Version strips a leading
+// "v" anyway. A "v"-prefixed download URL 404s for every published release
+// (T0-3), breaking WSL auto-install on first run of a released Windows binary.
 func releaseTag(version string) string {
-	v := strings.TrimSpace(version)
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
 // linuxArchiveName is the goreleaser archive filename for the Linux build of the

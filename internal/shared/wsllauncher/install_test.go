@@ -21,12 +21,18 @@ func TestIsReleaseVersion(t *testing.T) {
 	}
 }
 
+// TestReleaseTag locks the tag convention of this repo: release.yml tags with
+// the BARE semver (`git tag -a "${VERSION}"` → "0.4.7"). A "v"-prefixed tag
+// produced a download URL that 404s for every published release (T0-3).
 func TestReleaseTag(t *testing.T) {
-	if got := releaseTag("1.2.3"); got != "v1.2.3" {
-		t.Errorf("tag = %q, want v1.2.3", got)
+	if got := releaseTag("1.2.3"); got != "1.2.3" {
+		t.Errorf("tag = %q, want 1.2.3 (bare, matching release.yml tagging)", got)
 	}
-	if got := releaseTag("v1.2.3"); got != "v1.2.3" {
-		t.Errorf("already-prefixed tag = %q, want v1.2.3", got)
+	if got := releaseTag("v1.2.3"); got != "1.2.3" {
+		t.Errorf("v-prefixed version tag = %q, want 1.2.3", got)
+	}
+	if got := releaseTag(" 0.4.7 "); got != "0.4.7" {
+		t.Errorf("untrimmed version tag = %q, want 0.4.7", got)
 	}
 }
 
@@ -40,12 +46,14 @@ func TestLinuxArchiveName(t *testing.T) {
 }
 
 func TestReleaseAssetURL(t *testing.T) {
+	// Real releases live at .../download/<bare-version>/... (e.g. 0.4.7); the
+	// v-prefixed form 404s.
 	got := releaseAssetURL("1.2.3", "openframe-cli_linux_amd64.tar.gz")
-	want := "https://github.com/flamingo-stack/openframe-cli/releases/download/v1.2.3/openframe-cli_linux_amd64.tar.gz"
+	want := "https://github.com/flamingo-stack/openframe-cli/releases/download/1.2.3/openframe-cli_linux_amd64.tar.gz"
 	if got != want {
 		t.Errorf("url = %q, want %q", got, want)
 	}
-	if csum := releaseAssetURL("2.0.0", "checksums.txt"); !strings.HasSuffix(csum, "/v2.0.0/checksums.txt") {
+	if csum := releaseAssetURL("2.0.0", "checksums.txt"); !strings.HasSuffix(csum, "/2.0.0/checksums.txt") {
 		t.Errorf("checksums url = %q", csum)
 	}
 }

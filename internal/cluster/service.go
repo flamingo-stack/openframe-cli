@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -218,8 +220,11 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
 
-	// 1. Clean up Helm releases (including ArgoCD)
-	if err := s.cleanupHelmReleases(ctx, verbose, force); err != nil {
+	// 1. Clean up Helm releases (including ArgoCD) — pinned to this cluster's
+	// kube-context. Without the pin helm operates on the kubeconfig's CURRENT
+	// context, which may be a different (even production) cluster.
+	kubeContext := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
+	if err := s.cleanupHelmReleases(ctx, kubeContext, verbose, force); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to cleanup Helm releases: %v\n", err)
 		}
@@ -249,72 +254,60 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 	return nil
 }
 
-// cleanupHelmReleases removes all Helm releases
-func (s *ClusterService) cleanupHelmReleases(ctx context.Context, verbose bool, force bool) error {
-	// List all helm releases
-	result, err := s.executor.Execute(ctx, "helm", "list", "--all-namespaces", "--short")
+// helmRelease is the subset of `helm list --output json` we consume.
+type helmRelease struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// cleanupHelmReleases removes all Helm releases from the cluster identified by
+// kubeContext. The explicit --kube-context on every helm call is what keeps
+// cleanup scoped to that cluster (T0-1): helm otherwise acts on the
+// kubeconfig's current context, whatever the user last switched to.
+func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext string, verbose bool, force bool) error {
+	if kubeContext == "" {
+		return fmt.Errorf("refusing to cleanup Helm releases without an explicit kube-context")
+	}
+
+	result, err := s.executor.Execute(ctx, "helm", "list", "--all-namespaces", "--output", "json", "--kube-context", kubeContext)
 	if err != nil {
 		return fmt.Errorf("failed to list Helm releases: %w", err)
 	}
 
-	if result.Stdout == "" {
+	var releases []helmRelease
+	if out := strings.TrimSpace(result.Stdout); out != "" {
+		if err := json.Unmarshal([]byte(out), &releases); err != nil {
+			return fmt.Errorf("failed to parse helm list output: %w", err)
+		}
+	}
+	if len(releases) == 0 {
 		if verbose {
 			pterm.Info.Println("No Helm releases found to cleanup")
 		}
 		return nil
 	}
 
-	// Parse release names and uninstall each one
-	releases := strings.Split(strings.TrimSpace(result.Stdout), "\n")
 	for _, release := range releases {
-		release = strings.TrimSpace(release)
-		if release == "" {
+		if release.Name == "" || release.Namespace == "" {
 			continue
 		}
 
 		if verbose {
-			pterm.Info.Printf("Uninstalling Helm release: %s\n", release)
+			pterm.Info.Printf("Uninstalling Helm release: %s (namespace %s)\n", release.Name, release.Namespace)
 		}
 
-		// Get release info to determine namespace
-		releaseInfo, err := s.executor.Execute(ctx, "helm", "list", "--filter", release, "--all-namespaces", "--output", "json")
-		if err != nil {
+		// Always use aggressive uninstall for cleanup
+		args := []string{"uninstall", release.Name, "--namespace", release.Namespace, "--kube-context", kubeContext, "--no-hooks", "--wait"}
+		if force {
+			// Add even more aggressive flags when force is enabled
+			args = append(args, "--ignore-not-found")
+		}
+		if _, err := s.executor.Execute(ctx, "helm", args...); err != nil {
 			if verbose {
-				pterm.Warning.Printf("Failed to get info for release %s: %v\n", release, err)
+				pterm.Warning.Printf("Failed to uninstall release %s: %v\n", release.Name, err)
 			}
-			continue
-		}
-
-		// Simple JSON parsing to extract namespace - this is basic but functional
-		if strings.Contains(releaseInfo.Stdout, `"namespace"`) {
-			lines := strings.Split(releaseInfo.Stdout, "\n")
-			var namespace string
-			for _, line := range lines {
-				if strings.Contains(line, `"namespace"`) && strings.Contains(line, ":") {
-					parts := strings.Split(line, ":")
-					if len(parts) >= 2 {
-						namespace = strings.Trim(strings.TrimSpace(parts[1]), `",`)
-						break
-					}
-				}
-			}
-
-			if namespace != "" {
-				// Always use aggressive uninstall for cleanup
-				args := []string{"uninstall", release, "--namespace", namespace, "--no-hooks", "--wait"}
-				if force {
-					// Add even more aggressive flags when force is enabled
-					args = append(args, "--ignore-not-found")
-				}
-				_, err := s.executor.Execute(ctx, "helm", args...)
-				if err != nil {
-					if verbose {
-						pterm.Warning.Printf("Failed to uninstall release %s: %v\n", release, err)
-					}
-				} else if verbose {
-					pterm.Success.Printf("Uninstalled Helm release: %s\n", release)
-				}
-			}
+		} else if verbose {
+			pterm.Success.Printf("Uninstalled Helm release: %s\n", release.Name)
 		}
 	}
 
