@@ -13,7 +13,7 @@ func TestArgoCDInstallArgs(t *testing.T) {
 
 	for _, want := range []string{
 		"upgrade --install argo-cd argo/argo-cd",
-		"--version=10.1.1",
+		"--version=10.1.3",
 		"--namespace argocd",
 		"--create-namespace",
 		"--wait",

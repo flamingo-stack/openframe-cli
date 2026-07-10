@@ -41,6 +41,18 @@ func ConfirmActionInteractive(message string, defaultValue bool) (bool, error) {
 	return confirm(message, defaultValue)
 }
 
+// RequireConfirmation prompts like ConfirmActionInteractive, but in a
+// non-interactive environment (CI, piped stdin) it fails fast with guidance
+// instead of blocking on a prompt no one can answer — or worse, silently
+// proceeding with a destructive action. flagHint names the flag that skips the
+// prompt (e.g. "--yes", "--force"); callers must check that flag BEFORE calling.
+func RequireConfirmation(message, flagHint string, defaultValue bool) (bool, error) {
+	if IsNonInteractive() {
+		return false, fmt.Errorf("confirmation required but the session is non-interactive; re-run with %s", flagHint)
+	}
+	return confirm(message, defaultValue)
+}
+
 // ConfirmDeletion prompts for deletion confirmation (defaults to No).
 func ConfirmDeletion(resourceType, resourceName string) (bool, error) {
 	return confirm(fmt.Sprintf("Are you sure you want to delete %s '%s'?", resourceType, pterm.Cyan(resourceName)), false)

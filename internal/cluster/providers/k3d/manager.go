@@ -557,16 +557,32 @@ func CreateClusterManagerWithExecutor(exec executor.CommandExecutor) *K3dManager
 // The limits are set via sysctl:
 // - fs.inotify.max_user_watches: max number of file watches per user (default: 8192)
 // - fs.inotify.max_user_instances: max number of inotify instances per user (default: 128)
+//
+// Best-effort by design, and it must NEVER prompt: sudo runs with -n
+// (non-interactive) so a box without passwordless sudo gets a skip + hint, not
+// a hidden password prompt on /dev/tty that stalls `bootstrap --non-interactive`
+// mid-spinner.
 func (m *K3dManager) increaseInotifyLimits(ctx context.Context) error {
-	// Desired limits - these are common recommended values for development environments
-	const maxUserWatches = "524288"
-	const maxUserInstances = "512"
+	return m.increaseInotifyLimitsFor(ctx, runtime.GOOS)
+}
 
-	if runtime.GOOS == "windows" {
-		// On Windows, the limits need to be set inside WSL2 where Docker runs
-		// We need root privileges to modify sysctl settings
+// increaseInotifyLimitsFor is the goos-parameterized implementation (testable
+// off-Linux).
+func (m *K3dManager) increaseInotifyLimitsFor(ctx context.Context, goos string) error {
+	// Desired limits - these are common recommended values for development environments
+	const maxUserWatches = 524288
+	const maxUserInstances = 512
+
+	switch goos {
+	case "darwin":
+		// macOS has no fs.inotify.* keys (it uses FSEvents); the old
+		// unconditional `sudo sysctl` only ever produced a password prompt here.
+		return nil
+	case "windows":
+		// On Windows, the limits need to be set inside WSL2 where Docker runs.
+		// Reached only with WSL forwarding disabled; keep it prompt-free too.
 		sysctlCmd := fmt.Sprintf(
-			"sudo sysctl -w fs.inotify.max_user_watches=%s fs.inotify.max_user_instances=%s 2>/dev/null || true",
+			"sudo -n sysctl -w fs.inotify.max_user_watches=%d fs.inotify.max_user_instances=%d 2>/dev/null || true",
 			maxUserWatches, maxUserInstances,
 		)
 
@@ -576,27 +592,54 @@ func (m *K3dManager) increaseInotifyLimits(ctx context.Context) error {
 		}
 
 		if m.verbose {
-			fmt.Printf("✓ Increased inotify limits in WSL (max_user_watches=%s, max_user_instances=%s)\n",
+			fmt.Printf("✓ Increased inotify limits in WSL (max_user_watches=%d, max_user_instances=%d)\n",
 				maxUserWatches, maxUserInstances)
 		}
-	} else {
-		// On Linux/macOS, set the limits directly
-		// Note: macOS doesn't use inotify (uses FSEvents), so this only applies to Linux
-		sysctlCmd := fmt.Sprintf(
-			"sudo sysctl -w fs.inotify.max_user_watches=%s fs.inotify.max_user_instances=%s 2>/dev/null || true",
-			maxUserWatches, maxUserInstances,
-		)
+	default: // linux
+		// Skip the privileged write when the current limits already suffice.
+		if m.inotifyLimitsSufficient(ctx, maxUserWatches, maxUserInstances) {
+			if m.verbose {
+				fmt.Println("✓ inotify limits already sufficient")
+			}
+			return nil
+		}
 
-		_, err := m.executor.Execute(ctx, "bash", "-c", sysctlCmd)
+		// sudo -n: fail instead of prompting when passwordless sudo is missing.
+		_, err := m.executor.Execute(ctx, "sudo", "-n", "sysctl", "-w",
+			fmt.Sprintf("fs.inotify.max_user_watches=%d", maxUserWatches),
+			fmt.Sprintf("fs.inotify.max_user_instances=%d", maxUserInstances),
+		)
 		if err != nil {
-			return fmt.Errorf("failed to set inotify limits: %w", err)
+			// Best-effort: the caller downgrades this to a warning. Give the
+			// manual command since we deliberately refused to prompt for sudo.
+			return fmt.Errorf("could not raise inotify limits without prompting for sudo; run manually: sudo sysctl -w fs.inotify.max_user_watches=%d fs.inotify.max_user_instances=%d: %w",
+				maxUserWatches, maxUserInstances, err)
 		}
 
 		if m.verbose {
-			fmt.Printf("✓ Increased inotify limits (max_user_watches=%s, max_user_instances=%s)\n",
+			fmt.Printf("✓ Increased inotify limits (max_user_watches=%d, max_user_instances=%d)\n",
 				maxUserWatches, maxUserInstances)
 		}
 	}
 
 	return nil
+}
+
+// inotifyLimitsSufficient reports whether both current inotify limits already
+// meet the wanted values (reading them needs no privileges).
+func (m *K3dManager) inotifyLimitsSufficient(ctx context.Context, wantWatches, wantInstances int) bool {
+	for key, want := range map[string]int{
+		"fs.inotify.max_user_watches":   wantWatches,
+		"fs.inotify.max_user_instances": wantInstances,
+	} {
+		result, err := m.executor.Execute(ctx, "sysctl", "-n", key)
+		if err != nil {
+			return false
+		}
+		current, err := strconv.Atoi(strings.TrimSpace(result.Stdout))
+		if err != nil || current < want {
+			return false
+		}
+	}
+	return true
 }

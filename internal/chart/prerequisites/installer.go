@@ -97,12 +97,9 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 	}
 
 	if len(stillMissingInstallable) > 0 {
-		// In non-interactive mode, just warn and continue
-		if nonInteractive {
-			pterm.Warning.Printf("Some tools are still missing: %s\n", strings.Join(stillMissingInstallable, ", "))
-			pterm.Info.Println("Continuing with available tools (non-interactive mode)...")
-			return nil
-		}
+		// Fail fast in BOTH modes: "continuing with available tools" just moved
+		// the failure into the helm install minutes later with a misleading
+		// error, which is worse in CI, not better.
 		pterm.Warning.Printf("Some tools are still missing: %s\n", strings.Join(stillMissingInstallable, ", "))
 		return fmt.Errorf("installation completed but some tools are still missing: %s", strings.Join(stillMissingInstallable, ", "))
 	}
@@ -201,12 +198,9 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 
 		if confirmed {
 			if err := i.installMissingToolsNonInteractive(installableMissing, nonInteractive); err != nil {
-				// In non-interactive mode, log error but continue
-				if nonInteractive {
-					pterm.Warning.Printf("Failed to install some prerequisites: %v\n", err)
-					pterm.Info.Println("Continuing anyway (non-interactive mode)...")
-					return nil
-				}
+				// Fail fast in BOTH modes: the old non-interactive "continuing
+				// anyway" deferred the failure to a guaranteed helm error with
+				// the real cause buried in a scrolled-past warning.
 				return err
 			}
 		} else {

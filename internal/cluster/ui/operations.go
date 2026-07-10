@@ -148,14 +148,17 @@ func (ui *OperationsUI) SelectClusterForCleanup(clusters []models.ClusterInfo, a
 			return "", fmt.Errorf("cluster '%s' not found", clusterName)
 		}
 
-		// Always ask for confirmation
-		confirmed, err := ui.confirmCleanup(clusterName, force)
-		if err != nil {
-			return "", err
-		}
-		if !confirmed {
-			pterm.Info.Println("Cleanup cancelled.")
-			return "", nil
+		// Ask for confirmation unless forced (--force is documented as "skip
+		// confirmation prompts"; the old behavior of prompting anyway hung CI).
+		if !force {
+			confirmed, err := ui.confirmCleanup(clusterName)
+			if err != nil {
+				return "", err
+			}
+			if !confirmed {
+				pterm.Info.Println("Cleanup cancelled.")
+				return "", nil
+			}
 		}
 
 		return clusterName, nil
@@ -177,36 +180,35 @@ func (ui *OperationsUI) SelectClusterForCleanup(clusters []models.ClusterInfo, a
 		return "", nil
 	}
 
-	// Always ask for confirmation
-	confirmed, err := ui.confirmCleanup(clusterName, force)
-	if err != nil {
-		return "", err
-	}
-	if !confirmed {
-		pterm.Info.Println("Cleanup cancelled.")
-		return "", nil
+	// Ask for confirmation unless forced (same semantics as the argument path).
+	if !force {
+		confirmed, err := ui.confirmCleanup(clusterName)
+		if err != nil {
+			return "", err
+		}
+		if !confirmed {
+			pterm.Info.Println("Cleanup cancelled.")
+			return "", nil
+		}
 	}
 
 	return clusterName, nil
 }
 
-// confirmCleanup asks for user confirmation before cleaning up a cluster
-func (ui *OperationsUI) confirmCleanup(clusterName string, force bool) (bool, error) {
-	prompt := fmt.Sprintf("Are you sure you want to cleanup cluster '%s'?", pterm.Cyan(clusterName))
-	if force {
-		prompt = fmt.Sprintf("Are you sure you want to perform AGGRESSIVE cleanup on cluster '%s'?\n%s",
-			pterm.Cyan(clusterName),
-			pterm.Gray("This will remove ALL images, volumes, networks, and system resources."))
-	}
-
-	return pterm.DefaultInteractiveConfirm.
-		WithDefaultText(prompt).
-		WithDefaultValue(false).
-		Show()
+// confirmCleanup asks for user confirmation before cleaning up a cluster.
+// Non-interactive sessions fail fast with a --force hint instead of blocking.
+func (ui *OperationsUI) confirmCleanup(clusterName string) (bool, error) {
+	return sharedUI.RequireConfirmation(
+		fmt.Sprintf("Are you sure you want to cleanup cluster '%s'?", pterm.Cyan(clusterName)),
+		"--force", false)
 }
 
-// confirmDeletion asks for user confirmation before deleting a cluster
+// confirmDeletion asks for user confirmation before deleting a cluster.
+// Non-interactive sessions fail fast with a --force hint instead of blocking.
 func (ui *OperationsUI) confirmDeletion(clusterName string) (bool, error) {
+	if sharedUI.IsNonInteractive() {
+		return false, fmt.Errorf("confirmation required but the session is non-interactive; re-run with --force")
+	}
 	return sharedUI.ConfirmDeletion("cluster", clusterName)
 }
 

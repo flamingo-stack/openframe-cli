@@ -75,3 +75,15 @@ func containsSubstring(str, substr string) bool {
 			return false
 		}()
 }
+
+// TestContainsTool covers the case-insensitive membership check used to detect
+// a freshly installed Docker that still needs the start/wait phase (B3).
+func TestContainsTool(t *testing.T) {
+	tools := []string{"Docker", "k3d"}
+	if !containsTool(tools, "docker") || !containsTool(tools, "Docker") {
+		t.Error("containsTool must match case-insensitively")
+	}
+	if containsTool(tools, "helm") || containsTool(nil, "docker") {
+		t.Error("containsTool must not match absent tools")
+	}
+}

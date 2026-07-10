@@ -102,6 +102,16 @@ func (i *Installer) installSpecificTools(tools []string) error {
 	return nil
 }
 
+// containsTool reports whether tools contains name (case-insensitive).
+func containsTool(tools []string, name string) bool {
+	for _, t := range tools {
+		if strings.EqualFold(t, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (i *Installer) installTool(tool string) error {
 	switch strings.ToLower(tool) {
 	case "docker":
@@ -183,15 +193,20 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 
 		if confirmed {
 			if err := i.installSpecificTools(missingTools); err != nil {
-				// In non-interactive mode, log error but continue
-				if nonInteractive {
-					pterm.Warning.Printf("Failed to install some prerequisites: %v\n", err)
-					pterm.Info.Println("Continuing anyway (non-interactive mode)...")
-				} else {
-					return err
-				}
-			} else {
-				pterm.Success.Println("All missing tools installed successfully!")
+				// Fail fast in BOTH modes. The old non-interactive path logged
+				// "Continuing anyway" and proceeded to a guaranteed, confusingly
+				// attributed k3d/helm failure minutes later — CI cannot fix
+				// anything "later" anyway.
+				return err
+			}
+			pterm.Success.Println("All missing tools installed successfully!")
+
+			// A freshly installed Docker is not usable yet: Docker Desktop on
+			// macOS takes tens of seconds to start, and on Linux the daemon may
+			// not be running at all. Route it through the start/wait phase below
+			// instead of letting the very next `k3d cluster create` fail.
+			if containsTool(missingTools, "Docker") && !docker.IsDockerRunning() {
+				dockerNotRunning = true
 			}
 		} else {
 			i.showManualInstructions()
@@ -207,19 +222,18 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 			pterm.Info.Println("Attempting to start Docker automatically (non-interactive mode)...")
 
 			if err := docker.StartDocker(); err != nil {
-				pterm.Warning.Printf("Could not start Docker automatically: %v\n", err)
-				pterm.Info.Println("Docker must be started manually. Continuing anyway...")
-				// Don't exit in non-interactive mode, let it fail later if needed
-				return nil
+				// Fail fast: "continuing anyway" only moved the failure into the
+				// next cluster operation with a misleading error.
+				i.showDockerStartInstructions()
+				return fmt.Errorf("the Docker daemon is not running and could not be started automatically (if it was just installed on Linux, a re-login may be needed for docker group membership): %w", err)
 			}
 
 			sp := spinner.New()
 			sp.Start("Waiting for Docker to start...")
 			if err := docker.WaitForDocker(); err != nil {
-				sp.Warning("Docker failed to start automatically")
-				pterm.Info.Println("Please ensure Docker is running before cluster operations.")
-				// Don't exit in non-interactive mode
-				return nil
+				sp.Fail("Docker failed to start")
+				i.showDockerStartInstructions()
+				return fmt.Errorf("timed out waiting for Docker to start (if it was just installed on Linux, a re-login may be needed for docker group membership): %w", err)
 			}
 			sp.Success("Docker started successfully")
 		} else {

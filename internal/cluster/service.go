@@ -763,9 +763,12 @@ func CreateClusterWithPrerequisitesNonInteractive(ctx context.Context, clusterNa
 	// Show logo first, then check prerequisites (consistent with individual commands)
 	ui.ShowLogo()
 
-	// Check prerequisites using the installer directly
+	// Check prerequisites using the installer directly. OR the flag with
+	// environment detection (CI / piped stdin) so a forgotten --non-interactive
+	// in CI cannot reach an interactive confirm that hangs the job — same rule
+	// as the chart-side gate (chart_service.go).
 	installer := prerequisites.NewInstaller()
-	if err := installer.CheckAndInstallNonInteractive(nonInteractive); err != nil {
+	if err := installer.CheckAndInstallNonInteractive(nonInteractive || ui.IsNonInteractive()); err != nil {
 		return nil, err
 	}
 

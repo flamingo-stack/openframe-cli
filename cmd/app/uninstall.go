@@ -47,8 +47,10 @@ func runUninstallCommand(cmd *cobra.Command, _ []string) error {
 	}
 
 	if !skipConfirm {
-		ok, err := ui.ConfirmActionInteractive(
-			fmt.Sprintf("Remove ArgoCD and all OpenFrame apps from %s? The cluster itself is kept.", target), false)
+		// Destructive: in a non-interactive session this fails fast with a --yes
+		// hint instead of blocking on (or worse, auto-answering) a prompt.
+		ok, err := ui.RequireConfirmation(
+			fmt.Sprintf("Remove ArgoCD and all OpenFrame apps from %s? The cluster itself is kept.", target), "--yes", false)
 		if err != nil {
 			return sharedErrors.HandleGlobalError(err, verbose)
 		}

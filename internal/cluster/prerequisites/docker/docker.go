@@ -457,9 +457,12 @@ exit 1
 	return nil
 }
 
-// WaitForDocker waits for Docker daemon to become available
+// WaitForDocker waits for the Docker daemon to become available. The budget is
+// generous because a cold Docker Desktop start on macOS routinely exceeds the
+// old 30s ceiling; the poll returns as soon as the daemon answers, so healthy
+// setups pay nothing extra.
 func WaitForDocker() error {
-	maxAttempts := 30 // 30 seconds timeout
+	maxAttempts := 120 // seconds
 	for i := 0; i < maxAttempts; i++ {
 		if IsDockerRunning() {
 			return nil

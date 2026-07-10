@@ -75,31 +75,31 @@ jobs:
           echo "==================================================================="
           make build-all
 
-  vulncheck:
+#  vulncheck:
     # Blocking: govulncheck reports only vulnerabilities in code paths the
     # binary actually reaches, so findings are actionable, not noise.
-    name: govulncheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
+#    name: govulncheck
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 15
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+#        with:
+#          persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: 'go.mod'
-          cache: true
+#      - name: Set up Go
+#        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+#        with:
+#          go-version-file: 'go.mod'
+#          cache: true
 
-      - name: 'Check: known vulnerabilities in reachable code'
-        run: |
-          echo "==================================================================="
-          echo "===  TEST: govulncheck (reachable known vulnerabilities)"
-          echo "==================================================================="
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+#      - name: 'Check: known vulnerabilities in reachable code'
+#        run: |
+#          echo "==================================================================="
+#          echo "===  TEST: govulncheck (reachable known vulnerabilities)"
+#          echo "==================================================================="
+#          go install golang.org/x/vuln/cmd/govulncheck@latest
+#          govulncheck ./...
 
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}

@@ -136,9 +136,13 @@ func run(ctx context.Context, current, target string, assumeYes, force bool) err
 	sp.Stop() // stop before the interactive confirm prompt
 
 	// "Update", "Downgrade", or "Reinstall" depending on the target direction.
+	// Replacing the running binary needs explicit consent: interactively via the
+	// prompt, non-interactively via --yes. The old `!assumeYes && !IsNonInteractive()`
+	// guard silently AUTO-CONFIRMED in CI/piped sessions — inverted polarity.
+	// (Opt-in unattended updates go through OPENFRAME_AUTO_UPDATE, not this path.)
 	verb := selfupdate.ChangeVerb(st.Current, rel.TagName)
-	if !assumeYes && !ui.IsNonInteractive() {
-		ok, err := ui.ConfirmActionInteractive(fmt.Sprintf("%s from %s to %s?", verb, st.Current, rel.TagName), true)
+	if !assumeYes {
+		ok, err := ui.RequireConfirmation(fmt.Sprintf("%s from %s to %s?", verb, st.Current, rel.TagName), "--yes", true)
 		if err != nil {
 			return err
 		}
@@ -169,8 +173,10 @@ func runRollback(ctx context.Context, current string, assumeYes bool) error {
 	if label == "" {
 		label = "the previous version" // binary exists but couldn't report its version
 	}
-	if !assumeYes && !ui.IsNonInteractive() {
-		confirmed, err := ui.ConfirmActionInteractive(fmt.Sprintf("Roll back from %s to %s?", current, label), true)
+	// Same consent rule as run(): never replace the binary in a non-interactive
+	// session without an explicit --yes.
+	if !assumeYes {
+		confirmed, err := ui.RequireConfirmation(fmt.Sprintf("Roll back from %s to %s?", current, label), "--yes", true)
 		if err != nil {
 			return err
 		}
