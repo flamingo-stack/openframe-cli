@@ -198,6 +198,66 @@ jobs:
           # back" notice (offline, no download), not error out or hang.
           "$OF_BIN" update rollback
 
+      # Self-update against the REAL latest release: the only test that
+      # exercises the live trust chain end to end (GitHub release lookup →
+      # cosign signature of checksums.txt against the pinned identity →
+      # SHA256 of the archive → atomic swap → --version smoke test → rollback).
+      # Runs on a COPY of the binary, never the one under test.
+      #
+      # Not on Windows: the native launcher forwards the whole CLI into WSL, so
+      # this would exercise the Linux binary there, not the Windows one.
+      - name: 'Update: apply the real latest release, then roll back'
+        if: matrix.os != 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: openframe update (real release, cosign-verified) + rollback"
+          echo "==================================================================="
+          LATEST="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name)"
+          [ -n "$LATEST" ] && [ "$LATEST" != "null" ] || { echo "::error::could not resolve the latest release"; exit 1; }
+          echo "latest published release: $LATEST"
+
+          # A dev build refuses to self-update, so stamp an old version in.
+          WORK="$(mktemp -d)"; export HOME="$WORK/home"; mkdir -p "$HOME"
+          go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$WORK/openframe" .
+          OF="$WORK/openframe"
+          [ "$("$OF" --version | cut -d' ' -f1)" = "0.0.1" ] || { echo "::error::ldflags version injection broken"; exit 1; }
+
+          echo "--- update to the latest release (verifies the cosign bundle)"
+          "$OF" update --yes
+          got="$("$OF" --version | cut -d' ' -f1)"
+          [ "$got" = "$LATEST" ] || { echo "::error::after update --version is $got, want $LATEST"; exit 1; }
+          echo "updated 0.0.1 -> $got"
+
+          echo "--- rollback restores the previous binary (offline)"
+          "$OF" update rollback --yes
+          back="$("$OF" --version | cut -d' ' -f1)"
+          [ "$back" = "0.0.1" ] || { echo "::error::after rollback --version is $back, want 0.0.1"; exit 1; }
+
+          echo "--- rollback again: nothing left to restore, clean exit"
+          "$OF" update rollback --yes
+
+          echo "--- explicit tag, both spellings (ForTag tolerates the v prefix)"
+          for spelling in "$LATEST" "v${LATEST#v}"; do
+            W2="$(mktemp -d)"; HOME="$W2/home"; mkdir -p "$HOME"
+            go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$W2/openframe" .
+            HOME="$W2/home" "$W2/openframe" update "$spelling" --yes
+            v="$(HOME="$W2/home" "$W2/openframe" --version | cut -d' ' -f1)"
+            [ "$v" = "$LATEST" ] || { echo "::error::update $spelling landed on $v, want $LATEST"; exit 1; }
+            echo "OK: update $spelling -> $v"
+          done
+
+          echo "--- an unsigned/nonexistent release is refused"
+          W3="$(mktemp -d)"; HOME="$W3/home"; mkdir -p "$HOME"
+          go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$W3/openframe" .
+          if HOME="$W3/home" "$W3/openframe" update 99.99.99 --yes; then
+            echo "::error::update to a nonexistent release must fail"; exit 1
+          fi
+          echo "update + rollback OK"
+
       # Windows only: run the CLI's own prerequisite installer inside WSL. This
       # exercises the apk Docker install path (installAlpine) and installs k3d +
       # helm via verified download. The Docker daemon is started separately below
