@@ -21,6 +21,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // maxAssetBytes bounds FetchVerified's in-memory read so a misbehaving or
@@ -65,16 +66,23 @@ func VerifyChecksum(data []byte, wantHex string) error {
 }
 
 // Downloader fetches and verifies pinned assets. The zero value is usable and
-// uses http.DefaultClient; tests can inject a client pointed at httptest.
+// uses a client with a generous overall timeout; tests can inject a client
+// pointed at httptest.
 type Downloader struct {
 	Client *http.Client
 }
+
+// defaultClient bounds every download: http.DefaultClient has NO timeout, so a
+// stalled GitHub connection hung the spinner forever (worse for MaybeAutoUpdate,
+// which runs before the user's actual command). Generous because release
+// archives are tens of MB on slow links; healthy downloads finish long before.
+var defaultClient = &http.Client{Timeout: 5 * time.Minute}
 
 func (d Downloader) client() *http.Client {
 	if d.Client != nil {
 		return d.Client
 	}
-	return http.DefaultClient
+	return defaultClient
 }
 
 // FetchVerified downloads asset.URL, verifies its SHA256, and returns the bytes.
@@ -132,6 +140,17 @@ func (d Downloader) InstallVerifiedTarGz(ctx context.Context, asset PinnedAsset,
 		return err
 	}
 	return writeFileAtomic(extracted, destPath, perm)
+}
+
+// FetchVerifiedTarGzMember downloads and verifies a .tar.gz asset and returns
+// the bytes of the regular file named member — for callers that stream the
+// binary elsewhere (e.g. into WSL via stdin) instead of installing it locally.
+func (d Downloader) FetchVerifiedTarGzMember(ctx context.Context, asset PinnedAsset, member string) ([]byte, error) {
+	body, err := d.FetchVerified(ctx, asset)
+	if err != nil {
+		return nil, err
+	}
+	return extractTarGzMember(body, member)
 }
 
 // extractTarGzMember returns the bytes of the regular file named member inside a

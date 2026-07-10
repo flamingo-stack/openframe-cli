@@ -6,6 +6,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 )
@@ -147,6 +148,8 @@ func (i *IngressConfigurator) collectNgrokCredentials(current *types.NgrokConfig
 		return nil, fmt.Errorf("API key input failed: %w", err)
 	}
 	config.APIKey = strings.TrimSpace(apiKey)
+	// Collection point: never let the value reach verbose logs / error output.
+	redact.RegisterSecret(config.APIKey)
 
 	// Collect auth token
 	authTokenInput := pterm.DefaultInteractiveTextInput.WithMask("*").WithMultiLine(false)
@@ -158,6 +161,8 @@ func (i *IngressConfigurator) collectNgrokCredentials(current *types.NgrokConfig
 		return nil, fmt.Errorf("auth token input failed: %w", err)
 	}
 	config.AuthToken = strings.TrimSpace(authtoken)
+	// Collection point: never let the value reach verbose logs / error output.
+	redact.RegisterSecret(config.AuthToken)
 
 	return config, nil
 }

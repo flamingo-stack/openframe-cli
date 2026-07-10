@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"golang.org/x/mod/semver"
 )
 
@@ -17,11 +17,7 @@ const autoUpdateEnv = "OPENFRAME_AUTO_UPDATE"
 
 // AutoUpdateEnabled reports whether the user opted into automatic self-update.
 func AutoUpdateEnabled() bool {
-	switch strings.ToLower(os.Getenv(autoUpdateEnv)) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return sharedconfig.EnvBool(autoUpdateEnv)
 }
 
 // MaybeAutoUpdate, when auto-update is opted in, performs a rate-limited check
@@ -55,8 +51,13 @@ func MaybeAutoUpdate(ctx context.Context, current string, interactive bool, prog
 		return notice(current, rel.TagName) + " (auto-update skips major versions)"
 	}
 
+	// Deadline: this runs unattended AFTER the user's command (root passes
+	// context.Background), so a stalled download/verify must never hang the CLI
+	// exit indefinitely.
+	actx, acancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer acancel()
 	u := Updater{Current: current, Client: Client{Token: os.Getenv("GITHUB_TOKEN")}}
-	if err := u.Apply(ctx, rel, progress); err != nil {
+	if err := u.Apply(actx, rel, progress); err != nil {
 		return fmt.Sprintf("auto-update to %s failed (run `openframe update`): %v", rel.TagName, err)
 	}
 	return fmt.Sprintf("Auto-updated %s → %s. Run `openframe update rollback` to revert.", current, rel.TagName)

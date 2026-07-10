@@ -21,71 +21,33 @@ func TestIsReleaseVersion(t *testing.T) {
 	}
 }
 
-// TestReleaseTag locks the tag convention of this repo: release.yml tags with
-// the BARE semver (`git tag -a "${VERSION}"` → "0.4.7"). A "v"-prefixed tag
-// produced a download URL that 404s for every published release (T0-3).
-func TestReleaseTag(t *testing.T) {
-	if got := releaseTag("1.2.3"); got != "1.2.3" {
-		t.Errorf("tag = %q, want 1.2.3 (bare, matching release.yml tagging)", got)
-	}
-	if got := releaseTag("v1.2.3"); got != "1.2.3" {
-		t.Errorf("v-prefixed version tag = %q, want 1.2.3", got)
-	}
-	if got := releaseTag(" 0.4.7 "); got != "0.4.7" {
-		t.Errorf("untrimmed version tag = %q, want 0.4.7", got)
-	}
-}
-
-func TestLinuxArchiveName(t *testing.T) {
-	if got := linuxArchiveName("amd64"); got != "openframe-cli_linux_amd64.tar.gz" {
-		t.Errorf("amd64 archive = %q", got)
-	}
-	if got := linuxArchiveName("arm64"); got != "openframe-cli_linux_arm64.tar.gz" {
-		t.Errorf("arm64 archive = %q", got)
-	}
-}
-
-func TestReleaseAssetURL(t *testing.T) {
-	// Real releases live at .../download/<bare-version>/... (e.g. 0.4.7); the
-	// v-prefixed form 404s.
-	got := releaseAssetURL("1.2.3", "openframe-cli_linux_amd64.tar.gz")
-	want := "https://github.com/flamingo-stack/openframe-cli/releases/download/1.2.3/openframe-cli_linux_amd64.tar.gz"
-	if got != want {
-		t.Errorf("url = %q, want %q", got, want)
-	}
-	if csum := releaseAssetURL("2.0.0", "checksums.txt"); !strings.HasSuffix(csum, "/2.0.0/checksums.txt") {
-		t.Errorf("checksums url = %q", csum)
-	}
-}
-
-// TestInstallScript_VerifiesAndInstalls locks the safety-critical shape of the
-// install script: it must download, verify the SHA256 against the release
-// checksums, and only then install the binary.
-func TestInstallScript_VerifiesAndInstalls(t *testing.T) {
-	s := installScript(
-		"https://example.com/archive.tar.gz",
-		"https://example.com/checksums.txt",
-		"openframe-cli_linux_amd64.tar.gz",
-	)
+// TestStdinInstallScript locks the safety-critical shape of the WSL install:
+// the binary arrives VERIFIED on stdin (cosign + SHA256, done on the Windows
+// side by selfupdate.FetchVerifiedLinuxBinary) — the script itself must not
+// download anything, and must install atomically (write tmp, chmod, rename).
+func TestStdinInstallScript(t *testing.T) {
+	s := stdinInstallScript()
 	for _, want := range []string{
 		"set -e",
-		`curl -fsSL -o archive.tar.gz "https://example.com/archive.tar.gz"`,
-		`curl -fsSL -o checksums.txt "https://example.com/checksums.txt"`,
-		"sha256sum archive.tar.gz",
-		`grep " openframe-cli_linux_amd64.tar.gz$" checksums.txt`,
-		`[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ]`,
-		`install -m 0755 openframe "$BIN_DIR/openframe"`,
+		`mkdir -p "$BIN_DIR"`,
+		`cat > "$BIN_DIR/openframe.tmp"`,
+		`chmod 0755 "$BIN_DIR/openframe.tmp"`,
+		`mv "$BIN_DIR/openframe.tmp" "$BIN_DIR/openframe"`,
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("install script missing %q:\n%s", want, s)
+			t.Errorf("stdin install script missing %q:\n%s", want, s)
 		}
 	}
-
-	// The install must come AFTER the checksum check (never install unverified).
-	verifyIdx := strings.Index(s, "sha256sum")
-	installIdx := strings.Index(s, "install -m 0755")
-	if verifyIdx < 0 || installIdx < 0 || verifyIdx > installIdx {
-		t.Error("checksum verification must precede install")
+	// No network access from inside WSL: the old curl-based path checked only
+	// checksums.txt from the same release (no authenticity).
+	for _, banned := range []string{"curl", "wget", "https://"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("stdin install script must not download anything, found %q:\n%s", banned, s)
+		}
+	}
+	// Self-contained: no positional args to bash (avoids the wsl.exe arg bug).
+	if strings.Contains(s, `"$@"`) || strings.Contains(s, `"$1"`) {
+		t.Error("stdin install script must be self-contained (no positional args)")
 	}
 }
 

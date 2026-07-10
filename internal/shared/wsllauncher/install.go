@@ -1,14 +1,16 @@
 package wsllauncher
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-)
+	"time"
 
-// releaseRepo is the GitHub repository releases are published to.
-const releaseRepo = "flamingo-stack/openframe-cli"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
+)
 
 // localBinaryEnv, when set to the Windows path of a Linux openframe binary,
 // installs that binary into WSL instead of downloading a release. Intended for
@@ -27,46 +29,19 @@ func isReleaseVersion(version string) bool {
 	return !strings.Contains(version, "-")
 }
 
-// releaseTag maps a build version to its git tag. This repo tags releases with
-// the BARE semver — release.yml runs `git tag -a "${VERSION}"`, so the tag for
-// 0.4.7 is "0.4.7", not "v0.4.7" — and goreleaser's .Version strips a leading
-// "v" anyway. A "v"-prefixed download URL 404s for every published release
-// (T0-3), breaking WSL auto-install on first run of a released Windows binary.
-func releaseTag(version string) string {
-	return strings.TrimPrefix(strings.TrimSpace(version), "v")
-}
-
-// linuxArchiveName is the goreleaser archive filename for the Linux build of the
-// given GOARCH (name_template "openframe-cli_{{.Os}}_{{.Arch}}", tar.gz).
-func linuxArchiveName(goarch string) string {
-	return fmt.Sprintf("openframe-cli_linux_%s.tar.gz", goarch)
-}
-
-// releaseAssetURL builds the download URL for a release asset.
-func releaseAssetURL(version, asset string) string {
-	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", releaseRepo, releaseTag(version), asset)
-}
-
-// installScript returns a bash script (run inside WSL) that downloads the Linux
-// archive, verifies it against the release checksums, and installs the openframe
-// binary into ~/.openframe/bin. It is a pure function so the logic is testable.
-func installScript(archiveURL, checksumsURL, archiveName string) string {
-	// Single-quoted heredoc-free script; all inputs are our own constant-derived
-	// URLs (no user data).
+// stdinInstallScript returns a bash script (run inside WSL) that installs the
+// openframe binary streamed on STDIN into ~/.openframe/bin. The binary itself
+// is downloaded and verified (cosign identity + SHA256) on the Windows side by
+// selfupdate.FetchVerifiedLinuxBinary — nothing unverified ever reaches WSL,
+// and the distro needs no curl. Pure and testable.
+func stdinInstallScript() string {
 	return strings.Join([]string{
 		"set -e",
 		`BIN_DIR="$HOME/.openframe/bin"`,
 		`mkdir -p "$BIN_DIR"`,
-		`TMP="$(mktemp -d)"`,
-		`trap 'rm -rf "$TMP"' EXIT`,
-		`cd "$TMP"`,
-		fmt.Sprintf(`curl -fsSL -o archive.tar.gz %q`, archiveURL),
-		fmt.Sprintf(`curl -fsSL -o checksums.txt %q`, checksumsURL),
-		fmt.Sprintf(`EXPECTED="$(grep " %s$" checksums.txt | awk '{print $1}')"`, archiveName),
-		`ACTUAL="$(sha256sum archive.tar.gz | awk '{print $1}')"`,
-		`[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "checksum verification failed" >&2; exit 1; }`,
-		`tar -xzf archive.tar.gz openframe`,
-		`install -m 0755 openframe "$BIN_DIR/openframe"`,
+		`cat > "$BIN_DIR/openframe.tmp"`,
+		`chmod 0755 "$BIN_DIR/openframe.tmp"`,
+		`mv "$BIN_DIR/openframe.tmp" "$BIN_DIR/openframe"`,
 	}, "\n")
 }
 
@@ -143,16 +118,24 @@ func installLocalBinaryInWSL(windowsPath string) error {
 	return nil
 }
 
-// installOpenframeInWSL runs the install script inside WSL. Thin exec wrapper
-// around the tested installScript / URL builders.
+// installOpenframeInWSL fetches the matching Linux release through the full
+// self-update trust chain (cosign-verified checksums, SHA256-verified archive)
+// on the Windows side, then streams the binary into WSL via stdin. The old
+// curl-inside-WSL path verified only checksums.txt from the same release —
+// no authenticity — so a compromised release upload meant arbitrary code
+// execution in WSL while `openframe update` would have rejected the same
+// binary (audit B5/T2).
 func installOpenframeInWSL(version, goarch string) error {
-	archive := linuxArchiveName(goarch)
-	script := installScript(
-		releaseAssetURL(version, archive),
-		releaseAssetURL(version, "checksums.txt"),
-		archive,
-	)
-	cmd := exec.Command("wsl", wslArgv("bash", "-lc", script)...) // #nosec G204 -- script built from constant-derived release URLs, no user input
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	binary, err := selfupdate.FetchVerifiedLinuxBinary(ctx, version, goarch, nil)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("wsl", wslArgv("bash", "-lc", stdinInstallScript())...) // #nosec G204 -- constant script, binary delivered via stdin
+	cmd.Stdin = bytes.NewReader(binary)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("installing openframe inside WSL failed: %w\n%s", err, string(out))
 	}

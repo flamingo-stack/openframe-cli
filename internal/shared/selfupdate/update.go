@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"golang.org/x/mod/semver"
 )
@@ -189,12 +190,15 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 	if err != nil {
 		return err
 	}
-	// Retain the just-replaced binary as the rollback point (best effort), then
-	// drop the temporary backup.
+	// Retain the just-replaced binary as the rollback point. When saving fails
+	// (state dir unwritable), KEEP the .bak in place — it is the only remaining
+	// copy of the old binary; deleting it silently voided the advertised
+	// rollback guarantee (audit B5/T2-12).
 	if err := savePrevious(backup); err != nil {
-		log(fmt.Sprintf("warning: could not save a rollback point: %v", err))
+		log(fmt.Sprintf("warning: could not save a rollback point: %v — the previous binary is kept at %s", err, backup))
+	} else {
+		_ = os.Remove(backup)
 	}
-	_ = os.Remove(backup)
 	log(fmt.Sprintf("Installed %s.", rel.TagName))
 	return nil
 }
@@ -226,7 +230,9 @@ func swapExecutable(ctx context.Context, exePath, newPath string, log func(strin
 // to integrity-only (checksums over TLS) with a loud warning — an escape hatch,
 // not a normal mode.
 func (u Updater) verifySignature(ctx context.Context, rel Release, checksums []byte, log func(string)) error {
-	if os.Getenv(insecureSkipEnv) != "" {
+	// Strictly-parsed opt-out: only =1/true/yes/on disables verification. The
+	// old any-non-empty check meant `=0`/`=false` silently DISABLED it.
+	if sharedconfig.EnvBool(insecureSkipEnv) {
 		log("WARNING: skipping release signature verification (" + insecureSkipEnv + " set); integrity is checked but authenticity is NOT.")
 		return nil
 	}

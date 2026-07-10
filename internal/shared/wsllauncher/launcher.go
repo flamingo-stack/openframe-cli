@@ -18,6 +18,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 )
 
 const (
@@ -64,11 +66,13 @@ var forwardedEnvVars = []string{
 
 // ShouldForward reports whether this process must re-run itself inside WSL: only
 // the native Windows build forwards, and only when not explicitly disabled.
+// The opt-out is strictly parsed: OPENFRAME_NO_WSL_FORWARD=0/false still
+// forwards (the old any-non-empty check treated them as "disable").
 func ShouldForward() bool {
 	if runtime.GOOS != "windows" {
 		return false
 	}
-	return os.Getenv(disableEnv) == ""
+	return !sharedconfig.EnvBool(disableEnv)
 }
 
 // Forward re-runs `openframe <args>` inside WSL, passing through stdio, the

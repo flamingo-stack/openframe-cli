@@ -407,7 +407,11 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			}
 		}
 
-		// Check for WSL-specific errors on Windows
+		// Check for WSL-specific errors on Windows.
+		// Error fields are REDACTED at construction: unlike the verbose prints
+		// above, these errors reach user-facing output through the error handler
+		// even in non-verbose mode, so a secret in argv or echoed back on stderr
+		// (e.g. a URL-embedded token) must never survive into them (audit B5).
 		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "helm" || options.Command == "k3d") {
 			// For WSL commands, stderr is often redirected to stdout via 2>&1
 			// Use stdout as error output if stderr is empty
@@ -421,8 +425,8 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     errorOutput,
-					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+					Stderr:     redact.Redact(errorOutput),
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, redact.Redact(fullCommand)),
 				}
 				return result, wslErr
 			}
@@ -431,14 +435,14 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s via WSL", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     errorOutput,
-					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+					Stderr:     redact.Redact(errorOutput),
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, redact.Redact(fullCommand)),
 				}
 				return result, wslErr
 			}
 		}
 
-		return result, &CommandError{Command: fullCommand, ExitCode: result.ExitCode, cause: err}
+		return result, &CommandError{Command: redact.Redact(fullCommand), ExitCode: result.ExitCode, cause: err}
 	}
 
 	result.ExitCode = 0

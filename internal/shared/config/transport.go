@@ -57,8 +57,11 @@ func ApplyInsecureTLSConfig(config *rest.Config) *rest.Config {
 
 // isLocalAPIServer reports whether serverURL points at a cluster running on
 // this host — loopback (127.0.0.0/8, ::1), the unspecified address 0.0.0.0
-// (used by k3d), localhost, host.docker.internal, or a *.local name. Anything
-// else (a real hostname or routable IP) is treated as remote.
+// (used by k3d), localhost, or host.docker.internal (Docker Desktop's alias
+// for this host). Anything else — including *.local names — is treated as
+// remote: mDNS/legacy-AD `.local` domains are common for REAL corporate
+// clusters, and a suffix match here silently disabled TLS verification for
+// them, enabling MITM with zero warning (audit B5/T1-10).
 func isLocalAPIServer(serverURL string) bool {
 	host := serverURL
 	if u, err := url.Parse(serverURL); err == nil && u.Host != "" {
@@ -70,9 +73,6 @@ func isLocalAPIServer(serverURL string) bool {
 
 	switch host {
 	case "localhost", "0.0.0.0", "host.docker.internal", "::1":
-		return true
-	}
-	if strings.HasSuffix(host, ".local") {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {

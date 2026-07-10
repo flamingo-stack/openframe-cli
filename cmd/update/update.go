@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -152,8 +153,12 @@ func run(ctx context.Context, current, target string, assumeYes, force bool) err
 		}
 	}
 
+	// cmd.Context() is signal-cancelled but has no deadline; a stalled download
+	// would otherwise spin the spinner forever (Ctrl-C aside).
+	actx, acancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer acancel()
 	apply := spinner.Start(fmt.Sprintf("%s to %s...", verb, rel.TagName))
-	if err := u.Apply(ctx, rel, func(msg string) { apply.UpdateText(msg) }); err != nil {
+	if err := u.Apply(actx, rel, func(msg string) { apply.UpdateText(msg) }); err != nil {
 		apply.Fail(fmt.Sprintf("%s failed", verb))
 		return err
 	}

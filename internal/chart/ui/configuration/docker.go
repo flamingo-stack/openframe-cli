@@ -6,6 +6,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 )
@@ -75,6 +76,8 @@ func (d *DockerConfigurator) promptForDockerSettings(current *types.DockerRegist
 	if err != nil {
 		return nil, fmt.Errorf("docker password input failed: %w", err)
 	}
+	// Collection point: never let the value reach verbose logs / error output.
+	redact.RegisterSecret(password)
 
 	email, err := pterm.DefaultInteractiveTextInput.
 		WithDefaultValue(current.Email).
