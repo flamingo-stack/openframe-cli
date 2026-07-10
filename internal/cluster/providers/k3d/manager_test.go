@@ -140,6 +140,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				// Using Maybe() to allow flexible number of calls as implementation may vary
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
@@ -157,6 +162,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				// Using Maybe() to allow flexible number of calls as implementation may vary
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
@@ -198,6 +208,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			setupMock: func(m *MockExecutor) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error")).Maybe()
 			},
@@ -246,6 +261,11 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 	executor := &MockExecutor{}
 	// Mock bash or wsl for kubeconfig directory prep and cleanup
 	executor.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+	// The Linux inotify pre-check reads current limits (sysctl -n) and only
+	// escalates via `sudo -n` when they are low; report them sufficient so no
+	// escalation happens. .Maybe(): on darwin the whole step is skipped.
+	executor.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+	executor.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 
