@@ -43,6 +43,64 @@ jobs:
         with:
           version: latest
 
+      - name: 'Check: go.mod/go.sum are tidy'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: go.mod/go.sum are tidy (go mod tidy -diff)"
+          echo "==================================================================="
+          go mod tidy -diff
+
+  cross-compile:
+    # Catches GOOS/GOARCH-specific compile breakage (windows/darwin-only files)
+    # without waiting for the heavy per-OS e2e legs.
+    name: Cross-compile all platforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: 'Build: linux/amd64, darwin/arm64, windows/amd64'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cross-compile linux/amd64, darwin/arm64, windows/amd64"
+          echo "==================================================================="
+          make build-all
+
+  vulncheck:
+    # Blocking: govulncheck reports only vulnerabilities in code paths the
+    # binary actually reaches, so findings are actionable, not noise.
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: 'Check: known vulnerabilities in reachable code'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: govulncheck (reachable known vulnerabilities)"
+          echo "==================================================================="
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -100,6 +158,9 @@ jobs:
       - name: Build & stage CLI
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  SETUP: build CLI for ${{ matrix.os }}/${{ matrix.arch }}"
+          echo "==================================================================="
           make build
           if [ "${{ matrix.os }}" = "windows" ]; then
             # The cluster and the Kubernetes client live in WSL, so the CLI needs a
@@ -115,6 +176,9 @@ jobs:
       - name: 'CLI: version & help'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: version, help & completion (read-only, no cluster)"
+          echo "==================================================================="
           "$OF_BIN" --version
           "$OF_BIN" --help
           "$OF_BIN" cluster --help
@@ -123,11 +187,16 @@ jobs:
           "$OF_BIN" app upgrade --help
           "$OF_BIN" bootstrap --help
           "$OF_BIN" update --help
+          echo "--- completion: every supported shell generates cleanly"
           # Shell-completion generation is pure (no cluster/network) — smoke every shell.
           for sh in bash zsh fish powershell; do "$OF_BIN" completion "$sh" >/dev/null; done
+          echo "--- update check (text + json; network-tolerant)"
           # Self-update check needs neither Docker nor k3d, so it runs everywhere
           # (incl. darwin); tolerate transient network issues on the runner.
           "$OF_BIN" update check || echo "update check skipped (network)"
+          # json mode must keep stdout machine-clean (no spinner) and stay parseable.
+          "$OF_BIN" update check -o json || echo "update check -o json skipped (network)"
+          echo "--- update rollback with no prior update"
           # Rollback with no prior update must exit cleanly with a "nothing to roll
           # back" notice (offline, no download), not error out or hang.
           "$OF_BIN" update rollback
@@ -139,7 +208,11 @@ jobs:
       - name: 'Prereqs: install (WSL, exercises apk Docker install)'
         if: matrix.os == 'windows'
         shell: bash
-        run: '"$OF_BIN" prerequisites install || echo "prereq install returned nonzero (daemon is started next)"'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: prerequisites install inside WSL (apk Docker path)"
+          echo "==================================================================="
+          "$OF_BIN" prerequisites install || echo "prereq install returned nonzero (daemon is started next)"
 
       # Start the Docker daemon inside WSL. Alpine WSL has no OpenRC init, so mount
       # cgroups and launch dockerd directly (vfs storage driver avoids overlayfs
@@ -148,6 +221,9 @@ jobs:
         if: matrix.os == 'windows'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  SETUP: start dockerd inside WSL (Alpine, initless)"
+          echo "==================================================================="
           # rc-service is unreliable in initless WSL (it returns 0 without actually
           # bringing up the daemon), so start dockerd directly and detached
           # (setsid, </dev/null) so it survives this shell and keeps the WSL VM and
@@ -177,7 +253,11 @@ jobs:
       # missing tools are expected pre-bootstrap, hence `|| echo`.
       - name: 'CLI: prerequisites check'
         shell: bash
-        run: '"$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: prerequisites check (report-only, informational)"
+          echo "==================================================================="
+          "$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"
 
       # Everything below needs a Docker daemon + k3d. It runs on linux and on
       # windows (the Windows binary forwards into WSL, where Docker was started
@@ -187,6 +267,9 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: cluster list on an empty state (text/json/yaml)"
+          echo "==================================================================="
           "$OF_BIN" cluster list
           "$OF_BIN" cluster list -o json
           "$OF_BIN" cluster list -o yaml
@@ -196,6 +279,9 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: dry-run create & install (no real changes)"
+          echo "==================================================================="
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
           # No cluster exists yet, so an install (even --dry-run) correctly exits
           # non-zero ("no cluster selected"); this just smokes that it reaches the
@@ -209,6 +295,9 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: --silent suppresses INFO output (with positive control)"
+          echo "==================================================================="
           "$OF_BIN" --silent cluster create sil-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >silent.out 2>&1 || true
           "$OF_BIN"          cluster create loud-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >loud.out 2>&1 || true
           if grep -qi 'Configuration Summary' silent.out; then echo "::error::--silent leaked INFO output"; cat silent.out; exit 1; fi
@@ -221,7 +310,11 @@ jobs:
         shell: bash
         timeout-minutes: 20
         run: |
+          echo "==================================================================="
+          echo "===  TEST: real cluster create + list/status (text/json/yaml)"
+          echo "==================================================================="
           "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard
+          echo "--- cluster list & status after create"
           "$OF_BIN" cluster list
           "$OF_BIN" cluster status "$OF_CLUSTER"
           "$OF_BIN" cluster status "$OF_CLUSTER" -o json
@@ -235,6 +328,9 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: --non-interactive fails fast, never drops into a prompt"
+          echo "==================================================================="
           set +e
           timeout 60 "$OF_BIN" app install --non-interactive
           code=$?
@@ -247,12 +343,19 @@ jobs:
         if: matrix.os != 'darwin'
         shell: bash
         timeout-minutes: 40
-        run: '"$OF_BIN" app install "$OF_CLUSTER" --non-interactive --verbose'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: real app install (non-interactive, full ArgoCD wait)"
+          echo "==================================================================="
+          "$OF_BIN" app install "$OF_CLUSTER" --non-interactive --verbose
 
       - name: 'App: status & access'
         if: matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEST: app status (text/json/yaml) & access after install"
+          echo "==================================================================="
           "$OF_BIN" app status --context "$OF_CONTEXT"
           "$OF_BIN" app status --context "$OF_CONTEXT" -o json
           "$OF_BIN" app status --context "$OF_CONTEXT" -o yaml
@@ -263,7 +366,11 @@ jobs:
         shell: bash
         timeout-minutes: 20
         run: |
+          echo "==================================================================="
+          echo "===  TEST: app upgrade — dry-run, then force-sync"
+          echo "==================================================================="
           "$OF_BIN" app upgrade --context "$OF_CONTEXT" --dry-run
+          echo "--- force-sync"
           "$OF_BIN" app upgrade --context "$OF_CONTEXT" --sync --verbose
 
       # --- Teardown (runs even if a step above failed) -----------------------
@@ -271,15 +378,28 @@ jobs:
         if: always() && matrix.os != 'darwin'
         shell: bash
         run: |
+          echo "==================================================================="
+          echo "===  TEARDOWN: app uninstall & cluster delete --force"
+          echo "==================================================================="
           "$OF_BIN" app uninstall --context "$OF_CONTEXT" --yes || true
           "$OF_BIN" cluster delete "$OF_CLUSTER" --force || true
 
       - name: Run unit tests
-        run: make test-unit
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil)"
+          echo "==================================================================="
+          make test-unit
 
       - name: Run unit tests with race detector
         # Linux only (race detector needs CGO/gcc). Now a blocking gate: the
         # codebase is race-clean (the pterm spinner was replaced with a
         # synchronized wrapper in internal/shared/ui/spinner).
         if: matrix.os == 'linux'
-        run: make test-race
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests with -race (linux only)"
+          echo "==================================================================="
+          make test-race

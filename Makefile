@@ -26,15 +26,18 @@ build-all:
 	@GOOS=darwin GOARCH=arm64 $(GO_BUILD) -o $(BINARY_NAME)-darwin-arm64 .
 	@GOOS=windows GOARCH=amd64 $(GO_BUILD) -o $(BINARY_NAME)-windows-amd64.exe .
 
-## Run unit tests (vet enabled; -vet=off removed per audit remediation §0)
+## Run unit tests (vet enabled; -vet=off removed per audit remediation §0).
+## Includes the root package (main_test.go — the only exit-code fidelity tests)
+## and tests/testutil, which `./cmd/... ./internal/...` silently skipped.
+## Deliberately NOT ./tests/integration/... — those create real k3d clusters.
 test-unit:
 	@echo "Running unit tests..."
-	@go test -count=1 ./cmd/... ./internal/...
+	@go test -count=1 . ./cmd/... ./internal/... ./tests/testutil/...
 
 ## Run unit tests with the race detector (CGO required)
 test-race:
 	@echo "Running unit tests with -race..."
-	@CGO_ENABLED=1 go test -race -count=1 ./cmd/... ./internal/...
+	@CGO_ENABLED=1 go test -race -count=1 . ./cmd/... ./internal/... ./tests/testutil/...
 
 ## Run golangci-lint (static-analysis gate: govet, staticcheck, errcheck, gosec, ineffassign)
 lint:
