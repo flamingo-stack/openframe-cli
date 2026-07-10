@@ -50,10 +50,16 @@ jobs:
           echo "==================================================================="
           go mod tidy -diff
 
-  cross-compile:
-    # Catches GOOS/GOARCH-specific compile breakage (windows/darwin-only files)
-    # without waiting for the heavy per-OS e2e legs.
-    name: Cross-compile all platforms
+  release-build-matrix:
+    # Compile-only guard for the FULL GoReleaser platform matrix. The three
+    # e2e runner legs already compile linux/amd64, windows/amd64 and
+    # darwin/arm64 (including their test files via `make test-unit`), but the
+    # release ships SIX combos — a GOOS/GOARCH break on the un-runnered three
+    # (linux/arm64, windows/arm64, darwin/amd64) would otherwise surface only
+    # when the release itself fails. For those three, `go vet` also
+    # cross-compiles the TEST files, catching windows/darwin-only breakage in
+    # test code that no runner ever builds.
+    name: Release build matrix (compile-only)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -68,38 +74,29 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: 'Build: linux/amd64, darwin/arm64, windows/amd64'
+      - name: 'Build: all six GoReleaser platform combos'
         run: |
           echo "==================================================================="
-          echo "===  TEST: cross-compile linux/amd64, darwin/arm64, windows/amd64"
+          echo "===  TEST: cross-compile the full release matrix (6 GOOS/GOARCH)"
           echo "==================================================================="
-          make build-all
+          # Keep in sync with .goreleaser.yml (goos: linux,windows,darwin ×
+          # goarch: amd64,arm64).
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
+            echo "--- go build ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...
+          done
 
-#  vulncheck:
-    # Blocking: govulncheck reports only vulnerabilities in code paths the
-    # binary actually reaches, so findings are actionable, not noise.
-#    name: govulncheck
-#    runs-on: ubuntu-latest
-#    timeout-minutes: 15
-#    steps:
-#      - name: Checkout code
-#        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-#        with:
-#          persist-credentials: false
-
-#      - name: Set up Go
-#        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-#        with:
-#          go-version-file: 'go.mod'
-#          cache: true
-
-#      - name: 'Check: known vulnerabilities in reachable code'
-#        run: |
-#          echo "==================================================================="
-#          echo "===  TEST: govulncheck (reachable known vulnerabilities)"
-#          echo "==================================================================="
-#          go install golang.org/x/vuln/cmd/govulncheck@latest
-#          govulncheck ./...
+      - name: 'Vet (incl. test files) for combos without a runner'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: go vet for the un-runnered combos (compiles test code)"
+          echo "==================================================================="
+          # The runner legs vet-compile their own combos; these three are never
+          # built anywhere else.
+          for target in linux/arm64 windows/arm64 darwin/amd64; do
+            echo "--- go vet ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
+          done
 
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
