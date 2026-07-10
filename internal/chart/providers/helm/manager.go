@@ -407,6 +407,19 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		}
 	}
 
+	// Dry-run creates nothing: helm ran with --dry-run=client and the executor
+	// suppressed real calls entirely, so verifying the release or waiting for
+	// deployments below would fail by construction ("helm list returned
+	// empty"). Caught by the e2e `--context ... --non-interactive --dry-run`
+	// step the moment the N2 fix made this path reachable.
+	if config.DryRun {
+		if spinner != nil {
+			spinner.Stop()
+		}
+		pterm.Info.Println("Skipping release verification and deployment waits (dry-run)")
+		return nil
+	}
+
 	// Verify the Helm release was actually created by checking helm list
 	if err := h.verifyHelmRelease(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace, config.ClusterName, config.Verbose); err != nil {
 		if spinner != nil {
