@@ -50,8 +50,12 @@ func PreviousVersion() (string, bool) {
 
 // binaryVersion runs "<path> --version" and returns the leading version token
 // (the CLI prints "<version> (<commit>) built on <date>").
+//
+// Generous timeout: exceeding it only blanks the rollback LABEL (rollback
+// itself still works), while the old 5s was repeatedly exceeded on a loaded
+// machine by the fully parallel test suite, flaking TestSavePreviousAndRollback.
 func binaryVersion(path string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err != nil {

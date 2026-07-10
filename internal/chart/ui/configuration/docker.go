@@ -77,7 +77,10 @@ func (d *DockerConfigurator) promptForDockerSettings(current *types.DockerRegist
 		return nil, fmt.Errorf("docker password input failed: %w", err)
 	}
 	// Collection point: never let the value reach verbose logs / error output.
-	redact.RegisterSecret(password)
+	// Register the TRIMMED value — that is what the config stores and what
+	// flows downstream; whitespace-padded paste input would otherwise never
+	// match the redactor's exact replacement (ingress.go does the same).
+	redact.RegisterSecret(strings.TrimSpace(password))
 
 	email, err := pterm.DefaultInteractiveTextInput.
 		WithDefaultValue(current.Email).

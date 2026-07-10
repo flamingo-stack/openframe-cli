@@ -18,6 +18,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -395,11 +396,15 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
 
-	// Log Helm output for debugging (helps identify if Helm actually created resources)
+	// Log Helm output for debugging (helps identify if Helm actually created
+	// resources). Stdout is redacted at the PRINT site (not in the result
+	// struct, which callers parse): helm's rendered output can echo values —
+	// including the docker registry password — in verbose/dry-run mode.
+	// Stderr arrives already redacted by the executor.
 	if config.Verbose && result != nil {
 		if result.Stdout != "" {
 			pterm.Info.Println("Helm stdout:")
-			pterm.Println(result.Stdout)
+			pterm.Println(redact.Redact(result.Stdout))
 		}
 		if result.Stderr != "" {
 			pterm.Info.Println("Helm stderr:")

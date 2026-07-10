@@ -371,7 +371,12 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) {
 			result.ExitCode = exitError.ExitCode()
-			result.Stderr = string(exitError.Stderr)
+			// Redact at the population chokepoint: callers embed Stderr in
+			// user-facing errors even in non-verbose mode (e.g. the helm
+			// manager's "Helm output: %s"), and a child process can echo a
+			// token back. Control-flow substring checks downstream match
+			// generic phrases, never secret values, so redaction is safe here.
+			result.Stderr = redact.Redact(string(exitError.Stderr))
 		} else {
 			result.ExitCode = -1
 		}

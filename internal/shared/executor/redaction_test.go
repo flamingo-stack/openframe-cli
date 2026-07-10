@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,6 +29,31 @@ func TestCommandError_IsRedacted(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "***") {
 		t.Errorf("expected the redaction marker in place of the secret, got: %v", err)
+	}
+}
+
+// TestResultStderr_IsRedactedAtPopulation: a child process that echoes a
+// registered secret back on stderr must never leak it — callers embed
+// result.Stderr in user-facing errors ("Helm output: %s") even in non-verbose
+// mode, so redaction happens where the field is populated.
+func TestResultStderr_IsRedactedAtPopulation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses an sh stub; unix-only")
+	}
+	const secret = "ghp_childEchoedSecret9876"
+	redact.RegisterSecret(secret)
+	t.Cleanup(redact.ClearSecrets)
+
+	exec := NewRealCommandExecutor(false, false)
+	result, err := exec.Execute(context.Background(), "sh", "-c", "echo "+secret+" >&2; exit 3")
+	if err == nil {
+		t.Fatal("expected the command to fail")
+	}
+	if strings.Contains(result.Stderr, secret) {
+		t.Fatalf("result.Stderr leaks the registered secret: %q", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "***") {
+		t.Errorf("expected the redaction marker in result.Stderr, got: %q", result.Stderr)
 	}
 }
 
