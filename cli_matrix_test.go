@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,13 @@ func matrixBin(t *testing.T) string {
 			matrixBinErr = err
 			return
 		}
-		matrixBinPath = filepath.Join(dir, "openframe-matrix-test")
+		// .exe on Windows: os/exec resolves executables via PATHEXT, so an
+		// extensionless binary is "not found" even by explicit path.
+		name := "openframe-matrix-test"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		matrixBinPath = filepath.Join(dir, name)
 		out, err := exec.Command("go", "build", "-o", matrixBinPath, ".").CombinedOutput()
 		if err != nil {
 			matrixBinErr = err

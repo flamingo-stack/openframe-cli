@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -30,8 +31,13 @@ func TestExitCode(t *testing.T) {
 }
 
 func TestMainIntegration(t *testing.T) {
-	// Build test binary
+	// Build test binary. The .exe suffix is mandatory on Windows: os/exec
+	// resolves executables via PATHEXT, so an extensionless binary is
+	// "not found in %PATH%" even by explicit path.
 	testBinary := "openframe-test-main"
+	if runtime.GOOS == "windows" {
+		testBinary += ".exe"
+	}
 	buildCmd := exec.Command("go", "build", "-o", testBinary, ".")
 	require.NoError(t, buildCmd.Run())
 	defer os.Remove(testBinary)
