@@ -1,11 +1,13 @@
 package services
 
 import (
+	"bytes"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
+	"github.com/pterm/pterm"
 )
 
 // TestLoadExistingConfiguration_MissingFileIsHardErrorForUpgrade is the
@@ -35,6 +37,12 @@ func TestLoadExistingConfiguration_MissingFileIsHardErrorForUpgrade(t *testing.T
 func TestLoadExistingConfiguration_MissingFileAllowedForFreshInstall(t *testing.T) {
 	t.Chdir(t.TempDir())
 
+	var infoBuf, warnBuf bytes.Buffer
+	oldInfo, oldWarn := pterm.Info, pterm.Warning
+	pterm.Info = *pterm.Info.WithWriter(&infoBuf)
+	pterm.Warning = *pterm.Warning.WithWriter(&warnBuf)
+	t.Cleanup(func() { pterm.Info, pterm.Warning = oldInfo, oldWarn })
+
 	w := &InstallationWorkflow{}
 	cfg, err := w.loadExistingConfiguration(false)
 	if err != nil {
@@ -43,6 +51,40 @@ func TestLoadExistingConfiguration_MissingFileAllowedForFreshInstall(t *testing.
 	t.Cleanup(func() { _ = os.Remove(cfg.TempHelmValuesPath) })
 	if len(cfg.ExistingValues) != 0 {
 		t.Errorf("expected empty values (chart defaults), got %#v", cfg.ExistingValues)
+	}
+
+	// N1 messaging guard: the missing file is announced as chart defaults, and
+	// nothing may claim an existing file was used.
+	if !strings.Contains(warnBuf.String(), "deploying chart defaults") {
+		t.Errorf("missing values file must be announced loudly, got: %q", warnBuf.String())
+	}
+	if strings.Contains(infoBuf.String(), "Using existing") {
+		t.Errorf("must not claim an existing values file was used, got: %q", infoBuf.String())
+	}
+}
+
+// TestLoadExistingConfiguration_ExistingFileAnnounced: when the file IS there,
+// say so (the counterpart of the N1 guard above).
+func TestLoadExistingConfiguration_ExistingFileAnnounced(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(config.DefaultHelmValuesFile, []byte("repository:\n  branch: main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var infoBuf bytes.Buffer
+	oldInfo := pterm.Info
+	pterm.Info = *pterm.Info.WithWriter(&infoBuf)
+	t.Cleanup(func() { pterm.Info = oldInfo })
+
+	w := &InstallationWorkflow{}
+	cfg, err := w.loadExistingConfiguration(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(cfg.TempHelmValuesPath) })
+
+	if !strings.Contains(infoBuf.String(), "Using existing "+config.DefaultHelmValuesFile) {
+		t.Errorf("existing values file must be announced, got: %q", infoBuf.String())
 	}
 }
 

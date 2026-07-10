@@ -171,6 +171,12 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Once an app is ready, it stays counted even if it temporarily goes out of sync
 	everReadyApps := make(map[string]bool)
 
+	// Stall tracking (finding N3) — see stall.go.
+	lastStallFingerprint := ""
+	lastProgressAt := time.Now()
+	stragglerSyncTriggered := false
+	stallHintShown := false
+
 	// Repo-server issue tracking for recovery logic
 	repoServerRecoveryAttempts := 0
 	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
@@ -327,6 +333,35 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			currentlyReady := assess.ready
 			healthyApps := assess.healthyNames
 			notReadyApps := assess.notReady
+
+			// Stall handling (finding N3): when the state has been bit-for-bit
+			// identical for stallAfter and OutOfSync-but-healthy stragglers
+			// remain, waiting further is futile for apps with autoSync off.
+			// On the upgrade path, sync exactly those stragglers once; otherwise
+			// print an actionable hint once instead of burning the full timeout.
+			if fp := stallFingerprint(currentlyReady, notReadyApps); fp != lastStallFingerprint {
+				lastStallFingerprint = fp
+				lastProgressAt = time.Now()
+			} else if len(notReadyApps) > 0 && time.Since(lastProgressAt) > stallAfter {
+				if stragglers := outOfSyncStragglers(apps); len(stragglers) > 0 {
+					if config.SyncStragglersOnStall && !stragglerSyncTriggered {
+						stragglerSyncTriggered = true
+						pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
+							stallAfter.Round(time.Second), len(stragglers), stragglers)
+						patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
+						if failedCount > 0 {
+							pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
+						}
+						lastProgressAt = time.Now() // give the sync room to act
+					} else if !stallHintShown {
+						stallHintShown = true
+						pterm.Warning.Printf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v\n",
+							stallAfter.Round(time.Second), len(stragglers), stragglers)
+						pterm.Info.Println("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out.")
+						lastProgressAt = time.Now() // print the hint once per stall, not every tick
+					}
+				}
+			}
 
 			// Show verbose logging if enabled
 			if config.Verbose && totalApps > 0 {

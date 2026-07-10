@@ -68,6 +68,10 @@ type InstallationRequest struct {
 	// bootstrap keep the defaults-with-warning behavior — a clean machine has no
 	// values file yet.
 	RequireExistingValues bool
+	// SyncStragglersOnStall: on the upgrade (ref-change) path, let the
+	// application wait sync OutOfSync-but-healthy stragglers once progress
+	// stalls (children with autoSync off never pick a new ref up themselves).
+	SyncStragglersOnStall bool
 	KubeConfig            *rest.Config // Kubernetes REST config for cluster communication
 	// KubeContext is the kube-context name KubeConfig was resolved from
 	// (--context or the interactive target selector). When set, every helm CLI

@@ -13,6 +13,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
@@ -81,9 +82,11 @@ func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteract
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
 
-	// Add spacing between commands
-	fmt.Println()
-	fmt.Println()
+	// Add spacing between commands. DefaultBasicText, not raw fmt: --silent
+	// redirects it — these two raw Printlns were the "three blank lines" the
+	// 0.4.7 verification report found in an otherwise silent bootstrap log.
+	pterm.DefaultBasicText.Println()
+	pterm.DefaultBasicText.Println()
 
 	// Step 2: Install charts on the created cluster
 	if err := s.installChart(ctx, actualClusterName, nonInteractive, verbose, kubeConfig); err != nil {

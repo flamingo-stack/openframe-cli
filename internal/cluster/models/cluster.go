@@ -21,13 +21,18 @@ type ClusterConfig struct {
 
 // ClusterInfo represents information about a cluster
 type ClusterInfo struct {
-	Name       string      `json:"name"`
-	Type       ClusterType `json:"type"`
-	Status     string      `json:"status"`
-	NodeCount  int         `json:"node_count"`
-	K8sVersion string      `json:"k8s_version,omitempty"`
-	CreatedAt  time.Time   `json:"created_at,omitempty"`
-	Nodes      []NodeInfo  `json:"nodes,omitempty"`
+	Name string      `json:"name"`
+	Type ClusterType `json:"type"`
+	// Status is a human-readable server fraction ("1/1"). Machine consumers
+	// should prefer ReadyServers/TotalServers (verification report: a string
+	// fraction forces JSON consumers to parse it).
+	Status       string     `json:"status"`
+	ReadyServers int        `json:"ready_servers"`
+	TotalServers int        `json:"total_servers"`
+	NodeCount    int        `json:"node_count"`
+	K8sVersion   string     `json:"k8s_version,omitempty"`
+	CreatedAt    time.Time  `json:"created_at,omitempty"`
+	Nodes        []NodeInfo `json:"nodes,omitempty"`
 }
 
 // NodeInfo represents information about a node in the cluster

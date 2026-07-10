@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pterm/pterm"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -96,25 +97,83 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	return m.syncChildApplications(ctx, prune)
 }
 
-// syncChildApplications triggers a sync on every Application except the root
-// app-of-apps (which the caller already synced). Best-effort: errors on
-// individual children (e.g. an operation already running) are ignored so one
-// stuck child cannot block the whole force-sync.
+// trackingInstanceLabel is ArgoCD's default (label) resource-tracking marker:
+// resources managed by an Application carry app.kubernetes.io/instance=<app>.
+// Child Applications created by the app-of-apps therefore carry the root's name.
+const trackingInstanceLabel = "app.kubernetes.io/instance"
+
+// syncChildApplications triggers a sync on the root's child Applications.
+// Children are selected by ArgoCD's tracking label
+// (app.kubernetes.io/instance=argocd-apps); when none carry it (custom
+// trackingMethod), it falls back to every Application except the root rather
+// than silently syncing nothing — but then it may touch Applications that are
+// not OpenFrame-owned, which the fallback warning makes visible.
+//
+// Per-child failures no longer vanish (audit F8): individual errors are
+// counted and surfaced — a warning on partial failure, an error when NOT ONE
+// child could be synced (previously `app upgrade --sync` would then "succeed"
+// into a 15-minute wait timeout with no hint).
 func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
 	list, err := apps.List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("listing applications to sync: %w", err)
 	}
-	patch := []byte(syncOperationPatch(prune))
+
+	var children []string
 	for i := range list.Items {
 		name := list.Items[i].GetName()
 		if name == AppOfAppsName {
 			continue
 		}
-		_, _ = apps.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		if list.Items[i].GetLabels()[trackingInstanceLabel] == AppOfAppsName {
+			children = append(children, name)
+		}
+	}
+	if children == nil {
+		for i := range list.Items {
+			if name := list.Items[i].GetName(); name != AppOfAppsName {
+				children = append(children, name)
+			}
+		}
+		if len(children) > 0 {
+			pterm.Warning.Printf("No applications carry the %s=%s tracking label; syncing all %d applications in %q\n",
+				trackingInstanceLabel, AppOfAppsName, len(children), ArgoCDNamespace)
+		}
+	}
+
+	patched, failed, firstErr := m.syncApplicationsByName(ctx, children, prune)
+	if failed > 0 && patched == 0 {
+		return fmt.Errorf("could not trigger a sync on any of the %d child applications (first error: %w)", failed, firstErr)
+	}
+	if failed > 0 {
+		pterm.Warning.Printf("Triggered sync on %d application(s); %d failed (first error: %v)\n", patched, failed, firstErr)
 	}
 	return nil
+}
+
+// syncApplicationsByName applies the sync-operation patch to each named
+// Application, returning how many were patched, how many failed, and the first
+// failure. Lazily initializes the Kubernetes clients like RefreshAndSync.
+func (m *Manager) syncApplicationsByName(ctx context.Context, names []string, prune bool) (patched, failed int, firstErr error) {
+	if m.dynamicClient == nil {
+		if err := m.initKubernetesClients(); err != nil {
+			return 0, len(names), err
+		}
+	}
+	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	patch := []byte(syncOperationPatch(prune))
+	for _, name := range names {
+		if _, err := apps.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
+		patched++
+	}
+	return patched, failed, firstErr
 }
 
 // appOfAppsObject fetches the current app-of-apps Application (unstructured).

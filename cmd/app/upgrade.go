@@ -102,6 +102,9 @@ func runUpgradeChangeRef(cmd *cobra.Command, args []string, flags *InstallFlags,
 	// the release values with chart defaults, wiping registry credentials and
 	// ingress settings (audit F3). Fresh installs keep defaults-with-warning.
 	req.RequireExistingValues = true
+	// Children with autoSync disabled never roll the new ref out themselves —
+	// let the wait sync them once progress stalls instead of timing out (N3).
+	req.SyncStragglersOnStall = true
 
 	pterm.Info.Printf("Upgrading OpenFrame to ref %q\n", flags.resolvedRef())
 	if err := services.InstallChartsWithConfigContext(cmd.Context(), req); err != nil {

@@ -18,6 +18,11 @@ type ChartInstallConfig struct {
 	Silent         bool
 	NonInteractive bool // Suppresses interactive UI elements and spinners
 	SkipCRDs       bool // Skip installation of ArgoCD CRDs
+	// SyncStragglersOnStall lets the application wait trigger a one-shot sync of
+	// OutOfSync-but-healthy stragglers when progress stalls. Set on the upgrade
+	// (ref-change) path: children with autoSync disabled never roll a new ref
+	// out by themselves, so waiting for them is provably futile (finding N3).
+	SyncStragglersOnStall bool
 	// App-of-apps specific configuration
 	AppOfApps *models.AppOfAppsConfig
 }

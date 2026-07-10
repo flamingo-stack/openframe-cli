@@ -45,8 +45,11 @@ func (a *AppOfApps) Install(ctx context.Context, config config.ChartInstallConfi
 		appConfig.GitHubBranch = "main" // Default to main branch
 	}
 
-	// Always show which branch is being used for cloning with dots to indicate work is happening
-	pterm.Info.Printf("Using branch '%s'...\n", appConfig.GitHubBranch)
+	// Say what is being DEPLOYED (the resolved ref), not "used" — the old
+	// wording read as if it reflected the cluster's current ref, which made a
+	// dry-run against a cluster on another ref confusing (verification report,
+	// minor observation).
+	pterm.Info.Printf("Deploying ref '%s'...\n", appConfig.GitHubBranch)
 
 	// Clone the repository to a temporary directory
 	cloneResult, err := a.gitRepo.CloneChartRepository(ctx, appConfig)

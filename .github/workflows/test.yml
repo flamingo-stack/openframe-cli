@@ -300,9 +300,12 @@ jobs:
           echo "==================================================================="
           "$OF_BIN" --silent cluster create sil-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >silent.out 2>&1 || true
           "$OF_BIN"          cluster create loud-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >loud.out 2>&1 || true
-          if grep -qi 'Configuration Summary' silent.out; then echo "::error::--silent leaked INFO output"; cat silent.out; exit 1; fi
+          # Strict contract: --silent means ZERO non-error output, not merely
+          # "no summary box" — the 0.4.7 verification report found blank lines
+          # leaking through raw fmt prints and graded them as silence.
+          if [ -s silent.out ]; then echo "::error::--silent produced output:"; cat silent.out; exit 1; fi
           if ! grep -qi 'Configuration Summary' loud.out; then echo "::error::control run printed no summary — test is moot, check the assertion"; exit 1; fi
-          echo "silent suppressed INFO, control did not — OK"
+          echo "silent output empty, control printed the summary — OK"
 
       # --- Complex: real cluster lifecycle (heaviest, last) ------------------
       - name: 'Cluster: create'
@@ -324,6 +327,18 @@ jobs:
       # name must fail fast, never drop into the interactive picker (which hangs
       # CI until the job timeout). Runs with a short timeout so a regression that
       # reintroduces the prompt is caught as exit 124, not a 40-minute hang.
+      # Guard (verification report N2): an explicit --context IS the install
+      # target — it must be accepted in non-interactive mode without a cluster
+      # name (0.4.7 failed this exact invocation with "requires a cluster name").
+      - name: 'App: --context works as the target in non-interactive mode'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app install --context <ctx> --non-interactive --dry-run"
+          echo "==================================================================="
+          "$OF_BIN" app install --context "$OF_CONTEXT" --non-interactive --dry-run
+
       - name: 'App: --non-interactive without a name fails fast'
         if: matrix.os != 'darwin'
         shell: bash
@@ -360,6 +375,29 @@ jobs:
           "$OF_BIN" app status --context "$OF_CONTEXT" -o json
           "$OF_BIN" app status --context "$OF_CONTEXT" -o yaml
           "$OF_BIN" app access --context "$OF_CONTEXT"
+
+      # Guard (verification report N1): an upgrade with NO values file must
+      # fail fast naming the file — an empty values map would make helm replace
+      # the release values with chart defaults, wiping the configuration.
+      - name: 'App: upgrade without a values file fails fast'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app upgrade --ref refuses to run without a values file"
+          echo "==================================================================="
+          BIN="$GITHUB_WORKSPACE/${OF_BIN#./}"
+          tmp="$(mktemp -d)"
+          set +e
+          out="$(cd "$tmp" && "$BIN" app upgrade --ref main "$OF_CLUSTER" 2>&1)"
+          code=$?
+          set -e
+          echo "$out" | tail -5
+          if [ "$code" -eq 0 ]; then echo "::error::upgrade without a values file must fail"; exit 1; fi
+          if ! echo "$out" | grep -q "openframe-helm-values.yaml"; then
+            echo "::error::the error must name the missing values file"; exit 1
+          fi
+          echo "fail-fast OK (exit $code)"
 
       - name: 'App: upgrade (dry-run then force-sync)'
         if: matrix.os != 'darwin'

@@ -289,16 +289,18 @@ func (ui *OperationsUI) ShowOperationError(operation, clusterName string, err er
 func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dryRun bool, skipWizard bool) {
 	pterm.Info.Printf("Configuration Summary\n")
 
-	// Clean, simple format without heavy table styling
-	fmt.Printf("   Name: %s\n", pterm.Cyan(config.Name))
-	fmt.Printf("   Type: %s\n", string(config.Type))
-	fmt.Printf("  Nodes: %d\n", config.NodeCount)
+	// Clean, simple format without heavy table styling. DefaultBasicText (not
+	// raw fmt): --silent redirects it, while raw fmt leaked these lines into
+	// "silent" output (verification report saw the leak and graded it silent).
+	pterm.DefaultBasicText.Printf("   Name: %s\n", pterm.Cyan(config.Name))
+	pterm.DefaultBasicText.Printf("   Type: %s\n", string(config.Type))
+	pterm.DefaultBasicText.Printf("  Nodes: %d\n", config.NodeCount)
 
 	if config.K8sVersion != "" {
-		fmt.Printf("Version: %s\n", config.K8sVersion)
+		pterm.DefaultBasicText.Printf("Version: %s\n", config.K8sVersion)
 	}
 
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 
 	if dryRun {
 		pterm.Warning.Println("DRY RUN MODE - No cluster will be created")

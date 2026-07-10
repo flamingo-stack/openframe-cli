@@ -350,12 +350,14 @@ func (m *K3dManager) ListClusters(ctx context.Context) ([]models.ClusterInfo, er
 		}
 
 		clusters = append(clusters, models.ClusterInfo{
-			Name:      k3dCluster.Name,
-			Type:      models.ClusterTypeK3d,
-			Status:    fmt.Sprintf("%d/%d", k3dCluster.ServersRunning, k3dCluster.ServersCount),
-			NodeCount: k3dCluster.AgentsCount + k3dCluster.ServersCount,
-			CreatedAt: createdAt,
-			Nodes:     []models.NodeInfo{},
+			Name:         k3dCluster.Name,
+			Type:         models.ClusterTypeK3d,
+			Status:       fmt.Sprintf("%d/%d", k3dCluster.ServersRunning, k3dCluster.ServersCount),
+			ReadyServers: k3dCluster.ServersRunning,
+			TotalServers: k3dCluster.ServersCount,
+			NodeCount:    k3dCluster.AgentsCount + k3dCluster.ServersCount,
+			CreatedAt:    createdAt,
+			Nodes:        []models.NodeInfo{},
 		})
 	}
 

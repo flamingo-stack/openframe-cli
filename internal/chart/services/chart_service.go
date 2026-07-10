@@ -167,8 +167,11 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		}
 		pterm.Info.Println("Using existing configuration (dry-run mode)")
 	} else if req.NonInteractive {
-		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
-		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
+		// NON-INTERACTIVE (CI/CD). Which values are used (existing file vs
+		// chart defaults) is announced by loadExistingConfiguration — claiming
+		// "using existing openframe-helm-values.yaml" here contradicted the
+		// missing-file warning two lines later (verification finding N1).
+		pterm.Info.Println("Running in non-interactive mode")
 		var err error
 		chartConfig, err = w.loadExistingConfiguration(req.RequireExistingValues)
 		if err != nil {
@@ -197,16 +200,30 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		}
 	}
 
-	// Step 2: Select cluster
-	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
-	if err != nil {
-		return err
-	}
-	if clusterName == "" {
-		// selectCluster prints why (no clusters found, or the interactive
-		// selection was cancelled) but returns no error; surface a non-zero exit
-		// so callers and CI don't read a no-op install as success.
-		return fmt.Errorf("no cluster selected — nothing was installed")
+	// Step 2: Resolve the install target. An explicit rest.Config from the
+	// command layer (--context, or the interactive kube-context selector) IS
+	// the target — running k3d cluster selection on top of it demanded a
+	// cluster name that --context had already made redundant (verification
+	// finding N2: `app install -c <ctx> --non-interactive` was unusable) and
+	// double-prompted interactive users (kube-context, then k3d cluster).
+	var clusterName string
+	if req.KubeConfig == nil {
+		var err error
+		clusterName, err = w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
+		if err != nil {
+			return err
+		}
+		if clusterName == "" {
+			// selectCluster prints why (no clusters found, or the interactive
+			// selection was cancelled) but returns no error; surface a non-zero exit
+			// so callers and CI don't read a no-op install as success.
+			return fmt.Errorf("no cluster selected — nothing was installed")
+		}
+	} else if req.KubeContext != "" {
+		// ClusterName stays empty: every helm call targets req.KubeContext
+		// (helmKubeContext gives it precedence) and the ArgoCD wait manager is
+		// built from the same rest.Config (F4 one-target rule).
+		pterm.Info.Printf("Install target: kube-context %q\n", req.KubeContext)
 	}
 
 	// Step 2.5 (deferred mode): no HelmManager yet — the caller had no
@@ -216,9 +233,13 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// workflow (ExecuteWithContextDeferred) that drifted from this one; the
 	// nil-check replaces the fork (audit B7).
 	if w.chartService.helmManager == nil {
-		kubeConfig, kerr := w.clusterService.GetRestConfig(clusterName)
-		if kerr != nil {
-			return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, kerr)
+		kubeConfig := req.KubeConfig
+		if kubeConfig == nil {
+			resolved, kerr := w.clusterService.GetRestConfig(clusterName)
+			if kerr != nil {
+				return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, kerr)
+			}
+			kubeConfig = resolved
 		}
 		if ierr := w.chartService.initializeHelmManager(kubeConfig, req.Verbose); ierr != nil {
 			return fmt.Errorf("failed to initialize HelmManager: %w", ierr)
@@ -227,7 +248,11 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 
 	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
 	if !req.NonInteractive && !req.DryRun {
-		if !w.confirmInstallationOnCluster(clusterName) {
+		target := clusterName
+		if target == "" {
+			target = req.KubeContext
+		}
+		if !w.confirmInstallationOnCluster(target) {
 			pterm.Info.Println("Installation cancelled.")
 			return fmt.Errorf("installation cancelled by user")
 		}
@@ -275,6 +300,12 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// Step 9: Installation successful - clean up temporary files
 	if cleanupErr := w.fileCleanup.RestoreFilesOnSuccess(req.Verbose); cleanupErr != nil {
 		pterm.Warning.Printf("Failed to clean up files after successful installation: %v\n", cleanupErr)
+	}
+
+	// A dry run that ends without an explicit statement is indistinguishable
+	// from a real run (verification report, minor observation).
+	if req.DryRun {
+		pterm.Success.Println("Dry run complete — nothing was changed.")
 	}
 
 	return nil
@@ -358,6 +389,8 @@ func (w *InstallationWorkflow) loadExistingConfiguration(requireValuesFile bool)
 		// starting point (a clean machine has no values file yet), but say so
 		// loudly instead of silently pretending a file was used.
 		pterm.Warning.Printf("%s not found in the current directory — deploying chart defaults\n", config.DefaultHelmValuesFile)
+	} else {
+		pterm.Info.Printf("Using existing %s\n", config.DefaultHelmValuesFile)
 	}
 
 	// Load existing openframe-helm-values.yaml (empty map when absent — allowed
@@ -430,6 +463,7 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 	// One target per install: an explicit kube-context resolved at the command
 	// layer overrides the ClusterName-derived context in every helm call.
 	cfg.KubeContext = req.KubeContext
+	cfg.SyncStragglersOnStall = req.SyncStragglersOnStall
 	return cfg, nil
 }
 
