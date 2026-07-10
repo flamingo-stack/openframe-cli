@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
 )
 
@@ -23,24 +24,14 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation failed for %s: %s", e.Field, e.Message)
 }
 
-// CommandError represents command execution errors
-type CommandError struct {
-	Command string
-	Args    []string
-	Err     error
-}
+// NOTE: there is deliberately no CommandError type here. There used to be one,
+// with a polished handler — but nothing ever constructed it, so real command
+// failures (executor.CommandError) fell through to the generic error dump. The
+// handler now matches the type the executor actually returns.
 
 // AlreadyHandledError wraps errors that have already been displayed to the user
 type AlreadyHandledError struct {
 	OriginalError error
-}
-
-func (e *CommandError) Error() string {
-	return fmt.Sprintf("command '%s %v' failed: %v", e.Command, e.Args, e.Err)
-}
-
-func (e *CommandError) Unwrap() error {
-	return e.Err
 }
 
 func (e *AlreadyHandledError) Error() string {
@@ -68,13 +59,13 @@ func (eh *ErrorHandler) HandleError(err error) {
 	}
 
 	var validationErr *ValidationError
-	var commandErr *CommandError
+	var commandErr *executor.CommandError
 	var branchErr *BranchNotFoundError
 	switch {
 	case stderrors.As(err, &validationErr):
 		eh.handleValidationError(validationErr)
 	case stderrors.As(err, &commandErr):
-		eh.handleCommandError(commandErr)
+		eh.handleCommandError(commandErr, err)
 	case stderrors.As(err, &branchErr):
 		eh.handleBranchNotFoundError(branchErr)
 	default:
@@ -91,17 +82,32 @@ func (eh *ErrorHandler) handleValidationError(err *ValidationError) {
 	pterm.Printf("  Issue: %s\n", err.Message)
 }
 
-func (eh *ErrorHandler) handleCommandError(err *CommandError) {
-	pterm.Error.Printf("❌ Command execution failed\n")
-	pterm.Printf("  Command: %s\n", pterm.Yellow(err.Command))
-	if len(err.Args) > 0 {
-		pterm.Printf("  Arguments: %v\n", err.Args)
+// handleCommandError renders a failed external command: what ran, how it
+// failed, and — crucially — what the child process actually said. Before this,
+// the handler matched a errors.CommandError type that was never constructed
+// anywhere, so real failures (executor.CommandError) fell through to the
+// generic dump and the user saw "exit status 1" with no reason.
+//
+// outer is the full error chain, used for the friendly hint (which matches on
+// wrapper text such as "cluster create operation failed").
+func (eh *ErrorHandler) handleCommandError(err *executor.CommandError, outer error) {
+	// DefaultBasicText, not bare pterm.Printf: the latter writes straight to
+	// stdout, bypassing --silent redirection (and any test capture).
+	pterm.Error.Printf("Command failed\n")
+	pterm.DefaultBasicText.Printf("  Command:   %s\n", pterm.Yellow(err.Command))
+	pterm.DefaultBasicText.Printf("  Exit code: %d\n", err.ExitCode)
+
+	if reason := strings.TrimSpace(err.Stderr); reason != "" {
+		pterm.DefaultBasicText.Printf("  Output:\n")
+		for _, line := range strings.Split(reason, "\n") {
+			pterm.DefaultBasicText.Printf("    %s\n", pterm.Red(line))
+		}
+	} else {
+		pterm.DefaultBasicText.Printf("  Error:     %v\n", err)
 	}
 
-	if eh.verbose {
-		pterm.Printf("  Details: %v\n", err.Err)
-	} else {
-		pterm.Printf("  Error: %v\n", err.Err)
+	if hint := friendlyHint(outer); hint != "" {
+		pterm.Info.Printf("%s\n", hint)
 	}
 }
 

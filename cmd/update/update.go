@@ -118,6 +118,11 @@ func run(ctx context.Context, current, target string, assumeYes, force bool) err
 	u := selfupdate.Updater{
 		Current: current,
 		Client:  selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")},
+		// Warnings must survive the spinner: they print above it, on stderr, so
+		// they stay on screen after the operation finishes and never mix into
+		// stdout. Routing them through the progress callback (as before) turned
+		// them into spinner text that the next step overwrote within a frame.
+		Warn: func(msg string) { pterm.Warning.WithWriter(os.Stderr).Println(msg) },
 	}
 	sp := spinner.Start("Checking for updates...")
 	st, rel, err := u.Check(ctx, target)

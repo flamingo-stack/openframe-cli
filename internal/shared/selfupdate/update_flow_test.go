@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,5 +145,62 @@ func TestRollback_ConsumesThePointOnce(t *testing.T) {
 	}
 	if err := u.Rollback(context.Background(), nil); err == nil {
 		t.Error("a second rollback must fail (nothing saved), not restore again")
+	}
+}
+
+// TestVerifySignature_InsecureSkipWarnsPersistently (M1.3): the security
+// downgrade must reach a durable printer, NOT the progress callback. Callers
+// wire progress to spinner.UpdateText, so a warning sent there is overwritten
+// by the next step within one frame — the user never sees that authenticity
+// was not checked.
+func TestVerifySignature_InsecureSkipWarnsPersistently(t *testing.T) {
+	t.Setenv(insecureSkipEnv, "1")
+
+	var warned, progressed []string
+	u := Updater{Current: "1.0.0", Warn: func(s string) { warned = append(warned, s) }}
+
+	if err := u.verifySignature(context.Background(), Release{TagName: "9.9.9"}, nil,
+		func(s string) { progressed = append(progressed, s) }); err != nil {
+		t.Fatalf("verifySignature with the opt-out set must succeed: %v", err)
+	}
+
+	if len(warned) != 1 {
+		t.Fatalf("expected exactly one persistent warning, got %d: %q", len(warned), warned)
+	}
+	if !strings.Contains(warned[0], insecureSkipEnv) {
+		t.Errorf("the warning must name the env var that caused it, got: %q", warned[0])
+	}
+	if !strings.Contains(warned[0], "authenticity") {
+		t.Errorf("the warning must say authenticity is unchecked, got: %q", warned[0])
+	}
+	for _, p := range progressed {
+		if strings.Contains(strings.ToLower(p), "skipping") {
+			t.Errorf("the security warning leaked into the transient progress callback: %q", p)
+		}
+	}
+}
+
+// TestUpdater_WarnDefaultsToStderr: an Updater built without a Warn hook (the
+// auto-update path) must still emit the warning somewhere durable, and must
+// never write it to stdout, which carries machine-readable output.
+func TestUpdater_WarnDefaultsToStderr(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = oldStderr })
+
+	Updater{}.warn("rollback point lost: %v", fmt.Errorf("disk full"))
+	_ = w.Close()
+
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "WARNING") || !strings.Contains(got, "disk full") {
+		t.Errorf("a Warn-less Updater must still print the warning to stderr, got: %q", got)
 	}
 }

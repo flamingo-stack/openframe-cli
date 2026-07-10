@@ -91,6 +91,13 @@ type Updater struct {
 	GOOS, GOARCH string           // default to runtime values; overridable in tests
 	exePath      string           // overrides the resolved executable path in tests
 	verify       checksumVerifier // nil → verifyChecksumsProd; injected in tests
+
+	// Warn receives messages that must OUTLIVE the operation. They must not go
+	// through the progress callback: callers wire that to a spinner's
+	// UpdateText, so the next step overwrites the line within one frame — the
+	// "signature verification skipped" and "no rollback point" warnings were
+	// effectively invisible. nil → stderr.
+	Warn func(string)
 }
 
 func (u Updater) goos() string {
@@ -105,6 +112,17 @@ func (u Updater) goarch() string {
 		return u.GOARCH
 	}
 	return runtime.GOARCH
+}
+
+// warn emits a persistent warning. Unlike the progress callback it is never
+// wired to transient spinner text; stdout is left clean for machine output.
+func (u Updater) warn(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if u.Warn != nil {
+		u.Warn(msg)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "WARNING: "+msg)
 }
 
 // Check queries a release and compares it to the running version. When tag is
@@ -195,7 +213,8 @@ func (u Updater) Apply(ctx context.Context, rel Release, progress func(string)) 
 	// copy of the old binary; deleting it silently voided the advertised
 	// rollback guarantee (audit B5/T2-12).
 	if err := savePrevious(backup); err != nil {
-		log(fmt.Sprintf("warning: could not save a rollback point: %v — the previous binary is kept at %s", err, backup))
+		u.warn("could not save a rollback point: %v\n"+
+			"         `openframe update rollback` will not work; the previous binary is kept at %s", err, backup)
 	} else {
 		_ = os.Remove(backup)
 	}
@@ -233,7 +252,11 @@ func (u Updater) verifySignature(ctx context.Context, rel Release, checksums []b
 	// Strictly-parsed opt-out: only =1/true/yes/on disables verification. The
 	// old any-non-empty check meant `=0`/`=false` silently DISABLED it.
 	if sharedconfig.EnvBool(insecureSkipEnv) {
-		log("WARNING: skipping release signature verification (" + insecureSkipEnv + " set); integrity is checked but authenticity is NOT.")
+		// A security downgrade must persist on screen, so it goes to Warn, not
+		// to the progress callback (transient spinner text).
+		u.warn("skipping release signature verification (%s is set).\n"+
+			"         The download's integrity is checked, but its authenticity is NOT: "+
+			"anyone who can serve you a checksums file can serve you a binary.", insecureSkipEnv)
 		return nil
 	}
 	bundleJSON, err := u.Client.fetchAsset(ctx, rel, bundleAsset)

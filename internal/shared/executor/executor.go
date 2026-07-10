@@ -45,17 +45,36 @@ func (e *WSLError) Error() string {
 }
 
 // CommandError is returned when an external command exits non-zero. It carries
-// the child's exit code so the top level can propagate it (exit-code fidelity for
-// automation), while its Error() message is byte-identical to the previous plain
-// error so all existing string-based handling keeps working.
+// the child's exit code so the top level can propagate it (exit-code fidelity
+// for automation) AND the child's stderr — without it the message degrades to
+// the useless "exit status 1" (`*exec.ExitError`'s own string), and the actual
+// reason ("port 6550 already allocated", "no space left on device") was only
+// ever printed under --verbose. Modelled on WSLError above.
+//
+// Stderr arrives already redacted from the executor (secrets can be echoed back
+// by child processes).
 type CommandError struct {
 	Command  string
 	ExitCode int
+	Stderr   string
 	cause    error
 }
 
+// maxStderrInError bounds how much of a chatty child's stderr lands in the
+// error string; the full text is still available via the Stderr field.
+const maxStderrInError = 2000
+
 func (e *CommandError) Error() string {
-	return fmt.Sprintf("command failed: %s (exit code: %d): %v", e.Command, e.ExitCode, e.cause)
+	msg := fmt.Sprintf("command failed: %s (exit code: %d)", e.Command, e.ExitCode)
+	if reason := strings.TrimSpace(e.Stderr); reason != "" {
+		if len(reason) > maxStderrInError {
+			reason = "..." + reason[len(reason)-maxStderrInError:]
+		}
+		return msg + ": " + reason
+	}
+	// No stderr (e.g. the child only wrote to stdout): fall back to the exec
+	// error, which at least carries the signal/exit description.
+	return fmt.Sprintf("%s: %v", msg, e.cause)
 }
 
 // Unwrap exposes the underlying exec error so errors.As/Is still reach it.
@@ -424,7 +443,13 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			}
 		}
 
-		return result, &CommandError{Command: redact.Redact(fullCommand), ExitCode: result.ExitCode, cause: err}
+		// result.Stderr was already redacted where it was populated.
+		return result, &CommandError{
+			Command:  redact.Redact(fullCommand),
+			ExitCode: result.ExitCode,
+			Stderr:   result.Stderr,
+			cause:    err,
+		}
 	}
 
 	result.ExitCode = 0
