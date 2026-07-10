@@ -62,8 +62,8 @@ func TestClusterSelector_NonInteractive_WithName_OK(t *testing.T) {
 	assert.Equal(t, "cluster-b", name)
 }
 
-// Finding 1 (0.4.6 regression guard): an explicitly pinned ref
-// (--github-branch/--ref) must be written into the flattened top-level
+// Finding 1 (0.4.6 regression guard): an explicitly pinned ref (--ref) must
+// be written into the flattened top-level
 // repository.branch so BOTH the app-of-apps clone and the child Applications'
 // targetRevision track it — rather than silently staying on the values-file
 // branch (0.4.6 left every Application on "main" while reporting success).

@@ -49,7 +49,7 @@ openframe app access                         # print ArgoCD URL, admin creds, po
 openframe app uninstall -y                   # remove the deployment
 ```
 
-Key `app install` flags: `--github-repo`, `--github-branch`, `--ref/-r`, `--context/-c`, `--cert-dir`, `--non-interactive`, `--dry-run`, `--force/-f`.
+Key `app install` flags: `--github-repo`, `--ref/-r`, `--context/-c`, `--cert-dir`, `--non-interactive`, `--dry-run`, `--force/-f`.
 
 `app install` deploys the OpenFrame platform app-of-apps — it does not install arbitrary charts.
 

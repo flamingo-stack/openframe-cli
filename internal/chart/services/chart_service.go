@@ -519,7 +519,7 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 	// (defaults to the public OSS repository) with no embedded credentials.
 	githubRepo := req.GitHubRepo
 
-	// When the operator explicitly pins a ref (--ref/--github-branch), write it into
+	// When the operator explicitly pins a ref (--ref), write it into
 	// the temp helm-values' repository.branch BEFORE the builder reads it back. This
 	// makes the explicit ref win over the values-file branch and keeps BOTH the
 	// app-of-apps clone and the child Applications' targetRevision on that ref

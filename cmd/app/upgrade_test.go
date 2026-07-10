@@ -33,15 +33,11 @@ func TestUpgradeIsChangeRef(t *testing.T) {
 // --sync` used to silently discard --ref and force-sync the CURRENT ref — the
 // user believed X was deployed. The combination must be rejected loudly.
 func TestUpgradeRejectsRefWithSync(t *testing.T) {
-	for _, refFlag := range []string{"--ref=v1.2.3", "--github-branch=develop"} {
-		t.Run(refFlag, func(t *testing.T) {
-			cmd := getUpgradeCmd()
-			cmd.SetArgs([]string{refFlag, "--sync"})
-			err := cmd.Execute()
-			require.Error(t, err, "%s with --sync must be rejected", refFlag)
-			assert.Contains(t, err.Error(), "mutually exclusive")
-		})
-	}
+	cmd := getUpgradeCmd()
+	cmd.SetArgs([]string{"--ref=v1.2.3", "--sync"})
+	err := cmd.Execute()
+	require.Error(t, err, "--ref with --sync must be rejected")
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 // TestUpgradeCommandShape verifies the command is wired with RunE and the --sync

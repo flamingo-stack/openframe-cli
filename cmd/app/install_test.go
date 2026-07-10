@@ -91,26 +91,25 @@ func TestInstallCommandFlagHandling(t *testing.T) {
 			name:  "default flags",
 			flags: map[string]string{},
 			expectedArgs: InstallFlags{
-				Force:        false,
-				DryRun:       false,
-				GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant",
-				GitHubBranch: "main",
-				CertDir:      "",
+				Force:      false,
+				DryRun:     false,
+				GitHubRepo: "https://github.com/flamingo-stack/openframe-oss-tenant",
+				CertDir:    "",
 			},
 		},
 		{
-			name: "dry run with custom branch",
+			name: "dry run with custom ref",
 			flags: map[string]string{
-				"dry-run":       "true",
-				"force":         "true",
-				"github-branch": "develop",
+				"dry-run": "true",
+				"force":   "true",
+				"ref":     "develop",
 			},
 			expectedArgs: InstallFlags{
-				Force:        true,
-				DryRun:       true,
-				GitHubRepo:   "https://github.com/flamingo-stack/openframe-oss-tenant",
-				GitHubBranch: "develop",
-				CertDir:      "",
+				Force:      true,
+				DryRun:     true,
+				GitHubRepo: "https://github.com/flamingo-stack/openframe-oss-tenant",
+				Ref:        "develop",
+				CertDir:    "",
 			},
 		},
 	}
@@ -133,17 +132,16 @@ func TestInstallCommandFlagHandling(t *testing.T) {
 	}
 }
 
-// TestResolvedRef proves --ref supersedes --github-branch, and --github-branch
-// (default "main") is used when --ref is absent.
+// TestResolvedRef proves --ref is used when set, and the default platform
+// branch ("main") when absent.
 func TestResolvedRef(t *testing.T) {
 	cases := []struct {
 		name   string
 		flags  InstallFlags
 		expect string
 	}{
-		{"github-branch only", InstallFlags{GitHubBranch: "main"}, "main"},
+		{"no ref -> default branch", InstallFlags{}, "main"},
 		{"ref only", InstallFlags{Ref: "v1.2.3"}, "v1.2.3"},
-		{"ref wins over branch", InstallFlags{GitHubBranch: "develop", Ref: "v1.2.3"}, "v1.2.3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,18 +153,17 @@ func TestResolvedRef(t *testing.T) {
 // TestExtractInstallFlags_Ref confirms the --ref flag is wired end-to-end.
 func TestExtractInstallFlags_Ref(t *testing.T) {
 	cmd := getInstallCmd()
-	require.NoError(t, cmd.Flags().Set("github-branch", "develop"))
 	require.NoError(t, cmd.Flags().Set("ref", "v2.0.0"))
 
 	flags, err := extractInstallFlags(cmd)
 	require.NoError(t, err)
 	assert.Equal(t, "v2.0.0", flags.Ref)
-	assert.Equal(t, "v2.0.0", flags.resolvedRef(), "ref supersedes github-branch")
+	assert.Equal(t, "v2.0.0", flags.resolvedRef())
 }
 
-// TestBuildInstallRequest_RefExplicit proves an explicitly set --ref/--github-branch
-// marks the request GitHubRefExplicit (so it wins over the helm-values branch),
-// and a bare invocation does not.
+// TestBuildInstallRequest_RefExplicit proves an explicitly set --ref marks the
+// request GitHubRefExplicit (so it wins over the helm-values branch), and a
+// bare invocation does not.
 func TestBuildInstallRequest_RefExplicit(t *testing.T) {
 	// --ref set → explicit.
 	cmd := getInstallCmd()
@@ -179,16 +176,7 @@ func TestBuildInstallRequest_RefExplicit(t *testing.T) {
 	assert.True(t, req.GitHubRefExplicit, "--ref must set GitHubRefExplicit")
 	assert.Equal(t, "v1.2.3", req.GitHubBranch)
 
-	// --github-branch set → explicit.
-	cmdB := getInstallCmd()
-	require.NoError(t, cmdB.Flags().Set("dry-run", "true"))
-	require.NoError(t, cmdB.Flags().Set("github-branch", "develop"))
-	flagsB, _ := extractInstallFlags(cmdB)
-	reqB, err := buildInstallRequest(cmdB, nil, flagsB, false, "Installing")
-	require.NoError(t, err)
-	assert.True(t, reqB.GitHubRefExplicit, "--github-branch must set GitHubRefExplicit")
-
-	// Neither set → not explicit (values-file branch keeps precedence).
+	// No ref set → not explicit (values-file branch keeps precedence).
 	cmdC := getInstallCmd()
 	require.NoError(t, cmdC.Flags().Set("dry-run", "true"))
 	flagsC, _ := extractInstallFlags(cmdC)
@@ -248,11 +236,11 @@ func TestRunInstallCommand(t *testing.T) {
 	// Test flag extraction functionality
 	cmd.Flags().Set("dry-run", "true")
 	cmd.Flags().Set("force", "true")
-	cmd.Flags().Set("github-branch", "develop")
+	cmd.Flags().Set("ref", "develop")
 
 	flags, err := extractInstallFlags(cmd)
 	assert.NoError(t, err, "Should extract flags without error")
 	assert.True(t, flags.DryRun, "Should extract dry-run flag correctly")
 	assert.True(t, flags.Force, "Should extract force flag correctly")
-	assert.Equal(t, "develop", flags.GitHubBranch, "Should extract github-branch flag correctly")
+	assert.Equal(t, "develop", flags.Ref, "Should extract ref flag correctly")
 }

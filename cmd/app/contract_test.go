@@ -27,12 +27,12 @@ func TestAppContract_UpgradeFlags(t *testing.T) {
 	// Upgrade mutates the cluster → not marked read-only.
 	assert.NotEqual(t, "true", upgrade.Annotations["readonly"], "upgrade is not read-only")
 
-	// Upgrade shares the install flag set plus --sync.
+	// Upgrade shares the install flag set plus --sync. --github-branch was
+	// removed: --ref is the single way to pin a git ref.
 	testutil.AssertFlags(t, upgrade, []testutil.FlagSpec{
 		{Name: "force", Shorthand: "f", Type: "bool", Default: "false"},
 		{Name: "dry-run", Type: "bool", Default: "false"},
 		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
-		{Name: "github-branch", Type: "string", Default: "main"},
 		{Name: "ref", Shorthand: "r", Type: "string", Default: ""},
 		{Name: "sync", Shorthand: "s", Type: "bool", Default: "false"},
 		{Name: "prune", Shorthand: "p", Type: "bool", Default: "false"},
@@ -43,11 +43,11 @@ func TestAppContract_UpgradeFlags(t *testing.T) {
 func TestAppContract_InstallFlags(t *testing.T) {
 	install := testutil.FindSubcommand(t, GetAppCmd(), "install")
 
+	// --github-branch was removed: --ref is the single way to pin a git ref.
 	testutil.AssertFlags(t, install, []testutil.FlagSpec{
 		{Name: "force", Shorthand: "f", Type: "bool", Default: "false"},
 		{Name: "dry-run", Type: "bool", Default: "false"},
 		{Name: "github-repo", Type: "string", Default: "https://github.com/flamingo-stack/openframe-oss-tenant"},
-		{Name: "github-branch", Type: "string", Default: "main"},
 		{Name: "ref", Shorthand: "r", Type: "string", Default: ""},
 		{Name: "cert-dir", Type: "string", Default: ""},
 		{Name: "non-interactive", Type: "bool", Default: "false"},

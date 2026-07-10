@@ -64,13 +64,13 @@ func runUpgradeCommand(cmd *cobra.Command, args []string) error {
 	}
 	verbose := getVerboseFlag(cmd)
 	sync, _ := cmd.Flags().GetBool("sync")
-	refChanged := cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch")
+	refChanged := cmd.Flags().Changed("ref")
 
 	// The modes are mutually exclusive. Silently preferring --sync used to
 	// force-sync the CURRENT ref and discard an explicit --ref — the user
 	// believed they had deployed the new version (audit F5/T1-9).
 	if refChanged && sync {
-		return fmt.Errorf("--ref/--github-branch and --sync are mutually exclusive: --ref deploys a new ref (Mode 1), --sync re-syncs the current ref (Mode 2); drop one of them")
+		return fmt.Errorf("--ref and --sync are mutually exclusive: --ref deploys a new ref (Mode 1), --sync re-syncs the current ref (Mode 2); drop one of them")
 	}
 
 	if upgradeIsChangeRef(refChanged, sync) {
@@ -79,9 +79,9 @@ func runUpgradeCommand(cmd *cobra.Command, args []string) error {
 	return runUpgradeForceSync(cmd, args, flags, verbose)
 }
 
-// upgradeIsChangeRef decides the upgrade mode: a changed --ref/--github-branch
-// means "deploy this ref" (Mode 1); otherwise force-sync the current ref
-// (Mode 2). The conflicting combination is rejected before this is called.
+// upgradeIsChangeRef decides the upgrade mode: a changed --ref means "deploy
+// this ref" (Mode 1); otherwise force-sync the current ref (Mode 2). The
+// conflicting combination is rejected before this is called.
 func upgradeIsChangeRef(refChanged, sync bool) bool {
 	return refChanged && !sync
 }

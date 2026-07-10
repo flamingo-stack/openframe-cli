@@ -34,8 +34,8 @@ Examples:
   openframe app install                                    # Interactive mode (default)
   openframe app install my-cluster                        # Install on specific cluster
   openframe app install --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
-  openframe app install --github-branch develop          # Use develop branch
-  openframe app install --ref v1.2.3                     # Deploy a release tag`, argocd.ArgoCDChartVersion),
+  openframe app install --ref develop                     # Deploy a branch
+  openframe app install --ref v1.2.3                      # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
 		SilenceErrors: true, // Errors are handled by our custom error handler
 		SilenceUsage:  true, // Don't show usage on errors
@@ -87,7 +87,7 @@ func buildInstallRequest(cmd *cobra.Command, args []string, flags *InstallFlags,
 		GitHubRepo:   flags.GitHubRepo,
 		GitHubBranch: flags.resolvedRef(),
 		// An explicitly set ref must win over the branch baked into openframe-helm-values.yaml.
-		GitHubRefExplicit: cmd.Flags().Changed("ref") || cmd.Flags().Changed("github-branch"),
+		GitHubRefExplicit: cmd.Flags().Changed("ref"),
 		CertDir:           flags.CertDir,
 		NonInteractive:    flags.NonInteractive,
 		// Inject cluster access from the command layer (composition root) so the
@@ -149,20 +149,18 @@ type InstallFlags struct {
 	Force          bool
 	DryRun         bool
 	GitHubRepo     string
-	GitHubBranch   string
 	Ref            string
 	CertDir        string
 	NonInteractive bool
 }
 
-// resolvedRef returns the git ref to deploy: the general --ref wins over the
-// legacy --github-branch when both are set, otherwise --github-branch (whose
-// default is "main") is used.
+// resolvedRef returns the git ref to deploy: --ref when set, otherwise the
+// default platform branch.
 func (f *InstallFlags) resolvedRef() string {
 	if f.Ref != "" {
 		return f.Ref
 	}
-	return f.GitHubBranch
+	return chartmodels.DefaultGitBranch
 }
 
 // extractInstallFlags extracts install flags from cobra command
@@ -179,10 +177,6 @@ func extractInstallFlags(cmd *cobra.Command) (*InstallFlags, error) {
 	}
 
 	if flags.GitHubRepo, err = cmd.Flags().GetString("github-repo"); err != nil {
-		return nil, err
-	}
-
-	if flags.GitHubBranch, err = cmd.Flags().GetString("github-branch"); err != nil {
 		return nil, err
 	}
 
@@ -224,8 +218,7 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force", "f", false, "Force installation even if charts already exist")
 	cmd.Flags().Bool("dry-run", false, "Show what would be installed without executing")
 	cmd.Flags().String("github-repo", chartmodels.RepoOSSTenant, "GitHub repository URL")
-	cmd.Flags().String("github-branch", chartmodels.DefaultGitBranch, "Git ref (branch or tag) to deploy")
-	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy; supersedes --github-branch")
+	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing openframe-helm-values.yaml")
 	cmd.Flags().StringP("context", "c", "", "Kube-context to install into (skips interactive selection)")

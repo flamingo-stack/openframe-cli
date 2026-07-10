@@ -145,7 +145,7 @@ type InstallationRequest struct {
 	Verbose        bool
 	GitHubRepo     string
 	GitHubBranch   string
-	// GitHubRefExplicit is true when the operator explicitly set --ref/--github-branch.
+	// GitHubRefExplicit is true when the operator explicitly set --ref.
 	// When set, GitHubBranch is pinned into the helm values (repository.branch) so it
 	// wins over the values-file branch and both the app-of-apps clone and the child
 	// Applications' targetRevision track that ref.
