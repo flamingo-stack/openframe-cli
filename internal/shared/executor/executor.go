@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
+	"github.com/pterm/pterm"
 )
 
 // WSL error exit codes
@@ -339,11 +340,12 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		Stderr: "",
 	}
 
-	// Handle dry-run mode
+	// Handle dry-run mode. The "Would run:" line prints UNCONDITIONALLY (not
+	// only under --verbose): showing what would execute is dry-run's entire
+	// purpose — without it a dry-run was indistinguishable from a real
+	// successful run (audit B6/T2-9). pterm.Info honors --silent.
 	if e.dryRun {
-		if e.verbose {
-			fmt.Printf("Would run: %s\n", redact.Redact(fullCommand))
-		}
+		pterm.Info.Printf("Would run: %s\n", redact.Redact(fullCommand))
 		result.Duration = time.Since(start)
 		return result, nil
 	}

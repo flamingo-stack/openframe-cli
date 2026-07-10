@@ -30,8 +30,9 @@ func TestRootContract_TopLevelSubcommands(t *testing.T) {
 	root := GetRootCmd(VersionInfo{Version: "t", Commit: "t", Date: "t"})
 
 	// Subset check (cobra may inject help/completion), so assert each is present
-	// rather than an exact count.
-	for _, name := range []string{"cluster", "app", "bootstrap", "prerequisites"} {
+	// rather than an exact count. `update` is here too: it rewrites the running
+	// binary, so its surface must never drift or vanish unnoticed.
+	for _, name := range []string{"cluster", "app", "bootstrap", "prerequisites", "update"} {
 		testutil.FindSubcommand(t, root, name)
 	}
 }

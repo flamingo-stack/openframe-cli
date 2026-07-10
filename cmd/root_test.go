@@ -98,14 +98,3 @@ func TestVersionInfo(t *testing.T) {
 	}
 }
 
-func TestExecuteWithVersion(t *testing.T) {
-	// Test that ExecuteWithVersion function exists and can be called
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("ExecuteWithVersion should not panic: %v", r)
-		}
-	}()
-
-	// We can't actually execute it in tests, but we can verify the function exists
-	_ = ExecuteWithVersion
-}

@@ -3,33 +3,13 @@ package executor
 import (
 	"bytes"
 	"context"
-	"io"
-	"os"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
+	"github.com/pterm/pterm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// captureStdout runs fn while capturing everything written to os.Stdout.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, r)
-		done <- buf.String()
-	}()
-	fn()
-	_ = w.Close()
-	os.Stdout = orig
-	return <-done
-}
 
 // TestVerboseLogging_RedactsRegisteredSecret is the I4 wiring guard: a registered
 // secret appearing in a command must not be printed by verbose command logging.
@@ -40,15 +20,20 @@ func TestVerboseLogging_RedactsRegisteredSecret(t *testing.T) {
 	secret := "ghp_executorVerboseSecret123"
 	redact.RegisterSecret(secret)
 
-	// dry-run + verbose hits the "Would run" log path without executing anything.
+	// dry-run hits the "Would run" log path without executing anything. The
+	// line now goes through pterm.Info (so --silent can suppress it), so the
+	// capture swaps pterm's writer rather than os.Stdout.
+	var buf bytes.Buffer
+	old := pterm.Info
+	pterm.Info = *pterm.Info.WithWriter(&buf)
+	t.Cleanup(func() { pterm.Info = old })
+
 	exec := NewRealCommandExecutor(true, true)
+	_, err := exec.Execute(context.Background(), "git", "clone", "https://x-access-token:"+secret+"@github.com/org/repo")
+	require.NoError(t, err)
 
-	out := captureStdout(t, func() {
-		_, err := exec.Execute(context.Background(), "git", "clone", "https://x-access-token:"+secret+"@github.com/org/repo")
-		require.NoError(t, err)
-	})
-
-	assert.Contains(t, out, "Would run:", "verbose dry-run should log the command")
+	out := buf.String()
+	assert.Contains(t, out, "Would run:", "dry-run should log the command")
 	assert.NotContains(t, out, secret, "registered secret must be redacted from verbose output")
 	assert.Contains(t, out, "***", "redaction marker expected")
 }

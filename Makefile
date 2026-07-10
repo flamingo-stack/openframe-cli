@@ -45,10 +45,12 @@ lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed: https://golangci-lint.run/usage/install/"; exit 1; }
 	@golangci-lint run ./...
 
-## Run integration tests
+## Run integration tests (opt-in via build tag: they create REAL k3d clusters
+## and run a full bootstrap — `go test ./...` must never trigger that by
+## accident; requires the CLI binary from `make build`)
 test-integration:
-	@echo "Running integration tests..."
-	@go test ./tests/integration/...
+	@echo "Running integration tests (real clusters!)..."
+	@go test -tags integration -count=1 ./tests/integration/...
 
 ## Run all tests
 test: test-unit test-integration
