@@ -65,23 +65,8 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - cluster might still work if limits are already sufficient
 	}
 
-	// On Windows/WSL2, get the WSL internal IP before creating the cluster
-	// to include it as a TLS SAN in the k3s certificate
-	var wslInternalIP string
-	if runtime.GOOS == "windows" {
-		var err error
-		wslInternalIP, err = m.getWSLInternalIP(ctx)
-		if err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Could not get WSL internal IP for TLS SAN: %v\n", err)
-			}
-			// Continue without the extra SAN - the insecure TLS config will still work
-		} else if m.verbose {
-			fmt.Printf("✓ Retrieved WSL internal IP for TLS SAN: %s\n", wslInternalIP)
-		}
-	}
-
-	configFile, err := m.createK3dConfigFile(config, wslInternalIP)
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
+	configFile, err := m.createK3dConfigFile(config)
 	if err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create config file: %w", err))
 	}
@@ -109,21 +94,10 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
-	// Convert Windows path to WSL path if running on Windows
-	configFilePath := configFile
-	if runtime.GOOS == "windows" {
-		configFilePath, err = m.convertWindowsPathToWSL(configFile)
-		if err != nil {
-			return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to convert config file path for WSL: %w", err))
-		}
-		if m.verbose {
-			fmt.Printf("DEBUG: Converted Windows path '%s' to WSL path '%s'\n", configFile, configFilePath)
-		}
-	}
-
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
 	args := []string{
 		"cluster", "create",
-		"--config", configFilePath,
+		"--config", configFile,
 		"--timeout", m.timeout,
 		"--kubeconfig-update-default", // Update default kubeconfig with new cluster context
 		"--kubeconfig-switch-context", // Automatically switch to new cluster context
@@ -154,15 +128,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 		// Don't fail - this is not critical
 	}
 
-	// On Windows, rewrite the kubeconfig server address to use the WSL internal IP
-	// This is necessary for helm (running inside Ubuntu WSL) to reach the k3d cluster
-	if err := m.rewriteWSLKubeconfigServerAddress(ctx, config.Name); err != nil {
-		if m.verbose {
-			fmt.Printf("Warning: Could not rewrite kubeconfig server address: %v\n", err)
-		}
-		// Don't fail - helm might still work if the network is configured correctly
-	}
-
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
 	// Verify the cluster is reachable and get the rest.Config via the native
 	// client (client-go). This is the sole verification — the previous best-effort
 	// kubectl double-check was removed with the kubectl migration.
@@ -184,11 +150,9 @@ func (m *K3dManager) GetRestConfig(ctx context.Context, clusterName string) (*re
 func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
 	// Validate at this domain boundary, not just at `cluster create`/`bootstrap`:
 	// `cluster delete <name> --force` skips both the existence check and any
-	// command-layer validation, and its Docker fallback interpolates the name
-	// into a `bash -c` string on the WSL path — a name like `x'; whoami; '`
-	// would break out of the single-quoted filter and run as sudo inside WSL.
-	// ValidateClusterName restricts names to [a-zA-Z0-9-], which has no shell
-	// metacharacters.
+	// command-layer validation, and the name then flows into the Docker cleanup
+	// fallback. ValidateClusterName restricts names to [a-zA-Z0-9-] (no shell
+	// metacharacters) as defense in depth against a name reaching a shell.
 	if err := models.ValidateClusterName(name); err != nil {
 		return models.NewInvalidConfigError("name", name, err.Error())
 	}
@@ -211,9 +175,10 @@ func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType
 
 	_, err := m.executor.ExecuteWithOptions(ctx, options)
 	if err != nil {
-		// On Windows/WSL or when force is set, fall back to direct Docker cleanup
-		// This handles WSL networking issues that can cause k3d to hang or fail
-		if runtime.GOOS == "windows" || force {
+		// When force is set, fall back to direct Docker cleanup.
+		// This handles networking issues that can cause k3d to hang or fail.
+		// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
+		if force {
 			if m.verbose {
 				fmt.Printf("k3d delete failed, attempting direct Docker cleanup for cluster %s: %v\n", name, err)
 			}
@@ -234,51 +199,17 @@ func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType
 }
 
 // forceCleanupDockerContainers removes all Docker containers associated with a k3d cluster
-// This is a fallback mechanism when k3d cluster delete fails (e.g., due to WSL networking issues)
+// This is a fallback mechanism when k3d cluster delete fails.
+//
+// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
 func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterName string) error {
-	if runtime.GOOS == "windows" {
-		return m.forceCleanupDockerContainersWSL(ctx, clusterName)
-	}
-	return m.forceCleanupDockerContainersDirect(ctx, clusterName)
-}
-
-// forceCleanupDockerContainersWSL removes k3d containers via WSL on Windows
-func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, clusterName string) error {
-	// Defense in depth: this is the one place a cluster name reaches a shell
-	// (`bash -c` as sudo inside WSL). Callers validate, but re-check here so a
-	// future caller cannot introduce an injection. See DeleteCluster.
+	// Defense in depth: the cluster name is interpolated into Docker arguments
+	// here. Callers validate, but re-check so a future caller cannot introduce
+	// an injection. See DeleteCluster.
 	if err := models.ValidateClusterName(clusterName); err != nil {
 		return models.NewInvalidConfigError("name", clusterName, err.Error())
 	}
 
-	username, err := m.getWSLUser(ctx)
-	if err != nil {
-		username = "runner" // fallback to runner
-	}
-
-	// Select containers by the k3d.cluster label (exact match). A name= filter
-	// is an unanchored regex: deleting cluster "dev" would also match the
-	// containers of "dev-2", "dev-old", ... (T0-2).
-	cleanupCmd := fmt.Sprintf(
-		"sudo docker ps -aq --filter 'label=k3d.cluster=%s' | xargs -r sudo docker rm -f 2>/dev/null || true",
-		clusterName,
-	)
-	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
-	if err != nil {
-		return fmt.Errorf("failed to cleanup containers via WSL: %w", err)
-	}
-
-	// Also remove the network
-	networkCleanupCmd := fmt.Sprintf("sudo docker network rm k3d-%s 2>/dev/null || true", clusterName)
-	if _, nerr := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", networkCleanupCmd); nerr != nil && m.verbose {
-		fmt.Printf("Warning: failed to remove k3d network for %s: %v\n", clusterName, nerr)
-	}
-
-	return nil
-}
-
-// forceCleanupDockerContainersDirect removes k3d containers directly (non-Windows)
-func (m *K3dManager) forceCleanupDockerContainersDirect(ctx context.Context, clusterName string) error {
 	// Select containers by the k3d.cluster label (exact match). A name= filter
 	// is an unanchored regex: deleting cluster "dev" would also match the
 	// containers of "dev-2", "dev-old", ... (T0-2).
@@ -455,8 +386,7 @@ func (m *K3dManager) validateClusterConfig(config models.ClusterConfig) error {
 }
 
 // createK3dConfigFile creates a k3d config file
-// wslInternalIP is optional - if provided, it will be added as a TLS SAN for the k3s API server certificate
-func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig, wslInternalIP string) (string, error) {
+func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig) (string, error) {
 	image := defaultK3sImage
 	if runtime.GOARCH == "arm64" {
 		image = defaultK3sImage
@@ -488,25 +418,9 @@ image: %s`, config.Name, servers, agents, image)
 	httpPort := strconv.Itoa(ports.HTTP)
 	httpsPort := strconv.Itoa(ports.HTTPS)
 
-	// On Windows/WSL2, bind to 0.0.0.0 so the API is accessible via the WSL eth0 IP
-	// Docker runs inside WSL2 Ubuntu, and binding to 0.0.0.0 makes the API accessible:
-	// - From within WSL via 127.0.0.1 (for kubectl/helm running in WSL)
-	// - From Windows via WSL's eth0 IP (for the Go client running on Windows)
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher),
+	// so the API always binds to the loopback address.
 	hostIP := "127.0.0.1"
-	if runtime.GOOS == "windows" {
-		hostIP = "0.0.0.0"
-	}
-
-	// Build TLS SAN argument if WSL internal IP is provided
-	// This ensures the k3s API server certificate includes the WSL internal IP,
-	// allowing kubectl/helm to connect via the WSL network without TLS errors
-	tlsSanArg := ""
-	if wslInternalIP != "" {
-		tlsSanArg = fmt.Sprintf(`
-      - arg: --tls-san=%s
-        nodeFilters:
-          - server:*`, wslInternalIP)
-	}
 
 	configContent += fmt.Sprintf(`
 kubeAPI:
@@ -524,14 +438,14 @@ options:
           - all
       - arg: --kubelet-arg=eviction-soft=
         nodeFilters:
-          - all%s
+          - all
 ports:
   - port: %s:80
     nodeFilters:
       - loadbalancer
   - port: %s:443
     nodeFilters:
-      - loadbalancer`, hostIP, hostIP, apiPort, tlsSanArg, httpPort, httpsPort)
+      - loadbalancer`, hostIP, hostIP, apiPort, httpPort, httpsPort)
 
 	tmpFile, err := os.CreateTemp("", "k3d-config-*.yaml")
 	if err != nil {

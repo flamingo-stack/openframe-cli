@@ -30,8 +30,12 @@ const (
 	distroEnv = "OPENFRAME_WSL_DISTRO"
 	// BinaryInWSL is the OpenFrame executable name expected on the PATH in WSL.
 	BinaryInWSL = "openframe"
-	// disableEnv, when set, bypasses forwarding and runs natively on Windows
-	// (unsupported; provided as a debugging escape hatch).
+	// disableEnv, when set, bypasses forwarding and runs the CLI natively on
+	// Windows. UNSUPPORTED, and not merely "untested": the cluster (Docker +
+	// k3d) lives inside WSL, and the native code paths that used to reach it
+	// from the outside were removed as dead. Read-only commands (--help,
+	// --version, completion) work; anything touching a cluster will fail with
+	// a platform error. It exists only to debug the launcher itself.
 	disableEnv = "OPENFRAME_NO_WSL_FORWARD"
 )
 

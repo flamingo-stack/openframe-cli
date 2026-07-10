@@ -149,7 +149,6 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 		}
 		os.Exit(code)
 	}
-
 	rootCmd := GetRootCmd(versionInfo)
 
 	// Initialize configuration using service layer

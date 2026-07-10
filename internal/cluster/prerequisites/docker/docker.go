@@ -6,11 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
-	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
 )
 
 type DockerInstaller struct{}
@@ -20,21 +18,19 @@ func commandExists(cmd string) bool {
 	return err == nil
 }
 
+// isDockerInstalled reports whether the docker CLI is present.
+//
+// No Windows branch: on Windows the root command forwards the whole CLI into
+// WSL before any command runs, so this code only executes as a Linux process
+// (see wsllauncher). The old branch probed WSL from the outside and hardcoded
+// the "Ubuntu" distro, contradicting the distro-agnostic launcher.
 func isDockerInstalled() bool {
-	// On Windows, check if Docker is installed in WSL2
-	if runtime.GOOS == "windows" {
-		return wsllauncher.CommandAvailable("docker")
-	}
-	// Just check if docker command exists, don't try to connect to daemon
 	return commandExists("docker")
 }
 
+// IsDockerRunning reports whether the docker daemon answers. See
+// isDockerInstalled for why there is no Windows branch.
 func IsDockerRunning() bool {
-	// On Windows, check Docker in WSL2 directly
-	if runtime.GOOS == "windows" {
-		return isDockerRunningWSL()
-	}
-
 	if !commandExists("docker") {
 		return false
 	}
@@ -46,19 +42,6 @@ func IsDockerRunning() bool {
 	return err == nil
 }
 
-// isDockerRunningWSL checks if Docker is running in WSL2 on Windows
-func isDockerRunningWSL() bool {
-	// First check that Docker is available inside WSL (bounded by a timeout).
-	if !wsllauncher.CommandAvailable("docker") {
-		return false
-	}
-
-	// Check if Docker daemon is running in WSL2
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps > /dev/null 2>&1")
-	return cmd.Run() == nil
-}
 
 func dockerInstallHelp() string {
 	return platform.InstallHint("docker")
@@ -330,7 +313,9 @@ func StartDocker() error {
 	case "linux":
 		return startDockerLinux()
 	case "windows":
-		return startDockerWindows()
+		// Unreachable in the supported flow (the CLI runs inside WSL as linux);
+		// the previous WSL-from-Windows starter hardcoded the Ubuntu distro.
+		return fmt.Errorf("starting Docker from the native Windows launcher is not supported — run openframe inside WSL")
 	default:
 		return fmt.Errorf("starting Docker is not supported on %s", runtime.GOOS)
 	}
@@ -387,70 +372,7 @@ func startDockerLinux() error {
 	return fmt.Errorf("unable to start Docker daemon: no supported init system found")
 }
 
-func startDockerWindows() error {
-	// First, try to start Docker CE in WSL2 (our preferred setup)
-	if err := startDockerInWSL(); err == nil {
-		return nil
-	}
 
-	// Fallback: Try to start Docker Desktop on Windows
-	cmd := exec.Command("cmd", "/c", "start", "", "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe")
-	if err := cmd.Run(); err != nil {
-		// Try alternative path
-		cmd = exec.Command("powershell", "-Command", "Start-Process", "'Docker Desktop'")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to start Docker (tried WSL2 Docker CE and Docker Desktop): %w", err)
-		}
-	}
-	return nil
-}
-
-// startDockerInWSL starts Docker CE daemon inside WSL2 Ubuntu
-func startDockerInWSL() error {
-	// Check if Ubuntu WSL distribution exists
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "ok")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("no Ubuntu WSL distribution available: %w", err)
-	}
-
-	// Start Docker daemon using the start-docker.sh script or directly
-	startScript := `
-if [ -x /usr/local/bin/start-docker.sh ]; then
-    sudo /usr/local/bin/start-docker.sh
-else
-    if ! pgrep -x dockerd > /dev/null; then
-        sudo dockerd > /dev/null 2>&1 &
-    fi
-fi
-
-# Wait for Docker to be ready (up to 30 seconds)
-for i in $(seq 1 30); do
-    if sudo docker ps > /dev/null 2>&1; then
-        echo "docker_ready"
-        exit 0
-    fi
-    sleep 1
-done
-echo "docker_timeout"
-exit 1
-`
-
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-
-	cmd = exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", startScript)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to start Docker in WSL: %w", err)
-	}
-
-	result := strings.TrimSpace(string(output))
-	if result == "docker_timeout" {
-		return fmt.Errorf("timeout waiting for Docker to start in WSL")
-	}
-
-	return nil
-}
 
 // WaitForDocker waits for the Docker daemon to become available. The budget is
 // generous because a cold Docker Desktop start on macOS routinely exceeds the

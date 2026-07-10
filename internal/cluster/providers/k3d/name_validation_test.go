@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// injectionNames are cluster names carrying shell metacharacters. The WSL
-// force-delete fallback interpolates the name into a `bash -c` string executed
-// with sudo, so any of these must be rejected before a command runs.
+// injectionNames are cluster names carrying shell metacharacters. The
+// force-delete fallback is the one place a cluster name reaches a shell, so any
+// of these must be rejected before a command runs.
 var injectionNames = []string{
 	`dev'; whoami; '`,
 	`dev$(id)`,
@@ -46,15 +46,15 @@ func TestDeleteCluster_RejectsShellMetacharacters(t *testing.T) {
 	}
 }
 
-// TestForceCleanupWSL_RejectsShellMetacharacters guards the sink itself, so a
+// TestForceCleanup_RejectsShellMetacharacters guards the sink itself, so a
 // future caller that skips DeleteCluster cannot reintroduce the injection.
-func TestForceCleanupWSL_RejectsShellMetacharacters(t *testing.T) {
+func TestForceCleanup_RejectsShellMetacharacters(t *testing.T) {
 	for _, name := range injectionNames {
 		mock := executor.NewMockCommandExecutor()
 		m := NewK3dManager(mock, false)
 
-		err := m.forceCleanupDockerContainersWSL(context.Background(), name)
-		require.Errorf(t, err, "WSL cleanup must reject %q", name)
+		err := m.forceCleanupDockerContainers(context.Background(), name)
+		require.Errorf(t, err, "cleanup must reject %q", name)
 		assert.Zerof(t, mock.GetCommandCount(), "no shell command may run for %q", name)
 	}
 }

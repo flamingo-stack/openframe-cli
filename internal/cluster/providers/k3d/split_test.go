@@ -63,65 +63,6 @@ func TestGetUsedPortsByExistingClusters_ErrorsYieldEmpty(t *testing.T) {
 	})
 }
 
-// --- wsl.go: convertWindowsPathToWSL (expandShortPath is a no-op off Windows) ---
-
-func TestConvertWindowsPathToWSL(t *testing.T) {
-	m := NewK3dManager(executor.NewMockCommandExecutor(), false)
-
-	cases := []struct{ in, want string }{
-		{`C:\Users\foo\file.txt`, "/mnt/c/Users/foo/file.txt"},
-		{`D:\data`, "/mnt/d/data"},
-		{`relative\path`, "relative/path"}, // no drive letter → slashes only
-	}
-	for _, c := range cases {
-		got, err := m.convertWindowsPathToWSL(c.in)
-		if err != nil {
-			t.Fatalf("convertWindowsPathToWSL(%q): %v", c.in, err)
-		}
-		if got != c.want {
-			t.Errorf("convertWindowsPathToWSL(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-
-	if _, err := m.convertWindowsPathToWSL(""); err == nil {
-		t.Error("empty path must error")
-	}
-}
-
-// --- wsl.go: getWSLUser ---
-
-func TestGetWSLUser(t *testing.T) {
-	t.Run("runner user exists", func(t *testing.T) {
-		mock := executor.NewMockCommandExecutor()
-		mock.SetResponse("-u runner whoami", &executor.CommandResult{Stdout: "runner\n"})
-		got, err := NewK3dManager(mock, false).getWSLUser(context.Background())
-		if err != nil || got != "runner" {
-			t.Fatalf("got (%q, %v), want (runner, nil)", got, err)
-		}
-	})
-
-	t.Run("falls back to first home-dir user", func(t *testing.T) {
-		mock := executor.NewMockCommandExecutor()
-		mock.SetResponse("-u runner whoami", &executor.CommandResult{Stdout: ""}) // no runner
-		mock.SetResponse("getent passwd", &executor.CommandResult{Stdout: "ubuntu\n"})
-		mock.SetResponse("-u ubuntu whoami", &executor.CommandResult{Stdout: "ubuntu\n"})
-		got, err := NewK3dManager(mock, false).getWSLUser(context.Background())
-		if err != nil || got != "ubuntu" {
-			t.Fatalf("got (%q, %v), want (ubuntu, nil)", got, err)
-		}
-	})
-
-	t.Run("defaults to runner when detection fails", func(t *testing.T) {
-		mock := executor.NewMockCommandExecutor()
-		// Every probe returns empty output → no user detected → default "runner".
-		mock.SetDefaultResult(&executor.CommandResult{Stdout: ""})
-		got, err := NewK3dManager(mock, false).getWSLUser(context.Background())
-		if err != nil || got != "runner" {
-			t.Fatalf("got (%q, %v), want (runner, nil)", got, err)
-		}
-	})
-}
-
 // --- verify.go: waitForTCPPort ---
 
 func TestWaitForTCPPort(t *testing.T) {

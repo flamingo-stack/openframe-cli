@@ -6,8 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -26,100 +24,38 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 
 	var restConfig *rest.Config
 
-	// On Windows, load kubeconfig content directly from WSL into memory
-	// to avoid Windows filesystem path issues
-	if runtime.GOOS == "windows" {
-		// Retrieve kubeconfig content directly from k3d inside WSL
-		kubeconfigContent, err := m.getKubeconfigContentFromWSL(ctx, clusterName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve kubeconfig content from WSL: %w", err)
-		}
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher),
+	// so the file-based kubeconfig is always used.
+	kubeconfigPath := m.getKubeconfigPath()
 
-		// Load the content from string into memory
-		config, err := clientcmd.Load([]byte(kubeconfigContent))
-		if err != nil {
-			return nil, fmt.Errorf("failed to load kubeconfig content into memory: %w", err)
-		}
+	// Load the Kubeconfig file
+	config, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
+	}
 
-		// Use WSL's eth0 IP for the Go client running on Windows to reach k3d inside WSL2
-		// Docker runs inside WSL2 Ubuntu, so we need WSL's own IP (not the gateway).
-		// From Windows, we can reach WSL services via WSL's eth0 IP (e.g., 172.x.x.2).
-		wslIP, err := m.getWSLInternalIP(ctx)
-		if err != nil {
-			if m.verbose {
-				fmt.Printf("Warning: Could not get WSL IP: %v\n", err)
-				fmt.Println("Falling back to 127.0.0.1")
-			}
-			wslIP = "127.0.0.1" // Fallback
-		} else if m.verbose {
-			fmt.Printf("✓ Retrieved WSL IP for Go client: %s\n", wslIP)
-		}
+	// Check if the context exists
+	if _, exists := config.Contexts[contextName]; !exists {
+		return nil, fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
+	}
 
-		// Replace all server addresses with the WSL IP
-		for clusterName, cluster := range config.Clusters {
-			// Extract the port from the current server URL
-			re := regexp.MustCompile(`:(\d+)`)
-			match := re.FindStringSubmatch(cluster.Server)
+	// Switch the current context
+	config.CurrentContext = contextName
+	if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
+		return nil, fmt.Errorf("failed to switch and write kubectl context: %w", err)
+	}
 
-			if len(match) > 1 {
-				oldServer := cluster.Server
-				cluster.Server = fmt.Sprintf("https://%s:%s", wslIP, match[1])
-				if m.verbose {
-					fmt.Printf("Rewrote KubeAPI host for cluster %s: %s -> %s\n", clusterName, oldServer, cluster.Server)
-				}
-			}
-		}
+	if m.verbose {
+		fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
+	}
 
-		// Check if the context exists
-		if _, exists := config.Contexts[contextName]; !exists {
-			return nil, fmt.Errorf("kubectl context %s not found in kubeconfig content", contextName)
-		}
-
-		// Switch the current context in memory
-		config.CurrentContext = contextName
-
-		if m.verbose {
-			fmt.Printf("✓ Loaded kubeconfig from WSL and set context to %s\n", contextName)
-		}
-
-		// Build REST config from the in-memory kubeconfig
-		restConfig, err = clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build REST config from in-memory kubeconfig: %w", err)
-		}
-	} else {
-		// Non-Windows: use file-based kubeconfig
-		kubeconfigPath := m.getKubeconfigPath()
-
-		// Load the Kubeconfig file
-		config, err := clientcmd.LoadFromFile(kubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load kubeconfig file from %s: %w", kubeconfigPath, err)
-		}
-
-		// Check if the context exists
-		if _, exists := config.Contexts[contextName]; !exists {
-			return nil, fmt.Errorf("kubectl context %s not found in kubeconfig", contextName)
-		}
-
-		// Switch the current context
-		config.CurrentContext = contextName
-		if err := clientcmd.WriteToFile(*config, kubeconfigPath); err != nil {
-			return nil, fmt.Errorf("failed to switch and write kubectl context: %w", err)
-		}
-
-		if m.verbose {
-			fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
-		}
-
-		// Build rest.Config from the loaded Kubeconfig
-		restConfig, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-			&clientcmd.ConfigOverrides{CurrentContext: contextName},
-		).ClientConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build REST config: %w", err)
-		}
+	// Build rest.Config from the loaded Kubeconfig
+	restConfig, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+		&clientcmd.ConfigOverrides{CurrentContext: contextName},
+	).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build REST config: %w", err)
 	}
 
 	// CRITICAL FIX: Bypass TLS Verification for local k3d clusters
@@ -146,12 +82,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		port = "6550"
 	}
 
-	// Brief pause before TCP check on Windows/WSL2
-	// This gives the port mapping time to stabilize after k3d reports success
-	if runtime.GOOS == "windows" {
-		time.Sleep(500 * time.Millisecond)
-	}
-
+	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
 	// Wait for TCP port to be available before attempting API calls
 	// This prevents flooding a dead port with requests on Windows/WSL2
 	tcpRetries := 10
@@ -328,128 +259,19 @@ func (m *K3dManager) getKubeconfigPath() string {
 	return filepath.Join(homeDir, ".kube", "config")
 }
 
-// getKubeconfigContentFromWSL fetches kubeconfig content directly from k3d inside WSL
-// This avoids Windows filesystem path issues by loading content into memory
-func (m *K3dManager) getKubeconfigContentFromWSL(ctx context.Context, clusterName string) (string, error) {
-	args := []string{"kubeconfig", "get", clusterName}
-
-	// Execute the command - the executor will automatically wrap with 'wsl -d Ubuntu k3d ...'
-	result, err := m.executor.Execute(ctx, "k3d", args...)
-	if err != nil {
-		return "", fmt.Errorf("failed to get kubeconfig content from k3d: %w", err)
-	}
-
-	return result.Stdout, nil
-}
-
-// getWSLInternalIP retrieves the WSL2 VM's own IP address (eth0 interface).
-// This is the IP that Windows can use to reach services running inside WSL2.
-// Docker runs inside WSL2 Ubuntu, and ports exposed by Docker are accessible
-// via this IP from Windows.
+// cleanupStaleLockFiles removes any stale kubeconfig lock files.
 //
-// Note: This is different from the Windows host IP (default gateway from WSL's perspective).
-// - WSL eth0 IP (e.g., 172.x.x.2): WSL's own IP, reachable from Windows
-// - Windows host IP (e.g., 172.x.x.1): The gateway, used by WSL to reach Windows
-func (m *K3dManager) getWSLInternalIP(ctx context.Context) (string, error) {
-	// Get the WSL user for running the command
-	username, err := m.getWSLUser(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to get WSL user: %w", err)
-	}
-
-	// Get WSL's own IP address (eth0 interface)
-	// This is the IP that Windows can use to reach services in WSL2
-	// The 'hostname -I' command returns all IP addresses, we take the first one (usually eth0)
-	ipCmd := "hostname -I | awk '{print $1}'"
-	result, err := m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", ipCmd)
-	if err != nil {
-		return "", fmt.Errorf("failed to get WSL IP address: %w", err)
-	}
-
-	ip := strings.TrimSpace(result.Stdout)
-
-	// Fallback: try getting eth0 IP directly
-	if ip == "" {
-		ipCmd = "ip addr show eth0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1"
-		result, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", ipCmd)
-		if err != nil {
-			return "", fmt.Errorf("failed to get WSL eth0 IP: %w", err)
-		}
-		ip = strings.TrimSpace(result.Stdout)
-	}
-
-	if ip == "" {
-		return "", fmt.Errorf("WSL IP address is empty - could not determine from hostname or eth0")
-	}
-
-	// Validate that it's a proper IPv4 address using net.ParseIP
-	if net.ParseIP(ip) == nil {
-		return "", fmt.Errorf("invalid WSL IP format: %s", ip)
-	}
-
-	return ip, nil
-}
-
-// cleanupStaleLockFiles removes any stale kubeconfig lock files
+// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
 func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
-	if runtime.GOOS == "windows" {
-		// Get the WSL user
-		username, err := m.getWSLUser(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get WSL user: %w", err)
-		}
-
-		// Remove lock files in WSL
-		cleanupCmd := "rm -f ~/.kube/config.lock ~/.kube/config.lock.* 2>/dev/null || true"
-		_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", cleanupCmd)
-		if err != nil {
-			return fmt.Errorf("failed to cleanup lock files: %w", err)
-		}
-	} else {
-		// Linux/macOS: Remove lock files
-		cleanupCmd := "rm -f ~/.kube/config.lock ~/.kube/config.lock.* 2>/dev/null || true"
-		_, err := m.executor.Execute(ctx, "bash", "-c", cleanupCmd)
-		if err != nil {
-			return fmt.Errorf("failed to cleanup lock files: %w", err)
-		}
+	// Linux/macOS: Remove lock files
+	cleanupCmd := "rm -f ~/.kube/config.lock ~/.kube/config.lock.* 2>/dev/null || true"
+	_, err := m.executor.Execute(ctx, "bash", "-c", cleanupCmd)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup lock files: %w", err)
 	}
 
 	if m.verbose {
 		fmt.Println("✓ Cleaned up stale kubeconfig lock files")
-	}
-
-	return nil
-}
-
-// rewriteWSLKubeconfigServerAddress rewrites the kubeconfig file in WSL to use 127.0.0.1
-// instead of 0.0.0.0. This is necessary because:
-// - k3d writes 0.0.0.0 as the server address which doesn't work for connections
-// - Docker runs INSIDE WSL2 Ubuntu (not Docker Desktop), so k3d is in the same network namespace
-// - From Ubuntu WSL, 127.0.0.1 refers to the WSL loopback where Docker/k3d is listening
-// - We only need to rewrite 0.0.0.0 to 127.0.0.1
-func (m *K3dManager) rewriteWSLKubeconfigServerAddress(ctx context.Context, _ string) error {
-	// Only needed on Windows where helm runs inside WSL
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-
-	// Get the WSL user
-	username, err := m.getWSLUser(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get WSL user: %w", err)
-	}
-
-	// Use sed to replace 0.0.0.0 with 127.0.0.1
-	// Docker runs inside WSL2 Ubuntu, so localhost (127.0.0.1) is the correct address
-	sedCmd := `sed -i 's|server: https://0\.0\.0\.0:|server: https://127.0.0.1:|g' ~/.kube/config`
-
-	_, err = m.executor.Execute(ctx, "wsl", "-d", "Ubuntu", "-u", username, "bash", "-c", sedCmd)
-	if err != nil {
-		return fmt.Errorf("failed to rewrite kubeconfig server address: %w", err)
-	}
-
-	if m.verbose {
-		fmt.Println("✓ Rewrote kubeconfig server addresses to use 127.0.0.1")
 	}
 
 	return nil
