@@ -297,11 +297,13 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 		result.AddFailure("Kubernetes namespaces", err)
 	}
 
-	// 5. Clean up Docker images and containers in the cluster
-	pruned, err := s.cleanupDockerResources(ctx, clusterName, verbose, force)
+	// 5. Reclaim disk by pruning unused container images inside each node.
+	// Not gated on force: removing images no container references is safe, and
+	// reclaiming disk is the whole point of `cluster cleanup`.
+	pruned, err := s.cleanupNodeImages(ctx, clusterName, verbose)
 	result.NodesPruned = pruned
 	if err != nil {
-		result.AddFailure("Docker resources", err)
+		result.AddFailure("Container images", err)
 	}
 
 	if verbose {
@@ -473,12 +475,28 @@ func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, cluster
 	return deleted, nil
 }
 
-// cleanupDockerResources cleans up Docker images and containers in the k3d
-// cluster. It returns the number of nodes pruned without error. A node whose
-// discovery or prune fails is reported, not silently counted as cleaned.
-func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName string, verbose bool, force bool) (int, error) {
+// cleanupNodeImages reclaims disk by removing unused container images inside
+// each k3d node. It returns the number of nodes pruned without error.
+//
+// The nodes run CONTAINERD, not Docker. They are `rancher/k3s` containers, and
+// that image ships no docker binary at all — so the previous implementation,
+// which ran `docker exec <node> docker image|container|volume|network|system
+// prune`, failed with exit 127 ("docker": executable file not found in $PATH)
+// on every node, for every prune, on every cleanup. Every error was swallowed,
+// so `cluster cleanup` reported success and reclaimed nothing, ever.
+//
+// crictl is the CRI client k3s provides: /bin/crictl is a symlink to the k3s
+// multi-call binary, so it is always present in a k3d node (verified against
+// rancher/k3s:v1.35.5-k3s1). `crictl rmi --prune` removes every image not
+// referenced by a container.
+//
+// There is deliberately no container/volume/network/builder prune: those are
+// Docker concepts with no containerd equivalent inside the node. Stopped pods
+// are the kubelet's business, and the node's volumes and networks belong to the
+// Docker daemon on the host, not to anything running inside the node.
+func (s *ClusterService) cleanupNodeImages(ctx context.Context, clusterName string, verbose bool) (int, error) {
 	if verbose {
-		pterm.Info.Printf("Cleaning up Docker resources for cluster: %s\n", clusterName)
+		pterm.Info.Printf("Reclaiming unused container images for cluster: %s\n", clusterName)
 	}
 
 	// Dynamically discover all k3d nodes for this cluster
@@ -499,49 +517,29 @@ func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName
 		pterm.Info.Printf("Found %d k3d nodes for cluster %s\n", len(nodeNames), clusterName)
 	}
 
-	// Each entry is one `docker exec <node> docker ...` prune. force adds the
-	// build cache, which is the expensive one.
-	prunes := [][]string{
-		{"image", "prune", "-f", "--all"},
-		{"container", "prune", "-f"},
-		{"volume", "prune", "-f"},
-		{"network", "prune", "-f"},
-		{"system", "prune", "-f"},
-	}
-	if force {
-		prunes = append(prunes, []string{"builder", "prune", "-f", "--all"})
-	}
-
 	var pruned int
 	var failed []string
 	for _, nodeName := range nodeNames {
 		if verbose {
-			pterm.Info.Printf("Cleaning up Docker resources in node: %s\n", nodeName)
+			pterm.Info.Printf("Pruning unused images in node: %s\n", nodeName)
 		}
 
-		nodeOK := true
-		for _, prune := range prunes {
-			args := append([]string{"exec", nodeName, "docker"}, prune...)
-			if _, err := s.executor.Execute(ctx, "docker", args...); err != nil {
-				nodeOK = false
-				if verbose {
-					pterm.Warning.Printf("Failed to %s in node %s: %v\n", strings.Join(prune[:2], " "), nodeName, err)
-				}
-			}
-		}
-		if nodeOK {
-			pruned++
-		} else {
+		if _, err := s.executor.Execute(ctx, "docker", "exec", nodeName, "crictl", "rmi", "--prune"); err != nil {
 			failed = append(failed, nodeName)
+			if verbose {
+				pterm.Warning.Printf("Failed to prune images in node %s: %v\n", nodeName, err)
+			}
+			continue
 		}
+		pruned++
 	}
 
 	if verbose {
-		pterm.Success.Printf("Docker cleanup completed for cluster: %s\n", clusterName)
+		pterm.Success.Printf("Image cleanup completed for cluster: %s\n", clusterName)
 	}
 
 	if len(failed) > 0 {
-		return pruned, fmt.Errorf("prune incomplete on node(s): %s", strings.Join(failed, ", "))
+		return pruned, fmt.Errorf("image prune failed on node(s): %s", strings.Join(failed, ", "))
 	}
 	return pruned, nil
 }

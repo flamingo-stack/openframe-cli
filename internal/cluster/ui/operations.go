@@ -253,7 +253,7 @@ func (ui *OperationsUI) ShowCleanupSummary(clusterName string, result models.Cle
 			{result.FinalizersCleared, "stuck application finalizer(s) cleared"},
 			{result.ReleasesRemoved, "Helm release(s)"},
 			{result.NamespacesDeleted, "namespace(s)"},
-			{result.NodesPruned, "node(s) pruned (images, containers, volumes, networks)"},
+			{result.NodesPruned, "node(s) pruned of unused container images"},
 		} {
 			if line.n > 0 {
 				pterm.DefaultBasicText.Printf("  %d %s\n", line.n, line.label)
