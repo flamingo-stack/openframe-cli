@@ -70,7 +70,7 @@ func TestCleanup_ApplicationPhasesBracketTheHelmUninstall(t *testing.T) {
 	cleaner := &recordingCleaner{trace: &trace, deleted: 3, cleared: 2}
 
 	service := NewClusterService(exec).WithApplicationCleaner(cleaner)
-	_ = service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
+	_, _ = service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
 
 	require.GreaterOrEqual(t, len(trace), 3, "trace: %v", trace)
 	assert.Equal(t, "delete-applications", trace[0], "applications must be deleted first: %v", trace)
@@ -103,7 +103,8 @@ func TestCleanup_WithoutCleanerStillRuns(t *testing.T) {
 	exec := newTracingExecutor(&trace)
 
 	service := NewClusterService(exec) // no cleaner injected
-	require.NoError(t, service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false))
+	_, err := service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
+	require.NoError(t, err)
 	assert.Contains(t, trace, "helm-uninstall", "helm phase must still run: %v", trace)
 	assert.NotContains(t, trace, "delete-applications")
 	assert.NotContains(t, trace, "clear-finalizers")
@@ -122,7 +123,8 @@ func TestCleanup_CleanerErrorsAreNonFatal(t *testing.T) {
 	}
 
 	service := NewClusterService(exec).WithApplicationCleaner(cleaner)
-	require.NoError(t, service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false),
+	_, err := service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
+	require.NoError(t, err,
 		"cleaner failures must not fail the cleanup")
 	assert.Contains(t, trace, "helm-uninstall", "helm phase must still run after a cleaner error: %v", trace)
 	assert.Equal(t, 1, cleaner.clearCall, "the finalizer phase must run even if the delete phase failed")

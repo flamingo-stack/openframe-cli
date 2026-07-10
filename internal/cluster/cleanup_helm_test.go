@@ -47,7 +47,7 @@ func TestCleanupHelmReleases_PinsKubeContext(t *testing.T) {
 	})
 	service := NewClusterService(mock)
 
-	err := service.cleanupHelmReleases(context.Background(), "k3d-test-cluster", false, false)
+	_, err := service.cleanupHelmReleases(context.Background(), "k3d-test-cluster", false, false)
 	require.NoError(t, err)
 
 	argvs := helmArgvsOf(mock)
@@ -88,7 +88,8 @@ func TestCleanupHelmReleases_ForceAddsIgnoreNotFound(t *testing.T) {
 	})
 	service := NewClusterService(mock)
 
-	require.NoError(t, service.cleanupHelmReleases(context.Background(), "k3d-x", false, true))
+	_, err := service.cleanupHelmReleases(context.Background(), "k3d-x", false, true)
+	require.NoError(t, err)
 
 	found := false
 	for _, argv := range helmArgvsOf(mock) {
@@ -108,7 +109,8 @@ func TestCleanupHelmReleases_EmptyList(t *testing.T) {
 			mock.SetResponse("helm list", &executor.CommandResult{ExitCode: 0, Stdout: stdout, Duration: time.Millisecond})
 			service := NewClusterService(mock)
 
-			require.NoError(t, service.cleanupHelmReleases(context.Background(), "k3d-x", false, false))
+			_, err := service.cleanupHelmReleases(context.Background(), "k3d-x", false, false)
+			require.NoError(t, err)
 			for _, argv := range helmArgvsOf(mock) {
 				assert.NotEqual(t, "uninstall", argv[0], "no uninstall may run for an empty release list")
 			}
@@ -122,7 +124,7 @@ func TestCleanupHelmReleases_RefusesWithoutContext(t *testing.T) {
 	mock := executor.NewMockCommandExecutor()
 	service := NewClusterService(mock)
 
-	err := service.cleanupHelmReleases(context.Background(), "", false, false)
+	_, err := service.cleanupHelmReleases(context.Background(), "", false, false)
 	require.Error(t, err)
 	assert.Zero(t, mock.GetCommandCount(), "no command may run without an explicit kube-context")
 }
@@ -135,7 +137,7 @@ func TestCleanupHelmReleases_GarbageOutputErrors(t *testing.T) {
 	mock.SetResponse("helm list", &executor.CommandResult{ExitCode: 0, Stdout: "not json", Duration: time.Millisecond})
 	service := NewClusterService(mock)
 
-	err := service.cleanupHelmReleases(context.Background(), "k3d-x", false, false)
+	_, err := service.cleanupHelmReleases(context.Background(), "k3d-x", false, false)
 	require.Error(t, err)
 	for _, argv := range helmArgvsOf(mock) {
 		assert.NotEqual(t, "uninstall", argv[0], "no uninstall may run on unparseable output")
@@ -151,7 +153,7 @@ func TestCleanupCluster_HelmPhasePinsKubeContext(t *testing.T) {
 	service := NewClusterService(mock)
 
 	// K8s/Docker phases run against the mock too and are allowed to no-op/fail.
-	_ = service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
+	_, _ = service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
 
 	argvs := helmArgvsOf(mock)
 	require.NotEmpty(t, argvs, "cleanup must reach the helm phase")

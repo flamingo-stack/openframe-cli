@@ -93,14 +93,14 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 		pterm.Warning.Printf("Cluster not reachable for ArgoCD cleanup: %v\n", cerr)
 	}
 
-	// Execute cluster cleanup through service layer
-	err = service.CleanupCluster(cmd.Context(), clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose, utils.GetGlobalFlags().Cleanup.Force)
+	// Execute cluster cleanup through service layer. A nil error with failed
+	// phases is a partial cleanup: the summary names what was left behind.
+	result, err := service.CleanupCluster(cmd.Context(), clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose, utils.GetGlobalFlags().Cleanup.Force)
 	if err != nil {
 		operationsUI.ShowOperationError("cleanup", clusterName, err)
 		return err
 	}
 
-	// Show friendly success message
-	operationsUI.ShowOperationSuccess("cleanup", clusterName)
+	operationsUI.ShowCleanupSummary(clusterName, result)
 	return nil
 }

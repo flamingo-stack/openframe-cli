@@ -194,6 +194,12 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 	}
 }
 
+// metadataCmd is the argv GetChartStatus issues. `helm get metadata` is used
+// instead of `helm status` because status's JSON carries no chart version, and
+// its top-level "version" field is the release REVISION — verified against helm
+// v4.2.2 on a live release.
+const metadataCmd = "helm get metadata argocd -n argocd --output json"
+
 func TestHelmManager_GetChartStatus(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -201,25 +207,56 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 		namespace   string
 		setupMock   func(*MockExecutor)
 		expectError bool
+		wantStatus  string
+		wantVersion string
+		wantApp     string
 	}{
 		{
 			name:        "successful status retrieval",
 			releaseName: "argocd",
 			namespace:   "argocd",
 			setupMock: func(m *MockExecutor) {
-				m.SetResult("helm status argocd -n argocd --output json", &executor.CommandResult{
+				m.SetResult(metadataCmd, &executor.CommandResult{
 					ExitCode: 0,
-					Stdout:   `{"name":"argocd","namespace":"argocd","info":{"status":"deployed"}}`,
+					Stdout:   `{"name":"argocd","namespace":"argocd","status":"deployed","version":"7.7.5","appVersion":"v2.13.0","revision":3}`,
 				})
 			},
-			expectError: false,
+			wantStatus:  "deployed",
+			wantVersion: "7.7.5",
+			wantApp:     "v2.13.0",
+		},
+		{
+			// The point of M2.4: the method used to return a literal
+			// "deployed"/"1.0.0" regardless of what helm reported, so a broken
+			// release looked healthy and every chart claimed version 1.0.0.
+			name:        "a failed release is reported as failed",
+			releaseName: "argocd",
+			namespace:   "argocd",
+			setupMock: func(m *MockExecutor) {
+				m.SetResult(metadataCmd, &executor.CommandResult{
+					ExitCode: 0,
+					Stdout:   `{"name":"argocd","namespace":"argocd","status":"failed","version":"7.7.5","appVersion":"v2.13.0"}`,
+				})
+			},
+			wantStatus:  "failed",
+			wantVersion: "7.7.5",
+			wantApp:     "v2.13.0",
 		},
 		{
 			name:        "status command fails",
 			releaseName: "argocd",
 			namespace:   "argocd",
 			setupMock: func(m *MockExecutor) {
-				m.SetError("helm status argocd -n argocd --output json", assert.AnError)
+				m.SetError(metadataCmd, assert.AnError)
+			},
+			expectError: true,
+		},
+		{
+			name:        "unparseable output is an error, not a fabricated status",
+			releaseName: "argocd",
+			namespace:   "argocd",
+			setupMock: func(m *MockExecutor) {
+				m.SetResult(metadataCmd, &executor.CommandResult{ExitCode: 0, Stdout: `not json`})
 			},
 			expectError: true,
 		},
@@ -239,7 +276,9 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.releaseName, info.Name)
 				assert.Equal(t, tt.namespace, info.Namespace)
-				assert.Equal(t, "deployed", info.Status)
+				assert.Equal(t, tt.wantStatus, info.Status)
+				assert.Equal(t, tt.wantVersion, info.Version, "the chart version must come from helm, not a constant")
+				assert.Equal(t, tt.wantApp, info.AppVersion)
 			}
 		})
 	}

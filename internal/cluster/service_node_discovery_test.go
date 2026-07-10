@@ -247,7 +247,7 @@ func TestClusterService_cleanupDockerResources_Integration(t *testing.T) {
 
 	service := NewClusterService(mockExec)
 
-	err := service.cleanupDockerResources(context.Background(), "test-cluster", true, false)
+	_, err := service.cleanupDockerResources(context.Background(), "test-cluster", true, false)
 
 	require.NoError(t, err, "cleanupDockerResources should succeed")
 

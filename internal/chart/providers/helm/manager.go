@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"os"
@@ -606,26 +607,48 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 	return nil
 }
 
-// GetChartStatus returns the status of a chart
-func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error) {
-	args := []string{"status", releaseName, "-n", namespace, "--output", "json"}
+// helmMetadata is the subset of `helm get metadata --output json` we consume.
+type helmMetadata struct {
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+	Status     string `json:"status"`
+	Version    string `json:"version"`    // chart version, e.g. "0.1.0"
+	AppVersion string `json:"appVersion"` // packaged app version, e.g. "1.16.0"
+}
 
-	_, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+// GetChartStatus returns the real status of a release.
+//
+// It used to run `helm status --output json`, discard the output, and return a
+// literal {Status: "deployed", Version: "1.0.0"} — so a failed release reported
+// itself as deployed, and every chart reported version 1.0.0.
+//
+// `helm get metadata` is used rather than `helm status` because status's JSON
+// carries no chart version at all, and its top-level "version" field is the
+// RELEASE REVISION (1, 2, 3...), not the chart version. Parsing that would have
+// swapped one wrong answer for another.
+func (h *HelmManager) GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error) {
+	args := []string{"get", "metadata", releaseName, "-n", namespace, "--output", "json"}
+
+	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
 		Args:    args,
 		Env:     h.getHelmEnv(),
 	})
 	if err != nil {
-		return models.ChartInfo{}, fmt.Errorf("failed to get chart status: %w", err)
+		return models.ChartInfo{}, fmt.Errorf("failed to get status of release %s in namespace %s: %w", releaseName, namespace, err)
 	}
 
-	// Parse JSON output and return chart info
-	// For now, return basic info
+	var meta helmMetadata
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &meta); err != nil {
+		return models.ChartInfo{}, fmt.Errorf("failed to parse `helm get metadata` output for release %s: %w", releaseName, err)
+	}
+
 	return models.ChartInfo{
-		Name:      releaseName,
-		Namespace: namespace,
-		Status:    "deployed", // Parse from JSON
-		Version:   "1.0.0",    // Parse from JSON
+		Name:       meta.Name,
+		Namespace:  meta.Namespace,
+		Status:     meta.Status,
+		Version:    meta.Version,
+		AppVersion: meta.AppVersion,
 	}, nil
 }
 

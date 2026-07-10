@@ -224,21 +224,29 @@ func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, err
 	return s.manager.DetectClusterType(ctx, name)
 }
 
-// CleanupCluster handles cluster cleanup business logic
-func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool, force bool) error {
+// CleanupCluster handles cluster cleanup business logic. The returned
+// CleanupResult reports what was actually removed and which phases failed; a
+// nil error with a non-empty Failures list is a partial cleanup.
+func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool, force bool) (models.CleanupResult, error) {
 	switch clusterType {
 	case models.ClusterTypeK3d:
 		return s.cleanupK3dCluster(ctx, name, verbose, force)
 	default:
-		return fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
+		return models.CleanupResult{}, fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
 	}
 }
 
-// cleanupK3dCluster handles K3d-specific cleanup
-func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool, force bool) error {
+// cleanupK3dCluster handles K3d-specific cleanup.
+//
+// Every phase is best-effort: a failure is recorded and the next phase still
+// runs, because a partly-installed cluster must remain tearable-down. Failures
+// are surfaced (not just under --verbose) so "cleanup completed" never hides a
+// phase that did nothing.
+func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool, force bool) (models.CleanupResult, error) {
 	if verbose {
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
+	var result models.CleanupResult
 
 	// 1. Delete the ArgoCD Applications WHILE the ArgoCD controller is still
 	// running, so it cascades the workload cleanup itself. Best-effort: a
@@ -246,10 +254,13 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 	if s.appCleaner != nil {
 		deleted, err := s.appCleaner.DeleteApplications(ctx)
 		switch {
-		case err != nil && verbose:
-			pterm.Warning.Printf("Failed to delete ArgoCD applications: %v\n", err)
-		case err == nil && deleted > 0 && verbose:
-			pterm.Info.Printf("Deleted %d ArgoCD application(s)\n", deleted)
+		case err != nil:
+			result.AddFailure("ArgoCD applications", err)
+		default:
+			result.ApplicationsDeleted = deleted
+			if deleted > 0 && verbose {
+				pterm.Info.Printf("Deleted %d ArgoCD application(s)\n", deleted)
+			}
 		}
 	}
 
@@ -257,11 +268,10 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 	// kube-context. Without the pin helm operates on the kubeconfig's CURRENT
 	// context, which may be a different (even production) cluster.
 	kubeContext := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
-	if err := s.cleanupHelmReleases(ctx, kubeContext, verbose, force); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to cleanup Helm releases: %v\n", err)
-		}
-		// Don't fail completely if Helm cleanup fails
+	removed, err := s.cleanupHelmReleases(ctx, kubeContext, verbose, force)
+	result.ReleasesRemoved = removed
+	if err != nil {
+		result.AddFailure("Helm releases", err)
 	}
 
 	// 3. ArgoCD is gone now, so nothing is left to clear its resources-finalizer.
@@ -270,34 +280,35 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 	if s.appCleaner != nil {
 		cleared, err := s.appCleaner.RemoveApplicationFinalizers(ctx)
 		switch {
-		case err != nil && verbose:
-			pterm.Warning.Printf("Failed to clear application finalizers: %v\n", err)
-		case err == nil && cleared > 0 && verbose:
-			pterm.Info.Printf("Cleared finalizers on %d stuck application(s)\n", cleared)
+		case err != nil:
+			result.AddFailure("application finalizers", err)
+		default:
+			result.FinalizersCleared = cleared
+			if cleared > 0 && verbose {
+				pterm.Info.Printf("Cleared finalizers on %d stuck application(s)\n", cleared)
+			}
 		}
 	}
 
 	// 4. Clean up Kubernetes resources in common namespaces
-	if err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to cleanup Kubernetes resources: %v\n", err)
-		}
-		// Don't fail completely if K8s cleanup fails
+	deletedNS, err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force)
+	result.NamespacesDeleted = deletedNS
+	if err != nil {
+		result.AddFailure("Kubernetes namespaces", err)
 	}
 
 	// 5. Clean up Docker images and containers in the cluster
-	if err := s.cleanupDockerResources(ctx, clusterName, verbose, force); err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to cleanup Docker resources: %v\n", err)
-		}
-		// Don't fail completely if Docker cleanup fails
+	pruned, err := s.cleanupDockerResources(ctx, clusterName, verbose, force)
+	result.NodesPruned = pruned
+	if err != nil {
+		result.AddFailure("Docker resources", err)
 	}
 
 	if verbose {
 		pterm.Success.Printf("Cleanup completed for cluster: %s\n", clusterName)
 	}
 
-	return nil
+	return result, nil
 }
 
 // helmRelease is the subset of `helm list --output json` we consume.
@@ -310,29 +321,33 @@ type helmRelease struct {
 // kubeContext. The explicit --kube-context on every helm call is what keeps
 // cleanup scoped to that cluster (T0-1): helm otherwise acts on the
 // kubeconfig's current context, whatever the user last switched to.
-func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext string, verbose bool, force bool) error {
+// It returns the number of releases actually uninstalled. A release that fails
+// to uninstall is counted as a failure, not as removed.
+func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext string, verbose bool, force bool) (int, error) {
 	if kubeContext == "" {
-		return fmt.Errorf("refusing to cleanup Helm releases without an explicit kube-context")
+		return 0, fmt.Errorf("refusing to cleanup Helm releases without an explicit kube-context")
 	}
 
 	result, err := s.executor.Execute(ctx, "helm", "list", "--all-namespaces", "--output", "json", "--kube-context", kubeContext)
 	if err != nil {
-		return fmt.Errorf("failed to list Helm releases: %w", err)
+		return 0, fmt.Errorf("failed to list Helm releases: %w", err)
 	}
 
 	var releases []helmRelease
 	if out := strings.TrimSpace(result.Stdout); out != "" {
 		if err := json.Unmarshal([]byte(out), &releases); err != nil {
-			return fmt.Errorf("failed to parse helm list output: %w", err)
+			return 0, fmt.Errorf("failed to parse helm list output: %w", err)
 		}
 	}
 	if len(releases) == 0 {
 		if verbose {
 			pterm.Info.Println("No Helm releases found to cleanup")
 		}
-		return nil
+		return 0, nil
 	}
 
+	var removed int
+	var failed []string
 	for _, release := range releases {
 		if release.Name == "" || release.Namespace == "" {
 			continue
@@ -358,15 +373,23 @@ func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext st
 			args = append(args, "--ignore-not-found")
 		}
 		if _, err := s.executor.Execute(ctx, "helm", args...); err != nil {
+			failed = append(failed, release.Name)
 			if verbose {
 				pterm.Warning.Printf("Failed to uninstall release %s: %v\n", release.Name, err)
 			}
-		} else if verbose {
-			pterm.Success.Printf("Uninstalled Helm release: %s\n", release.Name)
+		} else {
+			removed++
+			if verbose {
+				pterm.Success.Printf("Uninstalled Helm release: %s\n", release.Name)
+			}
 		}
 	}
 
-	return nil
+	if len(failed) > 0 {
+		return removed, fmt.Errorf("%d of %d release(s) could not be uninstalled: %s",
+			len(failed), len(releases), strings.Join(failed, ", "))
+	}
+	return removed, nil
 }
 
 // protectedNamespaces must never be deleted by cleanup, regardless of --force.
@@ -401,23 +424,27 @@ func filterProtectedNamespaces(raw []string) []string {
 // cleanupKubernetesResources removes namespaces created by OpenFrame components
 // via the native Kubernetes client (client-go). It never touches
 // protected/system namespaces.
-func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, clusterName string, verbose bool, _ bool) error {
+// It returns the number of namespaces whose deletion was accepted by the API
+// server.
+func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, clusterName string, verbose bool, _ bool) (int, error) {
 	// On Windows the cluster lives in WSL and must be reached from inside WSL.
 	if err := platform.WSLClusterHint("clean up OpenFrame namespaces"); err != nil {
-		return err
+		return 0, err
 	}
 
 	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
 	if err != nil {
-		return fmt.Errorf("failed to get cluster config for cleanup: %w", err)
+		return 0, fmt.Errorf("failed to get cluster config for cleanup: %w", err)
 	}
 	client, err := kubernetes.NewForConfig(sharedconfig.ApplyInsecureTLSConfig(restConfig))
 	if err != nil {
-		return fmt.Errorf("failed to create kubernetes client: %w", err)
+		return 0, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
 	// Namespaces created by OpenFrame component installs. System namespaces are
 	// intentionally absent and are additionally filtered (I7 defense-in-depth).
+	var deleted int
+	var failed []string
 	for _, namespace := range filterProtectedNamespaces([]string{"argocd", "openframe"}) {
 		if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
 			continue // doesn't exist (or unreachable) — skip
@@ -428,19 +455,28 @@ func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, cluster
 		}
 
 		if err := client.CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			failed = append(failed, namespace)
 			if verbose {
 				pterm.Warning.Printf("Failed to delete namespace %s: %v\n", namespace, err)
 			}
-		} else if verbose {
-			pterm.Success.Printf("Deleted namespace: %s\n", namespace)
+		} else {
+			deleted++
+			if verbose {
+				pterm.Success.Printf("Deleted namespace: %s\n", namespace)
+			}
 		}
 	}
 
-	return nil
+	if len(failed) > 0 {
+		return deleted, fmt.Errorf("could not delete namespace(s): %s", strings.Join(failed, ", "))
+	}
+	return deleted, nil
 }
 
-// cleanupDockerResources cleans up Docker images and containers in the k3d cluster
-func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName string, verbose bool, force bool) error {
+// cleanupDockerResources cleans up Docker images and containers in the k3d
+// cluster. It returns the number of nodes pruned without error. A node whose
+// discovery or prune fails is reported, not silently counted as cleaned.
+func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName string, verbose bool, force bool) (int, error) {
 	if verbose {
 		pterm.Info.Printf("Cleaning up Docker resources for cluster: %s\n", clusterName)
 	}
@@ -448,71 +484,55 @@ func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName
 	// Dynamically discover all k3d nodes for this cluster
 	nodeNames, err := s.getK3dClusterNodes(ctx, clusterName)
 	if err != nil {
-		if verbose {
-			pterm.Warning.Printf("Failed to discover cluster nodes: %v\n", err)
-		}
-		return nil // Don't fail cleanup if we can't discover nodes
+		// Not fatal: a cluster whose nodes are already gone still cleans up.
+		return 0, fmt.Errorf("could not discover cluster nodes: %w", err)
 	}
 
 	if len(nodeNames) == 0 {
 		if verbose {
 			pterm.Info.Printf("No k3d nodes found for cluster: %s\n", clusterName)
 		}
-		return nil
+		return 0, nil
 	}
 
 	if verbose {
 		pterm.Info.Printf("Found %d k3d nodes for cluster %s\n", len(nodeNames), clusterName)
 	}
 
+	// Each entry is one `docker exec <node> docker ...` prune. force adds the
+	// build cache, which is the expensive one.
+	prunes := [][]string{
+		{"image", "prune", "-f", "--all"},
+		{"container", "prune", "-f"},
+		{"volume", "prune", "-f"},
+		{"network", "prune", "-f"},
+		{"system", "prune", "-f"},
+	}
+	if force {
+		prunes = append(prunes, []string{"builder", "prune", "-f", "--all"})
+	}
+
+	var pruned int
+	var failed []string
 	for _, nodeName := range nodeNames {
 		if verbose {
-			pterm.Info.Printf("Cleaning up Docker images in node: %s\n", nodeName)
+			pterm.Info.Printf("Cleaning up Docker resources in node: %s\n", nodeName)
 		}
 
-		// Always use aggressive image cleanup
-		imageArgs := []string{"exec", nodeName, "docker", "image", "prune", "-f", "--all"}
-		_, err = s.executor.Execute(ctx, "docker", imageArgs...)
-		if err != nil {
-			if verbose {
-				pterm.Warning.Printf("Failed to prune images in node %s: %v\n", nodeName, err)
+		nodeOK := true
+		for _, prune := range prunes {
+			args := append([]string{"exec", nodeName, "docker"}, prune...)
+			if _, err := s.executor.Execute(ctx, "docker", args...); err != nil {
+				nodeOK = false
+				if verbose {
+					pterm.Warning.Printf("Failed to %s in node %s: %v\n", strings.Join(prune[:2], " "), nodeName, err)
+				}
 			}
 		}
-
-		// Clean up stopped containers
-		_, err = s.executor.Execute(ctx, "docker", "exec", nodeName, "docker", "container", "prune", "-f")
-		if err != nil {
-			if verbose {
-				pterm.Warning.Printf("Failed to prune containers in node %s: %v\n", nodeName, err)
-			}
-		}
-
-		// Always perform comprehensive cleanup
-		// Clean volumes
-		_, err = s.executor.Execute(ctx, "docker", "exec", nodeName, "docker", "volume", "prune", "-f")
-		if err != nil && verbose {
-			pterm.Warning.Printf("Failed to prune volumes in node %s: %v\n", nodeName, err)
-		}
-
-		// Clean networks
-		_, err = s.executor.Execute(ctx, "docker", "exec", nodeName, "docker", "network", "prune", "-f")
-		if err != nil && verbose {
-			pterm.Warning.Printf("Failed to prune networks in node %s: %v\n", nodeName, err)
-		}
-
-		// System prune for comprehensive cleanup
-		_, err = s.executor.Execute(ctx, "docker", "exec", nodeName, "docker", "system", "prune", "-f")
-		if err != nil && verbose {
-			pterm.Warning.Printf("Failed to system prune in node %s: %v\n", nodeName, err)
-		}
-
-		// Force cleanup: even more aggressive cleanup when force is enabled
-		if force {
-			// Remove build cache and dangling images with time filter
-			_, err = s.executor.Execute(ctx, "docker", "exec", nodeName, "docker", "builder", "prune", "-f", "--all")
-			if err != nil && verbose {
-				pterm.Warning.Printf("Failed to prune build cache in node %s: %v\n", nodeName, err)
-			}
+		if nodeOK {
+			pruned++
+		} else {
+			failed = append(failed, nodeName)
 		}
 	}
 
@@ -520,7 +540,10 @@ func (s *ClusterService) cleanupDockerResources(ctx context.Context, clusterName
 		pterm.Success.Printf("Docker cleanup completed for cluster: %s\n", clusterName)
 	}
 
-	return nil
+	if len(failed) > 0 {
+		return pruned, fmt.Errorf("prune incomplete on node(s): %s", strings.Join(failed, ", "))
+	}
+	return pruned, nil
 }
 
 // getK3dClusterNodes discovers all Docker containers that are part of a k3d cluster
@@ -589,6 +612,31 @@ func (s *ClusterService) isK3dWorkerNode(nodeName, clusterName string) bool {
 	return strings.HasPrefix(suffix, "server-") || strings.HasPrefix(suffix, "agent-")
 }
 
+// apiServerEndpoint returns the cluster's API server URL as the kubeconfig
+// records it, or "" when it cannot be determined.
+//
+// It replaces a hardcoded "https://0.0.0.0:6550" printed in three places. 6550
+// is only the *preferred* API port: findPort falls back to 6551, then 6552,
+// when the port is taken (see providers/k3d/ports.go). So on any machine with
+// a second cluster the box pointed the user at a different cluster's API
+// server. The kubeconfig records the port that was actually bound.
+func (s *ClusterService) apiServerEndpoint(ctx context.Context, name string) string {
+	cfg, err := s.manager.GetRestConfig(ctx, name)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.Host
+}
+
+// apiServerLine renders the API row for the summary boxes, degrading to an
+// honest "unknown" rather than inventing an address.
+func apiServerLine(endpoint string) string {
+	if endpoint == "" {
+		return "API:      (unknown — kubeconfig not readable)"
+	}
+	return "API:      " + endpoint
+}
+
 // displayClusterCreationSummary displays a summary after cluster creation
 func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) {
 	fmt.Println()
@@ -600,12 +648,13 @@ func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) 
 			"STATUS:   %s\n"+
 			"NODES:    %d\n"+
 			"NETWORK:  k3d-%s\n"+
-			"API:      https://0.0.0.0:6550",
+			"%s",
 		pterm.Bold.Sprint(info.Name),
 		strings.ToUpper(string(info.Type)),
 		pterm.Green("Ready"),
 		info.NodeCount,
 		info.Name,
+		apiServerLine(s.apiServerEndpoint(context.Background(), info.Name)),
 	)
 
 	pterm.DefaultBox.
@@ -712,19 +761,21 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 		}
 	}
 
+	endpoint := s.apiServerEndpoint(context.Background(), status.Name)
 	boxContent := fmt.Sprintf(
 		"NAME:     %s\n"+
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
 			"NODES:    %d\n"+
 			"NETWORK:  k3d-%s\n"+
-			"API:      https://0.0.0.0:6550\n"+
+			"%s\n"+
 			"AGE:      %s",
 		pterm.Bold.Sprint(status.Name),
 		strings.ToUpper(string(status.Type)),
 		statusDisplay,
 		status.NodeCount,
 		status.Name,
+		apiServerLine(endpoint),
 		ageStr,
 	)
 
@@ -737,17 +788,31 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 	fmt.Println()
 	pterm.Info.Printf("🌐 Network Information:\n")
 	pterm.Printf("  Network:    k3d-%s\n", status.Name)
-	pterm.Printf("  API Server: https://0.0.0.0:6550\n")
-	pterm.Printf("  Kubeconfig: ~/.kube/config\n")
+	if endpoint != "" {
+		pterm.Printf("  API Server: %s\n", endpoint)
+	}
+	pterm.Printf("  Kubeconfig: %s\n", k8s.DefaultKubeconfigPath())
 
-	// Show resource usage if detailed
+	// --detailed lists the nodes the provider actually reported. It used to
+	// print fixed CPU/Memory/Storage figures ("0.2 cores (10%)", "512MB (5%)",
+	// "2.1GB (local)") that were never measured — identical for every cluster,
+	// on every machine, at every point in time. The CLI does not collect
+	// metrics, so it says so and points at the tool that does.
 	if detailed {
 		fmt.Println()
+		pterm.Info.Printf("🖥️ Nodes:\n")
+		if len(status.Nodes) == 0 {
+			pterm.Printf("  (none reported)\n")
+		}
+		for _, node := range status.Nodes {
+			pterm.Printf("  %-28s %-8s %s\n", node.Name, node.Role, node.Status)
+		}
+
+		fmt.Println()
 		pterm.Info.Printf("💾 Resource Usage:\n")
-		pterm.Printf("  CPU:     0.2 cores (10%%)\n")
-		pterm.Printf("  Memory:  512MB (5%%)\n")
-		pterm.Printf("  Storage: 2.1GB (local)\n")
-		pterm.Printf("  Pods:    System pods running\n")
+		pterm.Printf("  Not collected by the CLI. With metrics-server installed:\n")
+		pterm.Printf("    kubectl top nodes\n")
+		pterm.Printf("    kubectl top pods -A\n")
 	}
 
 	// Management commands

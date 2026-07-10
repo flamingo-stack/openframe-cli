@@ -23,9 +23,10 @@ By default, shows a selection menu where you can choose:
 1. Quick start with defaults (press Enter) - creates cluster with default settings
 2. Interactive configuration wizard - step-by-step cluster customization
 
-Creates a local cluster for OpenFrame development. Existing clusters
-with the same name will be recreated. Use bootstrap command to install
-OpenFrame components after creation.
+Creates a local cluster for OpenFrame development. If a cluster with the same
+name already exists it is left untouched and reused — delete it first to start
+from scratch. Use the bootstrap command to install OpenFrame components after
+creation.
 
 Examples:
   openframe cluster create                    # Show creation mode selection

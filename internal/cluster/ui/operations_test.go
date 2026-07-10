@@ -116,24 +116,17 @@ func TestOperationsUI_ShowOperationStart(t *testing.T) {
 func TestOperationsUI_ShowOperationSuccess(t *testing.T) {
 	ui := NewOperationsUI()
 
-	t.Run("shows cleanup success without panicking", func(t *testing.T) {
+	// "cleanup" is deliberately absent: cleanup reports through
+	// ShowCleanupSummary, which prints the counts the run actually produced
+	// rather than a fixed list of accomplishments.
+	t.Run("shows delete success without panicking", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("ShowOperationSuccess panicked: %v", r)
 			}
 		}()
 
-		ui.ShowOperationSuccess("cleanup", "test-cluster")
-	})
-
-	t.Run("shows start success without panicking", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("ShowOperationSuccess panicked: %v", r)
-			}
-		}()
-
-		ui.ShowOperationSuccess("cleanup", "test-cluster")
+		ui.ShowOperationSuccess("delete", "test-cluster")
 	})
 
 	t.Run("shows generic success without panicking", func(t *testing.T) {
