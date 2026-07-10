@@ -19,13 +19,6 @@ func NewSystemService() *SystemService {
 	}
 }
 
-// NewSystemServiceWithOptions creates a system service with custom options
-func NewSystemServiceWithOptions(logDir string) *SystemService {
-	return &SystemService{
-		logDir: logDir,
-	}
-}
-
 // Initialize performs system initialization tasks
 func (s *SystemService) Initialize() error {
 	if err := s.setupLogDirectory(); err != nil {
@@ -40,9 +33,4 @@ func (s *SystemService) setupLogDirectory() error {
 		return fmt.Errorf("failed to setup log directory %s: %w", s.logDir, err)
 	}
 	return nil
-}
-
-// GetLogDirectory returns the configured log directory path
-func (s *SystemService) GetLogDirectory() string {
-	return s.logDir
 }

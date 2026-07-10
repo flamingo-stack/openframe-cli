@@ -2,7 +2,6 @@ package prerequisites
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites/certificates"
@@ -22,20 +21,6 @@ func NewInstaller() *Installer {
 	return &Installer{
 		checker: NewPrerequisiteChecker(),
 	}
-}
-
-func (i *Installer) InstallMissingPrerequisites() error {
-	allPresent, missing := i.checker.CheckAll()
-	if allPresent {
-		pterm.Success.Println("All prerequisites are already installed.")
-		return nil
-	}
-
-	return i.installMissingTools(missing)
-}
-
-func (i *Installer) installMissingTools(tools []string) error {
-	return i.installMissingToolsNonInteractive(tools, false)
 }
 
 // installMissingToolsNonInteractive installs missing tools with optional non-interactive mode
@@ -114,10 +99,6 @@ func (i *Installer) installMissingToolsNonInteractive(tools []string, nonInterac
 	return nil
 }
 
-func (i *Installer) installTool(tool string) error {
-	return i.installToolNonInteractive(tool, false)
-}
-
 // installToolNonInteractive installs a single tool with optional non-interactive mode
 func (i *Installer) installToolNonInteractive(tool string, nonInteractive bool) error {
 	switch strings.ToLower(tool) {
@@ -135,24 +116,6 @@ func (i *Installer) installToolNonInteractive(tool string, nonInteractive bool) 
 	default:
 		return fmt.Errorf("unknown tool: %s", tool)
 	}
-}
-
-func (i *Installer) runCommand(name string, args ...string) error {
-	// Handle shell commands with pipes
-	if strings.Contains(strings.Join(args, " "), "|") {
-		fullCmd := name + " " + strings.Join(args, " ")
-		cmd := exec.Command("bash", "-c", fullCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-		// Completely silence output during installation
-		return cmd.Run()
-	}
-
-	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
-func (i *Installer) CheckAndInstall() error {
-	return i.CheckAndInstallNonInteractive(false)
 }
 
 // CheckAndInstallNonInteractive checks and installs prerequisites with optional non-interactive mode

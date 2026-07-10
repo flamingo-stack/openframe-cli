@@ -8,22 +8,10 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
-	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"k8s.io/client-go/rest"
-)
-
-// Target is where a cluster runs.
-type Target string
-
-const (
-	// TargetLocal is a cluster on the local machine (e.g. k3d).
-	TargetLocal Target = "local"
-	// TargetCloud is a managed cluster in a cloud provider (e.g. GKE/EKS). Not yet implemented.
-	TargetCloud Target = "cloud"
 )
 
 // Provider is the unified contract every cluster backend implements. The k3d
@@ -51,23 +39,11 @@ type Provider interface {
 }
 
 // Compile-time assertion that the k3d manager satisfies Provider.
-var _ Provider = (*k3d.K3dManager)(nil)
-
-// New returns the Provider for the given cluster type and target.
 //
-// Only (k3d, local) is implemented. Cloud providers return a clear "coming
-// soon" error so callers can surface a friendly message instead of failing
-// obscurely. This is the single seam through which new providers are added.
-func New(clusterType models.ClusterType, target Target, exec executor.CommandExecutor, verbose bool) (Provider, error) {
-	switch clusterType {
-	case models.ClusterTypeK3d:
-		if target != TargetLocal {
-			return nil, fmt.Errorf("the k3d provider only supports the local target, not %q", target)
-		}
-		return k3d.NewK3dManager(exec, verbose), nil
-	case models.ClusterTypeGKE, models.ClusterTypeEKS:
-		return nil, fmt.Errorf("the %s cluster provider is not implemented yet — coming soon", clusterType)
-	default:
-		return nil, fmt.Errorf("unknown cluster provider %q", clusterType)
-	}
-}
+// NOTE: there is deliberately NO factory here. The old New(clusterType,
+// target, ...) "single seam" was never called from production — every
+// constructor hard-coded the k3d manager, so the factory was decorative
+// (audit B7). The interface itself is the real seam: it is what
+// ClusterService depends on and what tests mock. When a second backend
+// (GKE/EKS) actually lands, reintroduce a factory alongside its first caller.
+var _ Provider = (*k3d.K3dManager)(nil)

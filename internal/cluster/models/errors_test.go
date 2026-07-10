@@ -91,22 +91,6 @@ func TestErrInvalidClusterConfig(t *testing.T) {
 	})
 }
 
-func TestErrClusterAlreadyExists(t *testing.T) {
-	t.Run("creates error with cluster name", func(t *testing.T) {
-		err := NewClusterAlreadyExistsError("test-cluster")
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "test-cluster")
-		assert.Contains(t, err.Error(), "already exists")
-
-		// Test type assertion
-		var alreadyExistsErr ErrClusterAlreadyExists
-		if errors.As(err, &alreadyExistsErr) {
-			assert.Equal(t, "test-cluster", alreadyExistsErr.Name)
-		}
-	})
-}
-
 func TestErrClusterOperation(t *testing.T) {
 	t.Run("creates error with operation, cluster name, and cause", func(t *testing.T) {
 		originalErr := errors.New("k3d command failed")
@@ -162,12 +146,6 @@ func TestErrorFormatting(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid cluster config")
 		assert.Contains(t, err.Error(), "nodeCount")
 		assert.Contains(t, err.Error(), "must be positive")
-	})
-
-	t.Run("cluster already exists error format", func(t *testing.T) {
-		err := NewClusterAlreadyExistsError("existing-cluster")
-		expected := "cluster 'existing-cluster' already exists"
-		assert.Equal(t, expected, err.Error())
 	})
 
 	t.Run("cluster operation error format", func(t *testing.T) {

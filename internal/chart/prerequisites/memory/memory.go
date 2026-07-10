@@ -24,10 +24,6 @@ func (m *MemoryChecker) GetInstallHelp() string {
 	return fmt.Sprintf("Memory: %d MB available, %d MB recommended. Consider adding more RAM or increasing virtual memory", currentMemory, RecommendedMemoryMB)
 }
 
-func (m *MemoryChecker) Install() error {
-	return fmt.Errorf("memory cannot be automatically installed. Please add more physical RAM or increase virtual memory allocation")
-}
-
 func (m *MemoryChecker) HasSufficientMemory() bool {
 	totalMemory := m.getTotalMemoryMB()
 	return totalMemory >= RecommendedMemoryMB

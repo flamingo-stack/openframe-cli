@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
@@ -78,8 +79,8 @@ func TestSystemService(t *testing.T) {
 		t.Errorf("Initialize() should not error: %v", err)
 	}
 
-	// Check that log directory exists
-	logDir := service.GetLogDirectory()
+	// Check that the default log directory exists
+	logDir := filepath.Join(os.TempDir(), "openframe-deployment-logs")
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		t.Error("Service should create log directory")
 	}

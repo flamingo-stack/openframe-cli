@@ -48,9 +48,6 @@ func extractGitAuth(rawURL string) gitAuth {
 	return gitAuth{cleanURL: u.String(), username: username, token: token}
 }
 
-// hasToken reports whether a credential was present.
-func (a gitAuth) hasToken() bool { return a.token != "" }
-
 // buildAuth returns the in-memory HTTP auth method for a private repository, or
 // nil for a public one. The token lives only in memory — never in the URL,
 // argv, or a credentials file. GitHub PAT auth expects the token as the

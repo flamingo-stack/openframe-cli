@@ -14,7 +14,7 @@ func TestCurrentMatchesRuntime(t *testing.T) {
 
 func TestOSHelpersMutuallyExclusive(t *testing.T) {
 	n := 0
-	for _, b := range []bool{IsWindows(), IsMac(), IsLinux()} {
+	for _, b := range []bool{IsWindows(), Current() == Darwin, Current() == Linux} {
 		if b {
 			n++
 		}

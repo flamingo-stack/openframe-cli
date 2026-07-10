@@ -63,15 +63,6 @@ func TestCertificateInstaller_Install(t *testing.T) {
 	// Integration tests should cover full installation flow
 }
 
-func TestAreCertificatesGenerated(t *testing.T) {
-	// Test the certificate detection logic
-	generated := areCertificatesGenerated()
-
-	// This will likely be false in test environment, which is expected
-	// We're just testing that the function doesn't crash
-	_ = generated
-}
-
 func TestIsMkcertInstalled(t *testing.T) {
 	// Test mkcert detection
 	installed := isMkcertInstalled()

@@ -32,26 +32,7 @@ func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand 
 	fmt.Println()
 }
 
-// ShowOperationStart displays a friendly message when starting an operation
-func ShowOperationStart(operation, resourceName string, customMessages map[string]string) {
-	message, exists := customMessages[operation]
-	if !exists {
-		message = fmt.Sprintf("Processing '%s' for %s...", operation, pterm.Cyan(resourceName))
-	}
 
-	pterm.Info.Println(message)
-}
-
-// ShowOperationSuccess displays a friendly success message
-func ShowOperationSuccess(operation, resourceName string, customMessages map[string]string) {
-	message, exists := customMessages[operation]
-	if !exists {
-		message = fmt.Sprintf("Operation '%s' completed for %s", operation, pterm.Cyan(resourceName))
-	}
-
-	pterm.Success.Println(message)
-	fmt.Println()
-}
 
 // ShowOperationError displays a friendly error message with troubleshooting tips
 func ShowOperationError(operation, resourceName string, err error, troubleshootingTips []TroubleshootingTip) {

@@ -128,31 +128,6 @@ func ResetWSLCache() {
 	wslUbuntuChecked = false
 }
 
-// WakeUpWSL sends a simple command to WSL to ensure it's responsive
-// This is useful before critical operations as WSL can become unresponsive when idle
-// Returns nil if WSL is responsive, error otherwise
-func WakeUpWSL() error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-
-	// Quick ping to WSL - just echo something
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "echo", "ping")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("WSL wake-up failed: %w", err)
-	}
-
-	if strings.TrimSpace(string(output)) != "ping" {
-		return fmt.Errorf("WSL wake-up returned unexpected output: %s", string(output))
-	}
-
-	return nil
-}
-
 // TryRecoverWSL attempts to recover WSL connectivity by terminating and restarting the distribution
 // This is a last-resort operation when WSL becomes completely unresponsive
 // Returns nil if recovery was successful, error otherwise

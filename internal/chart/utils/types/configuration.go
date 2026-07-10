@@ -3,7 +3,6 @@ package types
 import (
 	"time"
 
-	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 )
 
 // DockerRegistryConfig holds Docker registry settings
@@ -78,8 +77,3 @@ type ChartConfiguration struct {
 	IngressConfig      *IngressConfig         // nil means use existing, otherwise use this value
 }
 
-// GetRepositoryURL returns the platform repository URL. Only the OSS (oss-tenant)
-// deployment is supported, so this always returns the public OSS repository.
-func GetRepositoryURL() string {
-	return models.RepoOSSTenant
-}

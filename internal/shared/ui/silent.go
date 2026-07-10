@@ -7,11 +7,8 @@ import (
 )
 
 // silent records whether --silent suppressed non-error output. Read by the logo
-// renderer (and available via IsSilent) so callers can honor the flag too.
+// renderer so it can honor the flag.
 var silent bool
-
-// IsSilent reports whether SetSilent has been applied (the --silent flag).
-func IsSilent() bool { return silent }
 
 // SetSilent honors the --silent flag's contract ("suppress all output except
 // errors"): it routes every non-error pterm printer to io.Discard and marks the

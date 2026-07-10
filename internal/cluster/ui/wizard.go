@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -98,42 +97,6 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	return w.config, nil
 }
 
-// SelectCluster provides interactive cluster selection
-func SelectCluster(clusters []models.ClusterInfo, message string) (models.ClusterInfo, error) {
-	if len(clusters) == 0 {
-		return models.ClusterInfo{}, errors.New("no clusters found")
-	}
-
-	items := make([]string, len(clusters))
-	for i, cluster := range clusters {
-		items[i] = formatClusterOption(cluster)
-	}
-
-	prompt := promptui.Select{
-		Label: message,
-		Items: items,
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return models.ClusterInfo{}, err
-	}
-
-	return clusters[idx], nil
-}
-
-// formatClusterOption formats a cluster for display in selection lists
-func formatClusterOption(clusterInfo models.ClusterInfo) string {
-	return pterm.Sprintf("%s - %s",
-		clusterInfo.Name,
-		clusterInfo.Status)
-}
-
 // ConfigurationHandler handles cluster configuration flows
 type ConfigurationHandler struct{}
 
@@ -222,15 +185,4 @@ func (h *ConfigurationHandler) getWizardConfig(clusterName string) (models.Clust
 		K8sVersion: wizardConfig.K8sVersion,
 		NodeCount:  wizardConfig.NodeCount,
 	}, nil
-}
-
-// GetClusterNameOrDefault returns the cluster name from args or default - helper for commands
-func GetClusterNameOrDefault(args []string, defaultName string) string {
-	if len(args) > 0 && args[0] != "" {
-		return args[0]
-	}
-	if defaultName != "" {
-		return defaultName
-	}
-	return "openframe-dev"
 }

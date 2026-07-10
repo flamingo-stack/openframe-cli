@@ -48,21 +48,6 @@ func TestMemoryChecker_GetInstallHelp(t *testing.T) {
 	}
 }
 
-func TestMemoryChecker_Install(t *testing.T) {
-	checker := NewMemoryChecker()
-
-	// Memory cannot be automatically installed
-	err := checker.Install()
-	if err == nil {
-		t.Error("Expected error when trying to install memory")
-	}
-
-	expectedSubstring := "cannot be automatically installed"
-	if !containsSubstring(err.Error(), expectedSubstring) {
-		t.Errorf("Expected error containing '%s', got: %v", expectedSubstring, err)
-	}
-}
-
 func TestGetTotalMemoryMB(t *testing.T) {
 	checker := NewMemoryChecker()
 	mem := checker.getTotalMemoryMB()

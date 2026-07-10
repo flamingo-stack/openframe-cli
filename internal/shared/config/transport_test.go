@@ -8,9 +8,9 @@ import (
 
 func TestIsLocalAPIServer(t *testing.T) {
 	local := []string{
-		"https://0.0.0.0:63625",       // k3d
-		"https://127.0.0.1:26443",     // orbstack / kind
-		"https://localhost:6443",      // docker-desktop style
+		"https://0.0.0.0:63625",   // k3d
+		"https://127.0.0.1:26443", // orbstack / kind
+		"https://localhost:6443",  // docker-desktop style
 		"https://host.docker.internal:6550",
 		"https://[::1]:6443",
 		"127.0.0.1:6443", // bare host:port (no scheme)

@@ -15,7 +15,6 @@ func TestExtractGitAuth(t *testing.T) {
 	assert.Equal(t, "https://github.com/org/repo", a.cleanURL)
 	assert.Equal(t, "x-access-token", a.username)
 	assert.Equal(t, fakeToken, a.token)
-	assert.True(t, a.hasToken())
 
 	// Single-field userinfo (https://<token>@host, a common PAT shorthand): the
 	// token is in the username field with no password — it must be recognized as
@@ -24,11 +23,10 @@ func TestExtractGitAuth(t *testing.T) {
 	assert.Equal(t, "https://github.com/org/repo", tok.cleanURL)
 	assert.Empty(t, tok.username)
 	assert.Equal(t, fakeToken, tok.token)
-	assert.True(t, tok.hasToken())
 
 	pub := extractGitAuth("https://github.com/org/repo")
 	assert.Equal(t, "https://github.com/org/repo", pub.cleanURL)
-	assert.False(t, pub.hasToken())
+	assert.Empty(t, pub.token)
 }
 
 // TestBuildAuth is the I1 guard: a private-repo token is handed to go-git only

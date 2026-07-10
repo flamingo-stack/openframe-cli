@@ -30,34 +30,4 @@ func TestShowNoResourcesMessage(t *testing.T) {
 	ShowNoResourcesMessage("", "", "", "")
 }
 
-func TestShowOperationStart(t *testing.T) {
-	customMessages := map[string]string{
-		"cleanup": "Starting cleanup...",
-		"delete":  "Deleting resource...",
-	}
 
-	// Should not panic with custom messages
-	ShowOperationStart("cleanup", "test-resource", customMessages)
-
-	// Should not panic with fallback message
-	ShowOperationStart("unknown", "test-resource", customMessages)
-
-	// Should not panic with nil map
-	ShowOperationStart("test", "test-resource", nil)
-}
-
-func TestShowOperationSuccess(t *testing.T) {
-	customMessages := map[string]string{
-		"cleanup": "Cleanup completed!",
-		"delete":  "Resource deleted!",
-	}
-
-	// Should not panic with custom messages
-	ShowOperationSuccess("cleanup", "test-resource", customMessages)
-
-	// Should not panic with fallback message
-	ShowOperationSuccess("unknown", "test-resource", customMessages)
-
-	// Should not panic with nil map
-	ShowOperationSuccess("test", "test-resource", nil)
-}

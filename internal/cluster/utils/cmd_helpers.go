@@ -1,5 +1,9 @@
 package utils
 
+// NOTE: this package must never import tests/... — the shipped binary used to
+// compile testutil (and testify) in via the integration-test helpers that
+// lived here (audit B7).
+
 import (
 	stderrors "errors"
 	"sync"
@@ -8,7 +12,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
-	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -38,20 +41,6 @@ func GetCommandService() *cluster.ClusterService {
 	verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
 	exec := executor.NewRealCommandExecutor(dryRun, verbose)
 	return cluster.NewClusterService(exec)
-}
-
-// GetSuppressedCommandService creates a command service with UI suppression for automation
-func GetSuppressedCommandService() *cluster.ClusterService {
-	// Use injected executor if available (for testing)
-	if globalFlags != nil && globalFlags.Executor != nil {
-		return cluster.NewClusterServiceSuppressed(globalFlags.Executor)
-	}
-
-	// Create real executor with current flags
-	dryRun := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.DryRun
-	verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
-	exec := executor.NewRealCommandExecutor(dryRun, verbose)
-	return cluster.NewClusterServiceSuppressed(exec)
 }
 
 // WrapCommandWithCommonSetup wraps a command function with common CLI setup and error handling
@@ -103,33 +92,17 @@ func GetGlobalFlags() *cluster.FlagContainer {
 	return globalFlags
 }
 
+// SetTestExecutor injects a mock executor into the global flag container. It
+// exists ONLY for cmd-layer tests (paired with ResetGlobalFlags in cleanup);
+// production never calls it.
 func SetTestExecutor(exec executor.CommandExecutor) {
 	InitGlobalFlags()
 	globalFlags.Executor = exec
 }
 
+// ResetGlobalFlags clears the global flag container (test cleanup).
 func ResetGlobalFlags() {
 	globalFlagsMutex.Lock()
 	defer globalFlagsMutex.Unlock()
 	globalFlags = nil
-}
-
-// Compatibility functions for integration tests
-var integrationTestFlags *cluster.FlagContainer
-
-func getOrCreateIntegrationFlags() *cluster.FlagContainer {
-	if integrationTestFlags == nil {
-		integrationTestFlags = testutil.CreateIntegrationTestFlags()
-	}
-	return integrationTestFlags
-}
-
-func SetVerboseForIntegrationTesting(v bool) {
-	flags := getOrCreateIntegrationFlags()
-	testutil.SetVerboseMode(flags, v)
-}
-
-func ResetTestFlags() {
-	integrationTestFlags = nil
-	ResetGlobalFlags()
 }

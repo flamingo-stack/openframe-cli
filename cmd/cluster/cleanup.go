@@ -86,8 +86,3 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 	operationsUI.ShowOperationSuccess("cleanup", clusterName)
 	return nil
 }
-
-// GetCleanupCmdForTesting returns the cleanup command for testing purposes
-func GetCleanupCmdForTesting() *cobra.Command {
-	return getCleanupCmd()
-}

@@ -2,7 +2,6 @@ package prerequisites
 
 import (
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 
@@ -23,39 +22,6 @@ func NewInstaller() *Installer {
 	return &Installer{
 		checker: NewPrerequisiteChecker(),
 	}
-}
-
-func (i *Installer) InstallMissingPrerequisites() error {
-	allPresent, missing := i.checker.CheckAll()
-	if allPresent {
-		pterm.Success.Println("All prerequisites are already installed.")
-		return nil
-	}
-
-	pterm.Info.Printf("Starting installation of %d tool(s): %s\n", len(missing), strings.Join(missing, ", "))
-
-	for idx, tool := range missing {
-		// Create a spinner for the installation process
-		sp := spinner.New()
-		sp.Start(fmt.Sprintf("[%d/%d] Installing %s...", idx+1, len(missing), tool))
-
-		if err := i.installTool(tool); err != nil {
-			sp.Fail(fmt.Sprintf("Failed to install %s: %v", tool, err))
-			return fmt.Errorf("failed to install %s: %w", tool, err)
-		}
-
-		sp.Success(fmt.Sprintf("%s installed successfully", tool))
-	}
-
-	// Verify all tools are now installed
-	allPresent, stillMissing := i.checker.CheckAll()
-	if !allPresent {
-		pterm.Warning.Printf("Some tools are still missing: %s\n", strings.Join(stillMissing, ", "))
-		return fmt.Errorf("installation completed but some tools are still missing: %s", strings.Join(stillMissing, ", "))
-	}
-
-	pterm.Success.Println("All prerequisites installed successfully!")
-	return nil
 }
 
 func (i *Installer) installSpecificTools(tools []string) error {
@@ -126,24 +92,6 @@ func (i *Installer) installTool(tool string) error {
 	default:
 		return fmt.Errorf("unknown tool: %s", tool)
 	}
-}
-
-func (i *Installer) runCommand(name string, args ...string) error {
-	// Handle shell commands with pipes
-	if strings.Contains(strings.Join(args, " "), "|") {
-		fullCmd := name + " " + strings.Join(args, " ")
-		cmd := exec.Command("bash", "-c", fullCmd) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-		// Completely silence output during installation
-		return cmd.Run()
-	}
-
-	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-	// Completely silence output during installation
-	return cmd.Run()
-}
-
-func (i *Installer) CheckAndInstall() error {
-	return i.CheckAndInstallNonInteractive(false)
 }
 
 // CheckAndInstallNonInteractive checks and installs prerequisites with optional non-interactive mode

@@ -25,11 +25,11 @@ func TestSetSilent(t *testing.T) {
 		silent = savedSilent
 	})
 
-	assert.False(t, IsSilent(), "precondition: not silent")
+	assert.False(t, silent, "precondition: not silent")
 
 	SetSilent()
 
-	assert.True(t, IsSilent())
+	assert.True(t, silent)
 	assert.Equal(t, io.Discard, pterm.Info.GetWriter(), "Info must be discarded")
 	assert.Equal(t, io.Discard, pterm.Success.GetWriter(), "Success must be discarded")
 	assert.Equal(t, io.Discard, pterm.Warning.GetWriter(), "Warning must be discarded")
@@ -45,5 +45,5 @@ func TestShowLogoConditional_SilentSkips(t *testing.T) {
 	// With silent set the renderer must early-return; this just exercises the
 	// guard path (no panic, no output).
 	ShowLogoConditional(false)
-	assert.True(t, IsSilent())
+	assert.True(t, silent)
 }

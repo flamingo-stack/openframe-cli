@@ -22,24 +22,10 @@ type ArgoCD struct {
 	executor      executor.CommandExecutor
 }
 
-// NewArgoCD creates a new ArgoCD service
-func NewArgoCD(helmManager *helm.HelmManager, pathResolver *config.PathResolver, exec executor.CommandExecutor) *ArgoCD {
-	// Create a non-verbose executor for ArgoCD operations to reduce command spam
-	// We'll handle verbose logging at a higher level in the ArgoCD manager
-	argoCDExecutor := executor.NewRealCommandExecutor(false, false) // Never verbose for internal operations
-
-	return &ArgoCD{
-		helmManager:   helmManager,
-		pathResolver:  pathResolver,
-		argoCDManager: argocd.NewManager(argoCDExecutor),
-		executor:      exec,
-	}
-}
-
 // NewArgoCDForTarget creates an ArgoCD service whose wait manager watches the
 // SAME cluster the install targets: the given rest.Config when available,
-// otherwise the named cluster's context. NewArgoCD's bare manager lazily
-// resolves the kubeconfig's CURRENT context, which during an install may be a
+// otherwise the named cluster's context. A bare manager would lazily
+// resolve the kubeconfig's CURRENT context, which during an install may be a
 // completely different cluster — the wait would then time out against (or,
 // worse, report ready from) the wrong target (audit F4).
 func NewArgoCDForTarget(helmManager *helm.HelmManager, pathResolver *config.PathResolver, exec executor.CommandExecutor, kubeConfig *rest.Config, clusterName string) (*ArgoCD, error) {

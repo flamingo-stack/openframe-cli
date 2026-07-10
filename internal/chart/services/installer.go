@@ -16,11 +16,6 @@ type Installer struct {
 	appOfAppsService types.AppOfAppsService
 }
 
-// InstallCharts handles the complete chart installation process
-func (i *Installer) InstallCharts(config config.ChartInstallConfig) error {
-	return i.InstallChartsWithContext(context.Background(), config)
-}
-
 // InstallChartsWithContext handles the complete chart installation process with context support
 func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.ChartInstallConfig) error {
 	// Install ArgoCD first

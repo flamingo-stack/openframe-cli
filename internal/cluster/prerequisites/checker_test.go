@@ -125,20 +125,3 @@ func TestCheckAllWithAllTools(t *testing.T) {
 		t.Errorf("Expected no missing tools, got %d: %v", len(missing), missing)
 	}
 }
-
-func TestGetInstallInstructions(t *testing.T) {
-	checker := NewPrerequisiteChecker()
-	missing := []string{"Docker", "k3d"}
-
-	instructions := checker.GetInstallInstructions(missing)
-
-	if len(instructions) != 2 {
-		t.Errorf("Expected 2 instructions, got %d", len(instructions))
-	}
-
-	for _, instruction := range instructions {
-		if instruction == "" {
-			t.Error("Instruction should not be empty")
-		}
-	}
-}

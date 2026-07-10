@@ -42,18 +42,3 @@ func ValidateCommonFlags(flags *CommonFlags) error {
 	// Add validation logic for common flags if needed
 	return nil
 }
-
-// GetFlagDescription returns a standard description for common flags
-func GetFlagDescription(flagName string) string {
-	descriptions := map[string]string{
-		"verbose": "Enable verbose output with detailed information",
-		"dry-run": "Show what would be done without actually executing",
-		"force":   "Skip confirmation prompts and proceed automatically",
-		"quiet":   "Minimize output, showing only essential information",
-	}
-
-	if desc, exists := descriptions[flagName]; exists {
-		return desc
-	}
-	return ""
-}

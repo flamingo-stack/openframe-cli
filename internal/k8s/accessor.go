@@ -16,11 +16,6 @@ type Accessor struct {
 	clientset kubernetes.Interface
 }
 
-// NewAccessor wraps an existing clientset (used by tests with a fake client).
-func NewAccessor(clientset kubernetes.Interface) *Accessor {
-	return &Accessor{clientset: clientset}
-}
-
 // NewAccessorForConfig builds an Accessor from a rest.Config.
 func NewAccessorForConfig(config *rest.Config) (*Accessor, error) {
 	if config == nil {

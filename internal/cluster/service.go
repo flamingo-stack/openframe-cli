@@ -63,14 +63,6 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 	}
 }
 
-// NewClusterServiceWithOptions creates a cluster service with custom options
-func NewClusterServiceWithOptions(exec executor.CommandExecutor, manager provider.Provider) *ClusterService {
-	return &ClusterService{
-		manager:  manager,
-		executor: exec,
-	}
-}
-
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
@@ -748,13 +740,6 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 	}
 
 	return nil
-}
-
-// CreateClusterWithPrerequisites creates a cluster after checking prerequisites
-// This is a wrapper function for bootstrap and other automated flows
-// Returns the *rest.Config for the created cluster
-func CreateClusterWithPrerequisites(ctx context.Context, clusterName string, verbose bool) (*rest.Config, error) {
-	return CreateClusterWithPrerequisitesNonInteractive(ctx, clusterName, verbose, false)
 }
 
 // CreateClusterWithPrerequisitesNonInteractive creates a cluster with non-interactive support

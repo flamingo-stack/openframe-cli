@@ -45,15 +45,6 @@ func NewK3dManager(exec executor.CommandExecutor, verbose bool) *K3dManager {
 	}
 }
 
-// NewK3dManagerWithTimeout creates a new K3D cluster manager with custom timeout
-func NewK3dManagerWithTimeout(exec executor.CommandExecutor, verbose bool, timeout string) *K3dManager {
-	return &K3dManager{
-		executor: exec,
-		verbose:  verbose,
-		timeout:  timeout,
-	}
-}
-
 // CreateCluster creates a new K3D cluster using config file approach
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {

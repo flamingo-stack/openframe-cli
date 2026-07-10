@@ -175,7 +175,7 @@ func TestInstaller_InstallCharts(t *testing.T) {
 			}
 
 			// Execute
-			err := installer.InstallCharts(tt.config)
+			err := installer.InstallChartsWithContext(context.Background(), tt.config)
 
 			// Assert
 			if tt.expectedError {
@@ -216,7 +216,7 @@ func TestInstaller_InstallCharts_RecoverableError(t *testing.T) {
 		appOfAppsService: mockAppOfApps,
 	}
 
-	err := installer.InstallCharts(config)
+	err := installer.InstallChartsWithContext(context.Background(), config)
 	assert.Error(t, err)
 
 	// Check that error is NOT recoverable (WaitForApplications failures should not trigger reinstallation)
@@ -246,7 +246,7 @@ func TestInstaller_InstallCharts_NoWaitWithoutAppOfApps(t *testing.T) {
 		appOfAppsService: mockAppOfApps,
 	}
 
-	err := installer.InstallCharts(config)
+	err := installer.InstallChartsWithContext(context.Background(), config)
 	assert.NoError(t, err)
 
 	// Verify Install was called but WaitForApplications was not
@@ -341,7 +341,7 @@ func TestInstaller_InstallCharts_ErrorTypes(t *testing.T) {
 				appOfAppsService: mockAppOfApps,
 			}
 
-			err := installer.InstallCharts(tt.config)
+			err := installer.InstallChartsWithContext(context.Background(), tt.config)
 			assert.Error(t, err)
 			tt.checkError(t, err)
 

@@ -71,93 +71,6 @@ func TestIsTerminalEnvironment(t *testing.T) {
 	assert.IsType(t, false, result)
 }
 
-func TestCenterText(t *testing.T) {
-	tests := []struct {
-		name     string
-		text     string
-		width    int
-		expected string
-	}{
-		{
-			name:     "text shorter than width",
-			text:     "hello",
-			width:    10,
-			expected: "  hello   ",
-		},
-		{
-			name:     "text equal to width",
-			text:     "hello",
-			width:    5,
-			expected: "hello",
-		},
-		{
-			name:     "text longer than width",
-			text:     "hello world",
-			width:    5,
-			expected: "hello world",
-		},
-		{
-			name:     "empty text",
-			text:     "",
-			width:    5,
-			expected: "     ",
-		},
-		{
-			name:     "odd width with odd text length",
-			text:     "abc",
-			width:    7,
-			expected: "  abc  ",
-		},
-		{
-			name:     "even width with odd text length",
-			text:     "abc",
-			width:    8,
-			expected: "  abc   ",
-		},
-		{
-			name:     "width of 1",
-			text:     "a",
-			width:    1,
-			expected: "a",
-		},
-		{
-			name:     "zero width",
-			text:     "hello",
-			width:    0,
-			expected: "hello",
-		},
-		{
-			name:     "negative width",
-			text:     "test",
-			width:    -1,
-			expected: "test",
-		},
-		{
-			name:     "large width with short text",
-			text:     "hi",
-			width:    20,
-			expected: "         hi         ",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := centerText(tt.text, tt.width)
-			assert.Equal(t, tt.expected, result)
-
-			// Verify the result length matches expected width (unless text is longer or width <= 0)
-			if len(tt.text) <= tt.width && tt.width > 0 {
-				assert.Equal(t, tt.width, len(result))
-			}
-
-			// Verify that non-empty text always produces non-empty result
-			if tt.text != "" {
-				assert.Contains(t, result, tt.text)
-			}
-		})
-	}
-}
-
 func TestShowPlainLogo(t *testing.T) {
 	// Capture output
 	output := captureOutput(func() {
@@ -256,23 +169,6 @@ func BenchmarkShowPlainLogo(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		showPlainLogo()
-	}
-}
-
-func BenchmarkCenterText(b *testing.B) {
-	tests := []struct {
-		text  string
-		width int
-	}{
-		{"short", 10},
-		{"medium length text", 30},
-		{"very long text that exceeds the width significantly", 20},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		test := tests[i%len(tests)]
-		centerText(test.text, test.width)
 	}
 }
 

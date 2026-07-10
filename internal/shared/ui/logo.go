@@ -89,11 +89,6 @@ func ShowLogoWithContext(ctx context.Context) {
 	ShowLogoConditional(false)
 }
 
-// WithSuppressedLogo returns a context with logo suppression enabled
-func WithSuppressedLogo(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressLogoKey, true)
-}
-
 // isTerminalEnvironment checks if we're running in a proper terminal
 func isTerminalEnvironment() bool {
 	// Check if stdout is a terminal
@@ -160,15 +155,4 @@ func showPlainLogo() {
 	fmt.Println(middleSeparator)
 	fmt.Println(bottomBorder)
 	fmt.Println()
-}
-
-// centerText centers text within a given width
-func centerText(text string, width int) string {
-	if len(text) >= width {
-		return text
-	}
-
-	padding := (width - len(text)) / 2
-	rightPadding := width - len(text) - padding
-	return strings.Repeat(" ", padding) + text + strings.Repeat(" ", rightPadding)
 }

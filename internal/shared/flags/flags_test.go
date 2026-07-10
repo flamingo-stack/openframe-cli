@@ -168,52 +168,6 @@ func TestValidateCommonFlags(t *testing.T) {
 	}
 }
 
-func TestGetFlagDescription(t *testing.T) {
-	tests := []struct {
-		name     string
-		flagName string
-		expected string
-	}{
-		{
-			name:     "verbose flag",
-			flagName: "verbose",
-			expected: "Enable verbose output with detailed information",
-		},
-		{
-			name:     "dry-run flag",
-			flagName: "dry-run",
-			expected: "Show what would be done without actually executing",
-		},
-		{
-			name:     "force flag",
-			flagName: "force",
-			expected: "Skip confirmation prompts and proceed automatically",
-		},
-		{
-			name:     "quiet flag",
-			flagName: "quiet",
-			expected: "Minimize output, showing only essential information",
-		},
-		{
-			name:     "unknown flag",
-			flagName: "unknown",
-			expected: "",
-		},
-		{
-			name:     "empty flag name",
-			flagName: "",
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetFlagDescription(tt.flagName)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestFlagManager_NilCommonFlags(t *testing.T) {
 	// Test that manager handles nil global flags gracefully
 	manager := NewFlagManager(nil)
@@ -278,17 +232,6 @@ func TestFlagManager_Struct(t *testing.T) {
 	manager := NewFlagManager(globalFlags)
 
 	assert.Equal(t, globalFlags, manager.common)
-}
-
-func TestFlagDescriptions_Coverage(t *testing.T) {
-	// Test that all expected flag descriptions are covered
-	expectedFlags := []string{"verbose", "dry-run", "force", "quiet"}
-
-	for _, flag := range expectedFlags {
-		description := GetFlagDescription(flag)
-		assert.NotEmpty(t, description, "Flag %s should have a description", flag)
-		assert.Greater(t, len(description), 10, "Description for %s should be meaningful", flag)
-	}
 }
 
 func TestFlagManager_EdgeCases(t *testing.T) {
@@ -408,53 +351,6 @@ func TestValidateCommonFlags_EdgeCases(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
-	}
-}
-
-func TestGetFlagDescription_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		flagName string
-		expected string
-	}{
-		{
-			name:     "case sensitivity",
-			flagName: "VERBOSE",
-			expected: "", // Should be case sensitive
-		},
-		{
-			name:     "partial match",
-			flagName: "verb",
-			expected: "", // Should be exact match
-		},
-		{
-			name:     "special characters",
-			flagName: "dry-run",
-			expected: "Show what would be done without actually executing",
-		},
-		{
-			name:     "hyphenated flag",
-			flagName: "dry_run", // Underscore instead of hyphen
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetFlagDescription(tt.flagName)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// Benchmark tests
-func BenchmarkGetFlagDescription(b *testing.B) {
-	flags := []string{"verbose", "dry-run", "force", "quiet", "unknown"}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		flag := flags[i%len(flags)]
-		GetFlagDescription(flag)
 	}
 }
 

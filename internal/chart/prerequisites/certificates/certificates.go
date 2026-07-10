@@ -31,22 +31,6 @@ func isMkcertInstalled() bool {
 	return commandExists("mkcert")
 }
 
-func areCertificatesGenerated() bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	certDir := filepath.Join(homeDir, ".config", "openframe", "certs")
-	certFile := filepath.Join(certDir, "localhost.pem")
-	keyFile := filepath.Join(certDir, "localhost-key.pem")
-
-	_, certErr := os.Stat(certFile)
-	_, keyErr := os.Stat(keyFile)
-
-	return certErr == nil && keyErr == nil
-}
-
 func certificateInstallHelp() string {
 	return platform.InstallHint("certificates")
 }

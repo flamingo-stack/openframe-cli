@@ -1,8 +1,6 @@
 package prerequisites
 
 import (
-	"strings"
-
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
@@ -62,21 +60,6 @@ func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
 	}
 
 	return allPresent, missing
-}
-
-func (pc *PrerequisiteChecker) GetInstallInstructions(missingTools []string) []string {
-	var instructions []string
-
-	for _, tool := range missingTools {
-		for _, req := range pc.requirements {
-			if strings.EqualFold(req.Name, tool) {
-				instructions = append(instructions, req.InstallHelp())
-				break
-			}
-		}
-	}
-
-	return instructions
 }
 
 func CheckPrerequisites() error {

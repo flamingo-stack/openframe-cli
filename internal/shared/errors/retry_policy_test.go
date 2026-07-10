@@ -32,8 +32,7 @@ func TestShouldRetry_WrappedRecoverableIsUnwrapped(t *testing.T) {
 	p := NewExponentialBackoffPolicy(5, time.Millisecond)
 	wrapped := fmt.Errorf("install step failed: %w", recoverable{msg: "boom"})
 	assert.True(t, p.ShouldRetry(wrapped, 0), "wrapped recoverable error must still retry")
-	assert.True(t, IsRecoverable(wrapped), "IsRecoverable must unwrap %w chains")
-	assert.False(t, IsRecoverable(fmt.Errorf("plain: %w", nonRecoverable{msg: "x"})))
+	assert.False(t, p.ShouldRetry(fmt.Errorf("plain: %w", nonRecoverable{msg: "x"}), 0))
 }
 
 func TestShouldRetry_RespectsMaxAttempts(t *testing.T) {

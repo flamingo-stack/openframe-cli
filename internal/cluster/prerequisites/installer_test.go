@@ -53,16 +53,6 @@ func TestInstallTool(t *testing.T) {
 	}
 }
 
-func TestRunCommand(t *testing.T) {
-	installer := NewInstaller()
-
-	// Test simple command that should work on all systems
-	err := installer.runCommand("echo", "test")
-	if err != nil {
-		t.Errorf("Expected echo command to succeed, got error: %v", err)
-	}
-}
-
 // Helper function to check if a string contains a substring
 func containsSubstring(str, substr string) bool {
 	return len(str) >= len(substr) &&

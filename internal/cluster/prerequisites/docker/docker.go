@@ -60,11 +60,6 @@ func isDockerRunningWSL() bool {
 	return cmd.Run() == nil
 }
 
-func IsDockerInstalledButNotRunning() bool {
-	// Docker command exists but daemon is not accessible
-	return isDockerInstalled() && !IsDockerRunning()
-}
-
 func dockerInstallHelp() string {
 	return platform.InstallHint("docker")
 }

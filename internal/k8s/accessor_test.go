@@ -38,7 +38,7 @@ func TestCheckHealth_CountsReadyNodes(t *testing.T) {
 		node("ready-1", true, "4", "8Gi"),
 		node("notready", false, "4", "8Gi"),
 	)
-	h, err := NewAccessor(cs).CheckHealth(context.Background())
+	h, err := (&Accessor{clientset: cs}).CheckHealth(context.Background())
 	require.NoError(t, err)
 	assert.True(t, h.Reachable)
 	assert.Equal(t, 2, h.NodesTotal)
@@ -51,7 +51,7 @@ func TestCheckHealth_Unreachable(t *testing.T) {
 	cs.PrependReactor("list", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("connection refused")
 	})
-	h, err := NewAccessor(cs).CheckHealth(context.Background())
+	h, err := (&Accessor{clientset: cs}).CheckHealth(context.Background())
 	require.Error(t, err)
 	assert.False(t, h.Reachable)
 	assert.False(t, h.Ready())
@@ -63,7 +63,7 @@ func TestCheckResources_SumsReadyNodesOnly(t *testing.T) {
 		node("ready-2", true, "2", "4Gi"),
 		node("notready", false, "8", "16Gi"), // must be excluded
 	)
-	a := NewAccessor(cs)
+	a := &Accessor{clientset: cs}
 
 	// ready capacity = 6 CPU (6000m), 12Gi
 	res, ok, err := a.CheckResources(context.Background(), Requirements{CPUMillis: 6000, MemBytes: 12 * 1024 * 1024 * 1024})

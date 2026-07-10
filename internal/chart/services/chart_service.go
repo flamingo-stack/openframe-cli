@@ -129,28 +129,12 @@ func (cs *ChartService) InstallWithContext(ctx context.Context, req types.Instal
 	return workflow.ExecuteWithContext(ctx, req)
 }
 
-// InstallWithContextDeferred performs installation with deferred HelmManager initialization
-// This is used when KubeConfig is not available upfront (e.g., standalone chart install)
+// InstallWithContextDeferred performs installation with deferred HelmManager
+// initialization — used when KubeConfig is not available upfront (standalone
+// chart install). Same workflow as InstallWithContext: the nil HelmManager on a
+// service built by NewChartServiceDeferred triggers the in-workflow resolution.
 func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req types.InstallationRequest) error {
-	// Check if context is already cancelled
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("chart installation cancelled: %w", ctx.Err())
-	default:
-	}
-
-	// Create installation workflow with direct dependencies
-	fileCleanup := files.NewFileCleanup()
-	fileCleanup.SetCleanupOnSuccessOnly(true) // Only clean temporary files after successful ArgoCD sync
-
-	workflow := &InstallationWorkflow{
-		chartService:   cs,
-		clusterService: cs.clusterService,
-		fileCleanup:    fileCleanup,
-	}
-
-	// Execute workflow with deferred initialization
-	return workflow.ExecuteWithContextDeferred(ctx, req)
+	return cs.InstallWithContext(ctx, req)
 }
 
 // InstallationWorkflow orchestrates the installation process
@@ -225,6 +209,22 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		return fmt.Errorf("no cluster selected — nothing was installed")
 	}
 
+	// Step 2.5 (deferred mode): no HelmManager yet — the caller had no
+	// rest.Config upfront (standalone install), so resolve the selected
+	// cluster's config now, through the injected ClusterAccess interface
+	// (req 18/19). This used to live in a ~120-line copy of this whole
+	// workflow (ExecuteWithContextDeferred) that drifted from this one; the
+	// nil-check replaces the fork (audit B7).
+	if w.chartService.helmManager == nil {
+		kubeConfig, kerr := w.clusterService.GetRestConfig(clusterName)
+		if kerr != nil {
+			return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, kerr)
+		}
+		if ierr := w.chartService.initializeHelmManager(kubeConfig, req.Verbose); ierr != nil {
+			return fmt.Errorf("failed to initialize HelmManager: %w", ierr)
+		}
+	}
+
 	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
 	if !req.NonInteractive && !req.DryRun {
 		if !w.confirmInstallationOnCluster(clusterName) {
@@ -273,128 +273,6 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 	// The installer waits for all ArgoCD applications after installing app-of-apps
 
 	// Step 9: Installation successful - clean up temporary files
-	if cleanupErr := w.fileCleanup.RestoreFilesOnSuccess(req.Verbose); cleanupErr != nil {
-		pterm.Warning.Printf("Failed to clean up files after successful installation: %v\n", cleanupErr)
-	}
-
-	return nil
-}
-
-// ExecuteWithContextDeferred runs the installation workflow with deferred HelmManager initialization
-// This is used when KubeConfig is not available upfront (e.g., standalone chart install)
-func (w *InstallationWorkflow) ExecuteWithContextDeferred(parentCtx context.Context, req types.InstallationRequest) error {
-	// parentCtx is already signal-cancelled (root ExecuteContext); a derived
-	// cancellable context is enough to stop remaining work on Ctrl-C / SIGTERM.
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-
-	// Step 1: Determine configuration mode and run appropriate workflow
-	var chartConfig *types.ChartConfiguration
-	if req.DryRun {
-		var err error
-		chartConfig, err = w.dryRunConfiguration()
-		if err != nil {
-			return err
-		}
-		// dry-run writes a real values file too, so register it for cleanup.
-		if chartConfig.TempHelmValuesPath != "" {
-			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
-				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
-			}
-		}
-		pterm.Info.Println("Using existing configuration (dry-run mode)")
-	} else if req.NonInteractive {
-		// NON-INTERACTIVE (CI/CD): use the existing openframe-helm-values.yaml as-is.
-		pterm.Info.Println("Running in non-interactive mode using existing openframe-helm-values.yaml")
-		var err error
-		chartConfig, err = w.loadExistingConfiguration(req.RequireExistingValues)
-		if err != nil {
-			return fmt.Errorf("non-interactive configuration failed: %w", err)
-		}
-		// Register the temp values file for cleanup (the dry-run and interactive
-		// paths do the same); otherwise the OS temp dir accumulates one per run.
-		if chartConfig.TempHelmValuesPath != "" {
-			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
-				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
-			}
-		}
-	} else {
-		var err error
-		chartConfig, err = w.runConfigurationWizard()
-		if err != nil {
-			return fmt.Errorf("configuration wizard failed: %w", err)
-		}
-		if chartConfig.TempHelmValuesPath != "" {
-			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
-				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
-			}
-		}
-	}
-
-	// Step 2: Select cluster
-	clusterName, err := w.selectCluster(req.Args, req.NonInteractive, req.Verbose)
-	if err != nil {
-		return err
-	}
-	if clusterName == "" {
-		// selectCluster prints why (no clusters found, or the interactive
-		// selection was cancelled) but returns no error; surface a non-zero exit
-		// so callers and CI don't read a no-op install as success.
-		return fmt.Errorf("no cluster selected — nothing was installed")
-	}
-
-	// Step 2.5: Get KubeConfig for the selected cluster and initialize HelmManager.
-	// Resolved through the injected ClusterAccess interface so this workflow does
-	// not depend on the concrete cluster service (req 18/19).
-	kubeConfig, err := w.clusterService.GetRestConfig(clusterName)
-	if err != nil {
-		return fmt.Errorf("failed to get rest.Config for cluster %s: %w", clusterName, err)
-	}
-	if err := w.chartService.initializeHelmManager(kubeConfig, req.Verbose); err != nil {
-		return fmt.Errorf("failed to initialize HelmManager: %w", err)
-	}
-
-	// Step 3: Confirm installation (skipped in non-interactive and dry-run modes)
-	if !req.NonInteractive && !req.DryRun {
-		if !w.confirmInstallationOnCluster(clusterName) {
-			pterm.Info.Println("Installation cancelled.")
-			return fmt.Errorf("installation cancelled by user")
-		}
-	}
-
-	// Step 4: Regenerate certificates (skipped in non-interactive and dry-run modes)
-	if !req.NonInteractive && !req.DryRun {
-		// Non-fatal: failures are logged inside the method, continue regardless.
-		_ = w.regenerateCertificates()
-	} else if req.DryRun {
-		pterm.Info.Println("Skipping certificate regeneration (dry-run)")
-	} else {
-		pterm.Warning.Println("Skipping certificate regeneration (non-interactive mode)")
-	}
-
-	// Step 5: Build configuration
-	config, err := w.buildConfiguration(req, clusterName, chartConfig)
-	if err != nil {
-		chartErr := errors.WrapAsChartError("configuration", "build", err).WithCluster(clusterName)
-		return sharedErrors.HandleGlobalError(chartErr, req.Verbose)
-	}
-
-	// Step 6: Execute installation with retry support
-	err = w.performInstallationWithRetry(ctx, config)
-
-	// Step 7: Clean up generated files based on installation result
-	if err != nil {
-		if cleanupErr := w.fileCleanup.RestoreFiles(req.Verbose); cleanupErr != nil {
-			pterm.Warning.Printf("Failed to clean up files after error: %v\n", cleanupErr)
-		}
-		return err
-	}
-
-	if ctx.Err() != nil {
-		_ = w.fileCleanup.RestoreFiles(false)
-		return fmt.Errorf("installation cancelled by user")
-	}
-
 	if cleanupErr := w.fileCleanup.RestoreFilesOnSuccess(req.Verbose); cleanupErr != nil {
 		pterm.Warning.Printf("Failed to clean up files after successful installation: %v\n", cleanupErr)
 	}

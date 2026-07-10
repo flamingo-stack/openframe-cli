@@ -68,33 +68,6 @@ func TestFlagContainer_SyncGlobalFlags(t *testing.T) {
 	})
 }
 
-func TestFlagContainer_Reset(t *testing.T) {
-	t.Run("resets all flags to zero values", func(t *testing.T) {
-		container := NewFlagContainer()
-
-		// Set some values
-		container.Global.Verbose = true
-		container.Create.ClusterType = "gke"
-		container.Create.NodeCount = 5
-		container.List.Quiet = true
-		container.Delete.GlobalFlags.Force = true
-
-		// Reset the container
-		container.Reset()
-
-		// Verify all flags are reset to zero values
-		assert.False(t, container.Global.Verbose)
-		assert.False(t, container.Global.DryRun)
-
-		assert.Empty(t, container.Create.ClusterType)
-		assert.Equal(t, 0, container.Create.NodeCount)
-		assert.Empty(t, container.Create.K8sVersion)
-
-		assert.False(t, container.List.Quiet)
-		assert.False(t, container.Delete.GlobalFlags.Force)
-	})
-}
-
 func TestFlagContainer_Executor(t *testing.T) {
 	t.Run("can set and get executor", func(t *testing.T) {
 		container := NewFlagContainer()
@@ -230,17 +203,6 @@ func TestErrorTypes(t *testing.T) {
 		// Test type assertion (check if error contains expected type)
 		var invalidConfigErr models.ErrInvalidClusterConfig
 		assert.True(t, errors.As(err, &invalidConfigErr))
-	})
-
-	t.Run("cluster already exists error", func(t *testing.T) {
-		err := models.NewClusterAlreadyExistsError("test-cluster")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "test-cluster")
-		assert.Contains(t, err.Error(), "already exists")
-
-		// Test type assertion (check if error contains expected type)
-		var alreadyExistsErr models.ErrClusterAlreadyExists
-		assert.True(t, errors.As(err, &alreadyExistsErr))
 	})
 
 	t.Run("cluster operation error", func(t *testing.T) {

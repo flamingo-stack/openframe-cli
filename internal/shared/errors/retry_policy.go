@@ -7,8 +7,6 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-
-	"github.com/pterm/pterm"
 )
 
 // RetryPolicy defines retry behavior for recoverable errors
@@ -108,40 +106,6 @@ func (p *ExponentialBackoffPolicy) GetMaxAttempts() int {
 	return p.MaxAttempts
 }
 
-// LinearBackoffPolicy implements linear backoff retry policy
-type LinearBackoffPolicy struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	Increment   time.Duration
-}
-
-// NewLinearBackoffPolicy creates a new linear backoff policy
-func NewLinearBackoffPolicy(maxAttempts int, baseDelay, increment time.Duration) *LinearBackoffPolicy {
-	return &LinearBackoffPolicy{
-		MaxAttempts: maxAttempts,
-		BaseDelay:   baseDelay,
-		Increment:   increment,
-	}
-}
-
-// ShouldRetry determines if an error should be retried
-func (p *LinearBackoffPolicy) ShouldRetry(err error, attempt int) bool {
-	if attempt >= p.MaxAttempts {
-		return false
-	}
-	return IsRecoverable(err)
-}
-
-// GetDelay calculates linear delay
-func (p *LinearBackoffPolicy) GetDelay(attempt int) time.Duration {
-	return p.BaseDelay + time.Duration(attempt)*p.Increment
-}
-
-// GetMaxAttempts returns maximum attempts
-func (p *LinearBackoffPolicy) GetMaxAttempts() int {
-	return p.MaxAttempts
-}
-
 // RetryExecutor handles retry logic with policies
 type RetryExecutor struct {
 	policy  RetryPolicy
@@ -153,12 +117,6 @@ func NewRetryExecutor(policy RetryPolicy) *RetryExecutor {
 	return &RetryExecutor{
 		policy: policy,
 	}
-}
-
-// WithRetryCallback sets a callback function called on each retry
-func (r *RetryExecutor) WithRetryCallback(callback func(err error, attempt int, delay time.Duration)) *RetryExecutor {
-	r.onRetry = callback
-	return r
 }
 
 // Execute executes a function with retry logic
@@ -211,116 +169,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) err
 	return lastErr
 }
 
-// ExecuteWithResult executes a function returning a result with retry logic
-func (r *RetryExecutor) ExecuteWithResult(ctx context.Context, operation func() (interface{}, error)) (interface{}, error) {
-	var lastErr error
-	var lastResult interface{}
-
-	for attempt := 0; attempt < r.policy.GetMaxAttempts(); attempt++ {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Execute the operation
-		result, err := operation()
-		if err == nil {
-			return result, nil // Success
-		}
-
-		lastErr = err
-		lastResult = result
-
-		// Check if we should retry
-		if !r.policy.ShouldRetry(err, attempt) {
-			break
-		}
-
-		// This is our last attempt
-		if attempt == r.policy.GetMaxAttempts()-1 {
-			break
-		}
-
-		// Calculate delay
-		delay := r.policy.GetDelay(attempt + 1)
-
-		// Call retry callback if set
-		if r.onRetry != nil {
-			r.onRetry(err, attempt+1, delay)
-		}
-
-		// Wait for the delay period or context cancellation
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(delay):
-			// Continue to next attempt
-		}
-	}
-
-	return lastResult, lastErr
-}
-
-// DefaultRetryCallback provides a standard retry callback with progress indication
-func DefaultRetryCallback(operation string) func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Warning.Printf("⚠️  %s failed (attempt %d): %v\n", operation, attempt, err)
-		pterm.Info.Printf("🔄 Retrying in %s...\n", delay.Round(time.Second))
-	}
-}
-
-// QuietRetryCallback provides a minimal retry callback
-func QuietRetryCallback() func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Debug.Printf("Retry attempt %d after %v: %v\n", attempt, delay, err)
-	}
-}
-
-// VerboseRetryCallback provides detailed retry information
-func VerboseRetryCallback() func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Warning.Printf("Operation failed on attempt %d: %v\n", attempt, err)
-		pterm.Info.Printf("Waiting %s before retry attempt %d...\n", delay.Round(time.Millisecond), attempt+1)
-
-		var recoverableErr RecoverableError
-		if stderrors.As(err, &recoverableErr) && recoverableErr.IsRecoverable() {
-			pterm.Debug.Printf("Error is recoverable with suggested retry after %v\n", recoverableErr.GetRetryAfter())
-		}
-	}
-}
-
 // Predefined retry policies for common scenarios
-
-// NetworkRetryPolicy for network-related operations
-func NetworkRetryPolicy() RetryPolicy {
-	policy := NewExponentialBackoffPolicy(5, 2*time.Second)
-	policy.MaxDelay = 30 * time.Second
-	policy.RetryableErrs = map[string]bool{
-		"network timeout":       true,
-		"connection refused":    true,
-		"connection reset":      true,
-		"no route to host":      true,
-		"dns resolution failed": true,
-		"tls handshake timeout": true,
-	}
-	return policy
-}
-
-// ResourceRetryPolicy for resource availability operations
-func ResourceRetryPolicy() RetryPolicy {
-	policy := NewExponentialBackoffPolicy(10, 5*time.Second)
-	policy.MaxDelay = 2 * time.Minute
-	policy.RetryableErrs = map[string]bool{
-		"resource not ready":      true,
-		"cluster not ready":       true,
-		"service unavailable":     true,
-		"temporarily unavailable": true,
-		"resource busy":           true,
-	}
-	return policy
-}
 
 // InstallationRetryPolicy for installation operations
 func InstallationRetryPolicy() RetryPolicy {
@@ -334,17 +183,6 @@ func InstallationRetryPolicy() RetryPolicy {
 		"rate limited":      true,
 	}
 	return policy
-}
-
-// Helper functions
-
-// IsRecoverable checks if an error is recoverable
-func IsRecoverable(err error) bool {
-	var recoverableErr RecoverableError
-	if stderrors.As(err, &recoverableErr) {
-		return recoverableErr.IsRecoverable()
-	}
-	return false
 }
 
 // contains reports whether str contains substr, case-insensitively. (The prior

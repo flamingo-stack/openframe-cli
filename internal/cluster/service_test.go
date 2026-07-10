@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
@@ -38,25 +37,6 @@ func TestNewClusterService(t *testing.T) {
 
 	if service.manager == nil {
 		t.Error("service should have a manager initialized")
-	}
-}
-
-func TestNewClusterServiceWithOptions(t *testing.T) {
-	exec := createTestExecutor()
-	customManager := k3d.CreateClusterManagerWithExecutor(exec)
-
-	service := NewClusterServiceWithOptions(exec, customManager)
-
-	if service == nil {
-		t.Fatal("NewClusterServiceWithOptions should not return nil")
-	}
-
-	if service.executor != exec {
-		t.Error("service should store the provided executor")
-	}
-
-	if service.manager != customManager {
-		t.Error("service should store the provided manager")
 	}
 }
 

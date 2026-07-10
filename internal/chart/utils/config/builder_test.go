@@ -35,10 +35,10 @@ func TestBuilder_ImplementsConfigBuilderInterface(t *testing.T) {
 	assert.NotNil(t, builder)
 
 	// Test that BuildInstallConfig method exists and works
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"", "", "",
+		"", "", "", "",
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, config)
@@ -48,10 +48,10 @@ func TestBuilder_BuildInstallConfig_BasicConfiguration(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false, // force, dryRun, verbose
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"", "", "", // no GitHub config
+		"", "", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -68,10 +68,10 @@ func TestBuilder_BuildInstallConfig_WithFlags(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		true, true, true, // force, dryRun, verbose
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		true, true, true, false,
 		"production-cluster",
-		"", "", "", // no GitHub config
+		"", "", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -86,10 +86,10 @@ func TestBuilder_BuildInstallConfig_WithGitHubRepo(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"https://github.com/test/repo", "main", "",
+		"https://github.com/test/repo", "main", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -111,10 +111,10 @@ func TestBuilder_BuildInstallConfig_WithCustomCertDir(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"https://github.com/test/repo", "main", "/custom/cert/dir",
+		"https://github.com/test/repo", "main", "/custom/cert/dir", "",
 	)
 
 	assert.NoError(t, err)
@@ -126,10 +126,10 @@ func TestBuilder_BuildInstallConfig_WithoutCertDir(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"https://github.com/test/repo", "main", "", // empty cert dir
+		"https://github.com/test/repo", "main", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -142,10 +142,10 @@ func TestBuilder_BuildInstallConfig_AllFlags(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		true, true, true, // all flags true
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		true, true, true, false,
 		"full-config-cluster",
-		"https://github.com/full/config", "develop", "/full/cert/path",
+		"https://github.com/full/config", "develop", "/full/cert/path", "",
 	)
 
 	assert.NoError(t, err)
@@ -168,10 +168,10 @@ func TestBuilder_BuildInstallConfig_EmptyClusterName(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
-		"", // empty cluster name
-		"", "", "",
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
+		"",
+		"", "", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -184,10 +184,10 @@ func TestBuilder_BuildInstallConfig_CompleteGitHubCredentials(t *testing.T) {
 	builder := NewBuilder(operationsUI)
 
 	// Test with complete GitHub configuration
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"test-cluster",
-		"https://github.com/test/repo", "main", "",
+		"https://github.com/test/repo", "main", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -200,10 +200,10 @@ func TestBuilder_BuildInstallConfig_PublicRepoWithCredentials(t *testing.T) {
 	operationsUI := chartUI.NewOperationsUI()
 	builder := NewBuilder(operationsUI)
 
-	config, err := builder.BuildInstallConfig(
-		false, false, false,
+	config, err := builder.BuildInstallConfigWithCustomHelmPath(
+		false, false, false, false,
 		"minimal-cluster",
-		"https://github.com/minimal/repo", "feature-branch", "",
+		"https://github.com/minimal/repo", "feature-branch", "", "",
 	)
 
 	assert.NoError(t, err)
@@ -222,10 +222,10 @@ func TestBuilder_BuildInstallConfig_DifferentBranches(t *testing.T) {
 	branches := []string{"main", "develop", "feature/test", "release/v1.0", "hotfix/urgent"}
 
 	for _, branch := range branches {
-		config, err := builder.BuildInstallConfig(
-			false, false, false,
+		config, err := builder.BuildInstallConfigWithCustomHelmPath(
+			false, false, false, false,
 			"branch-test-cluster",
-			"https://github.com/test/branches", branch, "",
+			"https://github.com/test/branches", branch, "", "",
 		)
 
 		assert.NoError(t, err)
@@ -249,16 +249,16 @@ func TestBuilder_MultipleBuilds(t *testing.T) {
 	builder := NewBuilder(operationsUI)
 
 	// Build multiple configurations to ensure builder is stateless
-	config1, err1 := builder.BuildInstallConfig(
-		true, false, true,
+	config1, err1 := builder.BuildInstallConfigWithCustomHelmPath(
+		true, false, true, false,
 		"cluster-1",
-		"https://github.com/test/repo1", "main", "/path1",
+		"https://github.com/test/repo1", "main", "/path1", "",
 	)
 
-	config2, err2 := builder.BuildInstallConfig(
-		false, true, false,
+	config2, err2 := builder.BuildInstallConfigWithCustomHelmPath(
+		false, true, false, false,
 		"cluster-2",
-		"https://github.com/test/repo2", "develop", "/path2",
+		"https://github.com/test/repo2", "develop", "/path2", "",
 	)
 
 	assert.NoError(t, err1)

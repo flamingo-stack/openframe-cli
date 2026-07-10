@@ -36,11 +36,6 @@ type helmValues struct {
 	} `yaml:"repository"`
 }
 
-// getBranchFromHelmValues reads the Helm values file and extracts the repository branch
-func (b *Builder) getBranchFromHelmValues() string {
-	return b.getBranchFromHelmValuesPath("")
-}
-
 // getBranchFromHelmValuesPath reads a specific Helm values file and extracts the
 // flattened repository.branch (empty means "use the default/flag ref").
 func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
@@ -64,45 +59,6 @@ func (b *Builder) getBranchFromHelmValuesPath(helmValuesPath string) string {
 	}
 
 	return values.Repository.Branch
-}
-
-// BuildInstallConfig constructs the installation configuration
-func (b *Builder) BuildInstallConfig(
-	force, dryRun, verbose bool,
-	clusterName, githubRepo, githubBranch, certDir string,
-) (ChartInstallConfig, error) {
-	// Use config service for certificate directory
-	if certDir == "" {
-		certDir = b.configService.GetCertificateDirectory()
-	}
-
-	// Create app-of-apps configuration if GitHub repo is provided
-	var appOfAppsConfig *models.AppOfAppsConfig
-	if githubRepo != "" {
-		appOfAppsConfig = models.NewAppOfAppsConfig()
-		appOfAppsConfig.GitHubRepo = githubRepo
-		appOfAppsConfig.GitHubBranch = githubBranch
-		appOfAppsConfig.CertDir = certDir
-
-		// Repository is public, no credentials needed
-
-		// After credentials are provided, check for branch override from Helm values
-		helmBranch := b.getBranchFromHelmValues()
-		if helmBranch != "" {
-			if verbose {
-				pterm.Info.Printf("📥 Using branch '%s' from Helm values\n", helmBranch)
-			}
-			appOfAppsConfig.GitHubBranch = helmBranch
-		} else if verbose {
-			pterm.Info.Printf("📥 Using default branch '%s'\n", appOfAppsConfig.GitHubBranch)
-		}
-	}
-
-	return b.configService.BuildInstallConfig(
-		force, dryRun, verbose,
-		clusterName,
-		appOfAppsConfig,
-	), nil
 }
 
 // BuildInstallConfigWithCustomHelmPath constructs the installation configuration using a custom helm values file

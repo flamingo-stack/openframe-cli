@@ -183,15 +183,6 @@ func (eh *ErrorHandler) isUserInterruption(err error) bool {
 	return isInterruption(err)
 }
 
-// CreateValidationError creates a new validation error
-func CreateValidationError(field, value, message string) *ValidationError {
-	return &ValidationError{
-		Field:   field,
-		Value:   value,
-		Message: message,
-	}
-}
-
 // BranchNotFoundError represents a branch not found error
 type BranchNotFoundError struct {
 	Branch string
@@ -204,27 +195,6 @@ func (e *BranchNotFoundError) Error() string {
 // NewBranchNotFoundError creates a new branch not found error
 func NewBranchNotFoundError(branch string) *BranchNotFoundError {
 	return &BranchNotFoundError{Branch: branch}
-}
-
-// CreateCommandError creates a new command error
-func CreateCommandError(command string, args []string, err error) *CommandError {
-	return &CommandError{
-		Command: command,
-		Args:    args,
-		Err:     err,
-	}
-}
-
-// IsValidationError checks if an error is a validation error
-func IsValidationError(err error) bool {
-	var target *ValidationError
-	return stderrors.As(err, &target)
-}
-
-// IsCommandError checks if an error is a command error
-func IsCommandError(err error) bool {
-	var target *CommandError
-	return stderrors.As(err, &target)
 }
 
 // HandleGlobalError provides a global error handling entry point

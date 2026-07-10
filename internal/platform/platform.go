@@ -25,12 +25,6 @@ func Current() OS { return OS(runtime.GOOS) }
 // IsWindows reports whether the host OS is Windows.
 func IsWindows() bool { return Current() == Windows }
 
-// IsMac reports whether the host OS is macOS.
-func IsMac() bool { return Current() == Darwin }
-
-// IsLinux reports whether the host OS is Linux.
-func IsLinux() bool { return Current() == Linux }
-
 // InstallDocs holds a tool's installation guidance per OS. Default is used for
 // any OS without a specific entry.
 type InstallDocs struct {
