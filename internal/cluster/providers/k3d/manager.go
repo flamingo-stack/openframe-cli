@@ -182,8 +182,15 @@ func (m *K3dManager) GetRestConfig(ctx context.Context, clusterName string) (*re
 
 // DeleteCluster removes a K3D cluster
 func (m *K3dManager) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
-	if name == "" {
-		return models.NewInvalidConfigError("name", name, "cluster name cannot be empty")
+	// Validate at this domain boundary, not just at `cluster create`/`bootstrap`:
+	// `cluster delete <name> --force` skips both the existence check and any
+	// command-layer validation, and its Docker fallback interpolates the name
+	// into a `bash -c` string on the WSL path — a name like `x'; whoami; '`
+	// would break out of the single-quoted filter and run as sudo inside WSL.
+	// ValidateClusterName restricts names to [a-zA-Z0-9-], which has no shell
+	// metacharacters.
+	if err := models.ValidateClusterName(name); err != nil {
+		return models.NewInvalidConfigError("name", name, err.Error())
 	}
 
 	if clusterType != models.ClusterTypeK3d {
@@ -237,6 +244,13 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 
 // forceCleanupDockerContainersWSL removes k3d containers via WSL on Windows
 func (m *K3dManager) forceCleanupDockerContainersWSL(ctx context.Context, clusterName string) error {
+	// Defense in depth: this is the one place a cluster name reaches a shell
+	// (`bash -c` as sudo inside WSL). Callers validate, but re-check here so a
+	// future caller cannot introduce an injection. See DeleteCluster.
+	if err := models.ValidateClusterName(clusterName); err != nil {
+		return models.NewInvalidConfigError("name", clusterName, err.Error())
+	}
+
 	username, err := m.getWSLUser(ctx)
 	if err != nil {
 		username = "runner" // fallback to runner
