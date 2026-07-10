@@ -17,13 +17,18 @@ type ChartError struct {
 	RetryAfter  time.Duration
 }
 
-// Error implements the error interface
+// Error reads as "<operation> failed for <component> [on cluster <name>]: <cause>",
+// e.g. "waiting failed for ArgoCD applications on cluster dev: ...".
+//
+// The previous form prefixed every message with a bare "chart" — "chart waiting
+// failed for ArgoCD applications" — which was ungrammatical and also wrong: the
+// operation is not always on a chart (waiting is on applications).
 func (e *ChartError) Error() string {
 	if e.ClusterName != "" {
-		return fmt.Sprintf("chart %s failed for %s on cluster %s: %v",
+		return fmt.Sprintf("%s failed for %s on cluster %s: %v",
 			e.Operation, e.Component, e.ClusterName, e.Cause)
 	}
-	return fmt.Sprintf("chart %s failed for %s: %v", e.Operation, e.Component, e.Cause)
+	return fmt.Sprintf("%s failed for %s: %v", e.Operation, e.Component, e.Cause)
 }
 
 // Unwrap returns the underlying error

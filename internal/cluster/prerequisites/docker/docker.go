@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/pterm/pterm"
 )
 
 type DockerInstaller struct{}
@@ -41,7 +42,6 @@ func IsDockerRunning() bool {
 	err := cmd.Run()
 	return err == nil
 }
-
 
 func dockerInstallHelp() string {
 	return platform.InstallHint("docker")
@@ -77,7 +77,7 @@ func (d *DockerInstaller) installMacOS() error {
 		return fmt.Errorf("automatic Docker installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
-	fmt.Println("Installing Docker Desktop via Homebrew...")
+	pterm.Info.Println("Installing Docker Desktop via Homebrew...")
 	cmd := exec.Command("brew", "install", "--cask", "docker")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -86,11 +86,11 @@ func (d *DockerInstaller) installMacOS() error {
 		return fmt.Errorf("failed to install Docker Desktop: %w", err)
 	}
 
-	fmt.Println("Starting Docker Desktop...")
+	pterm.Info.Println("Starting Docker Desktop...")
 	cmd = exec.Command("open", "-a", "Docker")
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Warning: Could not start Docker Desktop automatically: %v\n", err)
-		fmt.Println("Please start Docker Desktop manually from Applications")
+		pterm.Warning.Printfln("Could not start Docker Desktop automatically: %v", err)
+		pterm.Info.Println("Please start Docker Desktop manually from Applications")
 	}
 
 	return nil
@@ -121,7 +121,7 @@ func (d *DockerInstaller) installLinux() error {
 // may not be the init system, but `apk add docker` already provides the engine,
 // which can be started directly (see StartDocker).
 func (d *DockerInstaller) installAlpine() error {
-	fmt.Println("Installing Docker on Alpine Linux...")
+	pterm.Info.Println("Installing Docker on Alpine Linux...")
 
 	run := func(args ...string) error {
 		if os.Geteuid() != 0 && commandExists("sudo") {
@@ -134,18 +134,18 @@ func (d *DockerInstaller) installAlpine() error {
 		return fmt.Errorf("failed to install Docker with apk: %w", err)
 	}
 	if err := run("rc-update", "add", "docker", "default"); err != nil {
-		fmt.Printf("Warning: could not enable the docker service (rc-update): %v\n", err)
+		pterm.Warning.Printfln("Could not enable the docker service (rc-update): %v", err)
 	}
 	if err := run("rc-service", "docker", "start"); err != nil {
-		fmt.Printf("Warning: could not start the docker service (rc-service): %v\n", err)
+		pterm.Warning.Printfln("Could not start the docker service (rc-service): %v", err)
 	}
 
 	// Add the current user to the docker group (Alpine uses addgroup, not usermod).
 	if user := os.Getenv("USER"); user != "" && user != "root" {
 		if err := run("addgroup", user, "docker"); err != nil {
-			fmt.Printf("Warning: could not add user to the docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to the docker group: %v", err)
 		} else {
-			fmt.Println("Note: log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("Log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -153,7 +153,7 @@ func (d *DockerInstaller) installAlpine() error {
 }
 
 func (d *DockerInstaller) installUbuntu() error {
-	fmt.Println("Installing Docker on Ubuntu/Debian...")
+	pterm.Info.Println("Installing Docker on Ubuntu/Debian...")
 
 	commands := [][]string{
 		{"sudo", "apt", "update"},
@@ -196,9 +196,9 @@ func (d *DockerInstaller) installUbuntu() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -206,7 +206,7 @@ func (d *DockerInstaller) installUbuntu() error {
 }
 
 func (d *DockerInstaller) installRedHat() error {
-	fmt.Println("Installing Docker on CentOS/RHEL...")
+	pterm.Info.Println("Installing Docker on CentOS/RHEL...")
 
 	commands := [][]string{
 		{"sudo", "yum", "install", "-y", "yum-utils"},
@@ -226,9 +226,9 @@ func (d *DockerInstaller) installRedHat() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -236,7 +236,7 @@ func (d *DockerInstaller) installRedHat() error {
 }
 
 func (d *DockerInstaller) installFedora() error {
-	fmt.Println("Installing Docker on Fedora...")
+	pterm.Info.Println("Installing Docker on Fedora...")
 
 	commands := [][]string{
 		{"sudo", "dnf", "install", "-y", "dnf-plugins-core"},
@@ -256,9 +256,9 @@ func (d *DockerInstaller) installFedora() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -266,7 +266,7 @@ func (d *DockerInstaller) installFedora() error {
 }
 
 func (d *DockerInstaller) installArch() error {
-	fmt.Println("Installing Docker on Arch Linux...")
+	pterm.Info.Println("Installing Docker on Arch Linux...")
 
 	commands := [][]string{
 		{"sudo", "pacman", "-S", "--noconfirm", "docker"},
@@ -284,9 +284,9 @@ func (d *DockerInstaller) installArch() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -371,8 +371,6 @@ func startDockerLinux() error {
 
 	return fmt.Errorf("unable to start Docker daemon: no supported init system found")
 }
-
-
 
 // WaitForDocker waits for the Docker daemon to become available. The budget is
 // generous because a cold Docker Desktop start on macOS routinely exceeds the

@@ -186,7 +186,13 @@ func (h *HelmManager) UninstallRelease(ctx context.Context, releaseName, namespa
 		Env:     h.getHelmEnv(),
 	})
 	if err != nil {
-		return fmt.Errorf("helm uninstall %s: %w", releaseName, err)
+		// Name the target: "helm uninstall argo-cd: exit status 1" gave no way
+		// to tell which namespace, or which cluster, the failure happened in.
+		target := fmt.Sprintf("release %s in namespace %s", releaseName, namespace)
+		if kubeContext != "" {
+			target += fmt.Sprintf(" (context %s)", kubeContext)
+		}
+		return fmt.Errorf("helm uninstall of %s failed: %w", target, err)
 	}
 	return nil
 }

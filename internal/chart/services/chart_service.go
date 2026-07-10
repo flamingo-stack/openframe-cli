@@ -50,7 +50,10 @@ func NewChartService(clusterAccess types.ClusterAccess, kubeConfig *rest.Config,
 	// Initialize configuration service
 	configService := config.NewService()
 	if err := configService.Initialize(); err != nil {
-		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+		// Warning, not Debug: Debug printed nothing at all until --verbose was
+		// wired to EnableDebugMessages, and a config service that failed to
+		// initialize silently degrades every later step.
+		pterm.Warning.Printfln("Configuration service failed to initialize: %v", err)
 	}
 
 	// Create HelmManager with the rest.Config
@@ -80,7 +83,10 @@ func NewChartServiceDeferred(clusterAccess types.ClusterAccess, dryRun, verbose 
 	// Initialize configuration service
 	configService := config.NewService()
 	if err := configService.Initialize(); err != nil {
-		pterm.Debug.Printf("config service initialization failed: %v\n", err)
+		// Warning, not Debug: Debug printed nothing at all until --verbose was
+		// wired to EnableDebugMessages, and a config service that failed to
+		// initialize silently degrades every later step.
+		pterm.Warning.Printfln("Configuration service failed to initialize: %v", err)
 	}
 
 	return &ChartService{

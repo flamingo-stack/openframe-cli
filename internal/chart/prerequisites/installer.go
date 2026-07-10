@@ -128,7 +128,7 @@ func (i *Installer) CheckAndInstallNonInteractive(nonInteractive bool) error {
 
 	// Show memory warning if insufficient (but don't block)
 	if !sufficient {
-		pterm.Warning.Printf("⚠️  Memory Warning: %d MB available, %d MB recommended\n", current, recommended)
+		pterm.Warning.Printfln("Insufficient memory: %d MB available, %d MB recommended", current, recommended)
 		pterm.Info.Println("Charts may not deploy successfully with insufficient memory. Consider adding more RAM.")
 		fmt.Println()
 	}

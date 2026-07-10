@@ -111,8 +111,12 @@ func (eh *ErrorHandler) handleCommandError(err *executor.CommandError, outer err
 	}
 }
 
+// handleBranchNotFoundError names the ref that could not be found. The advice
+// alone ("check if the branch name is correct") was useless when the ref came
+// from a config file or a default rather than from something the user typed.
 func (eh *ErrorHandler) handleBranchNotFoundError(err *BranchNotFoundError) {
-	pterm.Error.Println("Please check if the branch name is correct or use 'main' branch")
+	pterm.Error.Printfln("Branch %q does not exist in the chart repository", err.Branch)
+	pterm.Info.Println("Check the ref, or pass an existing one with --ref (e.g. --ref main)")
 }
 
 func (eh *ErrorHandler) handleGenericError(err error) {
@@ -138,7 +142,10 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 			fmt.Println()
 			pterm.Info.Printf("🔧 Troubleshooting steps:\n")
 			pterm.Printf("  1. Check Docker is running: docker info\n")
-			pterm.Printf("  2. Check available ports: lsof -i :6550\n")
+			// 6550 is only the preferred API port; k3d falls back to 6551/6552
+			// when it is taken (providers/k3d/ports.go), and that fallback is
+			// exactly what a port conflict looks like.
+			pterm.Printf("  2. Check the API ports are free: lsof -i :6550-6552\n")
 			pterm.Printf("  3. Try with different name: openframe cluster create my-test\n")
 			pterm.Printf("  4. Check k3d directly: k3d version\n")
 		} else {

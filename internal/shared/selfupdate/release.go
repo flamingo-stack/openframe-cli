@@ -1,11 +1,14 @@
 // Package selfupdate checks for newer published releases of the OpenFrame CLI
 // and replaces the running binary in place.
 //
-// Phase 1 (this file set) verifies every artifact by SHA256 against the
-// release's checksums.txt before it touches disk, reusing the verified-download
-// substrate in internal/shared/download. Phase 2 will additionally verify the
-// cosign (keyless) signature of checksums.txt with a pinned OIDC identity, so
-// authenticity — not just integrity — is guaranteed.
+// Integrity: every artifact is verified by SHA256 against the release's
+// checksums.txt before it touches disk, reusing the verified-download substrate
+// in internal/shared/download.
+//
+// Authenticity: checksums.txt itself is verified against the release's cosign
+// (keyless) signature bundle, pinned to this repository's GitHub Actions OIDC
+// identity — see cosign.go. OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY downgrades to
+// integrity-only, loudly.
 package selfupdate
 
 import (

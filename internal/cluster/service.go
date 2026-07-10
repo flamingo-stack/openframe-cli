@@ -100,7 +100,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 
 		// Show warning for existing cluster
 		pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(config.Name))
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 
 		boxContent := fmt.Sprintf(
 			"NAME:     %s\n"+
@@ -122,11 +122,11 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 
 		// Show what user can do (suppress for automation)
 		if !s.suppressUI {
-			fmt.Println()
+			pterm.DefaultBasicText.Println()
 			pterm.Info.Printf("What would you like to do?\n")
-			pterm.Printf("  • Check status: openframe cluster status %s\n", config.Name)
-			pterm.Printf("  • Delete first: openframe cluster delete %s\n", config.Name)
-			pterm.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
+			pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", config.Name)
+			pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", config.Name)
+			pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
 		}
 
 		// Return the rest.Config for the existing cluster
@@ -639,7 +639,7 @@ func apiServerLine(endpoint string) string {
 
 // displayClusterCreationSummary displays a summary after cluster creation
 func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) {
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 
 	// Create a clean box for the summary
 	boxContent := fmt.Sprintf(
@@ -670,14 +670,14 @@ func (s *ClusterService) showNextSteps(clusterName string) {
 		return
 	}
 
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 	pterm.Info.Printf("🚀 Next Steps:\n")
-	pterm.Printf("  1. Bootstrap platform:   openframe bootstrap\n")
-	pterm.Printf("  2. Check cluster nodes:  kubectl get nodes\n")
-	pterm.Printf("  3. View cluster status:  openframe cluster status %s\n", clusterName)
-	pterm.Printf("  4. View running pods:    kubectl get pods -A\n")
+	pterm.DefaultBasicText.Printf("  1. Bootstrap platform:   openframe bootstrap\n")
+	pterm.DefaultBasicText.Printf("  2. Check cluster nodes:  kubectl get nodes\n")
+	pterm.DefaultBasicText.Printf("  3. View cluster status:  openframe cluster status %s\n", clusterName)
+	pterm.DefaultBasicText.Printf("  4. View running pods:    kubectl get pods -A\n")
 
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 }
 
 // ShowClusterStatus handles cluster status display logic
@@ -691,7 +691,7 @@ func (s *ClusterService) ShowClusterStatus(name string, detailed bool, skipApps 
 		if strings.Contains(err.Error(), "not found") {
 			// Show friendly "cluster not found" message only in interactive terminals
 			if isTerminalEnvironment() {
-				fmt.Println()
+				pterm.DefaultBasicText.Println()
 
 				// Get list of available clusters to show user their options
 				clusters, listErr := s.manager.ListClusters(ctx)
@@ -739,7 +739,7 @@ func (s *ClusterService) ShowClusterStatus(name string, detailed bool, skipApps 
 
 // displayDetailedClusterStatus shows comprehensive cluster information
 func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo, detailed bool, verbose bool) {
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 
 	// Main cluster information box
 	statusDisplay := fmt.Sprintf("Ready (%s)", status.Status)
@@ -785,13 +785,13 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 		Println(boxContent)
 
 	// Network information
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 	pterm.Info.Printf("🌐 Network Information:\n")
-	pterm.Printf("  Network:    k3d-%s\n", status.Name)
+	pterm.DefaultBasicText.Printf("  Network:    k3d-%s\n", status.Name)
 	if endpoint != "" {
-		pterm.Printf("  API Server: %s\n", endpoint)
+		pterm.DefaultBasicText.Printf("  API Server: %s\n", endpoint)
 	}
-	pterm.Printf("  Kubeconfig: %s\n", k8s.DefaultKubeconfigPath())
+	pterm.DefaultBasicText.Printf("  Kubeconfig: %s\n", k8s.DefaultKubeconfigPath())
 
 	// --detailed lists the nodes the provider actually reported. It used to
 	// print fixed CPU/Memory/Storage figures ("0.2 cores (10%)", "512MB (5%)",
@@ -799,29 +799,29 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 	// on every machine, at every point in time. The CLI does not collect
 	// metrics, so it says so and points at the tool that does.
 	if detailed {
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		pterm.Info.Printf("🖥️ Nodes:\n")
 		if len(status.Nodes) == 0 {
-			pterm.Printf("  (none reported)\n")
+			pterm.DefaultBasicText.Printf("  (none reported)\n")
 		}
 		for _, node := range status.Nodes {
-			pterm.Printf("  %-28s %-8s %s\n", node.Name, node.Role, node.Status)
+			pterm.DefaultBasicText.Printf("  %-28s %-8s %s\n", node.Name, node.Role, node.Status)
 		}
 
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		pterm.Info.Printf("💾 Resource Usage:\n")
-		pterm.Printf("  Not collected by the CLI. With metrics-server installed:\n")
-		pterm.Printf("    kubectl top nodes\n")
-		pterm.Printf("    kubectl top pods -A\n")
+		pterm.DefaultBasicText.Printf("  Not collected by the CLI. With metrics-server installed:\n")
+		pterm.DefaultBasicText.Printf("    kubectl top nodes\n")
+		pterm.DefaultBasicText.Printf("    kubectl top pods -A\n")
 	}
 
 	// Management commands
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 	pterm.Info.Printf("⚙️ Management Commands:\n")
-	pterm.Printf("  Delete cluster:      openframe cluster delete %s\n", status.Name)
-	pterm.Printf("  Access with kubectl: kubectl get nodes\n")
-	pterm.Printf("  View pods:           kubectl get pods -A\n")
-	pterm.Printf("  Get cluster info:    kubectl cluster-info\n")
+	pterm.DefaultBasicText.Printf("  Delete cluster:      openframe cluster delete %s\n", status.Name)
+	pterm.DefaultBasicText.Printf("  Access with kubectl: kubectl get nodes\n")
+	pterm.DefaultBasicText.Printf("  View pods:           kubectl get pods -A\n")
+	pterm.DefaultBasicText.Printf("  Get cluster info:    kubectl cluster-info\n")
 }
 
 // DisplayClusterList handles cluster list display logic
@@ -863,7 +863,7 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 
 	// Show additional info if verbose
 	if verbose {
-		pterm.Println()
+		pterm.DefaultBasicText.Println()
 		pterm.Info.Println("Use 'openframe cluster status <name>' for detailed cluster information")
 	}
 

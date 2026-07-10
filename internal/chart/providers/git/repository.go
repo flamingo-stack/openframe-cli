@@ -11,6 +11,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/pterm/pterm"
 )
 
 // Repository handles git operations for chart repositories using go-git — no
@@ -104,9 +105,11 @@ func isBranchNotFound(err error) bool {
 func (r *Repository) Cleanup(tempDir string) {
 	if tempDir != "" {
 		if err := os.RemoveAll(tempDir); err != nil {
-			// Log the error but don't fail the operation
-			// This is cleanup so we don't want to break the main flow
-			fmt.Printf("Warning: failed to cleanup temporary directory %s: %v\n", tempDir, err)
+			// Log the error but don't fail the operation: this is cleanup, and
+			// aborting the main flow over a leftover temp dir is worse than the
+			// leak. pterm.Warning, not fmt.Printf — the latter writes straight to
+			// stdout and ignores --silent.
+			pterm.Warning.Printfln("Failed to clean up the temporary directory %s: %v", tempDir, err)
 		}
 	}
 }

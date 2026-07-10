@@ -278,7 +278,7 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 		pterm.Success.Printf("Cluster '%s' deleted successfully\n", pterm.Cyan(clusterName))
 
 		// Show detailed deletion box
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		boxContent := fmt.Sprintf(
 			"NAME:         %s\n"+
 				"TYPE:         %s\n"+
@@ -298,17 +298,17 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 			Println(boxContent)
 
 		// Show deletion summary
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		pterm.Info.Printf("Deletion Summary:\n")
-		pterm.Printf("  Cluster and nodes removed\n")
-		pterm.Printf("  Docker containers cleaned up\n")
-		pterm.Printf("  Network configuration removed\n")
-		pterm.Printf("  Kubeconfig entries cleaned\n")
+		pterm.DefaultBasicText.Printf("  Cluster and nodes removed\n")
+		pterm.DefaultBasicText.Printf("  Docker containers cleaned up\n")
+		pterm.DefaultBasicText.Printf("  Network configuration removed\n")
+		pterm.DefaultBasicText.Printf("  Kubeconfig entries cleaned\n")
 
 	default:
 		pterm.Success.Printf("Operation '%s' completed for cluster '%s'\n", operation, pterm.Cyan(clusterName))
 	}
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 }
 
 // ShowOperationError displays a friendly error message

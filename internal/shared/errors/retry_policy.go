@@ -3,10 +3,15 @@ package errors
 import (
 	"context"
 	stderrors "errors"
+	"io"
 	"math"
 	"math/rand"
+	"net"
 	"strings"
+	"syscall"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // RetryPolicy defines retry behavior for recoverable errors
@@ -40,13 +45,21 @@ func NewExponentialBackoffPolicy(maxAttempts int, baseDelay time.Duration) *Expo
 		MaxDelay:    5 * time.Minute,
 		Multiplier:  2.0,
 		Jitter:      true,
+		// Substrings for tools we shell out to, whose Go error is only an exit
+		// code. These are the strings the tools ACTUALLY print. "network timeout"
+		// used to be listed here and is a phrase Go never emits: the standard
+		// library says "i/o timeout" (verified), so that entry matched nothing.
 		RetryableErrs: map[string]bool{
-			"network timeout":     true,
-			"connection refused":  true,
-			"temporary failure":   true,
-			"resource not ready":  true,
-			"cluster not ready":   true,
-			"service unavailable": true,
+			"i/o timeout":           true,
+			"connection refused":    true,
+			"connection reset":      true,
+			"tls handshake timeout": true,
+			"unexpected eof":        true,
+			"temporary failure":     true,
+			"resource not ready":    true,
+			"cluster not ready":     true,
+			"service unavailable":   true,
+			"too many requests":     true,
 		},
 	}
 }
@@ -54,6 +67,9 @@ func NewExponentialBackoffPolicy(maxAttempts int, baseDelay time.Duration) *Expo
 // ShouldRetry determines if an error should be retried
 func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 	if attempt >= p.MaxAttempts {
+		return false
+	}
+	if err == nil {
 		return false
 	}
 
@@ -64,7 +80,16 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 		return recoverableErr.IsRecoverable()
 	}
 
-	// Check if error message indicates it's retryable
+	// Structural classification first — it does not depend on the wording of
+	// somebody else's error string.
+	if retry, decided := classifyTransient(err); decided {
+		return retry
+	}
+
+	// Fallback for shelled-out tools (helm, k3d, docker): their failure is an
+	// exit code, and the reason only exists as text on stderr. Since
+	// executor.CommandError carries that stderr in its Error() string, matching
+	// substrings here actually reaches the tool's own message.
 	errMsg := err.Error()
 	for retryablePattern := range p.RetryableErrs {
 		if contains(errMsg, retryablePattern) {
@@ -73,6 +98,50 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 	}
 
 	return false
+}
+
+// classifyTransient answers "is this error transient?" structurally, returning
+// decided=false when it has no opinion.
+//
+// Order matters, and was verified against the standard library: an
+// http.Client timeout satisfies BOTH net.Error.Timeout() and
+// errors.Is(err, context.DeadlineExceeded), while a cancelled request is a
+// net.Error whose Timeout() is false. So the timeout check must come first, or
+// every network timeout would be misfiled as "the operation is over".
+func classifyTransient(err error) (retry, decided bool) {
+	// A timed-out network operation is the canonical retryable failure.
+	var netErr net.Error
+	if stderrors.As(err, &netErr) && netErr.Timeout() {
+		return true, true
+	}
+
+	// The user pressed Ctrl-C, or the overall budget is spent. Retrying is
+	// pointless and, for cancellation, wrong.
+	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+		return false, true
+	}
+
+	// Connection-level failures against an API server that is still starting.
+	for _, errno := range []error{
+		syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.EPIPE,
+		syscall.EHOSTUNREACH, syscall.ENETUNREACH,
+	} {
+		if stderrors.Is(err, errno) {
+			return true, true
+		}
+	}
+	if stderrors.Is(err, io.ErrUnexpectedEOF) {
+		return true, true
+	}
+
+	// Kubernetes API server backpressure and optimistic-concurrency conflicts.
+	if apierrors.IsConflict(err) || apierrors.IsTooManyRequests(err) ||
+		apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) ||
+		apierrors.IsTimeout(err) {
+		return true, true
+	}
+
+	return false, false
 }
 
 // GetDelay calculates the delay for the next retry attempt
@@ -171,16 +240,32 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) err
 
 // Predefined retry policies for common scenarios
 
-// InstallationRetryPolicy for installation operations
+// InstallationRetryPolicy for installation operations.
+//
+// The substrings are the fallback for helm/kubectl failures, which reach us as
+// "exit status 1" plus the tool's stderr. Structural classification
+// (classifyTransient) handles everything the Go type system can see.
+//
+// "tiller not ready" used to be listed here: Tiller was removed in Helm 3
+// (2019) and this CLI drives Helm 3/4, so it could never match. Likewise
+// "rate limited" — GitHub and the Kubernetes API server both say "too many
+// requests".
 func InstallationRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(3, 10*time.Second)
 	policy.MaxDelay = 5 * time.Minute
 	policy.RetryableErrs = map[string]bool{
-		"helm not ready":    true,
-		"tiller not ready":  true,
-		"resource conflict": true,
-		"temporary failure": true,
-		"rate limited":      true,
+		// helm's own transient conditions
+		"another operation (install/upgrade/rollback) is in progress": true,
+		"the server is currently unable to handle the request":        true,
+		"etcdserver: request timed out":                               true,
+		// generic transport failures visible only as text from a child process
+		"i/o timeout":           true,
+		"connection refused":    true,
+		"connection reset":      true,
+		"tls handshake timeout": true,
+		"unexpected eof":        true,
+		"too many requests":     true,
+		"temporary failure":     true,
 	}
 	return policy
 }

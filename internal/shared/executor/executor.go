@@ -400,11 +400,13 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			result.ExitCode = -1
 		}
 
-		// Log error in verbose mode
+		// Log error in verbose mode. pterm.Debug, not fmt.Printf: the latter
+		// writes straight to stdout, so these diagnostics survived --silent and
+		// corrupted machine-readable output (`cluster list -o json`).
 		if e.verbose {
-			fmt.Printf("Command failed: %s (exit code: %d)\n", redact.Redact(fullCommand), result.ExitCode)
+			pterm.Debug.Printfln("Command failed: %s (exit code: %d)", redact.Redact(fullCommand), result.ExitCode)
 			if result.Stderr != "" {
-				fmt.Printf("Stderr: %s\n", redact.Redact(result.Stderr))
+				pterm.Debug.Printfln("Stderr: %s", redact.Redact(result.Stderr))
 			}
 		}
 
@@ -454,9 +456,9 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 
 	result.ExitCode = 0
 
-	// Log success in verbose mode
+	// Log success in verbose mode (see above: pterm.Debug, not fmt.Printf).
 	if e.verbose {
-		fmt.Printf("Command completed successfully: %s (took %v)\n", redact.Redact(fullCommand), result.Duration)
+		pterm.Debug.Printfln("Command completed successfully: %s (took %v)", redact.Redact(fullCommand), result.Duration)
 	}
 
 	return result, nil

@@ -9,7 +9,7 @@ import (
 // ShowNoResourcesMessage displays a friendly message when no resources are available
 func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand string) {
 	pterm.Warning.Printf("No %s found for %s operation\n", resourceType, operation)
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 
 	boxContent := fmt.Sprintf(
 		"No %s are currently available.\n\n"+
@@ -29,7 +29,7 @@ func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand 
 		WithTitle(fmt.Sprintf(" No %s Available ", resourceType)).
 		WithTitleTopCenter().
 		Println(boxContent)
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 }
 
 
@@ -37,7 +37,7 @@ func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand 
 // ShowOperationError displays a friendly error message with troubleshooting tips
 func ShowOperationError(operation, resourceName string, err error, troubleshootingTips []TroubleshootingTip) {
 	pterm.Error.Printf("Operation '%s' failed for %s\n", operation, pterm.Cyan(resourceName))
-	pterm.Printf("Error details: %s\n\n", pterm.Red(err.Error()))
+	pterm.DefaultBasicText.Printf("Error details: %s\n\n", pterm.Red(err.Error()))
 
 	if len(troubleshootingTips) > 0 {
 		// Show helpful suggestions
@@ -52,13 +52,13 @@ func ShowOperationError(operation, resourceName string, err error, troubleshooti
 
 		pterm.Info.Println("Troubleshooting Tips:")
 		if err := pterm.DefaultTable.WithData(tableData).Render(); err != nil {
-			pterm.Printf("Troubleshooting:\n")
+			pterm.DefaultBasicText.Printf("Troubleshooting:\n")
 			for i, tip := range troubleshootingTips {
-				pterm.Printf("  %d. %s: %s\n", i+1, tip.Description, pterm.Cyan(tip.Command))
+				pterm.DefaultBasicText.Printf("  %d. %s: %s\n", i+1, tip.Description, pterm.Cyan(tip.Command))
 			}
 		}
 	}
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 }
 
 // TroubleshootingTip represents a troubleshooting suggestion
