@@ -26,12 +26,40 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// ApplicationCleaner removes the ArgoCD Application CRs that own the platform
+// workloads, and strips the resources-finalizer from any left in Terminating.
+//
+// Cleanup needs both, in that order around the Helm uninstall: Applications
+// must be deleted while the ArgoCD controller still runs (so it cascades the
+// workload cleanup), and the finalizers must be stripped afterwards, once the
+// controller — the only thing that could clear them — is gone. Otherwise the
+// CRs sit in Terminating forever and pin the argocd namespace.
+//
+// It is an interface because internal/cluster must not import internal/chart:
+// the ArgoCD-backed implementation is injected by the command layer, exactly
+// like ClusterAccess in the app subsystem.
+type ApplicationCleaner interface {
+	DeleteApplications(ctx context.Context) (int, error)
+	RemoveApplicationFinalizers(ctx context.Context) (int, error)
+}
+
 // ClusterService provides cluster configuration and management operations
 // This handles cluster lifecycle operations and configuration management
 type ClusterService struct {
 	manager    provider.Provider
 	executor   executor.CommandExecutor
 	suppressUI bool // Suppress interactive UI elements for automation
+	// appCleaner, when set, lets cleanup remove ArgoCD Applications before the
+	// Helm uninstall and strip their finalizers afterwards. Optional: nil means
+	// the Helm/namespace phases run as before (the CRs may then stay stuck).
+	appCleaner ApplicationCleaner
+}
+
+// WithApplicationCleaner injects the ArgoCD-backed application cleaner used by
+// the cleanup flow. Returns the service for chaining.
+func (s *ClusterService) WithApplicationCleaner(c ApplicationCleaner) *ClusterService {
+	s.appCleaner = c
+	return s
 }
 
 // isTerminalEnvironment checks if we're running in a proper terminal
@@ -212,7 +240,20 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
 
-	// 1. Clean up Helm releases (including ArgoCD) — pinned to this cluster's
+	// 1. Delete the ArgoCD Applications WHILE the ArgoCD controller is still
+	// running, so it cascades the workload cleanup itself. Best-effort: a
+	// cluster without OpenFrame installed simply has none.
+	if s.appCleaner != nil {
+		deleted, err := s.appCleaner.DeleteApplications(ctx)
+		switch {
+		case err != nil && verbose:
+			pterm.Warning.Printf("Failed to delete ArgoCD applications: %v\n", err)
+		case err == nil && deleted > 0 && verbose:
+			pterm.Info.Printf("Deleted %d ArgoCD application(s)\n", deleted)
+		}
+	}
+
+	// 2. Clean up Helm releases (including ArgoCD) — pinned to this cluster's
 	// kube-context. Without the pin helm operates on the kubeconfig's CURRENT
 	// context, which may be a different (even production) cluster.
 	kubeContext := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
@@ -223,7 +264,20 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 		// Don't fail completely if Helm cleanup fails
 	}
 
-	// 2. Clean up Kubernetes resources in common namespaces
+	// 3. ArgoCD is gone now, so nothing is left to clear its resources-finalizer.
+	// Strip it from any Application still in Terminating — otherwise those CRs
+	// (and the argocd namespace deleted in the next phase) never get reaped.
+	if s.appCleaner != nil {
+		cleared, err := s.appCleaner.RemoveApplicationFinalizers(ctx)
+		switch {
+		case err != nil && verbose:
+			pterm.Warning.Printf("Failed to clear application finalizers: %v\n", err)
+		case err == nil && cleared > 0 && verbose:
+			pterm.Info.Printf("Cleared finalizers on %d stuck application(s)\n", cleared)
+		}
+	}
+
+	// 4. Clean up Kubernetes resources in common namespaces
 	if err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to cleanup Kubernetes resources: %v\n", err)
@@ -231,7 +285,7 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 		// Don't fail completely if K8s cleanup fails
 	}
 
-	// 3. Clean up Docker images and containers in the cluster
+	// 5. Clean up Docker images and containers in the cluster
 	if err := s.cleanupDockerResources(ctx, clusterName, verbose, force); err != nil {
 		if verbose {
 			pterm.Warning.Printf("Failed to cleanup Docker resources: %v\n", err)
@@ -295,11 +349,9 @@ func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext st
 		// default 5m PER RELEASE (see UninstallRelease in
 		// internal/chart/providers/helm for the same rationale).
 		//
-		// Known leftover either way: Application CRs whose finalizer was never
-		// cleared stay Terminating, which can pin the argocd namespace in the
-		// namespace-cleanup phase. The full fix is the finalizer stripping that
-		// `app uninstall` (internal/app/uninstall) performs — tracked in the
-		// backlog; --wait only made the same outcome N×5m slower.
+		// The Application CRs left in Terminating are reaped by the
+		// finalizer-stripping phase that runs right after this one (see
+		// cleanupK3dCluster step 3), mirroring `app uninstall`.
 		args := []string{"uninstall", release.Name, "--namespace", release.Namespace, "--kube-context", kubeContext, "--no-hooks"}
 		if force {
 			// Add even more aggressive flags when force is enabled

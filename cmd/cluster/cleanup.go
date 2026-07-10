@@ -3,9 +3,12 @@ package cluster
 import (
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -73,6 +76,21 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		operationsUI.ShowOperationError("cleanup", clusterName, err)
 		return fmt.Errorf("failed to detect cluster type: %w", err)
+	}
+
+	// Inject the ArgoCD-backed application cleaner (composition root: only the
+	// command layer may import both the cluster and the chart subsystems).
+	// Without it, cleanup skips the Application delete/finalizer-strip phases and
+	// the argocd namespace can stay stuck in Terminating. Best-effort: a cluster
+	// that is unreachable or has no ArgoCD simply cleans up without it.
+	if cfg, cerr := service.GetRestConfig(clusterName); cerr == nil {
+		if mgr, merr := argocd.NewManagerWithConfig(executor.NewRealCommandExecutor(false, globalFlags.Global.Verbose), cfg); merr == nil {
+			service = service.WithApplicationCleaner(mgr)
+		} else if globalFlags.Global.Verbose {
+			pterm.Warning.Printf("ArgoCD cleanup unavailable: %v\n", merr)
+		}
+	} else if globalFlags.Global.Verbose {
+		pterm.Warning.Printf("Cluster not reachable for ArgoCD cleanup: %v\n", cerr)
 	}
 
 	// Execute cluster cleanup through service layer
