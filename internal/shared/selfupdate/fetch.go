@@ -3,7 +3,6 @@ package selfupdate
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 )
@@ -19,7 +18,7 @@ import (
 // worthless against a compromised release upload. A binary that `openframe
 // update` would reject must never be installed into WSL either (audit B5/T2).
 func FetchVerifiedLinuxBinary(ctx context.Context, version, goarch string, log func(string)) ([]byte, error) {
-	client := Client{Token: os.Getenv("GITHUB_TOKEN")}
+	client := Client{Token: GitHubToken()}
 	rel, err := client.ForTag(ctx, version)
 	if err != nil {
 		return nil, fmt.Errorf("looking up release %s: %w", version, err)

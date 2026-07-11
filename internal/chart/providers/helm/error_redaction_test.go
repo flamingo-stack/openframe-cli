@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,13 @@ import (
 // user-facing error. Stderr is already redacted by the executor at population;
 // stdout is not, because callers parse it.
 func TestInstallArgoCD_ErrorDoesNotLeakStdout(t *testing.T) {
+	// InstallArgoCDWithProgress refuses on native Windows (WSLClusterHint) before
+	// reaching the failure path under test. That guard is dead in production (the
+	// CLI forwards into WSL first) and the redaction asserted here is
+	// OS-independent, covered on Linux/darwin. Same skip as namespace_test.go.
+	if runtime.GOOS == "windows" {
+		t.Skip("native cluster ops are refused on Windows (must run inside WSL)")
+	}
 	const secret = "dckr_pat_leakedRegistryPassword"
 	redact.RegisterSecret(secret)
 	t.Cleanup(redact.ClearSecrets)

@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -68,6 +69,18 @@ type Client struct {
 	HTTP    *http.Client
 	APIBase string // defaults to defaultAPIBase
 	Token   string // optional; raises the unauthenticated rate limit
+}
+
+// GitHubToken returns the GitHub API token from the environment, accepting both
+// conventions: GITHUB_TOKEN (GitHub Actions) and GH_TOKEN (the gh CLI). Without
+// a token the API is unauthenticated and rate-limited per source IP — which is
+// how CI on shared macOS runners hit "HTTP 403" mid-update. A user who has only
+// authenticated `gh` (GH_TOKEN) gets the higher limit too.
+func GitHubToken() string {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("GH_TOKEN")
 }
 
 func (c Client) httpClient() *http.Client {

@@ -7,9 +7,10 @@ import (
 
 // appAssessment summarizes one polling tick over the ArgoCD applications.
 type appAssessment struct {
-	ready        int      // currently Healthy AND Synced
-	healthyNames []string // names of currently-Healthy apps
-	notReady     []string // "name (status)" labels for apps not yet ready
+	ready         int      // currently Healthy AND Synced
+	healthyNames  []string // names of currently-Healthy apps
+	notReady      []string // "name (status)" labels for apps not yet ready (display)
+	notReadyNames []string // bare names of apps not yet ready (for kubectl commands)
 }
 
 // assessApplications classifies the applications for one polling tick and
@@ -38,6 +39,7 @@ func assessApplications(apps []Application, everReady map[string]bool) appAssess
 			status = fmt.Sprintf("Sync: %s", app.Sync)
 		}
 		a.notReady = append(a.notReady, fmt.Sprintf("%s (%s)", app.Name, status))
+		a.notReadyNames = append(a.notReadyNames, app.Name)
 	}
 	return a
 }

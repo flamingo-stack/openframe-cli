@@ -74,7 +74,7 @@ func newCheckCmd(current string) *cobra.Command {
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			u := selfupdate.Updater{Current: current, Client: selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")}}
+			u := selfupdate.Updater{Current: current, Client: selfupdate.Client{Token: selfupdate.GitHubToken()}}
 
 			// Spinner only in human (text) mode — json/yaml must keep stdout clean.
 			var sp *spinner.Spinner
@@ -117,7 +117,7 @@ func newRollbackCmd(current string) *cobra.Command {
 func run(ctx context.Context, current, target string, assumeYes, force bool) error {
 	u := selfupdate.Updater{
 		Current: current,
-		Client:  selfupdate.Client{Token: os.Getenv("GITHUB_TOKEN")},
+		Client:  selfupdate.Client{Token: selfupdate.GitHubToken()},
 		// Warnings must survive the spinner: they print above it, on stderr, so
 		// they stay on screen after the operation finishes and never mix into
 		// stdout. Routing them through the progress callback (as before) turned

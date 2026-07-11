@@ -207,7 +207,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// that never became ready. The loop had this all along and threw it away:
 	// "timeout waiting for ArgoCD applications after 1h0m0s" told the user
 	// nothing about which of the apps was stuck, or what to run next.
-	var lastNotReadyApps []string
+	var lastNotReadyApps []string  // decorated "name (Health: X)" labels, for the list
+	var lastNotReadyNames []string // bare names, for the kubectl example
 	lastReadyCount, lastTotalApps := 0, 0
 	// The spinner already animates for interactive users, so the textual line is
 	// mainly a heartbeat for logs and CI; verbose users want it more often.
@@ -230,7 +231,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()
-				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps)
+				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps, lastNotReadyNames)
 			}
 
 			// Periodic cluster health check
@@ -364,6 +365,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			healthyApps := assess.healthyNames
 			notReadyApps := assess.notReady
 			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
+			lastNotReadyNames = assess.notReadyNames
 
 			// Stall handling (finding N3): when the state has been bit-for-bit
 			// identical for stallAfter and OutOfSync-but-healthy stragglers
@@ -772,15 +774,21 @@ const maxAppsInTimeoutError = 10
 // true, and useless: the loop knew exactly which applications never became
 // ready and discarded that. This names them and points at the command that
 // shows why.
-func timeoutError(timeout time.Duration, ready, total int, notReady []string) error {
+//
+// notReadyLabels are decorated "name (Health: X)" strings for the human list;
+// notReadyNames are the BARE application names for the kubectl example. They
+// must be kept separate: feeding a decorated label into `kubectl describe
+// application` produced `kubectl describe application argocd-apps (Health:
+// Progressing) -n argocd`, which is not a runnable command.
+func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notReadyNames []string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "timeout after %s waiting for ArgoCD applications", timeout)
 	if total > 0 {
 		fmt.Fprintf(&b, " (%d/%d ready)", ready, total)
 	}
 
-	if len(notReady) > 0 {
-		shown := notReady
+	if len(notReadyLabels) > 0 {
+		shown := notReadyLabels
 		suffix := ""
 		if len(shown) > maxAppsInTimeoutError {
 			suffix = fmt.Sprintf(" (and %d more)", len(shown)-maxAppsInTimeoutError)
@@ -790,8 +798,8 @@ func timeoutError(timeout time.Duration, ready, total int, notReady []string) er
 	}
 
 	b.WriteString("\nInspect them with: kubectl get applications -n argocd")
-	if len(notReady) > 0 {
-		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReady[0])
+	if len(notReadyNames) > 0 {
+		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReadyNames[0])
 	}
 	return fmt.Errorf("%s", b.String())
 }

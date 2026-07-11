@@ -3,7 +3,6 @@ package selfupdate
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
@@ -36,7 +35,7 @@ func MaybeAutoUpdate(ctx context.Context, current string, interactive bool, prog
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	rel, err := Client{Token: os.Getenv("GITHUB_TOKEN")}.Latest(cctx)
+	rel, err := Client{Token: GitHubToken()}.Latest(cctx)
 	cancel()
 	if err != nil {
 		return ""
@@ -56,7 +55,7 @@ func MaybeAutoUpdate(ctx context.Context, current string, interactive bool, prog
 	// exit indefinitely.
 	actx, acancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer acancel()
-	u := Updater{Current: current, Client: Client{Token: os.Getenv("GITHUB_TOKEN")}}
+	u := Updater{Current: current, Client: Client{Token: GitHubToken()}}
 	if err := u.Apply(actx, rel, progress); err != nil {
 		return fmt.Sprintf("auto-update to %s failed (run `openframe update`): %v", rel.TagName, err)
 	}

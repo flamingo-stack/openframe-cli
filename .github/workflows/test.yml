@@ -210,7 +210,11 @@ jobs:
         if: matrix.os != 'windows'
         shell: bash
         env:
+          # GH_TOKEN for the curl below; GITHUB_TOKEN is what `openframe update`
+          # itself reads. Exporting only GH_TOKEN left the CLI unauthenticated,
+          # which rate-limited to HTTP 403 on shared macOS runner IPs.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "==================================================================="
           echo "===  TEST: openframe update (real release, cosign-verified) + rollback"

@@ -90,7 +90,7 @@ func MaybeNotify(ctx context.Context, current string, interactive bool) string {
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	rel, err := Client{Token: os.Getenv("GITHUB_TOKEN")}.Latest(ctx)
+	rel, err := Client{Token: GitHubToken()}.Latest(ctx)
 	if err != nil {
 		return "" // best effort; stay silent on any failure
 	}

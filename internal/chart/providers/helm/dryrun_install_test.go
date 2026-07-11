@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,13 @@ import (
 // returned empty") and deployment waits are guaranteed to fail — they must be
 // skipped entirely in dry-run mode.
 func TestInstallArgoCD_DryRunSkipsVerification(t *testing.T) {
+	// InstallArgoCDWithProgress refuses on native Windows (WSLClusterHint) before
+	// reaching the dry-run logic under test. That guard is dead in production —
+	// the CLI forwards into WSL first — and the behaviour asserted here is
+	// OS-independent and covered on Linux/darwin. Same skip as namespace_test.go.
+	if runtime.GOOS == "windows" {
+		t.Skip("native cluster ops are refused on Windows (must run inside WSL)")
+	}
 	mock := executor.NewMockCommandExecutor()
 	m, err := NewHelmManager(mock, nil, false)
 	require.NoError(t, err)
