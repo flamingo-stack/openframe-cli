@@ -372,15 +372,26 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// flapping status can't keep resetting the clock on a stuck app (V5).
 			// On the upgrade path, sync exactly those stragglers once; otherwise
 			// print an actionable hint once instead of burning the full timeout.
-			stall.observe(apps, time.Now())
-			if stragglers := stall.stalledStragglers(apps, time.Now()); len(stragglers) > 0 {
-				if config.SyncStragglersOnStall && !stragglerSyncTriggered {
-					stragglerSyncTriggered = true
-					pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
-						stallAfter.Round(time.Second), len(stragglers), stragglers)
-					patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
-					if failedCount > 0 {
-						pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
+			// One timestamp for both calls so an app's recorded "since" and the
+			// staleness check use the same tick.
+			now := time.Now()
+			stall.observe(apps, now)
+			if stragglers := stall.stalledStragglers(apps, now); len(stragglers) > 0 {
+				// The two branches are chosen by MODE, not by whether the sync has
+				// already fired: on the upgrade path (SyncStragglersOnStall) the hint
+				// must never print — it tells the user to run `app upgrade --sync`,
+				// which is exactly the path they are already on. Gating the hint on
+				// !stragglerSyncTriggered instead would print that contradictory
+				// advice on every stall tick after the one-shot sync.
+				if config.SyncStragglersOnStall {
+					if !stragglerSyncTriggered {
+						stragglerSyncTriggered = true
+						pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
+							stallAfter.Round(time.Second), len(stragglers), stragglers)
+						patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
+						if failedCount > 0 {
+							pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
+						}
 					}
 				} else if !stallHintShown {
 					stallHintShown = true
@@ -541,21 +552,31 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					pterm.Debug.Printf("All apps ready (%d/%d stabilization checks)\n", consecutiveAllReady, stabilizationChecks)
 				}
 				if consecutiveAllReady >= stabilizationChecks {
-					spinnerMutex.Lock()
-					if !spinnerStopped && spinner != nil {
-						spinner.Stop()
-						spinnerStopped = true
-					}
-					spinnerMutex.Unlock()
-
 					// Everything is Healthy+Synced — but "ready" is not "correct".
 					// If a ref was requested, confirm ArgoCD is actually tracking it
 					// before declaring success; a legacy branch's chart silently
 					// deploys main and this is the only place that catches it (V3).
+					// Decide the spinner's final state from the outcome: FAIL on a
+					// mismatch (matching the timeout path), a neutral Stop on success
+					// — never a neutral stop immediately before returning an error.
+					var mm []refMismatch
 					if config.AppOfApps != nil {
-						if mm := verifyRefPinning(apps, config.AppOfApps.GitHubRepo, config.AppOfApps.GitHubBranch); len(mm) > 0 {
-							return refMismatchError(config.AppOfApps.GitHubBranch, mm)
+						mm = verifyRefPinning(apps, config.AppOfApps.GitHubRepo, config.AppOfApps.GitHubBranch)
+					}
+
+					spinnerMutex.Lock()
+					if !spinnerStopped && spinner != nil {
+						if len(mm) > 0 {
+							spinner.Fail("Deployed ref does not match the requested ref")
+						} else {
+							spinner.Stop()
 						}
+						spinnerStopped = true
+					}
+					spinnerMutex.Unlock()
+
+					if len(mm) > 0 {
+						return refMismatchError(config.AppOfApps.GitHubBranch, mm)
 					}
 
 					pterm.Success.Println("All ArgoCD applications installed")

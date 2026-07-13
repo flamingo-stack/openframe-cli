@@ -96,6 +96,7 @@ func TestFriendlyHint_PendingReleaseSuggestsRollback(t *testing.T) {
 		`Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress`,
 		`Error: release app-of-apps failed, status: pending-upgrade`,
 		`cannot patch: release in pending-install state`,
+		`Error: release argo-cd failed, status: pending-rollback`,
 	}
 	for _, msg := range cases {
 		got := friendlyHint(fmt.Errorf("op failed: %s", msg))
