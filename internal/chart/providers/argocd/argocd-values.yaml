@@ -1,9 +1,19 @@
 # Baseline Helm values for the Argo CD chart (targets chart 10.x / app v3.x).
 #
 # This file is embedded into the CLI binary via go:embed (see values.go) and is
-# the single source of truth for the ArgoCD install the CLI performs BEFORE the
-# app-of-apps is cloned from the platform repo. Keep component keys (redis, dex,
-# applicationSet, notifications) aligned with the pinned chart version.
+# the BASELINE for the ArgoCD install the CLI performs BEFORE the app-of-apps is
+# cloned from the platform repo. Keep component keys (redis, dex, applicationSet,
+# notifications) aligned with the pinned chart version.
+#
+# USER OVERRIDES: a user can override any value here without rebuilding the CLI
+# by adding a top-level `argocd:` section to openframe-helm-values.yaml; that
+# subtree is deep-merged over this baseline (maps merge, scalars/lists replace)
+# and the CLI prints a warning naming the overridden keys. Only the `argocd:`
+# subtree is used — the rest of that file targets the app-of-apps chart. Example:
+#   argocd:
+#     dex:
+#       enabled: true        # re-enable dex (disabled by default below)
+# See MergedArgoCDValues in values.go.
 #
 # SECURITY — developer account default:
 #   configs.secret.extra.accounts.developer.password below is a bcrypt hash of

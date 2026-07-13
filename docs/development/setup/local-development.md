@@ -150,6 +150,32 @@ kubectl get pods --all-namespaces
 kubectl get applications -n argocd
 ```
 
+### Overriding ArgoCD chart values
+
+The CLI installs ArgoCD from a built-in baseline (embedded
+`internal/chart/providers/argocd/argocd-values.yaml`), which is separate from
+the app-of-apps values. To change an ArgoCD chart value without rebuilding the
+CLI, add a top-level `argocd:` section to `openframe-helm-values.yaml`:
+
+```yaml
+# openframe-helm-values.yaml
+repository:
+  branch: main            # (app-of-apps settings, as before)
+
+argocd:                   # deep-merged over the built-in ArgoCD baseline
+  dex:
+    enabled: true         # e.g. re-enable dex (disabled by default)
+  server:
+    replicas: 2
+```
+
+Only the `argocd:` subtree is applied to the ArgoCD install — the rest of the
+file targets the app-of-apps chart, and keeping them separate stops secrets
+(e.g. the docker registry password) from leaking into the ArgoCD release. The
+merge follows Helm semantics (maps merge, scalars/lists replace), and the CLI
+prints a warning listing the keys you overrode, since a bad override can break
+the ArgoCD install. Without an `argocd:` section the baseline is used unchanged.
+
 ## Cross-platform Builds
 
 ```bash

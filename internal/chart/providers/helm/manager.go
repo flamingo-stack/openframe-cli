@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/yaml"
 )
 
 // HelmManager handles Helm operations
@@ -246,12 +247,56 @@ func (h *HelmManager) installArgoCDHelm(ctx context.Context, cfg config.ChartIns
 	if cfg.Verbose {
 		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
 	}
+
+	// The ArgoCD chart's values are the embedded baseline, optionally overridden
+	// by the user's `argocd:` subtree in openframe-helm-values.yaml. Only that
+	// subtree is merged (never the whole file — the rest targets the app-of-apps
+	// chart and carries the registry password). Overrides are announced because a
+	// bad one can break the install.
+	values := argocd.GetArgoCDValues()
+	if uv, path := userValues(cfg); uv != nil {
+		merged, overridden, err := argocd.MergedArgoCDValues(uv)
+		if err != nil {
+			return nil, fmt.Errorf("merging ArgoCD overrides from %s: %w", path, err)
+		}
+		if len(overridden) > 0 {
+			pterm.Warning.Printfln("Using ArgoCD overrides from %s (keys: %s) on top of the built-in baseline "+
+				"(differs from the bundled argocd-values.yaml); a bad override can break the ArgoCD install.",
+				path, strings.Join(overridden, ", "))
+			values = merged
+		}
+	}
+
 	return h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
 		Args:    args,
 		Env:     h.getHelmEnv(),
-		Stdin:   []byte(argocd.GetArgoCDValues()),
+		Stdin:   []byte(values),
 	})
+}
+
+// userValues reads and parses the user's openframe-helm-values.yaml, returning
+// the parsed map and the path it read. It resolves the path from the config
+// (explicit --values wins) or the default cwd location, and returns (nil, path)
+// on a missing or unparseable file — a missing user file is normal, not an
+// error, so the caller simply falls back to the baseline.
+func userValues(cfg config.ChartInstallConfig) (map[string]interface{}, string) {
+	path := ""
+	if cfg.AppOfApps != nil {
+		path = cfg.AppOfApps.ValuesFile
+	}
+	if path == "" {
+		path = config.NewPathResolver().GetHelmValuesFile()
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- values path resolved from config/CLI, read as the invoking user
+	if err != nil {
+		return nil, path
+	}
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, path
+	}
+	return m, path
 }
 
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
