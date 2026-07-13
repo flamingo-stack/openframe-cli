@@ -44,8 +44,19 @@ func GetArgoCDValues() string {
 // replace. Overriding is the user's explicit choice, so nothing in the baseline
 // is protected from being replaced — the caller warns loudly instead.
 func MergedArgoCDValues(userValues map[string]interface{}) (string, []string, error) {
-	sub, ok := userValues[UserArgoCDKey].(map[string]interface{})
-	if !ok || len(sub) == 0 {
+	raw, present := userValues[UserArgoCDKey]
+	// Absent, or bare `argocd:` (null), or `argocd: {}` — nothing to override.
+	if !present || raw == nil {
+		return argoCDValues, nil, nil
+	}
+	// Present but not a mapping (scalar/list/typo'd indentation) is a mistake,
+	// not a no-op: fail loudly so the caller surfaces it, rather than silently
+	// dropping the user's intended override (same silent-failure class as V3).
+	sub, ok := raw.(map[string]interface{})
+	if !ok {
+		return "", nil, fmt.Errorf("%q in the values file must be a mapping of ArgoCD chart values, got %T", UserArgoCDKey, raw)
+	}
+	if len(sub) == 0 {
 		return argoCDValues, nil, nil
 	}
 

@@ -24,7 +24,8 @@ func TestMergedArgoCDValues_NoOverridesReturnsBaselineVerbatim(t *testing.T) {
 	for _, uv := range []map[string]interface{}{
 		nil,
 		{"repository": map[string]interface{}{"branch": "main"}}, // app-of-apps keys, no argocd
-		{UserArgoCDKey: map[string]interface{}{}},                // present but empty
+		{UserArgoCDKey: map[string]interface{}{}},                // present but empty (argocd: {})
+		{UserArgoCDKey: nil},                                     // bare `argocd:` (null)
 	} {
 		out, keys, err := MergedArgoCDValues(uv)
 		if err != nil {
@@ -156,5 +157,32 @@ func TestDeepMerge_Semantics(t *testing.T) {
 	}
 	if dst["new"] != "added" {
 		t.Error("new key must be added")
+	}
+}
+
+// TestMergedArgoCDValues_MalformedOverrideErrors: a present-but-non-map argocd:
+// value (scalar, list, typo'd indentation) is a mistake, not a no-op. It must
+// error so installArgoCDHelm surfaces it, rather than silently dropping the
+// user's intended override (the V3 silent-failure class).
+func TestMergedArgoCDValues_MalformedOverrideErrors(t *testing.T) {
+	cases := map[string]interface{}{
+		"scalar bool":   true,
+		"scalar string": "enabled",
+		"list":          []interface{}{"dex"},
+		"number":        42,
+	}
+	for name, bad := range cases {
+		t.Run(name, func(t *testing.T) {
+			out, keys, err := MergedArgoCDValues(map[string]interface{}{UserArgoCDKey: bad})
+			if err == nil {
+				t.Fatalf("a malformed %q override must error, got out=%q keys=%v", UserArgoCDKey, out, keys)
+			}
+			if !strings.Contains(err.Error(), UserArgoCDKey) || !strings.Contains(err.Error(), "mapping") {
+				t.Errorf("error must name the key and say it must be a mapping, got: %v", err)
+			}
+			if out != "" {
+				t.Errorf("on error the values string must be empty, got %q", out)
+			}
+		})
 	}
 }
