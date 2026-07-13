@@ -372,7 +372,18 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		pterm.Info.Println("Running in dry-run mode...")
 	}
 
-	result, err := h.installArgoCDHelm(ctx, config)
+	// installArgoCDHelm blocks on `helm upgrade --wait --timeout 7m`, which
+	// prints nothing while it runs. On a TTY the spinner animates; when there is
+	// no spinner (non-interactive/CI) the terminal would sit silent for minutes
+	// and users kill the process before the diagnostics ever print. A heartbeat
+	// gives that path liveness (no-op under --silent, and scoped to this call).
+	result, err := func() (*executor.CommandResult, error) {
+		if spinner == nil {
+			hb := uispinner.StartHeartbeat("Still installing ArgoCD (helm --wait, up to 7m)...", 0)
+			defer hb.Stop()
+		}
+		return h.installArgoCDHelm(ctx, config)
+	}()
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
@@ -594,12 +605,21 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		pterm.Info.Println("Installing the OpenFrame app-of-apps chart...")
 	}
 
-	// Execute helm command with local chart path
-	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    args,
-		Env:     h.getHelmEnv(),
-	})
+	// Execute helm command with local chart path. Like the ArgoCD install this
+	// blocks on `helm --wait` with no output; when there is no animated spinner
+	// (non-interactive/CI) a heartbeat keeps the terminal alive so users don't
+	// assume a hang. No-op under --silent; scoped to the blocking call.
+	result, err := func() (*executor.CommandResult, error) {
+		if spinner == nil {
+			hb := uispinner.StartHeartbeat("Still installing the app-of-apps chart (helm --wait)...", 0)
+			defer hb.Stop()
+		}
+		return h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "helm",
+			Args:    args,
+			Env:     h.getHelmEnv(),
+		})
+	}()
 
 	if err != nil {
 		if spinner != nil {
