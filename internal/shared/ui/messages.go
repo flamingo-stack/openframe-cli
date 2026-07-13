@@ -32,8 +32,6 @@ func ShowNoResourcesMessage(resourceType, operation, createCommand, listCommand 
 	pterm.DefaultBasicText.Println()
 }
 
-
-
 // ShowOperationError displays a friendly error message with troubleshooting tips
 func ShowOperationError(operation, resourceName string, err error, troubleshootingTips []TroubleshootingTip) {
 	pterm.Error.Printf("Operation '%s' failed for %s\n", operation, pterm.Cyan(resourceName))

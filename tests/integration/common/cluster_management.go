@@ -28,7 +28,7 @@ func DeleteTestCluster(name string) error {
 func ClusterExists(name string) (bool, error) {
 	// Use k3d directly to check if cluster exists - more reliable and faster than CLI
 	cmd := exec.Command("k3d", "cluster", "list", name, "--no-headers") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-	cmd.Env = append(cmd.Env, "DOCKER_CLI_EXPERIMENTAL=enabled") // Speed up docker operations
+	cmd.Env = append(cmd.Env, "DOCKER_CLI_EXPERIMENTAL=enabled")        // Speed up docker operations
 	err := cmd.Run()
 	// If k3d command succeeds, cluster exists
 	return err == nil, nil

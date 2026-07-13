@@ -29,5 +29,3 @@ func TestShowNoResourcesMessage(t *testing.T) {
 	// Should not panic with empty strings
 	ShowNoResourcesMessage("", "", "", "")
 }
-
-

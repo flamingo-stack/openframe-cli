@@ -119,4 +119,3 @@ func (s *Service) installChart(ctx context.Context, clusterName string, nonInter
 		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
 	})
 }
-

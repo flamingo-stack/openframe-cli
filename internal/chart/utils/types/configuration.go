@@ -2,7 +2,6 @@ package types
 
 import (
 	"time"
-
 )
 
 // DockerRegistryConfig holds Docker registry settings
@@ -76,4 +75,3 @@ type ChartConfiguration struct {
 	DockerRegistry     *DockerRegistryConfig  // nil means use existing, otherwise use this value
 	IngressConfig      *IngressConfig         // nil means use existing, otherwise use this value
 }
-
