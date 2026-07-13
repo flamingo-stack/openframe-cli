@@ -7,7 +7,8 @@
 # Notes are built per merged PR and categorized by the PR's LABELS, which is
 # robust to this repo's squash-merge + free-form PR titles (commit-title regexes
 # would miss most of them). A PR lands in the FIRST category whose label it
-# carries; anything unlabeled falls through to "Other Changes".
+# carries; anything not matched by an earlier category (unlabeled, or labeled
+# but uncategorized) falls through to the "Other Changes" catch-all.
 changelog:
   exclude:
     labels:
