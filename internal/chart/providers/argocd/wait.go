@@ -179,9 +179,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Once an app is ready, it stays counted even if it temporarily goes out of sync
 	everReadyApps := make(map[string]bool)
 
-	// Stall tracking (finding N3) — see stall.go.
-	lastStallFingerprint := ""
-	lastProgressAt := time.Now()
+	// Stall tracking (finding N3, per-application — see stall.go).
+	stall := newStallTracker()
 	stragglerSyncTriggered := false
 	stallHintShown := false
 
@@ -367,32 +366,27 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
 			lastNotReadyNames = assess.notReadyNames
 
-			// Stall handling (finding N3): when the state has been bit-for-bit
-			// identical for stallAfter and OutOfSync-but-healthy stragglers
-			// remain, waiting further is futile for apps with autoSync off.
+			// Stall handling (finding N3, per-application): an app that has sat
+			// OutOfSync-but-Healthy, bit-for-bit identical, for stallAfter will not
+			// move on its own (autoSync off). Judged per-app so a noisy neighbour
+			// flapping status can't keep resetting the clock on a stuck app (V5).
 			// On the upgrade path, sync exactly those stragglers once; otherwise
 			// print an actionable hint once instead of burning the full timeout.
-			if fp := stallFingerprint(currentlyReady, notReadyApps); fp != lastStallFingerprint {
-				lastStallFingerprint = fp
-				lastProgressAt = time.Now()
-			} else if len(notReadyApps) > 0 && time.Since(lastProgressAt) > stallAfter {
-				if stragglers := outOfSyncStragglers(apps); len(stragglers) > 0 {
-					if config.SyncStragglersOnStall && !stragglerSyncTriggered {
-						stragglerSyncTriggered = true
-						pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
-							stallAfter.Round(time.Second), len(stragglers), stragglers)
-						patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
-						if failedCount > 0 {
-							pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
-						}
-						lastProgressAt = time.Now() // give the sync room to act
-					} else if !stallHintShown {
-						stallHintShown = true
-						pterm.Warning.Printf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v\n",
-							stallAfter.Round(time.Second), len(stragglers), stragglers)
-						pterm.Info.Println("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out.")
-						lastProgressAt = time.Now() // print the hint once per stall, not every tick
+			stall.observe(apps, time.Now())
+			if stragglers := stall.stalledStragglers(apps, time.Now()); len(stragglers) > 0 {
+				if config.SyncStragglersOnStall && !stragglerSyncTriggered {
+					stragglerSyncTriggered = true
+					pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
+						stallAfter.Round(time.Second), len(stragglers), stragglers)
+					patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
+					if failedCount > 0 {
+						pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
 					}
+				} else if !stallHintShown {
+					stallHintShown = true
+					pterm.Warning.Printf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v\n",
+						stallAfter.Round(time.Second), len(stragglers), stragglers)
+					pterm.Info.Println("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out.")
 				}
 			}
 
@@ -545,6 +539,17 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						spinnerStopped = true
 					}
 					spinnerMutex.Unlock()
+
+					// Everything is Healthy+Synced — but "ready" is not "correct".
+					// If a ref was requested, confirm ArgoCD is actually tracking it
+					// before declaring success; a legacy branch's chart silently
+					// deploys main and this is the only place that catches it (V3).
+					if config.AppOfApps != nil {
+						if mm := verifyRefPinning(apps, config.AppOfApps.GitHubRepo, config.AppOfApps.GitHubBranch); len(mm) > 0 {
+							return refMismatchError(config.AppOfApps.GitHubBranch, mm)
+						}
+					}
+
 					pterm.Success.Println("All ArgoCD applications installed")
 					return nil
 				}

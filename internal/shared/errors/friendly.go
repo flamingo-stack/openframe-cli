@@ -20,6 +20,12 @@ func friendlyHint(err error) string {
 	// often surfaces wrapped in a timeout-looking message).
 	case containsAny(msg, "invalid ownership metadata", "cannot be imported into the current release", "missing key \"meta.helm.sh"):
 		return "A resource (usually the ArgoCD CRDs) already exists without Helm ownership metadata. Recreate the cluster ('openframe cluster delete' + 'openframe cluster create'), or add the Helm ownership labels to that resource, then retry."
+	// A prior helm operation was interrupted and left the release wedged in a
+	// pending-* state. Matched BEFORE the generic timeout case: retrying hits the
+	// SAME pending release and fails identically, so the timeout hint ("wait and
+	// retry") is actively wrong here — the fix is a rollback.
+	case containsAny(msg, "another operation (install/upgrade/rollback) is in progress", "pending-install", "pending-upgrade", "pending-rollback"):
+		return "A previous install/upgrade was interrupted and left the release in a pending state; retrying will not clear it. Roll it back with 'helm rollback <release> -n <namespace>' (or 'helm uninstall' it), then run the command again. Tip: pending releases are hidden from plain 'helm list' — use 'helm list -a'."
 	case containsAny(msg, "connection refused", "was refused", "unable to connect to the server", "connection reset"):
 		return "The cluster isn't reachable — is it running? Try 'openframe cluster status'."
 	case containsAny(msg, "no such host", "dns resolution", "name resolution"):

@@ -406,20 +406,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
 
-	// Log Helm output for debugging (helps identify if Helm actually created
-	// resources). Stdout is redacted at the PRINT site (not in the result
-	// struct, which callers parse): helm's rendered output can echo values —
-	// including the docker registry password — in verbose/dry-run mode.
-	// Stderr arrives already redacted by the executor.
-	if config.Verbose && result != nil {
-		if result.Stdout != "" {
-			pterm.Info.Println("Helm stdout:")
-			pterm.Println(redact.Redact(result.Stdout))
-		}
-		if result.Stderr != "" {
-			pterm.Info.Println("Helm stderr:")
-			pterm.Println(result.Stderr)
-		}
+	// On success, helm's stdout is just the release summary + chart NOTES (100+
+	// lines) — pure noise that buried the useful --verbose output (V6), so it is
+	// not printed. Stderr, when present, carries deprecation/ownership warnings
+	// worth seeing; it arrives already redacted by the executor.
+	if config.Verbose && result != nil && result.Stderr != "" {
+		pterm.Info.Println("Helm stderr:")
+		pterm.Println(result.Stderr)
 	}
 
 	// Dry-run creates nothing: helm ran with --dry-run=client and the executor

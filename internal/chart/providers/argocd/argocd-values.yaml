@@ -112,13 +112,14 @@ redis:
 
 
 dex:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi
+  # Dex (SSO) is disabled: the chart defaults it on (dex.enabled: true), but
+  # OpenFrame's local/oss-tenant login uses the local `developer` account
+  # configured above, never dex. Beyond being dead weight on local k3d, the
+  # dexidp/dex:v2.45.1 arm64 image intermittently SIGSEGVs under emulation on
+  # Apple Silicon (exit 139) before its first log line -> CrashLoopBackOff ->
+  # the 7m `helm --wait` never completes -> fresh installs fail. Disabling it
+  # removes the blocker; re-enable and pin a known-good image if SSO is needed.
+  enabled: false
 
 
 applicationSet:
