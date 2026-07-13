@@ -84,9 +84,15 @@ func printResult(res fw.Result) {
 		pterm.Success.Printf("✓ %s (installed)\n", name)
 	}
 	for _, m := range res.Missing {
-		pterm.Error.Printf("✗ %s is not installed\n", m.Name)
-		if m.DocsURL != "" {
-			pterm.Info.Printf("   How to install: %s\n", m.DocsURL)
+		if m.Reason != "" {
+			// A specific reason (e.g. "installed but not running") — the tool IS
+			// present, so don't claim it isn't and don't show install docs.
+			pterm.Error.Printf("✗ %s: %s\n", m.Name, m.Reason)
+		} else {
+			pterm.Error.Printf("✗ %s is not installed\n", m.Name)
+			if m.DocsURL != "" {
+				pterm.Info.Printf("   How to install: %s\n", m.DocsURL)
+			}
 		}
 		if m.Err != nil {
 			pterm.Debug.Printf("   (%v)\n", m.Err)

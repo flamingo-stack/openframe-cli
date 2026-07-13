@@ -30,6 +30,15 @@ func ClusterSet() fw.Set {
 				IsSatisfied: docker.IsDockerRunning,
 				Install:     asCtxInstall(dockerInstaller.Install),
 				DocsURL:     dockerInstaller.GetInstallHelp(),
+				// When the binary is present but the daemon is down, say so instead
+				// of the framework's default "not installed" — the fix a user needs
+				// (start the daemon) is different from installing it.
+				Detail: func() string {
+					if dockerInstaller.IsInstalled() {
+						return "installed but not running — start Docker Desktop or the Docker daemon"
+					}
+					return "" // genuinely absent: let the generic "not installed" wording stand
+				},
 			},
 			toolPrerequisite("k3d", k3dInstaller.IsInstalled, k3dInstaller.Install, k3dInstaller.GetInstallHelp),
 			toolPrerequisite("helm", helmInstaller.IsInstalled, helmInstaller.Install, helmInstaller.GetInstallHelp),

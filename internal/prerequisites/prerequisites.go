@@ -28,6 +28,11 @@ type Prerequisite struct {
 	// DocsURL points to manual setup instructions. Shown on Windows, when there
 	// is no installer, or when an install attempt fails.
 	DocsURL string
+	// Detail, when set, explains WHY the prerequisite is unsatisfied more
+	// precisely than the default "not installed" — e.g. Docker returns
+	// "installed but not running" when the binary is present but the daemon is
+	// down. Optional; nil means the generic "not installed" wording is used.
+	Detail func() string
 }
 
 // Set is a named group of prerequisites, e.g. "cluster" or "app".
@@ -40,7 +45,11 @@ type Set struct {
 type MissingItem struct {
 	Name    string
 	DocsURL string
-	Err     error // why it could not be auto-installed (nil on Windows / no installer)
+	// Reason, when set, is a specific explanation (from Prerequisite.Detail) of
+	// why the item is unsatisfied — e.g. "installed but not running". Empty means
+	// the item is genuinely absent and the generic "not installed" wording fits.
+	Reason string
+	Err    error // why it could not be auto-installed (nil on Windows / no installer)
 }
 
 // Result summarizes running a Set.
