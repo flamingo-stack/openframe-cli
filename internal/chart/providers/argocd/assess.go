@@ -13,6 +13,15 @@ type appAssessment struct {
 	notReadyNames []string // bare names of apps not yet ready (for kubectl commands)
 }
 
+// appNames returns the names of the given applications, preserving order.
+func appNames(apps []Application) []string {
+	names := make([]string, 0, len(apps))
+	for _, app := range apps {
+		names = append(names, app.Name)
+	}
+	return names
+}
+
 // assessApplications classifies the applications for one polling tick and
 // marks apps that are currently Healthy+Synced in everReady (the session-wide
 // set of apps that have ever been ready).

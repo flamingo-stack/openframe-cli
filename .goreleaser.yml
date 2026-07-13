@@ -80,28 +80,13 @@ signs:
       - '--yes'
 
 changelog:
+  # github-native delegates note generation to GitHub's "Generate release notes"
+  # API, which categorizes by PR LABEL via .github/release.yml — the right fit
+  # for this repo's squash-merge + free-form PR titles. Under github-native
+  # GoReleaser IGNORES its own `groups`/`filters`, so they are intentionally
+  # absent here; edit .github/release.yml to change categories or exclusions.
   use: github-native
   sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
-      - '^ci:'
-      - '^build:'
-      - '^style:'
-      - '^refactor:'
-      - Merge pull request
-      - Merge branch
-  groups:
-    - title: Features
-      regexp: "^.*feat[(\\w)]*:+.*$"
-      order: 0
-    - title: Bug fixes
-      regexp: "^.*fix[(\\w)]*:+.*$"
-      order: 1
-    - title: Others
-      order: 999
 
 release:
   make_latest: true

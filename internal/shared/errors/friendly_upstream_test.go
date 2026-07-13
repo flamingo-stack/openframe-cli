@@ -86,3 +86,25 @@ func TestFriendlyHint_NoHintForUnknownErrors(t *testing.T) {
 		t.Errorf("expected no hint for an unrecognized error, got %q", got)
 	}
 }
+
+// TestFriendlyHint_PendingReleaseSuggestsRollback (V4): a helm release left in
+// pending-* by an interrupted operation must point at rollback, NOT the generic
+// "wait and retry" timeout hint — retrying hits the same wedged release. The
+// pending case is ordered before the timeout case for exactly this reason.
+func TestFriendlyHint_PendingReleaseSuggestsRollback(t *testing.T) {
+	cases := []string{
+		`Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress`,
+		`Error: release app-of-apps failed, status: pending-upgrade`,
+		`cannot patch: release in pending-install state`,
+		`Error: release argo-cd failed, status: pending-rollback`,
+	}
+	for _, msg := range cases {
+		got := friendlyHint(fmt.Errorf("op failed: %s", msg))
+		if !strings.Contains(got, "rollback") {
+			t.Errorf("pending-release must suggest rollback.\nmessage: %s\ngot: %q", msg, got)
+		}
+		if strings.Contains(got, "cluster may be slow or unreachable") {
+			t.Errorf("pending-release must NOT get the generic timeout hint (retry is wrong here).\nmessage: %s\ngot: %q", msg, got)
+		}
+	}
+}

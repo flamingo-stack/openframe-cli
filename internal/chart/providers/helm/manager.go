@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/yaml"
 )
 
 // HelmManager handles Helm operations
@@ -246,12 +247,56 @@ func (h *HelmManager) installArgoCDHelm(ctx context.Context, cfg config.ChartIns
 	if cfg.Verbose {
 		pterm.Debug.Printf("Executing: helm %s\n", strings.Join(args, " "))
 	}
+
+	// The ArgoCD chart's values are the embedded baseline, optionally overridden
+	// by the user's `argocd:` subtree in openframe-helm-values.yaml. Only that
+	// subtree is merged (never the whole file — the rest targets the app-of-apps
+	// chart and carries the registry password). Overrides are announced because a
+	// bad one can break the install.
+	values := argocd.GetArgoCDValues()
+	if uv, path := userValues(cfg); uv != nil {
+		merged, overridden, err := argocd.MergedArgoCDValues(uv)
+		if err != nil {
+			return nil, fmt.Errorf("merging ArgoCD overrides from %s: %w", path, err)
+		}
+		if len(overridden) > 0 {
+			pterm.Warning.Printfln("Using ArgoCD overrides from %s (keys: %s) on top of the built-in baseline "+
+				"(differs from the bundled argocd-values.yaml); a bad override can break the ArgoCD install.",
+				path, strings.Join(overridden, ", "))
+			values = merged
+		}
+	}
+
 	return h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
 		Args:    args,
 		Env:     h.getHelmEnv(),
-		Stdin:   []byte(argocd.GetArgoCDValues()),
+		Stdin:   []byte(values),
 	})
+}
+
+// userValues reads and parses the user's openframe-helm-values.yaml, returning
+// the parsed map and the path it read. It resolves the path from the config
+// (explicit --values wins) or the default cwd location, and returns (nil, path)
+// on a missing or unparseable file — a missing user file is normal, not an
+// error, so the caller simply falls back to the baseline.
+func userValues(cfg config.ChartInstallConfig) (map[string]interface{}, string) {
+	path := ""
+	if cfg.AppOfApps != nil {
+		path = cfg.AppOfApps.ValuesFile
+	}
+	if path == "" {
+		path = config.NewPathResolver().GetHelmValuesFile()
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- values path resolved from config/CLI, read as the invoking user
+	if err != nil {
+		return nil, path
+	}
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, path
+	}
+	return m, path
 }
 
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
@@ -372,7 +417,18 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		pterm.Info.Println("Running in dry-run mode...")
 	}
 
-	result, err := h.installArgoCDHelm(ctx, config)
+	// installArgoCDHelm blocks on `helm upgrade --wait --timeout 7m`, which
+	// prints nothing while it runs. On a TTY the spinner animates; when there is
+	// no spinner (non-interactive/CI) the terminal would sit silent for minutes
+	// and users kill the process before the diagnostics ever print. A heartbeat
+	// gives that path liveness (no-op under --silent, and scoped to this call).
+	result, err := func() (*executor.CommandResult, error) {
+		if spinner == nil {
+			hb := uispinner.StartHeartbeat("Still installing ArgoCD (helm --wait, up to 7m)...", 0)
+			defer hb.Stop()
+		}
+		return h.installArgoCDHelm(ctx, config)
+	}()
 	if err != nil {
 		// Check if the error is due to context cancellation (CTRL-C)
 		if ctx.Err() == context.Canceled {
@@ -406,20 +462,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 		return fmt.Errorf("failed to install ArgoCD: %w", err)
 	}
 
-	// Log Helm output for debugging (helps identify if Helm actually created
-	// resources). Stdout is redacted at the PRINT site (not in the result
-	// struct, which callers parse): helm's rendered output can echo values —
-	// including the docker registry password — in verbose/dry-run mode.
-	// Stderr arrives already redacted by the executor.
-	if config.Verbose && result != nil {
-		if result.Stdout != "" {
-			pterm.Info.Println("Helm stdout:")
-			pterm.Println(redact.Redact(result.Stdout))
-		}
-		if result.Stderr != "" {
-			pterm.Info.Println("Helm stderr:")
-			pterm.Println(result.Stderr)
-		}
+	// On success, helm's stdout is just the release summary + chart NOTES (100+
+	// lines) — pure noise that buried the useful --verbose output (V6), so it is
+	// not printed. Stderr, when present, carries deprecation/ownership warnings
+	// worth seeing; it arrives already redacted by the executor.
+	if config.Verbose && result != nil && result.Stderr != "" {
+		pterm.Info.Println("Helm stderr:")
+		pterm.Println(result.Stderr)
 	}
 
 	// Dry-run creates nothing: helm ran with --dry-run=client and the executor
@@ -601,12 +650,21 @@ func (h *HelmManager) InstallAppOfAppsFromLocal(ctx context.Context, config conf
 		pterm.Info.Println("Installing the OpenFrame app-of-apps chart...")
 	}
 
-	// Execute helm command with local chart path
-	result, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
-		Command: "helm",
-		Args:    args,
-		Env:     h.getHelmEnv(),
-	})
+	// Execute helm command with local chart path. Like the ArgoCD install this
+	// blocks on `helm --wait` with no output; when there is no animated spinner
+	// (non-interactive/CI) a heartbeat keeps the terminal alive so users don't
+	// assume a hang. No-op under --silent; scoped to the blocking call.
+	result, err := func() (*executor.CommandResult, error) {
+		if spinner == nil {
+			hb := uispinner.StartHeartbeat("Still installing the app-of-apps chart (helm --wait)...", 0)
+			defer hb.Stop()
+		}
+		return h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+			Command: "helm",
+			Args:    args,
+			Env:     h.getHelmEnv(),
+		})
+	}()
 
 	if err != nil {
 		if spinner != nil {

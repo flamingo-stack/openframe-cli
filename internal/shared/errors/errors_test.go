@@ -92,7 +92,6 @@ func TestValidationError_Error(t *testing.T) {
 	}
 }
 
-
 func TestNewErrorHandler(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -154,7 +153,6 @@ func TestErrorHandler_HandleError_ValidationError_NoValue(t *testing.T) {
 		handler.HandleError(err)
 	})
 }
-
 
 // TestErrorHandler_CommandError_ShowsChildStderr is the M1.1 guard: a failed
 // external command must surface the CHILD'S reason to the user, not the
@@ -349,7 +347,6 @@ func BenchmarkValidationError_Error(b *testing.B) {
 		_ = err.Error()
 	}
 }
-
 
 func BenchmarkErrorHandler_HandleError(b *testing.B) {
 	handler := NewErrorHandler(false)

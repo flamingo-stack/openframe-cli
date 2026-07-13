@@ -93,3 +93,49 @@ func TestRun_MissingWithoutInstallerIsManual(t *testing.T) {
 	require.Len(t, res.Missing, 1)
 	assert.Equal(t, "https://docs/docker", res.Missing[0].DocsURL)
 }
+
+// TestCheck_DetailBecomesReason: a prerequisite that supplies a Detail (e.g.
+// Docker "installed but not running") must surface it as MissingItem.Reason so
+// the renderer can avoid the false "not installed" wording. A prereq without a
+// Detail leaves Reason empty (genuine absence → generic wording).
+func TestCheck_DetailBecomesReason(t *testing.T) {
+	notRunning := Prerequisite{
+		Name:        "Docker",
+		DocsURL:     "https://docs/docker",
+		IsSatisfied: func() bool { return false },
+		Detail:      func() string { return "installed but not running" },
+	}
+	absent := Prerequisite{
+		Name:        "k3d",
+		DocsURL:     "https://docs/k3d",
+		IsSatisfied: func() bool { return false },
+	}
+
+	res := Runner{}.Check(Set{Items: []Prerequisite{notRunning, absent}})
+	require.Len(t, res.Missing, 2)
+
+	byName := map[string]MissingItem{}
+	for _, m := range res.Missing {
+		byName[m.Name] = m
+	}
+	assert.Equal(t, "installed but not running", byName["Docker"].Reason,
+		"Detail must flow into Reason so the tool isn't mislabeled 'not installed'")
+	assert.Empty(t, byName["k3d"].Reason, "a prereq with no Detail must leave Reason empty")
+}
+
+// TestRun_DetailReasonSurvivesFailedInstall: on Linux, when an auto-install
+// runs but the tool is still unsatisfied (Docker installed but daemon down),
+// the Detail reason must still be attached — this is the exact WSL-Alpine case
+// where apk installs docker but no OpenRC starts the daemon.
+func TestRun_DetailReasonSurvivesFailedInstall(t *testing.T) {
+	installedButDown := Prerequisite{
+		Name:        "Docker",
+		IsSatisfied: func() bool { return false }, // never becomes running
+		Install:     func(context.Context) error { return nil },
+		Detail:      func() string { return "installed but not running" },
+	}
+	// OS: "linux" forces the auto-install path (the WSL-Alpine case).
+	res := Runner{OS: "linux"}.Run(context.Background(), Set{Items: []Prerequisite{installedButDown}})
+	require.Len(t, res.Missing, 1)
+	assert.Equal(t, "installed but not running", res.Missing[0].Reason)
+}

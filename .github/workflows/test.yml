@@ -178,12 +178,7 @@ jobs:
           echo "==================================================================="
           "$OF_BIN" --version
           "$OF_BIN" --help
-          "$OF_BIN" cluster --help
-          "$OF_BIN" app --help
-          "$OF_BIN" app install --help
-          "$OF_BIN" app upgrade --help
-          "$OF_BIN" bootstrap --help
-          "$OF_BIN" update --help
+          # Per-command --help is exercised exhaustively in the next step.
           echo "--- completion: every supported shell generates cleanly"
           # Shell-completion generation is pure (no cluster/network) — smoke every shell.
           for sh in bash zsh fish powershell; do "$OF_BIN" completion "$sh" >/dev/null; done
@@ -197,6 +192,36 @@ jobs:
           # Rollback with no prior update must exit cleanly with a "nothing to roll
           # back" notice (offline, no download), not error out or hang.
           "$OF_BIN" update rollback
+
+      # Exhaustive --help over the WHOLE command tree, on the real (built/staged)
+      # binary. Complements the hermetic cmd/help_matrix_test.go by covering the
+      # actual binary (ldflags, embeds, and on Windows the WSL forward). Discovery
+      # is dynamic — a newly added command is covered with no hand-maintained list.
+      # Pure and non-interactive (no cluster, no network), so it runs on every OS.
+      - name: 'CLI: every command --help (exhaustive)'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: --help on EVERY command (real binary, non-interactive)"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          walk_help() {
+            local path="$1"
+            # $path is a space-separated command path ("cluster create") that MUST
+            # word-split into separate argv entries — intentional, so quiet SC2086.
+            # shellcheck disable=SC2086
+            "$OF_BIN" $path --help >/tmp/h.out 2>&1 || { cat /tmp/h.out; fail "'openframe $path --help' exited non-zero"; }
+            grep -q '^Usage:' /tmp/h.out || { cat /tmp/h.out; fail "'openframe $path --help' printed no Usage section"; }
+            echo "  OK: openframe $path --help"
+            # Leaf commands list no subcommands, so grep matching nothing is fine.
+            local subs
+            subs=$(sed -n '/Available Commands:/,/^$/p' /tmp/h.out | grep -E '^  [a-z]' | awk '{print $1}' || true)
+            for s in $subs; do
+              [ "$s" = "help" ] && continue
+              walk_help "${path:+$path }$s"
+            done
+          }
+          walk_help ""
 
       # Self-update against the REAL latest release: the only test that
       # exercises the live trust chain end to end (GitHub release lookup →
@@ -501,6 +526,22 @@ jobs:
           "$OF_BIN" app upgrade --context "$OF_CONTEXT" --dry-run
           echo "--- force-sync"
           "$OF_BIN" app upgrade --context "$OF_CONTEXT" --sync --verbose
+
+      # cluster cleanup is a first-class non-interactive command with logic no
+      # other step exercises against a real cluster: kube-context-pinned Helm
+      # uninstalls, ArgoCD finalizer stripping, and node image pruning via crictl
+      # (k3d nodes run containerd, not docker). Runs on the live, populated cluster
+      # so all phases have something to do; --force skips the confirmation prompt.
+      # It leaves the cluster empty; the teardown then deletes it.
+      - name: 'Cluster: cleanup (releases + crictl image prune)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cluster cleanup --force (non-interactive)"
+          echo "==================================================================="
+          "$OF_BIN" cluster cleanup "$OF_CLUSTER" --force
 
       # --- Teardown (runs even if a step above failed) -----------------------
       - name: 'Teardown: uninstall & delete cluster'

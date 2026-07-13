@@ -116,7 +116,6 @@ func TestSelectClusterForInstall_EmptyClusterList(t *testing.T) {
 	assert.Empty(t, selectedCluster)
 }
 
-
 func TestShowNoClusterMessage(t *testing.T) {
 	ui := NewOperationsUI()
 
@@ -125,9 +124,3 @@ func TestShowNoClusterMessage(t *testing.T) {
 		ui.ShowNoClusterMessage()
 	})
 }
-
-
-
-
-
-

@@ -12,7 +12,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
-	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
 	"github.com/pterm/pterm"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -217,12 +216,11 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 		return fmt.Errorf("failed to run helm list: %w", err)
 	}
 
-	// Log the helm list output. Redact at the print site (the struct value is
-	// parsed below): helm output may carry values echoed back from the release.
-	if verbose {
-		pterm.Info.Println("Helm list output:")
-		pterm.Println(redact.Redact(result.Stdout))
-	}
+	// The raw `helm list` JSON is not printed even under --verbose (V6): it is an
+	// implementation detail of the existence check below, and dumping it (plus
+	// the full `helm status` inventory further down) buried the useful lines
+	// under 150+ lines of noise. The compact "verified successfully" line at the
+	// end carries the signal.
 
 	// Check if the release exists in the output
 	// The JSON output will be an empty array "[]" if no releases found
@@ -231,25 +229,22 @@ func (h *HelmManager) verifyHelmRelease(ctx context.Context, releaseName, namesp
 		return fmt.Errorf("helm release '%s' not found in namespace '%s' - helm list returned empty", releaseName, namespace)
 	}
 
-	// Also run helm status for more details
+	// Also run `helm status` as a second existence/health probe. Only its exit
+	// status matters — a release that exists but whose status errors is a real
+	// problem. The command's multi-hundred-line resource inventory + NOTES are
+	// intentionally discarded, not printed even under --verbose (V6).
 	statusArgs := []string{"status", releaseName, "-n", namespace}
 	if clusterName != "" {
 		contextName := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
 		statusArgs = append(statusArgs, "--kube-context", contextName)
 	}
 
-	statusResult, err := h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
+	if _, err = h.executor.ExecuteWithOptions(ctx, executor.ExecuteOptions{
 		Command: "helm",
 		Args:    statusArgs,
 		Env:     h.getHelmEnv(),
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("helm release exists but status check failed: %w", err)
-	}
-
-	if verbose {
-		pterm.Info.Println("Helm status output:")
-		pterm.Println(redact.Redact(statusResult.Stdout))
 	}
 
 	pterm.Success.Printf("Helm release '%s' verified successfully\n", releaseName)

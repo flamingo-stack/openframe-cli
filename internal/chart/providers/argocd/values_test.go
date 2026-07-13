@@ -118,12 +118,13 @@ func TestArgoCDValues_ControllerExtraArgs(t *testing.T) {
 // scheduling on the small k3d clusters the CLI targets.
 func TestArgoCDValues_AllComponentsHaveResources(t *testing.T) {
 	v := parseValues(t)
+	// dex is intentionally excluded: it is disabled (see TestArgoCDValues_DexDisabled),
+	// so it schedules no pod and needs no resource block.
 	components := map[string]component{
 		"controller":     v.Controller,
 		"server":         v.Server,
 		"repoServer":     v.RepoServer,
 		"redis":          v.Redis,
-		"dex":            v.Dex,
 		"applicationSet": v.ApplicationSet,
 		"notifications":  v.Notifications,
 	}
@@ -136,5 +137,27 @@ func TestArgoCDValues_AllComponentsHaveResources(t *testing.T) {
 				t.Errorf("%s: missing resources.limits.%s", name, res)
 			}
 		}
+	}
+}
+
+// TestArgoCDValues_DexDisabled locks the V1 blocker fix: the argo-cd chart
+// defaults dex.enabled to true, and the dexidp/dex:v2.45.1 arm64 image
+// intermittently SIGSEGVs under emulation on Apple Silicon, CrashLoopBackOff-ing
+// the 7-minute `helm --wait` into a fresh-install failure. OpenFrame's login
+// uses the local developer account, never dex, so it must be disabled.
+func TestArgoCDValues_DexDisabled(t *testing.T) {
+	var raw struct {
+		Dex struct {
+			Enabled *bool `yaml:"enabled"`
+		} `yaml:"dex"`
+	}
+	if err := yaml.Unmarshal([]byte(GetArgoCDValues()), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Dex.Enabled == nil {
+		t.Fatal("dex.enabled must be set explicitly (chart default is true); it is absent")
+	}
+	if *raw.Dex.Enabled {
+		t.Error("dex.enabled must be false — dex is unused and its arm64 image crashes on Apple Silicon")
 	}
 }

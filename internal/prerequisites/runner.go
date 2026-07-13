@@ -44,10 +44,21 @@ func (r Runner) Check(set Set) Result {
 		if satisfied(item) {
 			res.Satisfied = append(res.Satisfied, item.Name)
 		} else {
-			res.Missing = append(res.Missing, MissingItem{Name: item.Name, DocsURL: item.DocsURL})
+			res.Missing = append(res.Missing, missing(item, nil))
 		}
 	}
 	return res
+}
+
+// missing builds a MissingItem for an unsatisfied prerequisite, capturing the
+// Detail-supplied reason (e.g. "installed but not running") so the renderer can
+// avoid the false "not installed" wording when the tool is present.
+func missing(p Prerequisite, err error) MissingItem {
+	m := MissingItem{Name: p.Name, DocsURL: p.DocsURL, Err: err}
+	if p.Detail != nil {
+		m.Reason = p.Detail()
+	}
+	return m
 }
 
 // Run checks every prerequisite in the set and, on supported OSes, installs the
@@ -67,23 +78,19 @@ func (r Runner) Run(ctx context.Context, set Set) Result {
 		// installer exists.
 		if auto && item.Install != nil {
 			if err := item.Install(ctx); err != nil {
-				res.Missing = append(res.Missing, MissingItem{Name: item.Name, DocsURL: item.DocsURL, Err: err})
+				res.Missing = append(res.Missing, missing(item, err))
 				continue
 			}
 			if satisfied(item) {
 				res.Installed = append(res.Installed, item.Name)
 				continue
 			}
-			res.Missing = append(res.Missing, MissingItem{
-				Name:    item.Name,
-				DocsURL: item.DocsURL,
-				Err:     fmt.Errorf("%s was installed but is still not satisfied", item.Name),
-			})
+			res.Missing = append(res.Missing, missing(item, fmt.Errorf("%s was installed but is still not satisfied", item.Name)))
 			continue
 		}
 
 		// Windows, or no installer available: report as manual (docs link).
-		res.Missing = append(res.Missing, MissingItem{Name: item.Name, DocsURL: item.DocsURL})
+		res.Missing = append(res.Missing, missing(item, nil))
 	}
 
 	return res

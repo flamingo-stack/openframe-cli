@@ -167,4 +167,3 @@ func TestWSLBinaryLookupScript(t *testing.T) {
 		}
 	}
 }
-
