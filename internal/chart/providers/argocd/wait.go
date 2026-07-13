@@ -441,6 +441,14 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 								if m.triggerRepoServerRecovery(localCtx, app.Name) {
 									pterm.Info.Println("ArgoCD repo-server restarted; applications will re-sync shortly.")
 									delete(appsWithRepoServerIssues, app.Name)
+									// The restarted repo-server has a cold manifest cache, so
+									// every app stuck in Unknown (not just the trigger) needs a
+									// HARD refresh to regenerate — otherwise they ride the wait
+									// out to its timeout. triggerRepoServerRecovery already
+									// hard-refreshed app.Name; cover the rest.
+									if refreshed := m.hardRefreshApplications(localCtx, appNames(unknownApps)); refreshed > 0 {
+										pterm.Info.Printfln("Hard-refreshed %d application(s) stuck in Unknown.", refreshed)
+									}
 								} else {
 									pterm.Warning.Println("Could not restart the ArgoCD repo-server; continuing to wait.")
 								}

@@ -139,9 +139,36 @@ func (m *Manager) checkRepoServerHealth(ctx context.Context, _ bool) *RepoServer
 	return nil
 }
 
+// hardRefreshApplications annotates each named Application with a HARD refresh
+// (argocd.argoproj.io/refresh: hard), forcing the repo-server to re-fetch
+// manifests from git and bypass its manifest cache. A "normal" refresh only
+// re-compares against that cache — worthless right after a repo-server restart,
+// where the cache is exactly what's stale (apps sit in Unknown because manifest
+// generation failed). Best-effort: returns the number successfully patched;
+// per-app failures are logged at debug and skipped.
+func (m *Manager) hardRefreshApplications(ctx context.Context, names []string) int {
+	if m.dynamicClient == nil {
+		return 0
+	}
+	var refreshed int
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, err := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
+			Patch(ctx, name, types.MergePatchType, []byte(refreshHardPatch), metav1.PatchOptions{}); err != nil {
+			pterm.Debug.Printf("best-effort hard refresh of application %s failed: %v\n", name, err)
+			continue
+		}
+		refreshed++
+	}
+	return refreshed
+}
+
 // triggerRepoServerRecovery restarts the repo-server (delete its pods → the
-// controller recreates them) and optionally forces an application refresh. Uses
-// the native client for both the delete and the ArgoCD Application patch.
+// controller recreates them) and hard-refreshes the triggering application so
+// child generation unblocks. Uses the native client for the delete and the
+// dynamic client for the Application patch.
 func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string) bool {
 	if m.kubeClient == nil {
 		return false
@@ -161,13 +188,13 @@ func (m *Manager) triggerRepoServerRecovery(ctx context.Context, appName string)
 		if m.checkRepoServerHealth(ctx, false) != nil {
 			continue
 		}
-		// Recovered — force a refresh of the application if specified.
-		if appName != "" && m.dynamicClient != nil {
-			patch := []byte(`{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"normal"}}}`)
-			if _, err := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace).
-				Patch(ctx, appName, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
-				pterm.Debug.Printf("best-effort refresh of application %s failed: %v\n", appName, err)
-			}
+		// Recovered — HARD-refresh the triggering app so the freshly restarted
+		// repo-server re-fetches its manifests from git. A "normal" refresh
+		// (what this did before) only re-compares against the manifest cache,
+		// which is exactly what a just-restarted repo-server has lost — so the
+		// app stayed stuck in Unknown until the wait timed out.
+		if appName != "" {
+			m.hardRefreshApplications(ctx, []string{appName})
 		}
 		return true
 	}
