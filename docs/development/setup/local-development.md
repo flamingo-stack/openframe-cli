@@ -43,7 +43,7 @@ Unit tests are colocated as `*_test.go` next to the code they cover.
 # Build for your current platform (produces openframe-<os>-<arch>)
 make build
 
-# Build for all platforms
+# Cross-compile all six release platforms (matches .goreleaser.yml)
 make build-all
 
 # Or build directly
@@ -84,10 +84,13 @@ k3d cluster delete openframe-test
 ## Lint and Format
 
 ```bash
-make lint          # golangci-lint run ./...
-gofmt -w .
-goimports -w .
+make fmt     # gofmt -w over the tree
+make vet     # go vet ./...
+make lint    # golangci-lint run ./...
+make tidy    # fail if `go mod tidy` would change go.mod/go.sum
 ```
+
+These mirror the CI gates — run them before pushing.
 
 ## Development Workflow
 
@@ -96,6 +99,7 @@ goimports -w .
 git fetch upstream && git checkout main && git merge upstream/main
 
 # Create a branch, make changes, then before committing:
+make fmt vet tidy
 make test
 make lint
 
