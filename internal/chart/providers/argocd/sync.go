@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -97,17 +98,43 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	return m.syncChildApplications(ctx, prune)
 }
 
-// trackingInstanceLabel is ArgoCD's default (label) resource-tracking marker:
-// resources managed by an Application carry app.kubernetes.io/instance=<app>.
-// Child Applications created by the app-of-apps therefore carry the root's name.
+// trackingInstanceLabel is ArgoCD's LABEL resource-tracking marker: resources
+// managed by an Application carry app.kubernetes.io/instance=<app>. Child
+// Applications created by the app-of-apps therefore carry the root's name.
 const trackingInstanceLabel = "app.kubernetes.io/instance"
 
+// trackingIDAnnotation is ArgoCD's ANNOTATION resource-tracking marker, used
+// when resourceTrackingMethod is "annotation" or "annotation+label" (the label
+// above is then absent). Its value is "<owner-app>:<group>/<kind>:<ns>/<name>",
+// e.g. "argocd-apps:argoproj.io/Application:argocd/openframe-api".
+const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
+
+// trackingOwner returns the owning Application name encoded in either tracking
+// marker, or "" if neither is present. The label wins when set; otherwise the
+// annotation's owner is the segment before the first ":". Splitting (rather
+// than prefix-matching) avoids mistaking "argocd-apps-foo" for "argocd-apps".
+func trackingOwner(labels, annotations map[string]string) string {
+	if v := labels[trackingInstanceLabel]; v != "" {
+		return v
+	}
+	if id := annotations[trackingIDAnnotation]; id != "" {
+		return strings.SplitN(id, ":", 2)[0]
+	}
+	return ""
+}
+
 // syncChildApplications triggers a sync on the root's child Applications.
-// Children are selected by ArgoCD's tracking label
-// (app.kubernetes.io/instance=argocd-apps); when none carry it (custom
-// trackingMethod), it falls back to every Application except the root rather
-// than silently syncing nothing — but then it may touch Applications that are
-// not OpenFrame-owned, which the fallback warning makes visible.
+// Children are selected by ArgoCD's resource tracking, checking BOTH markers:
+// the label (app.kubernetes.io/instance=argocd-apps) and the annotation
+// (argocd.argoproj.io/tracking-id, owner before the first ":"). The annotation
+// is required because ArgoCD's "annotation" / "annotation+label" tracking
+// methods leave the label empty — the case the verification run hit, where the
+// primary selector matched nothing and the fallback synced everything.
+//
+// Only when NEITHER marker is present on any Application does it fall back to
+// every Application except the root, rather than silently syncing nothing —
+// but that may touch Applications that are not OpenFrame-owned (a real risk on
+// a shared cluster), which the fallback warning makes visible.
 //
 // Per-child failures no longer vanish (audit F8): individual errors are
 // counted and surfaced — a warning on partial failure, an error when NOT ONE
@@ -126,7 +153,7 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 		if name == AppOfAppsName {
 			continue
 		}
-		if list.Items[i].GetLabels()[trackingInstanceLabel] == AppOfAppsName {
+		if trackingOwner(list.Items[i].GetLabels(), list.Items[i].GetAnnotations()) == AppOfAppsName {
 			children = append(children, name)
 		}
 	}
