@@ -74,6 +74,11 @@ var repoServerErrorPatterns = []string{
 // those whose condition message points at repo-server trouble. issueCounts is
 // updated in place: incremented for apps showing a repo-server error and
 // cleared for apps that no longer do.
+//
+// Deterministic manifest errors (see fatalmanifest.go) are excluded even
+// though they match "failed to generate manifest": restarting the repo-server
+// cannot make a missing chart path appear, so counting them here only produced
+// pointless recovery restarts before the fail-fast fired.
 func classifyAppIssues(apps []Application, issueCounts map[string]int) (unknown, conditionErrors []Application) {
 	for _, app := range apps {
 		if app.Health == ArgoCDStatusUnknown || app.Sync == ArgoCDStatusUnknown {
@@ -81,7 +86,7 @@ func classifyAppIssues(apps []Application, issueCounts map[string]int) (unknown,
 		}
 
 		hasRepoErr := false
-		if app.Condition != "" {
+		if app.Condition != "" && !isDeterministicManifestError(app.Condition) {
 			for _, p := range repoServerErrorPatterns {
 				if strings.Contains(app.Condition, p) {
 					hasRepoErr = true

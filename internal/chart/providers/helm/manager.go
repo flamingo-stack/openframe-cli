@@ -254,7 +254,11 @@ func (h *HelmManager) installArgoCDHelm(ctx context.Context, cfg config.ChartIns
 	// chart and carries the registry password). Overrides are announced because a
 	// bad one can break the install.
 	values := argocd.GetArgoCDValues()
-	if uv, path := userValues(cfg); uv != nil {
+	uv, path, err := userValues(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if uv != nil {
 		merged, overridden, err := argocd.MergedArgoCDValues(uv)
 		if err != nil {
 			return nil, fmt.Errorf("merging ArgoCD overrides from %s: %w", path, err)
@@ -277,10 +281,11 @@ func (h *HelmManager) installArgoCDHelm(ctx context.Context, cfg config.ChartIns
 
 // userValues reads and parses the user's openframe-helm-values.yaml, returning
 // the parsed map and the path it read. It resolves the path from the config
-// (explicit --values wins) or the default cwd location, and returns (nil, path)
-// on a missing or unparseable file — a missing user file is normal, not an
-// error, so the caller simply falls back to the baseline.
-func userValues(cfg config.ChartInstallConfig) (map[string]interface{}, string) {
+// (explicit --values wins) or the default cwd location. A MISSING file is
+// normal (the caller falls back to the baseline), but a file that exists and
+// cannot be read or parsed is an error: swallowing it silently dropped the
+// user's intended `argocd:` override — the same silent-failure class as V3.
+func userValues(cfg config.ChartInstallConfig) (map[string]interface{}, string, error) {
 	path := ""
 	if cfg.AppOfApps != nil {
 		path = cfg.AppOfApps.ValuesFile
@@ -290,13 +295,16 @@ func userValues(cfg config.ChartInstallConfig) (map[string]interface{}, string) 
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- values path resolved from config/CLI, read as the invoking user
 	if err != nil {
-		return nil, path
+		if os.IsNotExist(err) {
+			return nil, path, nil
+		}
+		return nil, path, fmt.Errorf("reading values file %s: %w", path, err)
 	}
 	var m map[string]interface{}
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, path
+		return nil, path, fmt.Errorf("values file %s is not valid YAML: %w", path, err)
 	}
-	return m, path
+	return m, path, nil
 }
 
 // InstallArgoCDWithProgress installs ArgoCD using Helm with progress indicators
@@ -442,8 +450,13 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 			spinner.Stop()
 		}
 
-		// Show diagnostic information about ArgoCD pods
-		h.showArgoCDDiagnostics(ctx, config.ClusterName)
+		// Show diagnostic information about ArgoCD pods — but only when helm
+		// actually ran (result != nil). A nil result means the values merge or
+		// parse failed before any helm call, and a pod dump for a pure
+		// configuration error only buries the real message.
+		if result != nil {
+			h.showArgoCDDiagnostics(ctx, config.ClusterName)
+		}
 
 		// Include stdout and stderr output for better debugging
 		// On Windows/WSL, stderr is redirected to stdout via 2>&1, so check both.

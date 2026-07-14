@@ -75,6 +75,13 @@ func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteract
 		actualClusterName = defaultClusterName
 	}
 
+	// Step 0: Pre-flight the helm values file BEFORE creating the cluster. A
+	// malformed `argocd:` override (or unparseable YAML) otherwise costs a full
+	// cluster create before the chart install rejects the same file.
+	if err := chartServices.ValidateHelmValuesFile(); err != nil {
+		return err
+	}
+
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
 	kubeConfig, err := s.createClusterSuppressed(ctx, actualClusterName, verbose, nonInteractive)
 	if err != nil {

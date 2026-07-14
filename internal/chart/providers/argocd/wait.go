@@ -184,6 +184,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	stragglerSyncTriggered := false
 	stallHintShown := false
 
+	// Deterministic manifest-error tracking (see fatalmanifest.go): a legacy
+	// ref whose chart path does not exist at the pinned revision fails fast
+	// instead of riding the full timeout.
+	fatalManifest := newFatalManifestTracker()
+
 	// Repo-server issue tracking for recovery logic
 	repoServerRecoveryAttempts := 0
 	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
@@ -366,15 +371,35 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
 			lastNotReadyNames = assess.notReadyNames
 
+			// Fail fast on deterministic manifest errors (see fatalmanifest.go):
+			// once an app has shown the same "content missing at this revision"
+			// ComparisonError past the persistence thresholds, no amount of
+			// waiting or repo-server recovery changes the outcome. Checked before
+			// stall/recovery handling so neither wastes effort on a lost cause.
+			// One timestamp for all observe calls so recorded "since" values and
+			// staleness checks use the same tick.
+			now := time.Now()
+			if fatal := fatalManifest.observe(apps, now); len(fatal) > 0 {
+				spinnerMutex.Lock()
+				if !spinnerStopped && spinner != nil {
+					spinner.Fail("Applications cannot render manifests from the deployed revision")
+					spinnerStopped = true
+				}
+				spinnerMutex.Unlock()
+
+				requestedRef := ""
+				if config.AppOfApps != nil {
+					requestedRef = config.AppOfApps.GitHubBranch
+				}
+				return fatalManifestError(requestedRef, fatal)
+			}
+
 			// Stall handling (finding N3, per-application): an app that has sat
 			// OutOfSync-but-Healthy, bit-for-bit identical, for stallAfter will not
 			// move on its own (autoSync off). Judged per-app so a noisy neighbour
 			// flapping status can't keep resetting the clock on a stuck app (V5).
 			// On the upgrade path, sync exactly those stragglers once; otherwise
 			// print an actionable hint once instead of burning the full timeout.
-			// One timestamp for both calls so an app's recorded "since" and the
-			// staleness check use the same tick.
-			now := time.Now()
 			stall.observe(apps, now)
 			if stragglers := stall.stalledStragglers(apps, now); len(stragglers) > 0 {
 				// The two branches are chosen by MODE, not by whether the sync has

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/prerequisites"
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/git"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/helm"
 	chartUI "github.com/flamingo-stack/openframe-cli/internal/chart/ui"
@@ -203,6 +204,18 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 			if backupErr := w.fileCleanup.RegisterTempFile(chartConfig.TempHelmValuesPath); backupErr != nil {
 				pterm.Warning.Printf("Failed to register temp file for cleanup: %v\n", backupErr)
 			}
+		}
+	}
+
+	// Step 1.5: Pre-flight the values that will feed the ArgoCD install. The
+	// values are fully parsed by now, so a malformed `argocd:` override fails
+	// here — before cluster selection and any cluster work — instead of
+	// surfacing mid-install behind a misleading ArgoCD pod-diagnostics dump
+	// (0.4.9 verification observation). The install-time check remains as
+	// defense in depth.
+	if path := chartConfig.TempHelmValuesPath; path != "" {
+		if err := argocd.ValidateUserValuesFile(path); err != nil {
+			return fmt.Errorf("helm values pre-flight failed: %w", err)
 		}
 	}
 
