@@ -44,11 +44,17 @@ func stripLogNoise(s string) string {
 // errorDetail prepares captured stderr for embedding into an error message:
 // log noise is stripped first; when NOTHING survives (the child only logged
 // informational lines before dying) the raw text is kept — losing the only
-// available detail would be worse than the noise.
+// available detail would be worse than the noise. The result is bounded to
+// maxStderrInError (keeping the tail, where the failure reason lands) so a
+// chatty child cannot overwhelm the error; the full text stays available on
+// the error's Stderr field.
 func errorDetail(stderr string) string {
-	filtered := strings.TrimSpace(stripLogNoise(stderr))
-	if filtered != "" {
-		return filtered
+	detail := strings.TrimSpace(stripLogNoise(stderr))
+	if detail == "" {
+		detail = strings.TrimSpace(stderr)
 	}
-	return strings.TrimSpace(stderr)
+	if len(detail) > maxStderrInError {
+		detail = "..." + detail[len(detail)-maxStderrInError:]
+	}
+	return detail
 }

@@ -82,6 +82,32 @@ func TestCommandError_FiltersK3dProgressWall(t *testing.T) {
 	}
 }
 
+// TestErrorDetail_TruncatesToBound: both CommandError and WSLError embed
+// stderr via errorDetail, so the maxStderrInError bound must live there —
+// WSLError previously had no truncation at all.
+func TestErrorDetail_TruncatesToBound(t *testing.T) {
+	huge := strings.Repeat("x", 3*maxStderrInError) + " the actual reason"
+	got := errorDetail(huge)
+
+	if len(got) > maxStderrInError+3 { // "..." prefix
+		t.Fatalf("detail not bounded: %d chars", len(got))
+	}
+	if !strings.HasPrefix(got, "...") || !strings.HasSuffix(got, "the actual reason") {
+		t.Errorf("truncation must keep the tail with an ellipsis prefix, got: %.40s...%.40s", got, got[len(got)-40:])
+	}
+}
+
+func TestWSLError_TruncatesHugeStderr(t *testing.T) {
+	err := &WSLError{
+		Operation: "executing k3d",
+		ExitCode:  1,
+		Stderr:    strings.Repeat("y", 3*maxStderrInError),
+	}
+	if len(err.Error()) > maxStderrInError+200 { // message prefix + ellipsis
+		t.Fatalf("WSLError message not bounded: %d chars", len(err.Error()))
+	}
+}
+
 func TestWSLError_FiltersLogNoise(t *testing.T) {
 	err := &WSLError{
 		Operation: "executing k3d",

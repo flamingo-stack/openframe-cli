@@ -69,12 +69,10 @@ const maxStderrInError = 2000
 func (e *CommandError) Error() string {
 	msg := fmt.Sprintf("command failed: %s (exit code: %d)", e.Command, e.ExitCode)
 	// Informational logrus records (k3d's INFO[0000] progress wall) are
-	// stripped so the ERRO/FATA line that explains the failure stays visible;
-	// the full text remains in the Stderr field.
+	// stripped and the detail is bounded to maxStderrInError (both inside
+	// errorDetail) so the ERRO/FATA line that explains the failure stays
+	// visible; the full text remains in the Stderr field.
 	if reason := errorDetail(e.Stderr); reason != "" {
-		if len(reason) > maxStderrInError {
-			reason = "..." + reason[len(reason)-maxStderrInError:]
-		}
 		return msg + ": " + reason
 	}
 	// No stderr (e.g. the child only wrote to stdout): fall back to the exec
