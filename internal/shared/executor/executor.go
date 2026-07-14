@@ -35,8 +35,10 @@ type WSLError struct {
 
 func (e *WSLError) Error() string {
 	msg := fmt.Sprintf("WSL error during %s (exit code: %d)", e.Operation, e.ExitCode)
-	if e.Stderr != "" {
-		msg += fmt.Sprintf(": %s", e.Stderr)
+	// Same log-noise strip as CommandError: k3d/helm run via WSL on Windows,
+	// so this error carries the same logrus progress wall on failure.
+	if detail := errorDetail(e.Stderr); detail != "" {
+		msg += fmt.Sprintf(": %s", detail)
 	}
 	if e.Suggestion != "" {
 		msg += fmt.Sprintf("\nSuggestion: %s", e.Suggestion)
@@ -66,10 +68,11 @@ const maxStderrInError = 2000
 
 func (e *CommandError) Error() string {
 	msg := fmt.Sprintf("command failed: %s (exit code: %d)", e.Command, e.ExitCode)
-	if reason := strings.TrimSpace(e.Stderr); reason != "" {
-		if len(reason) > maxStderrInError {
-			reason = "..." + reason[len(reason)-maxStderrInError:]
-		}
+	// Informational logrus records (k3d's INFO[0000] progress wall) are
+	// stripped and the detail is bounded to maxStderrInError (both inside
+	// errorDetail) so the ERRO/FATA line that explains the failure stays
+	// visible; the full text remains in the Stderr field.
+	if reason := errorDetail(e.Stderr); reason != "" {
 		return msg + ": " + reason
 	}
 	// No stderr (e.g. the child only wrote to stdout): fall back to the exec

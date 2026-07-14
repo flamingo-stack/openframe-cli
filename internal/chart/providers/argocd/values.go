@@ -3,6 +3,7 @@ package argocd
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"sort"
 
 	"sigs.k8s.io/yaml"
@@ -77,6 +78,31 @@ func MergedArgoCDValues(userValues map[string]interface{}) (string, []string, er
 	}
 	sort.Strings(keys)
 	return string(out), keys, nil
+}
+
+// ValidateUserValuesFile is the pre-flight check for the user's values file:
+// a missing file is fine (baseline install), but a file that exists must be
+// readable, parse as YAML, and its `argocd:` key — when present — must be a
+// mapping. Callers run this BEFORE any cluster work; previously a malformed
+// override surfaced only mid-install, after a cluster create and behind an
+// ArgoCD pod-diagnostics dump it had nothing to do with (0.4.9 verification
+// observation).
+func ValidateUserValuesFile(path string) error {
+	data, err := os.ReadFile(path) // #nosec G304 -- values path resolved from config/CLI, read as the invoking user
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading values file %s: %w", path, err)
+	}
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("values file %s is not valid YAML: %w", path, err)
+	}
+	if _, _, err := MergedArgoCDValues(m); err != nil {
+		return fmt.Errorf("values file %s: %w", path, err)
+	}
+	return nil
 }
 
 // deepMerge overlays src onto dst in place: nested maps merge recursively;
