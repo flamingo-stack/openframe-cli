@@ -1,9 +1,10 @@
 // Package provider defines the unified cluster-provider abstraction.
 //
 // A Provider creates and manages Kubernetes clusters. Today only k3d (local) is
-// implemented; cloud providers (GKE, EKS) are placeholders that return a
-// friendly "coming soon" error. New backends implement the same Provider
-// interface, so the rest of the CLI never needs to know which backend is used.
+// implemented; for the recognized cloud types (GKE, EKS) the factory returns
+// ErrProviderNotFound until their backends land. New backends implement the
+// same Provider interface, so the rest of the CLI never needs to know which
+// backend is used.
 package provider
 
 import (
@@ -40,10 +41,7 @@ type Provider interface {
 
 // Compile-time assertion that the k3d manager satisfies Provider.
 //
-// NOTE: there is deliberately NO factory here. The old New(clusterType,
-// target, ...) "single seam" was never called from production — every
-// constructor hard-coded the k3d manager, so the factory was decorative
-// (audit B7). The interface itself is the real seam: it is what
-// ClusterService depends on and what tests mock. When a second backend
-// (GKE/EKS) actually lands, reintroduce a factory alongside its first caller.
+// Backends are selected through New (factory.go). The old decorative factory
+// was removed in audit B7 because nothing called it; this one is real —
+// ClusterService resolves its backend through it, keyed on ClusterConfig.Type.
 var _ Provider = (*k3d.K3dManager)(nil)

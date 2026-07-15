@@ -17,6 +17,21 @@ type ClusterConfig struct {
 	Type       ClusterType `json:"type"`
 	NodeCount  int         `json:"node_count"`
 	K8sVersion string      `json:"k8s_version"`
+	// Cloud carries the settings that only make sense for managed cloud
+	// clusters (GKE/EKS). Nil for local clusters; the k3d backend rejects a
+	// config that sets it.
+	Cloud *CloudConfig `json:"cloud,omitempty"`
+}
+
+// CloudConfig holds the provider-agnostic knobs for a managed cloud cluster.
+type CloudConfig struct {
+	Region      string `json:"region"`
+	Project     string `json:"project,omitempty"` // GCP project
+	Profile     string `json:"profile,omitempty"` // AWS profile
+	MachineType string `json:"machine_type,omitempty"`
+	MinNodes    int    `json:"min_nodes,omitempty"`
+	MaxNodes    int    `json:"max_nodes,omitempty"`
+	Spot        bool   `json:"spot,omitempty"`
 }
 
 // ClusterInfo represents information about a cluster
@@ -40,22 +55,4 @@ type NodeInfo struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Role   string `json:"role"`
-}
-
-// ProviderOptions contains provider-specific options
-type ProviderOptions struct {
-	K3d     *K3dOptions `json:"k3d,omitempty"`
-	GKE     *GKEOptions `json:"gke,omitempty"`
-	Verbose bool        `json:"verbose,omitempty"`
-}
-
-// K3dOptions contains k3d-specific options
-type K3dOptions struct {
-	PortMappings []string `json:"port_mappings,omitempty"`
-}
-
-// GKEOptions contains GKE-specific options
-type GKEOptions struct {
-	Zone    string `json:"zone"`
-	Project string `json:"project"`
 }

@@ -12,15 +12,6 @@ func TestWizardSteps(t *testing.T) {
 	assert.NotNil(t, steps, "NewWizardSteps should return a non-nil instance")
 }
 
-func TestWizardSteps_PromptClusterType(t *testing.T) {
-	steps := NewWizardSteps()
-
-	t.Run("should have cluster type prompt", func(t *testing.T) {
-		// We can't easily test the interactive part, but we can test the method exists
-		assert.NotNil(t, steps.PromptClusterType)
-	})
-}
-
 func TestWizardSteps_PromptK8sVersion(t *testing.T) {
 	steps := NewWizardSteps()
 

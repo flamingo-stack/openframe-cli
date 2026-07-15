@@ -382,6 +382,9 @@ func (m *K3dManager) validateClusterConfig(config models.ClusterConfig) error {
 	if config.NodeCount < 1 {
 		return models.NewInvalidConfigError("nodeCount", config.NodeCount, "node count must be at least 1")
 	}
+	if config.Cloud != nil {
+		return models.NewInvalidConfigError("cloud", config.Cloud, "cloud settings are not valid for k3d clusters")
+	}
 	return nil
 }
 

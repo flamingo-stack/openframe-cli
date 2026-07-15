@@ -56,28 +56,24 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	}
 	w.config.Name = name
 
-	// Step 2: Cluster type
-	clusterType, err := steps.PromptClusterType()
-	if err != nil {
-		return ClusterConfig{}, err
-	}
-	w.config.Type = clusterType
+	// Cluster type is not prompted: k3d is the only implemented backend. When a
+	// cloud backend lands, reintroduce a type step here with real options.
 
-	// Step 3: Node count
+	// Step 2: Node count
 	nodeCount, err := steps.PromptNodeCount(w.config.NodeCount)
 	if err != nil {
 		return ClusterConfig{}, err
 	}
 	w.config.NodeCount = nodeCount
 
-	// Step 4: Kubernetes version
+	// Step 3: Kubernetes version
 	k8sVersion, err := steps.PromptK8sVersion()
 	if err != nil {
 		return ClusterConfig{}, err
 	}
 	w.config.K8sVersion = k8sVersion
 
-	// Step 5: Confirmation
+	// Step 4: Confirmation
 	domainConfig := models.ClusterConfig{
 		Name:       w.config.Name,
 		Type:       w.config.Type,

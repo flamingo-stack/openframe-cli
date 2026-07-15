@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -177,84 +178,29 @@ func TestNodeInfo(t *testing.T) {
 	})
 }
 
-func TestProviderOptions(t *testing.T) {
-	t.Run("creates provider options with K3d options", func(t *testing.T) {
-		options := ProviderOptions{
-			K3d: &K3dOptions{
-				PortMappings: []string{"8080:80@loadbalancer", "8443:443@loadbalancer"},
-			},
-			Verbose: true,
+func TestCloudConfig(t *testing.T) {
+	t.Run("cluster config without cloud settings has nil Cloud", func(t *testing.T) {
+		var config ClusterConfig
+
+		assert.Nil(t, config.Cloud)
+	})
+
+	t.Run("holds provider-agnostic cloud settings", func(t *testing.T) {
+		cloud := CloudConfig{
+			Region:      "us-east-1",
+			Profile:     "default",
+			MachineType: "m6i.large",
+			MinNodes:    1,
+			MaxNodes:    5,
+			Spot:        true,
 		}
 
-		assert.NotNil(t, options.K3d)
-		assert.Equal(t, []string{"8080:80@loadbalancer", "8443:443@loadbalancer"}, options.K3d.PortMappings)
-		assert.True(t, options.Verbose)
-		assert.Nil(t, options.GKE)
-	})
-
-	t.Run("creates provider options with GKE options", func(t *testing.T) {
-		options := ProviderOptions{
-			GKE: &GKEOptions{
-				Zone:    "us-central1-a",
-				Project: "my-project",
-			},
-		}
-
-		assert.NotNil(t, options.GKE)
-		assert.Equal(t, "us-central1-a", options.GKE.Zone)
-		assert.Equal(t, "my-project", options.GKE.Project)
-		assert.Nil(t, options.K3d)
-		assert.False(t, options.Verbose)
-	})
-
-	t.Run("creates empty provider options", func(t *testing.T) {
-		options := ProviderOptions{}
-
-		assert.Nil(t, options.K3d)
-		assert.Nil(t, options.GKE)
-		assert.False(t, options.Verbose)
-	})
-}
-
-func TestK3dOptions(t *testing.T) {
-	t.Run("creates K3d options with port mappings", func(t *testing.T) {
-		options := K3dOptions{
-			PortMappings: []string{
-				"8080:80@loadbalancer",
-				"8443:443@loadbalancer",
-				"6550:6443@server:0",
-			},
-		}
-
-		assert.Len(t, options.PortMappings, 3)
-		assert.Contains(t, options.PortMappings, "8080:80@loadbalancer")
-		assert.Contains(t, options.PortMappings, "8443:443@loadbalancer")
-		assert.Contains(t, options.PortMappings, "6550:6443@server:0")
-	})
-
-	t.Run("creates empty K3d options", func(t *testing.T) {
-		options := K3dOptions{}
-
-		assert.Empty(t, options.PortMappings)
-	})
-}
-
-func TestGKEOptions(t *testing.T) {
-	t.Run("creates GKE options with zone and project", func(t *testing.T) {
-		options := GKEOptions{
-			Zone:    "europe-west1-b",
-			Project: "my-gcp-project",
-		}
-
-		assert.Equal(t, "europe-west1-b", options.Zone)
-		assert.Equal(t, "my-gcp-project", options.Project)
-	})
-
-	t.Run("creates empty GKE options", func(t *testing.T) {
-		options := GKEOptions{}
-
-		assert.Empty(t, options.Zone)
-		assert.Empty(t, options.Project)
+		assert.Equal(t, "us-east-1", cloud.Region)
+		assert.Equal(t, "default", cloud.Profile)
+		assert.Equal(t, "m6i.large", cloud.MachineType)
+		assert.Equal(t, 1, cloud.MinNodes)
+		assert.Equal(t, 5, cloud.MaxNodes)
+		assert.True(t, cloud.Spot)
 	})
 }
 
@@ -289,16 +235,25 @@ func TestJSONSerialization(t *testing.T) {
 		assert.Equal(t, 5, info.NodeCount)
 	})
 
-	t.Run("provider options serialization", func(t *testing.T) {
-		options := ProviderOptions{
-			K3d: &K3dOptions{
-				PortMappings: []string{"8080:80@loadbalancer"},
+	t.Run("cloud config round-trips through JSON and is omitted when nil", func(t *testing.T) {
+		config := ClusterConfig{
+			Name: "cloud-cluster",
+			Type: ClusterTypeEKS,
+			Cloud: &CloudConfig{
+				Region:   "eu-west-1",
+				MaxNodes: 4,
 			},
-			Verbose: true,
 		}
 
-		// Basic validation that struct tags are correct
-		assert.NotNil(t, options.K3d)
-		assert.True(t, options.Verbose)
+		data, err := json.Marshal(config)
+		assert.NoError(t, err)
+
+		var decoded ClusterConfig
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, config, decoded)
+
+		local, err := json.Marshal(ClusterConfig{Name: "local", Type: ClusterTypeK3d})
+		assert.NoError(t, err)
+		assert.NotContains(t, string(local), "cloud")
 	})
 }

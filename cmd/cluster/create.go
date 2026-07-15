@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/spf13/cobra"
@@ -128,6 +129,14 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 		if globalFlags.Create.DryRun {
 			return nil
 		}
+	}
+
+	// Type-aware prerequisite gate: runs after the type is known (wizard or
+	// flags), so only the tools the chosen backend needs are demanded. It sits
+	// after the dry-run return on purpose — the gate may INSTALL tools, and
+	// dry-run must not mutate the system.
+	if err := prerequisites.CheckForClusterType(config.Type); err != nil {
+		return err
 	}
 
 	// Execute cluster creation through service layer

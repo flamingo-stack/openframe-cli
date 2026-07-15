@@ -41,34 +41,6 @@ func (ws *WizardSteps) PromptClusterName(defaultName string) (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-// PromptClusterType prompts for cluster type selection
-func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
-	prompt := promptui.Select{
-		Label: "Cluster Type",
-		Items: []string{"k3d (Recommended for local development)", "gke (Google Kubernetes Engine - Coming Soon)"},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-
-	switch idx {
-	case 0:
-		return models.ClusterTypeK3d, nil
-	case 1:
-		return models.ClusterTypeGKE, nil
-	default:
-		return models.ClusterTypeK3d, nil
-	}
-}
-
 // PromptNodeCount prompts for number of worker nodes
 func (ws *WizardSteps) PromptNodeCount(defaultCount int) (int, error) {
 	prompt := promptui.Prompt{

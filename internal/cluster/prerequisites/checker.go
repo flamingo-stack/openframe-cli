@@ -1,6 +1,7 @@
 package prerequisites
 
 import (
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
@@ -65,4 +66,18 @@ func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
 func CheckPrerequisites() error {
 	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
 	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
+}
+
+// CheckForClusterType runs the prerequisite gate for the given cluster type.
+// Docker/k3d/helm are only required for local k3d clusters; cloud types bring
+// their own prerequisite sets with their backends (none implemented yet), so
+// they pass through and fail later at the provider factory instead of
+// demanding tools they will never use.
+func CheckForClusterType(clusterType models.ClusterType) error {
+	switch clusterType {
+	case models.ClusterTypeK3d, "":
+		return CheckPrerequisites()
+	default:
+		return nil
+	}
 }

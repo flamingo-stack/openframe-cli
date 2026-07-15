@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
@@ -69,6 +70,29 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	// No args → the default "openframe-dev" name branch, then dry-run nil.
 	if err := runCreateCluster(cmd, nil); err != nil {
 		t.Fatalf("dry-run with default name should return nil, got %v", err)
+	}
+}
+
+func TestRunCreateCluster_CloudTypeFailsWithProviderNotFound(t *testing.T) {
+	for _, clusterType := range []string{"gke", "eks"} {
+		t.Run(clusterType, func(t *testing.T) {
+			setupCreate(t)
+			cmd := getCreateCmd()
+			gf := utils.GetGlobalFlags()
+			gf.Create.SkipWizard = true
+			gf.Create.ClusterType = clusterType
+
+			// The type passes flag validation (recognized) and the local-tool
+			// prerequisite gate (cloud types skip it), then fails at the provider
+			// factory — no cloud backend is implemented yet.
+			err := runCreateCluster(cmd, []string{"cloud-cluster"})
+			if err == nil {
+				t.Fatal("expected ErrProviderNotFound for a cloud cluster type")
+			}
+			if !strings.Contains(err.Error(), "no provider available for cluster type") {
+				t.Fatalf("expected provider-not-found error, got: %v", err)
+			}
+		})
 	}
 }
 
