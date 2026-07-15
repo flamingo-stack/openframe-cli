@@ -221,15 +221,18 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, name string, cluster
 	return nil
 }
 
-// cloudProvider returns the EKS backend, or nil when it cannot be built (its
-// registry is plain files under ~/.openframe, so this practically never
-// fails; a nil just degrades the CLI to local-only visibility).
-func (s *ClusterService) cloudProvider() provider.Provider {
-	p, err := s.providerFor(models.ClusterTypeEKS)
-	if err != nil {
-		return nil
+// cloudProviders returns the cloud backends (EKS, GKE). Their registries are
+// plain files under ~/.openframe, so construction practically never fails; a
+// failed one is skipped, degrading the CLI to reduced visibility rather than
+// blocking local operations.
+func (s *ClusterService) cloudProviders() []provider.Provider {
+	var providers []provider.Provider
+	for _, t := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {
+		if p, err := s.providerFor(t); err == nil {
+			providers = append(providers, p)
+		}
 	}
-	return p
+	return providers
 }
 
 // ListClusters merges the local k3d clusters with the cloud clusters recorded
@@ -240,7 +243,7 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cloud := s.cloudProvider(); cloud != nil {
+	for _, cloud := range s.cloudProviders() {
 		cloudClusters, err := cloud.ListAllClusters(ctx)
 		if err != nil {
 			return nil, err
@@ -253,7 +256,7 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 // GetClusterStatus handles cluster status business logic
 func (s *ClusterService) GetClusterStatus(name string) (models.ClusterInfo, error) {
 	ctx := context.Background()
-	if cloud := s.cloudProvider(); cloud != nil {
+	for _, cloud := range s.cloudProviders() {
 		if info, err := cloud.GetClusterStatus(ctx, name); err == nil {
 			return info, nil
 		}
@@ -264,7 +267,7 @@ func (s *ClusterService) GetClusterStatus(name string) (models.ClusterInfo, erro
 // GetRestConfig returns the rest.Config for an existing cluster
 func (s *ClusterService) GetRestConfig(name string) (*rest.Config, error) {
 	ctx := context.Background()
-	if cloud := s.cloudProvider(); cloud != nil {
+	for _, cloud := range s.cloudProviders() {
 		if _, err := cloud.DetectClusterType(ctx, name); err == nil {
 			return cloud.GetRestConfig(ctx, name)
 		}
@@ -276,7 +279,7 @@ func (s *ClusterService) GetRestConfig(name string) (*rest.Config, error) {
 // read), then falls back to k3d discovery.
 func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, error) {
 	ctx := context.Background()
-	if cloud := s.cloudProvider(); cloud != nil {
+	for _, cloud := range s.cloudProviders() {
 		if t, err := cloud.DetectClusterType(ctx, name); err == nil {
 			return t, nil
 		}

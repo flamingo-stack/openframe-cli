@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
@@ -73,37 +72,25 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
-func TestRunCreateCluster_GKEFailsWithProviderNotFound(t *testing.T) {
-	setupCreate(t)
-	cmd := getCreateCmd()
-	gf := utils.GetGlobalFlags()
-	gf.Create.SkipWizard = true
-	gf.Create.ClusterType = "gke"
+func TestRunCreateCluster_CloudDryRunShowsSummaryAndExits(t *testing.T) {
+	for _, clusterType := range []string{"eks", "gke"} {
+		t.Run(clusterType, func(t *testing.T) {
+			setupCreate(t)
+			cmd := getCreateCmd()
+			gf := utils.GetGlobalFlags()
+			gf.Create.SkipWizard = true
+			gf.Create.DryRun = true
+			gf.Create.ClusterType = clusterType
+			gf.Create.Region = "us-east-1"
+			gf.Create.Project = "my-project"
 
-	// gke passes flag validation (recognized) and the prerequisite gate (no
-	// backend → no tools), then fails at the provider factory.
-	err := runCreateCluster(cmd, []string{"cloud-cluster"})
-	if err == nil {
-		t.Fatal("expected ErrProviderNotFound for gke")
-	}
-	if !strings.Contains(err.Error(), "no provider available for cluster type") {
-		t.Fatalf("expected provider-not-found error, got: %v", err)
-	}
-}
-
-func TestRunCreateCluster_EKSDryRunShowsPlanAndExits(t *testing.T) {
-	setupCreate(t)
-	cmd := getCreateCmd()
-	gf := utils.GetGlobalFlags()
-	gf.Create.SkipWizard = true
-	gf.Create.DryRun = true
-	gf.Create.ClusterType = "eks"
-	gf.Create.Region = "us-east-1"
-
-	// Dry-run exits after the summary — before the prerequisite gate (which may
-	// install tools) and before any terraform runs, so this is hermetic.
-	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
-		t.Fatalf("eks dry-run should return nil, got %v", err)
+			// Dry-run exits after the summary — before the prerequisite gate
+			// (which may install tools) and before any terraform runs, so this
+			// is hermetic.
+			if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+				t.Fatalf("%s dry-run should return nil, got %v", clusterType, err)
+			}
+		})
 	}
 }
 

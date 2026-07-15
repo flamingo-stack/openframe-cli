@@ -24,19 +24,13 @@ func TestNew(t *testing.T) {
 		assert.NotNil(t, p)
 	})
 
-	t.Run("eks returns a provider", func(t *testing.T) {
+	t.Run("cloud types return providers", func(t *testing.T) {
 		t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
-		p, err := New(models.ClusterTypeEKS, exec)
-		assert.NoError(t, err)
-		assert.NotNil(t, p)
-	})
-
-	t.Run("gke has no backend yet and returns ErrProviderNotFound", func(t *testing.T) {
-		p, err := New(models.ClusterTypeGKE, exec)
-		assert.Nil(t, p)
-		var notFound models.ErrProviderNotFound
-		assert.True(t, errors.As(err, &notFound), "expected ErrProviderNotFound for gke, got %v", err)
-		assert.Equal(t, models.ClusterTypeGKE, notFound.ClusterType)
+		for _, clusterType := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {
+			p, err := New(clusterType, exec)
+			assert.NoError(t, err, "type %s", clusterType)
+			assert.NotNil(t, p, "type %s", clusterType)
+		}
 	})
 
 	t.Run("unknown type is a config error", func(t *testing.T) {

@@ -127,11 +127,12 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 
 		// Cloud settings only exist for cloud types; the k3d backend rejects a
 		// non-nil Cloud by design.
-		if config.Type == models.ClusterTypeEKS {
+		if config.Type == models.ClusterTypeEKS || config.Type == models.ClusterTypeGKE {
 			cf := globalFlags.Create
 			config.Cloud = &models.CloudConfig{
 				Region:      cf.Region,
 				Profile:     cf.Profile,
+				Project:     cf.Project,
 				MachineType: cf.MachineType,
 				MinNodes:    cf.MinNodes,
 				MaxNodes:    cf.MaxNodes,

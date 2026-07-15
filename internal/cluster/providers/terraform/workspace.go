@@ -41,7 +41,8 @@ type Record struct {
 	Type       models.ClusterType `json:"type"`
 	Status     Status             `json:"status"`
 	Region     string             `json:"region"`
-	Profile    string             `json:"profile,omitempty"`
+	Profile    string             `json:"profile,omitempty"` // AWS
+	Project    string             `json:"project,omitempty"` // GCP
 	K8sVersion string             `json:"k8s_version,omitempty"`
 	NodeCount  int                `json:"node_count"`
 	CreatedAt  time.Time          `json:"created_at"`
