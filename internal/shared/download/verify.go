@@ -8,6 +8,7 @@ package download
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -44,6 +45,9 @@ type PinnedTool struct {
 	// extracted from the archive member "<GOOS>-<GOARCH>/<Name>" (the layout
 	// helm and many Go tools ship). Bare-binary tools leave this false.
 	Tarball bool
+	// Zip marks the assets as .zip archives with the bare binary named <Name>
+	// at the archive root (the layout HashiCorp releases ship, e.g. terraform).
+	Zip bool
 }
 
 // Asset returns the pinned asset for the given platform.
@@ -142,6 +146,21 @@ func (d Downloader) InstallVerifiedTarGz(ctx context.Context, asset PinnedAsset,
 	return writeFileAtomic(extracted, destPath, perm)
 }
 
+// InstallVerifiedZipMember downloads and verifies a .zip asset, extracts the
+// regular file named member (a slash path within the archive, e.g.
+// "terraform"), and installs it to destPath with mode perm (atomic).
+func (d Downloader) InstallVerifiedZipMember(ctx context.Context, asset PinnedAsset, member, destPath string, perm os.FileMode) error {
+	body, err := d.FetchVerified(ctx, asset)
+	if err != nil {
+		return err
+	}
+	extracted, err := extractZipMember(body, member)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(extracted, destPath, perm)
+}
+
 // FetchVerifiedTarGzMember downloads and verifies a .tar.gz asset and returns
 // the bytes of the regular file named member — for callers that stream the
 // binary elsewhere (e.g. into WSL via stdin) instead of installing it locally.
@@ -181,6 +200,32 @@ func extractTarGzMember(data []byte, member string) ([]byte, error) {
 		}
 		return b, nil
 	}
+}
+
+// extractZipMember returns the bytes of the regular file named member inside a
+// zip archive. The member is matched by its cleaned path.
+func extractZipMember(data []byte, member string) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("opening zip: %w", err)
+	}
+	want := path.Clean(member)
+	for _, f := range zr.File {
+		if f.Mode().IsRegular() && path.Clean(f.Name) == want {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("extracting %q: %w", member, err)
+			}
+			defer func() { _ = rc.Close() }()
+			// Cap extraction to guard against a decompression bomb.
+			b, err := io.ReadAll(io.LimitReader(rc, 200<<20))
+			if err != nil {
+				return nil, fmt.Errorf("extracting %q: %w", member, err)
+			}
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("member %q not found in archive", member)
 }
 
 // writeFileAtomic writes body to destPath with mode perm via a temp file in the

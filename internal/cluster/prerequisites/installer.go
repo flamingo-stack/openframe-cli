@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
@@ -19,9 +17,24 @@ type Installer struct {
 }
 
 func NewInstaller() *Installer {
-	return &Installer{
-		checker: NewPrerequisiteChecker(),
+	return NewInstallerWithChecker(NewPrerequisiteChecker())
+}
+
+// NewInstallerWithChecker builds an installer around a specific requirement
+// set (k3d local vs EKS cloud); the install/verify flow is data-driven from
+// the checker's requirements.
+func NewInstallerWithChecker(checker *PrerequisiteChecker) *Installer {
+	return &Installer{checker: checker}
+}
+
+// requirement returns the checker requirement matching name (case-insensitive).
+func (i *Installer) requirement(name string) *Requirement {
+	for idx := range i.checker.requirements {
+		if strings.EqualFold(i.checker.requirements[idx].Name, name) {
+			return &i.checker.requirements[idx]
+		}
 	}
+	return nil
 }
 
 func (i *Installer) installSpecificTools(tools []string) error {
@@ -40,22 +53,19 @@ func (i *Installer) installSpecificTools(tools []string) error {
 		sp.Success(fmt.Sprintf("%s installed successfully", tool))
 	}
 
-	// Verify only the installed tools are actually installed (don't check Docker running state)
+	// Verify the installed tools are actually usable. Docker is special-cased:
+	// its requirement's IsInstalled checks the daemon is RUNNING, which the
+	// start/wait phase handles separately — here only binary presence matters.
 	var stillMissing []string
 	for _, tool := range tools {
-		switch strings.ToLower(tool) {
-		case "docker":
+		if strings.EqualFold(tool, "docker") {
 			if !docker.NewDockerInstaller().IsInstalled() {
 				stillMissing = append(stillMissing, "Docker")
 			}
-		case "k3d":
-			if !k3d.NewK3dInstaller().IsInstalled() {
-				stillMissing = append(stillMissing, "k3d")
-			}
-		case "helm":
-			if !helm.NewHelmInstaller().IsInstalled() {
-				stillMissing = append(stillMissing, "helm")
-			}
+			continue
+		}
+		if req := i.requirement(tool); req != nil && !req.IsInstalled() {
+			stillMissing = append(stillMissing, req.Name)
 		}
 	}
 
@@ -79,19 +89,11 @@ func containsTool(tools []string, name string) bool {
 }
 
 func (i *Installer) installTool(tool string) error {
-	switch strings.ToLower(tool) {
-	case "docker":
-		installer := docker.NewDockerInstaller()
-		return installer.Install()
-	case "k3d":
-		installer := k3d.NewK3dInstaller()
-		return installer.Install()
-	case "helm":
-		installer := helm.NewHelmInstaller()
-		return installer.Install()
-	default:
+	req := i.requirement(tool)
+	if req == nil || req.Install == nil {
 		return fmt.Errorf("unknown tool: %s", tool)
 	}
+	return req.Install()
 }
 
 // CheckAndInstallNonInteractive checks and installs prerequisites with optional non-interactive mode
@@ -219,11 +221,10 @@ func (i *Installer) showManualInstructions() {
 	fmt.Println()
 	pterm.Info.Println("Installation skipped. Here are manual installation instructions:")
 
-	// Get instructions for all prerequisites
-	allInstructions := []string{
-		docker.NewDockerInstaller().GetInstallHelp(),
-		k3d.NewK3dInstaller().GetInstallHelp(),
-		helm.NewHelmInstaller().GetInstallHelp(),
+	// Get instructions for this checker's prerequisites
+	var allInstructions []string
+	for _, req := range i.checker.requirements {
+		allInstructions = append(allInstructions, req.InstallHelp())
 	}
 
 	tableData := pterm.TableData{{"Tool", "Installation Instructions"}}

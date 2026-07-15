@@ -19,6 +19,14 @@ type CreateFlags struct {
 	NodeCount   int
 	K8sVersion  string
 	SkipWizard  bool
+
+	// Cloud-only flags (EKS)
+	Region      string
+	Profile     string
+	MachineType string
+	MinNodes    int
+	MaxNodes    int
+	Spot        bool
 }
 
 // ListFlags contains flags specific to list command
@@ -56,10 +64,17 @@ func AddGlobalFlags(cmd *cobra.Command, global *GlobalFlags) {
 
 // AddCreateFlags adds create-specific flags to a command
 func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
-	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d)")
+	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d, eks)")
 	cmd.Flags().IntVarP(&flags.NodeCount, "nodes", "n", 3, "Number of nodes (default 3)")
 	cmd.Flags().StringVar(&flags.K8sVersion, "version", "", "Kubernetes version")
 	cmd.Flags().BoolVar(&flags.SkipWizard, "skip-wizard", false, "Skip interactive wizard")
+
+	cmd.Flags().StringVar(&flags.Region, "region", "", "Cloud region (required for --type eks)")
+	cmd.Flags().StringVar(&flags.Profile, "profile", "", "AWS credentials profile (eks only)")
+	cmd.Flags().StringVar(&flags.MachineType, "machine-type", "", "Node instance type (eks only; default m6i.large)")
+	cmd.Flags().IntVar(&flags.MinNodes, "min-nodes", 0, "Node group minimum size (eks only)")
+	cmd.Flags().IntVar(&flags.MaxNodes, "max-nodes", 0, "Node group maximum size (eks only)")
+	cmd.Flags().BoolVar(&flags.Spot, "spot", false, "Use spot capacity for nodes (eks only)")
 }
 
 // AddListFlags adds list-specific flags to a command
@@ -131,14 +146,26 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 		return err
 	}
 
-	// Reject unknown --type values up front. Recognized-but-unimplemented cloud
-	// types (gke, eks) pass here and fail later with ErrProviderNotFound at the
+	// Reject unknown --type values up front. GKE is recognized but has no
+	// backend yet — it passes here and fails with ErrProviderNotFound at the
 	// provider factory, so the two cases stay distinguishable.
 	switch ClusterType(flags.ClusterType) {
 	case "", ClusterTypeK3d, ClusterTypeGKE, ClusterTypeEKS:
 		// known
 	default:
-		return fmt.Errorf("unknown cluster type '%s' (supported: k3d)", flags.ClusterType)
+		return fmt.Errorf("unknown cluster type '%s' (supported: k3d, eks)", flags.ClusterType)
+	}
+
+	// The wizard prompts for the region; in skip-wizard mode it must come from
+	// the flag.
+	if ClusterType(flags.ClusterType) == ClusterTypeEKS && flags.SkipWizard && flags.Region == "" {
+		return fmt.Errorf("--region is required for --type eks with --skip-wizard")
+	}
+	if flags.MinNodes < 0 || flags.MaxNodes < 0 {
+		return fmt.Errorf("node bounds must not be negative: min=%d max=%d", flags.MinNodes, flags.MaxNodes)
+	}
+	if flags.MinNodes > 0 && flags.MaxNodes > 0 && flags.MinNodes > flags.MaxNodes {
+		return fmt.Errorf("--min-nodes (%d) must not exceed --max-nodes (%d)", flags.MinNodes, flags.MaxNodes)
 	}
 
 	// Validate node count - this validation is now handled at command level

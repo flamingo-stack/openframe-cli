@@ -26,7 +26,7 @@ This command group provides cluster lifecycle management functionality:
   • status - Display detailed cluster information
   • cleanup - Remove unused images and resources
 
-Supports K3d clusters for local development.
+Supports K3d clusters for local development and AWS EKS for cloud deployments.
 
 Examples:
   openframe cluster create

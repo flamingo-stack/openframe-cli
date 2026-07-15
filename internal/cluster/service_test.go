@@ -3,9 +3,11 @@ package cluster
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
@@ -59,32 +61,50 @@ func TestClusterService_CreateCluster(t *testing.T) {
 	_ = err
 }
 
-func TestClusterService_CreateCluster_CloudTypeFailsBeforeAnyCommand(t *testing.T) {
-	for _, clusterType := range []models.ClusterType{models.ClusterTypeGKE, models.ClusterTypeEKS} {
-		mock := executor.NewMockCommandExecutor()
-		service := NewClusterService(mock)
-
-		_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
-			Name:      "cloud-cluster",
-			Type:      clusterType,
-			NodeCount: 1,
-		})
-
-		var notFound models.ErrProviderNotFound
-		if !errors.As(err, &notFound) {
-			t.Fatalf("expected ErrProviderNotFound for %s, got %v", clusterType, err)
-		}
-		if mock.GetCommandCount() != 0 {
-			t.Errorf("no commands should run for unsupported type %s, got: %v", clusterType, mock.GetExecutedCommands())
-		}
-	}
-}
-
-func TestClusterService_DeleteCluster_CloudTypeFailsBeforeAnyCommand(t *testing.T) {
+func TestClusterService_CreateCluster_GKEFailsBeforeAnyCommand(t *testing.T) {
 	mock := executor.NewMockCommandExecutor()
 	service := NewClusterService(mock)
 
-	err := service.DeleteCluster(context.Background(), "cloud-cluster", models.ClusterTypeEKS, false)
+	_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
+		Name:      "cloud-cluster",
+		Type:      models.ClusterTypeGKE,
+		NodeCount: 1,
+	})
+
+	var notFound models.ErrProviderNotFound
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected ErrProviderNotFound for gke, got %v", err)
+	}
+	if mock.GetCommandCount() != 0 {
+		t.Errorf("no commands should run for gke, got: %v", mock.GetExecutedCommands())
+	}
+}
+
+func TestClusterService_CreateCluster_EKSWithoutRegionFailsBeforeAnyCommand(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	mock := executor.NewMockCommandExecutor()
+	service := NewClusterService(mock)
+
+	_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
+		Name:      "cloud-cluster",
+		Type:      models.ClusterTypeEKS,
+		NodeCount: 1,
+	})
+
+	var invalid models.ErrInvalidClusterConfig
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidClusterConfig for eks without region, got %v", err)
+	}
+	if mock.GetCommandCount() != 0 {
+		t.Errorf("no commands should run before validation passes, got: %v", mock.GetExecutedCommands())
+	}
+}
+
+func TestClusterService_DeleteCluster_GKEFailsBeforeAnyCommand(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	service := NewClusterService(mock)
+
+	err := service.DeleteCluster(context.Background(), "cloud-cluster", models.ClusterTypeGKE, false)
 
 	var notFound models.ErrProviderNotFound
 	if !errors.As(err, &notFound) {
@@ -92,6 +112,43 @@ func TestClusterService_DeleteCluster_CloudTypeFailsBeforeAnyCommand(t *testing.
 	}
 	if mock.GetCommandCount() != 0 {
 		t.Errorf("no commands should run for unsupported type, got: %v", mock.GetExecutedCommands())
+	}
+}
+
+func TestClusterService_ListClusters_MergesCloudRegistry(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	service := NewClusterService(createTestExecutor())
+
+	clusters, err := service.ListClusters()
+	if err != nil {
+		t.Fatalf("ListClusters: %v", err)
+	}
+	baseline := len(clusters)
+
+	// Drop a cloud record into the registry and expect it to appear.
+	reg := tfengine.NewRegistry(os.Getenv("OPENFRAME_CLUSTERS_DIR"))
+	record := tfengine.Record{
+		Name:      "cloudy",
+		Type:      models.ClusterTypeEKS,
+		Status:    tfengine.StatusReady,
+		Region:    "us-east-1",
+		NodeCount: 3,
+	}
+	if err := reg.Workspace("cloudy").Scaffold(record, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	clusters, err = service.ListClusters()
+	if err != nil {
+		t.Fatalf("ListClusters: %v", err)
+	}
+	if len(clusters) != baseline+1 {
+		t.Fatalf("expected %d clusters after adding a cloud record, got %d", baseline+1, len(clusters))
+	}
+
+	clusterType, err := service.DetectClusterType("cloudy")
+	if err != nil || clusterType != models.ClusterTypeEKS {
+		t.Fatalf("expected eks for cloudy, got %s / %v", clusterType, err)
 	}
 }
 

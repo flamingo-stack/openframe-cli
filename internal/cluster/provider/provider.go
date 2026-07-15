@@ -11,6 +11,7 @@ import (
 	"context"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/eks"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	"k8s.io/client-go/rest"
 )
@@ -39,9 +40,12 @@ type Provider interface {
 	GetKubeconfig(ctx context.Context, name string, clusterType models.ClusterType) (string, error)
 }
 
-// Compile-time assertion that the k3d manager satisfies Provider.
+// Compile-time assertions that the backends satisfy Provider.
 //
 // Backends are selected through New (factory.go). The old decorative factory
 // was removed in audit B7 because nothing called it; this one is real —
 // ClusterService resolves its backend through it, keyed on ClusterConfig.Type.
-var _ Provider = (*k3d.K3dManager)(nil)
+var (
+	_ Provider = (*k3d.K3dManager)(nil)
+	_ Provider = (*eks.Provider)(nil)
+)

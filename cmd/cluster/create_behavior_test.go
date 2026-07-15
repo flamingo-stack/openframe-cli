@@ -73,26 +73,37 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
-func TestRunCreateCluster_CloudTypeFailsWithProviderNotFound(t *testing.T) {
-	for _, clusterType := range []string{"gke", "eks"} {
-		t.Run(clusterType, func(t *testing.T) {
-			setupCreate(t)
-			cmd := getCreateCmd()
-			gf := utils.GetGlobalFlags()
-			gf.Create.SkipWizard = true
-			gf.Create.ClusterType = clusterType
+func TestRunCreateCluster_GKEFailsWithProviderNotFound(t *testing.T) {
+	setupCreate(t)
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.ClusterType = "gke"
 
-			// The type passes flag validation (recognized) and the local-tool
-			// prerequisite gate (cloud types skip it), then fails at the provider
-			// factory — no cloud backend is implemented yet.
-			err := runCreateCluster(cmd, []string{"cloud-cluster"})
-			if err == nil {
-				t.Fatal("expected ErrProviderNotFound for a cloud cluster type")
-			}
-			if !strings.Contains(err.Error(), "no provider available for cluster type") {
-				t.Fatalf("expected provider-not-found error, got: %v", err)
-			}
-		})
+	// gke passes flag validation (recognized) and the prerequisite gate (no
+	// backend → no tools), then fails at the provider factory.
+	err := runCreateCluster(cmd, []string{"cloud-cluster"})
+	if err == nil {
+		t.Fatal("expected ErrProviderNotFound for gke")
+	}
+	if !strings.Contains(err.Error(), "no provider available for cluster type") {
+		t.Fatalf("expected provider-not-found error, got: %v", err)
+	}
+}
+
+func TestRunCreateCluster_EKSDryRunShowsPlanAndExits(t *testing.T) {
+	setupCreate(t)
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+	gf.Create.ClusterType = "eks"
+	gf.Create.Region = "us-east-1"
+
+	// Dry-run exits after the summary — before the prerequisite gate (which may
+	// install tools) and before any terraform runs, so this is hermetic.
+	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+		t.Fatalf("eks dry-run should return nil, got %v", err)
 	}
 }
 
