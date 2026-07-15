@@ -16,6 +16,37 @@ import (
 // repoServerSelector matches the ArgoCD repo-server pods.
 const repoServerSelector = "app.kubernetes.io/name=argocd-repo-server"
 
+// repoServerColdStartGrace is how old the repo-server pod must be before the
+// stuck-detector may restart it. A repo-server younger than this is still
+// warming up (first manifest renders on a cold install take minutes on k3d),
+// and restarting it re-zeroes rendering for every application — manufacturing
+// the very "connection refused" conditions the detector keys on, which then
+// justify the next restart (the cold-start restart carousel).
+const repoServerColdStartGrace = 3 * time.Minute
+
+// repoServerAge returns the age of the youngest repo-server pod. ok is false
+// when the age cannot be determined (no client, list error, no pods) — callers
+// should then fall back to their previous behaviour rather than block recovery.
+func (m *Manager) repoServerAge(ctx context.Context) (age time.Duration, ok bool) {
+	if m.kubeClient == nil {
+		return 0, false
+	}
+	pods, err := m.kubeClient.CoreV1().Pods(ArgoCDNamespace).List(ctx, metav1.ListOptions{LabelSelector: repoServerSelector})
+	if err != nil || len(pods.Items) == 0 {
+		return 0, false
+	}
+	for i := range pods.Items {
+		start := pods.Items[i].Status.StartTime
+		if start == nil {
+			return 0, true // scheduled but not started: youngest possible
+		}
+		if a := time.Since(start.Time); !ok || a < age {
+			age, ok = a, true
+		}
+	}
+	return age, ok
+}
+
 // RepoServerIssue describes a detected problem with the ArgoCD repo-server.
 type RepoServerIssue struct {
 	Type        string // "communication", "resource", "git", "timeout"
