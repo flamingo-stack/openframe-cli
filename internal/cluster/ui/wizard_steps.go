@@ -41,6 +41,60 @@ func (ws *WizardSteps) PromptClusterName(defaultName string) (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
+// PromptClusterType prompts for cluster type selection.
+func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
+	prompt := promptui.Select{
+		Label: "Cluster Type",
+		Items: []string{
+			"k3d (Recommended for local development)",
+			"eks (AWS Elastic Kubernetes Service — provisions cloud resources that cost money)",
+		},
+		Templates: &promptui.SelectTemplates{
+			Label:    "{{ . }}:",
+			Active:   "→ {{ . | cyan }}",
+			Inactive: "  {{ . }}",
+			Selected: "{{ . | green }}",
+		},
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	if idx == 1 {
+		return models.ClusterTypeEKS, nil
+	}
+	return models.ClusterTypeK3d, nil
+}
+
+// PromptRegion prompts for the AWS region an EKS cluster lands in.
+func (ws *WizardSteps) PromptRegion(defaultRegion string) (string, error) {
+	prompt := promptui.Prompt{
+		Label:    "AWS Region",
+		Default:  defaultRegion,
+		Validate: sharedUI.ValidateNonEmpty("region"),
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
+// PromptMachineType prompts for the node instance type of a cloud cluster.
+func (ws *WizardSteps) PromptMachineType(defaultType string) (string, error) {
+	prompt := promptui.Prompt{
+		Label:    "Node Instance Type",
+		Default:  defaultType,
+		Validate: sharedUI.ValidateNonEmpty("instance type"),
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
 // PromptNodeCount prompts for number of worker nodes
 func (ws *WizardSteps) PromptNodeCount(defaultCount int) (int, error) {
 	prompt := promptui.Prompt{
@@ -94,6 +148,12 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		{"Cluster Type", string(config.Type)},
 		{"Node Count", strconv.Itoa(config.NodeCount)},
 		{"Kubernetes Version", config.K8sVersion},
+	}
+	if config.Cloud != nil {
+		data = append(data, []string{"Region", config.Cloud.Region})
+		if config.Cloud.MachineType != "" {
+			data = append(data, []string{"Instance Type", config.Cloud.MachineType})
+		}
 	}
 
 	// Use pterm for consistent styling

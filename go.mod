@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/elastic/go-sysinfo v1.15.5
 	github.com/go-git/go-git/v5 v5.19.1
+	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pterm/pterm v0.12.83
 	github.com/sigstore/sigstore-go v1.2.2
@@ -28,6 +29,7 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
+	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -80,6 +82,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gookit/color v1.6.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
+	github.com/hashicorp/terraform-json v0.27.2 // indirect
 	github.com/in-toto/attestation v1.2.0 // indirect
 	github.com/in-toto/in-toto-golang v0.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -120,6 +124,7 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	github.com/zclconf/go-cty v1.18.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect

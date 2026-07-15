@@ -94,6 +94,32 @@ var Helm = PinnedTool{
 	},
 }
 
+// Terraform is the pinned Terraform CLI, used by the cloud cluster providers
+// (EKS/GKE). Upstream: https://releases.hashicorp.com/terraform/ — assets are
+// .zip archives with the bare "terraform" binary inside; SHA256 from the
+// release's SHA256SUMS file.
+const (
+	terraformVersion = "1.15.8"
+	terraformBaseURL = "https://releases.hashicorp.com/terraform/" + terraformVersion + "/terraform_" + terraformVersion + "_"
+
+	terraformSHA256LinuxAMD64  = "d25ce7b6902013ad905db3d2eab0be4cd905887fe88b81a6171b8d5503c31f3d"
+	terraformSHA256LinuxARM64  = "8891e9dcedc9e3b8950bc6af9d4d8af1f4cfade3062f53b9dc403a89f6ce8c9c"
+	terraformSHA256DarwinAMD64 = "e2e812e783771159bf758fd4e55d6dc9bb08f63e2af2c63d212721807a02c5dc"
+	terraformSHA256DarwinARM64 = "f210110c5698b94d803a7a63cdb0251b5455c150841478808e2bbb343f95ed68"
+)
+
+var Terraform = PinnedTool{
+	Name:    "terraform",
+	Version: terraformVersion,
+	Zip:     true,
+	Assets: map[string]PinnedAsset{
+		"linux/amd64":  {URL: terraformBaseURL + "linux_amd64.zip", SHA256: terraformSHA256LinuxAMD64},
+		"linux/arm64":  {URL: terraformBaseURL + "linux_arm64.zip", SHA256: terraformSHA256LinuxARM64},
+		"darwin/amd64": {URL: terraformBaseURL + "darwin_amd64.zip", SHA256: terraformSHA256DarwinAMD64},
+		"darwin/arm64": {URL: terraformBaseURL + "darwin_arm64.zip", SHA256: terraformSHA256DarwinARM64},
+	},
+}
+
 // UserBinDir returns the CLI-managed bin directory (~/.openframe/bin) where
 // verified tool binaries are installed. It does not create the directory.
 func UserBinDir() (string, error) {
@@ -120,6 +146,12 @@ func (d Downloader) InstallPinnedTool(ctx context.Context, tool PinnedTool, binD
 	if tool.Tarball {
 		member := fmt.Sprintf("%s-%s/%s", runtime.GOOS, runtime.GOARCH, tool.Name)
 		if err := d.InstallVerifiedTarGz(ctx, asset, member, dest, 0o750); err != nil {
+			return "", err
+		}
+		return dest, nil
+	}
+	if tool.Zip {
+		if err := d.InstallVerifiedZipMember(ctx, asset, tool.Name, dest, 0o750); err != nil {
 			return "", err
 		}
 		return dest, nil

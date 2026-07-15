@@ -84,6 +84,18 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "Certificates: Please install mkcert manually from https://github.com/FiloSottile/mkcert and run 'mkcert localhost 127.0.0.1'",
 		Default: "Certificates: Please install mkcert from https://github.com/FiloSottile/mkcert",
 	},
+	"terraform": {
+		Darwin:  "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
+		Linux:   "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
+		Windows: "terraform: Download from https://developer.hashicorp.com/terraform/install",
+		Default: "terraform: Please install terraform from https://developer.hashicorp.com/terraform/install",
+	},
+	"aws": {
+		Darwin:  "AWS CLI: Run 'brew install awscli' or download from https://aws.amazon.com/cli/",
+		Linux:   "AWS CLI: Install via your package manager or from https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+		Windows: "AWS CLI: Download from https://aws.amazon.com/cli/",
+		Default: "AWS CLI: Please install the AWS CLI from https://aws.amazon.com/cli/",
+	},
 }
 
 // InstallHint returns installation guidance for the named tool on the current

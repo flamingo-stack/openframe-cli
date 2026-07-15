@@ -24,16 +24,22 @@ By default, shows a selection menu where you can choose:
 1. Quick start with defaults (press Enter) - creates cluster with default settings
 2. Interactive configuration wizard - step-by-step cluster customization
 
-Creates a local cluster for OpenFrame development. If a cluster with the same
-name already exists it is left untouched and reused — delete it first to start
-from scratch. Use the bootstrap command to install OpenFrame components after
-creation.
+Creates a local k3d cluster or a cloud EKS cluster for OpenFrame. If a cluster
+with the same name already exists it is left untouched and reused — delete it
+first to start from scratch. Use the bootstrap command to install OpenFrame
+components after creation.
+
+EKS clusters are provisioned with Terraform (installed automatically) and
+create AWS resources that incur costs; the workspace and state live under
+~/.openframe/clusters/<name>. A failed create can be re-run to resume, or
+torn down with 'openframe cluster delete'.
 
 Examples:
   openframe cluster create                    # Show creation mode selection
   openframe cluster create my-cluster        # Show selection with custom name
   openframe cluster create --skip-wizard     # Direct creation with defaults
-  openframe cluster create --nodes 3 --type k3d --skip-wizard`,
+  openframe cluster create --nodes 3 --type k3d --skip-wizard
+  openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard`,
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			utils.SyncGlobalFlags()
@@ -117,6 +123,20 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 		// Set defaults if needed
 		if config.Type == "" {
 			config.Type = models.ClusterTypeK3d
+		}
+
+		// Cloud settings only exist for cloud types; the k3d backend rejects a
+		// non-nil Cloud by design.
+		if config.Type == models.ClusterTypeEKS {
+			cf := globalFlags.Create
+			config.Cloud = &models.CloudConfig{
+				Region:      cf.Region,
+				Profile:     cf.Profile,
+				MachineType: cf.MachineType,
+				MinNodes:    cf.MinNodes,
+				MaxNodes:    cf.MaxNodes,
+				Spot:        cf.Spot,
+			}
 		}
 	}
 

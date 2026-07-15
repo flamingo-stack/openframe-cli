@@ -221,27 +221,66 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, name string, cluster
 	return nil
 }
 
-// ListClusters handles cluster listing business logic
+// cloudProvider returns the EKS backend, or nil when it cannot be built (its
+// registry is plain files under ~/.openframe, so this practically never
+// fails; a nil just degrades the CLI to local-only visibility).
+func (s *ClusterService) cloudProvider() provider.Provider {
+	p, err := s.providerFor(models.ClusterTypeEKS)
+	if err != nil {
+		return nil
+	}
+	return p
+}
+
+// ListClusters merges the local k3d clusters with the cloud clusters recorded
+// in the workspace registry.
 func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	ctx := context.Background()
-	return s.manager.ListAllClusters(ctx)
+	clusters, err := s.manager.ListAllClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cloud := s.cloudProvider(); cloud != nil {
+		cloudClusters, err := cloud.ListAllClusters(ctx)
+		if err != nil {
+			return nil, err
+		}
+		clusters = append(clusters, cloudClusters...)
+	}
+	return clusters, nil
 }
 
 // GetClusterStatus handles cluster status business logic
 func (s *ClusterService) GetClusterStatus(name string) (models.ClusterInfo, error) {
 	ctx := context.Background()
+	if cloud := s.cloudProvider(); cloud != nil {
+		if info, err := cloud.GetClusterStatus(ctx, name); err == nil {
+			return info, nil
+		}
+	}
 	return s.manager.GetClusterStatus(ctx, name)
 }
 
 // GetRestConfig returns the rest.Config for an existing cluster
 func (s *ClusterService) GetRestConfig(name string) (*rest.Config, error) {
 	ctx := context.Background()
+	if cloud := s.cloudProvider(); cloud != nil {
+		if _, err := cloud.DetectClusterType(ctx, name); err == nil {
+			return cloud.GetRestConfig(ctx, name)
+		}
+	}
 	return s.manager.GetRestConfig(ctx, name)
 }
 
-// DetectClusterType handles cluster type detection business logic
+// DetectClusterType consults the cloud registry first (a cheap local file
+// read), then falls back to k3d discovery.
 func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, error) {
 	ctx := context.Background()
+	if cloud := s.cloudProvider(); cloud != nil {
+		if t, err := cloud.DetectClusterType(ctx, name); err == nil {
+			return t, nil
+		}
+	}
 	return s.manager.DetectClusterType(ctx, name)
 }
 
@@ -252,6 +291,8 @@ func (s *ClusterService) CleanupCluster(ctx context.Context, name string, cluste
 	switch clusterType {
 	case models.ClusterTypeK3d:
 		return s.cleanupK3dCluster(ctx, name, verbose, force)
+	case models.ClusterTypeEKS, models.ClusterTypeGKE:
+		return models.CleanupResult{}, fmt.Errorf("cleanup is not supported for cloud clusters; use 'openframe cluster delete %s' to tear the cluster down", name)
 	default:
 		return models.CleanupResult{}, fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
 	}
