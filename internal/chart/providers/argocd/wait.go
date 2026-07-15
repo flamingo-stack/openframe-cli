@@ -65,8 +65,15 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		// If repo-server has already restarted, proactively restart it to clear any stuck state
 		// This helps CI environments where the pod may have OOM'd during initial setup
 		if initialIssue.Type == "resource" && initialIssue.Recoverable {
-			pterm.Info.Println("Restarting the ArgoCD repo-server to clear the stuck state...")
-			m.triggerRepoServerRecovery(localCtx, "")
+			if age, ok := m.repoServerAge(localCtx); ok && age < repoServerColdStartGrace {
+				// Cold-start grace: a freshly started repo-server produces exactly
+				// these symptoms while it warms up; restarting it only prolongs that.
+				pterm.Info.Printfln("ArgoCD repo-server is only %s old; giving it %s to settle before considering restarts.",
+					age.Round(time.Second), repoServerColdStartGrace)
+			} else {
+				pterm.Info.Println("Restarting the ArgoCD repo-server to clear the stuck state...")
+				m.triggerRepoServerRecovery(localCtx, "")
+			}
 		} else if !initialIssue.Recoverable {
 			pterm.Warning.Println("This is not automatically recoverable — the installation may fail. " +
 				"Check resources with: kubectl describe pods -n argocd -l app.kubernetes.io/component=repo-server")
@@ -467,6 +474,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						// After 2 consecutive checks with repo-server issues, recover.
 						if consecutiveIssues >= 2 && time.Since(lastRepoServerDiagnostic) >= repoServerDiagnosticInterval {
 							lastRepoServerDiagnostic = time.Now()
+
+							// Cold-start grace: never restart a repo-server that is still
+							// warming up — on a fresh install the first manifest renders
+							// legitimately fail with the same "connection refused"/EOF
+							// conditions this detector keys on, and each restart re-zeroes
+							// rendering for every app, restarting the carousel. This also
+							// spaces successive recovery attempts at least the grace apart.
+							if age, ok := m.repoServerAge(localCtx); ok && age < repoServerColdStartGrace {
+								pterm.Info.Printfln("ArgoCD repo-server is only %s old; waiting for it to settle (%s grace) before considering a restart.",
+									age.Round(time.Second), repoServerColdStartGrace)
+								break
+							}
 
 							if repoServerRecoveryAttempts < maxRepoServerRecoveryAttempts {
 								repoServerRecoveryAttempts++
