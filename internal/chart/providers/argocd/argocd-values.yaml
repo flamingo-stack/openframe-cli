@@ -66,9 +66,11 @@ configs:
 
 
 controller:
+  # 17 child apps flip status simultaneously during install; the defaults
+  # queued those transitions and slowed reconciliation on cold start.
   extraArgs:
-    - --status-processors=10
-    - --operation-processors=5
+    - --status-processors=20
+    - --operation-processors=10
   podAnnotations:
     loki.grafana.com/scrape: "true"
     prometheus.io/scrape: "true"
@@ -99,12 +101,15 @@ server:
 repoServer:
   podAnnotations:
     loki.grafana.com/scrape: "true"
+  # 1500m (was 500m): on a cold install the repo-server renders all 17 helm
+  # charts back-to-back and the 500m cap throttled it — slow first renders
+  # surfaced as "connection refused" on the apps.
   resources:
     requests:
       cpu: 200m
       memory: 400Mi
     limits:
-      cpu: 500m
+      cpu: 1500m
       memory: 1Gi
   env:
     - name: ARGOCD_EXEC_TIMEOUT
