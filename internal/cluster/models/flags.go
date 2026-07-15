@@ -56,7 +56,7 @@ func AddGlobalFlags(cmd *cobra.Command, global *GlobalFlags) {
 
 // AddCreateFlags adds create-specific flags to a command
 func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
-	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d, gke)")
+	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d)")
 	cmd.Flags().IntVarP(&flags.NodeCount, "nodes", "n", 3, "Number of nodes (default 3)")
 	cmd.Flags().StringVar(&flags.K8sVersion, "version", "", "Kubernetes version")
 	cmd.Flags().BoolVar(&flags.SkipWizard, "skip-wizard", false, "Skip interactive wizard")
@@ -129,6 +129,16 @@ func ValidateGlobalFlags(globalFlags *GlobalFlags) error {
 func ValidateCreateFlags(flags *CreateFlags) error {
 	if err := ValidateGlobalFlags(&flags.GlobalFlags); err != nil {
 		return err
+	}
+
+	// Reject unknown --type values up front. Recognized-but-unimplemented cloud
+	// types (gke, eks) pass here and fail later with ErrProviderNotFound at the
+	// provider factory, so the two cases stay distinguishable.
+	switch ClusterType(flags.ClusterType) {
+	case "", ClusterTypeK3d, ClusterTypeGKE, ClusterTypeEKS:
+		// known
+	default:
+		return fmt.Errorf("unknown cluster type '%s' (supported: k3d)", flags.ClusterType)
 	}
 
 	// Validate node count - this validation is now handled at command level

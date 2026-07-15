@@ -40,7 +40,6 @@ func TestClusterConfig(t *testing.T) {
 			clusterType ClusterType
 		}{
 			{"k3d cluster", ClusterTypeK3d},
-			{"gke cluster", ClusterTypeGKE},
 		}
 
 		for _, tt := range tests {

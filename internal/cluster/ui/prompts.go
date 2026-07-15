@@ -13,7 +13,6 @@ type ClusterInfo = models.ClusterInfo
 // Re-export domain constants for UI convenience
 const (
 	ClusterTypeK3d = models.ClusterTypeK3d
-	ClusterTypeGKE = models.ClusterTypeGKE
 )
 
 // UI should not depend on business logic interfaces

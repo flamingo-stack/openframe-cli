@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
@@ -80,6 +81,16 @@ func containsAny(str string, substrings []string) bool {
 		}
 	}
 	return false
+}
+
+func TestCheckForClusterType_CloudTypesSkipLocalGate(t *testing.T) {
+	// The Docker/k3d/helm gate is for local clusters only; cloud types must
+	// pass through regardless of what is installed on this machine.
+	for _, clusterType := range []models.ClusterType{models.ClusterTypeGKE, models.ClusterTypeEKS} {
+		if err := CheckForClusterType(clusterType); err != nil {
+			t.Errorf("CheckForClusterType(%s) should not require local tools: %v", clusterType, err)
+		}
+	}
 }
 
 func TestCheckAllWithMissingTools(t *testing.T) {

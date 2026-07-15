@@ -199,6 +199,16 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			expectedError: "node count must be at least 1",
 		},
 		{
+			name: "cloud settings rejected for k3d",
+			config: models.ClusterConfig{
+				Name:      "test-cluster",
+				Type:      models.ClusterTypeK3d,
+				NodeCount: 3,
+				Cloud:     &models.CloudConfig{Region: "us-east-1"},
+			},
+			expectedError: "cloud settings are not valid for k3d clusters",
+		},
+		{
 			name: "k3d command fails",
 			config: models.ClusterConfig{
 				Name:      "test-cluster",

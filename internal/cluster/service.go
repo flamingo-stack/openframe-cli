@@ -11,11 +11,9 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
-	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
@@ -73,7 +71,7 @@ func isTerminalEnvironment() bool {
 
 // NewClusterService creates a new cluster service with default configuration
 func NewClusterService(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -83,7 +81,7 @@ func NewClusterService(exec executor.CommandExecutor) *ClusterService {
 
 // NewClusterServiceSuppressed creates a cluster service with UI suppression
 func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -91,11 +89,29 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 	}
 }
 
+// providerFor resolves the backend for a cluster type. The k3d manager is the
+// service default (list/status/cleanup are k3d-scoped until cloud backends
+// land); anything else goes through the factory, which today yields
+// ErrProviderNotFound for the recognized cloud types.
+func (s *ClusterService) providerFor(clusterType models.ClusterType) (provider.Provider, error) {
+	if clusterType == models.ClusterTypeK3d || clusterType == "" {
+		return s.manager, nil
+	}
+	return provider.New(clusterType, s.executor)
+}
+
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
+	// Resolve the backend first: an unsupported type must fail here, before any
+	// k3d-specific existence checks run.
+	mgr, err := s.providerFor(config.Type)
+	if err != nil {
+		return nil, err
+	}
+
 	// Check if cluster already exists
-	if existingInfo, err := s.manager.GetClusterStatus(ctx, config.Name); err == nil {
+	if existingInfo, err := mgr.GetClusterStatus(ctx, config.Name); err == nil {
 		// Cluster already exists - show friendly message
 
 		// Show warning for existing cluster
@@ -130,7 +146,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 		}
 
 		// Return the rest.Config for the existing cluster
-		restConfig, err := s.manager.GetRestConfig(ctx, config.Name)
+		restConfig, err := mgr.GetRestConfig(ctx, config.Name)
 		if err != nil {
 			return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
 		}
@@ -147,7 +163,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
 	}
 
-	restConfig, err := s.manager.CreateCluster(ctx, config)
+	restConfig, err := mgr.CreateCluster(ctx, config)
 	if err != nil {
 		if sp != nil {
 			sp.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
@@ -162,7 +178,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 	}
 
 	// Get and display cluster status
-	if clusterInfo, statusErr := s.manager.GetClusterStatus(ctx, config.Name); statusErr == nil {
+	if clusterInfo, statusErr := mgr.GetClusterStatus(ctx, config.Name); statusErr == nil {
 		s.displayClusterCreationSummary(clusterInfo)
 	}
 
@@ -174,6 +190,11 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 
 // DeleteCluster handles cluster deletion business logic
 func (s *ClusterService) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
+	mgr, err := s.providerFor(clusterType)
+	if err != nil {
+		return err
+	}
+
 	// Show deletion progress
 	var sp *spinner.Spinner
 	if !s.suppressUI {
@@ -183,7 +204,7 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, name string, cluster
 		pterm.Info.Printf("Deleting %s cluster '%s'...\n", clusterType, name)
 	}
 
-	err := s.manager.DeleteCluster(ctx, name, clusterType, force)
+	err = mgr.DeleteCluster(ctx, name, clusterType, force)
 	if err != nil {
 		if sp != nil {
 			sp.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
@@ -434,11 +455,14 @@ func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, cluster
 		return 0, err
 	}
 
+	// TLS policy is the provider's mint-time decision: k3d marks its local
+	// rest.Config insecure itself (verify.go), and a future cloud provider's
+	// config must NOT be downgraded here.
 	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get cluster config for cleanup: %w", err)
 	}
-	client, err := kubernetes.NewForConfig(sharedconfig.ApplyInsecureTLSConfig(restConfig))
+	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}

@@ -46,6 +46,12 @@ Examples:
 			if cmd.Use != "cluster" {
 				ui.ShowLogoWithContext(cmd.Context())
 			}
+			// create runs its own type-aware gate after the cluster type is known
+			// (a cloud cluster must not demand Docker/k3d); the other subcommands
+			// are k3d-scoped, so the k3d gate stays here.
+			if cmd.Name() == "create" {
+				return nil
+			}
 			return prerequisites.CheckPrerequisites()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

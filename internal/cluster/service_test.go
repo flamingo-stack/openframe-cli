@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -56,6 +57,42 @@ func TestClusterService_CreateCluster(t *testing.T) {
 	// With mock executor, error can occur if cluster already exists or kubeconfig issues
 	// We just verify it doesn't panic
 	_ = err
+}
+
+func TestClusterService_CreateCluster_CloudTypeFailsBeforeAnyCommand(t *testing.T) {
+	for _, clusterType := range []models.ClusterType{models.ClusterTypeGKE, models.ClusterTypeEKS} {
+		mock := executor.NewMockCommandExecutor()
+		service := NewClusterService(mock)
+
+		_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
+			Name:      "cloud-cluster",
+			Type:      clusterType,
+			NodeCount: 1,
+		})
+
+		var notFound models.ErrProviderNotFound
+		if !errors.As(err, &notFound) {
+			t.Fatalf("expected ErrProviderNotFound for %s, got %v", clusterType, err)
+		}
+		if mock.GetCommandCount() != 0 {
+			t.Errorf("no commands should run for unsupported type %s, got: %v", clusterType, mock.GetExecutedCommands())
+		}
+	}
+}
+
+func TestClusterService_DeleteCluster_CloudTypeFailsBeforeAnyCommand(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	service := NewClusterService(mock)
+
+	err := service.DeleteCluster(context.Background(), "cloud-cluster", models.ClusterTypeEKS, false)
+
+	var notFound models.ErrProviderNotFound
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected ErrProviderNotFound, got %v", err)
+	}
+	if mock.GetCommandCount() != 0 {
+		t.Errorf("no commands should run for unsupported type, got: %v", mock.GetExecutedCommands())
+	}
 }
 
 func TestClusterService_DeleteCluster(t *testing.T) {

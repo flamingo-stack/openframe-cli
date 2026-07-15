@@ -286,6 +286,23 @@ func TestFlagValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "node count must be at least 1")
 	})
 
+	t.Run("accepts empty and recognized cluster types", func(t *testing.T) {
+		for _, clusterType := range []string{"", "k3d", "gke", "eks"} {
+			flags := &CreateFlags{ClusterType: clusterType, NodeCount: 3}
+
+			err := ValidateCreateFlags(flags)
+			assert.NoError(t, err, "type %q should pass flag validation", clusterType)
+		}
+	})
+
+	t.Run("rejects unknown cluster type", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "minikube", NodeCount: 3}
+
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown cluster type 'minikube'")
+	})
+
 	t.Run("validates list flags", func(t *testing.T) {
 		flags := &ListFlags{Quiet: true}
 
