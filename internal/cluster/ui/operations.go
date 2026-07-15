@@ -337,11 +337,14 @@ func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dr
 		pterm.DefaultBasicText.Printf("Version: %s\n", config.K8sVersion)
 	}
 	if config.Cloud != nil {
+		if config.Cloud.Project != "" {
+			pterm.DefaultBasicText.Printf("Project: %s\n", config.Cloud.Project)
+		}
 		pterm.DefaultBasicText.Printf(" Region: %s\n", config.Cloud.Region)
 		if config.Cloud.MachineType != "" {
 			pterm.DefaultBasicText.Printf("Instance: %s\n", config.Cloud.MachineType)
 		}
-		pterm.Warning.Println("Cloud clusters create AWS resources that incur costs (EKS control plane, EC2 nodes, NAT gateway)")
+		pterm.Warning.Println("Cloud clusters create resources that incur costs (managed control plane, VM nodes, NAT)")
 	}
 
 	pterm.DefaultBasicText.Println()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/eks"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/gke"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	"k8s.io/client-go/rest"
 )
@@ -48,4 +49,5 @@ type Provider interface {
 var (
 	_ Provider = (*k3d.K3dManager)(nil)
 	_ Provider = (*eks.Provider)(nil)
+	_ Provider = (*gke.Provider)(nil)
 )

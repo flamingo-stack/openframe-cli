@@ -90,6 +90,18 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "terraform: Download from https://developer.hashicorp.com/terraform/install",
 		Default: "terraform: Please install terraform from https://developer.hashicorp.com/terraform/install",
 	},
+	"gcloud": {
+		Darwin:  "gcloud: Run 'brew install --cask google-cloud-sdk' or download from https://cloud.google.com/sdk/docs/install",
+		Linux:   "gcloud: Install from https://cloud.google.com/sdk/docs/install (distribution packages: apt/dnf repos are documented there)",
+		Windows: "gcloud: Download from https://cloud.google.com/sdk/docs/install",
+		Default: "gcloud: Please install the Google Cloud SDK from https://cloud.google.com/sdk/docs/install",
+	},
+	"gke-gcloud-auth-plugin": {
+		Darwin:  "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin'",
+		Linux:   "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin' (or install the google-cloud-cli-gke-gcloud-auth-plugin OS package)",
+		Windows: "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin'",
+		Default: "gke-gcloud-auth-plugin: See https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl",
+	},
 	"aws": {
 		Darwin:  "AWS CLI: Run 'brew install awscli' or download from https://aws.amazon.com/cli/",
 		Linux:   "AWS CLI: Install via your package manager or from https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",

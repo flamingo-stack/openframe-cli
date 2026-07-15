@@ -14,8 +14,9 @@ type ClusterConfig struct {
 	Type       models.ClusterType
 	NodeCount  int
 	K8sVersion string
-	// Cloud-only answers (EKS)
+	// Cloud-only answers (EKS/GKE)
 	Region      string
+	Project     string
 	MachineType string
 }
 
@@ -28,9 +29,10 @@ func (c ClusterConfig) ToDomain() models.ClusterConfig {
 		NodeCount:  c.NodeCount,
 		K8sVersion: c.K8sVersion,
 	}
-	if c.Type == models.ClusterTypeEKS {
+	if c.Type == models.ClusterTypeEKS || c.Type == models.ClusterTypeGKE {
 		domain.Cloud = &models.CloudConfig{
 			Region:      c.Region,
+			Project:     c.Project,
 			MachineType: c.MachineType,
 		}
 	}
@@ -84,16 +86,28 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	}
 	w.config.Type = clusterType
 
-	// Step 3 (cloud only): region + instance type. The k3s version list below
-	// is meaningless for EKS, whose version comes from the module default.
-	if clusterType == models.ClusterTypeEKS {
-		region, err := steps.PromptRegion("us-east-1")
+	// Step 3 (cloud only): project/region + instance type. The k3s version
+	// list below is meaningless for cloud clusters, whose version comes from
+	// the module default.
+	if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
+		defaultRegion, defaultMachine := "us-east-1", "m6i.large"
+		if clusterType == models.ClusterTypeGKE {
+			defaultRegion, defaultMachine = "us-central1", "e2-standard-4"
+
+			project, err := steps.PromptProject()
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.Project = project
+		}
+
+		region, err := steps.PromptRegion(defaultRegion)
 		if err != nil {
 			return ClusterConfig{}, err
 		}
 		w.config.Region = region
 
-		machineType, err := steps.PromptMachineType("m6i.large")
+		machineType, err := steps.PromptMachineType(defaultMachine)
 		if err != nil {
 			return ClusterConfig{}, err
 		}

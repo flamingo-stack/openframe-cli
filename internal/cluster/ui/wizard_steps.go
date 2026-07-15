@@ -48,6 +48,7 @@ func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 		Items: []string{
 			"k3d (Recommended for local development)",
 			"eks (AWS Elastic Kubernetes Service — provisions cloud resources that cost money)",
+			"gke (Google Kubernetes Engine — provisions cloud resources that cost money)",
 		},
 		Templates: &promptui.SelectTemplates{
 			Label:    "{{ . }}:",
@@ -61,10 +62,27 @@ func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 	if err != nil {
 		return "", err
 	}
-	if idx == 1 {
+	switch idx {
+	case 1:
 		return models.ClusterTypeEKS, nil
+	case 2:
+		return models.ClusterTypeGKE, nil
+	default:
+		return models.ClusterTypeK3d, nil
 	}
-	return models.ClusterTypeK3d, nil
+}
+
+// PromptProject prompts for the GCP project a GKE cluster lands in.
+func (ws *WizardSteps) PromptProject() (string, error) {
+	prompt := promptui.Prompt{
+		Label:    "GCP Project",
+		Validate: sharedUI.ValidateNonEmpty("project"),
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
 }
 
 // PromptRegion prompts for the AWS region an EKS cluster lands in.
@@ -150,6 +168,9 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		{"Kubernetes Version", config.K8sVersion},
 	}
 	if config.Cloud != nil {
+		if config.Cloud.Project != "" {
+			data = append(data, []string{"Project", config.Cloud.Project})
+		}
 		data = append(data, []string{"Region", config.Cloud.Region})
 		if config.Cloud.MachineType != "" {
 			data = append(data, []string{"Instance Type", config.Cloud.MachineType})

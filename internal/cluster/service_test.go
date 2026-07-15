@@ -61,57 +61,43 @@ func TestClusterService_CreateCluster(t *testing.T) {
 	_ = err
 }
 
-func TestClusterService_CreateCluster_GKEFailsBeforeAnyCommand(t *testing.T) {
-	mock := executor.NewMockCommandExecutor()
-	service := NewClusterService(mock)
-
-	_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
-		Name:      "cloud-cluster",
-		Type:      models.ClusterTypeGKE,
-		NodeCount: 1,
-	})
-
-	var notFound models.ErrProviderNotFound
-	if !errors.As(err, &notFound) {
-		t.Fatalf("expected ErrProviderNotFound for gke, got %v", err)
-	}
-	if mock.GetCommandCount() != 0 {
-		t.Errorf("no commands should run for gke, got: %v", mock.GetExecutedCommands())
-	}
-}
-
-func TestClusterService_CreateCluster_EKSWithoutRegionFailsBeforeAnyCommand(t *testing.T) {
+func TestClusterService_CreateCluster_CloudWithoutRegionFailsBeforeAnyCommand(t *testing.T) {
 	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
-	mock := executor.NewMockCommandExecutor()
-	service := NewClusterService(mock)
+	for _, clusterType := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {
+		mock := executor.NewMockCommandExecutor()
+		service := NewClusterService(mock)
 
-	_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
-		Name:      "cloud-cluster",
-		Type:      models.ClusterTypeEKS,
-		NodeCount: 1,
-	})
+		_, err := service.CreateCluster(context.Background(), models.ClusterConfig{
+			Name:      "cloud-cluster",
+			Type:      clusterType,
+			NodeCount: 1,
+		})
 
-	var invalid models.ErrInvalidClusterConfig
-	if !errors.As(err, &invalid) {
-		t.Fatalf("expected ErrInvalidClusterConfig for eks without region, got %v", err)
-	}
-	if mock.GetCommandCount() != 0 {
-		t.Errorf("no commands should run before validation passes, got: %v", mock.GetExecutedCommands())
+		var invalid models.ErrInvalidClusterConfig
+		if !errors.As(err, &invalid) {
+			t.Fatalf("expected ErrInvalidClusterConfig for %s without region, got %v", clusterType, err)
+		}
+		if mock.GetCommandCount() != 0 {
+			t.Errorf("no commands should run before validation passes, got: %v", mock.GetExecutedCommands())
+		}
 	}
 }
 
-func TestClusterService_DeleteCluster_GKEFailsBeforeAnyCommand(t *testing.T) {
-	mock := executor.NewMockCommandExecutor()
-	service := NewClusterService(mock)
+func TestClusterService_DeleteCluster_UnknownCloudClusterIsNotFound(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	for _, clusterType := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {
+		mock := executor.NewMockCommandExecutor()
+		service := NewClusterService(mock)
 
-	err := service.DeleteCluster(context.Background(), "cloud-cluster", models.ClusterTypeGKE, false)
+		err := service.DeleteCluster(context.Background(), "cloud-cluster", clusterType, false)
 
-	var notFound models.ErrProviderNotFound
-	if !errors.As(err, &notFound) {
-		t.Fatalf("expected ErrProviderNotFound, got %v", err)
-	}
-	if mock.GetCommandCount() != 0 {
-		t.Errorf("no commands should run for unsupported type, got: %v", mock.GetExecutedCommands())
+		var notFound models.ErrClusterNotFound
+		if !errors.As(err, &notFound) {
+			t.Fatalf("expected ErrClusterNotFound for %s, got %v", clusterType, err)
+		}
+		if mock.GetCommandCount() != 0 {
+			t.Errorf("no commands should run for a missing cluster, got: %v", mock.GetExecutedCommands())
+		}
 	}
 }
 

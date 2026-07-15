@@ -4,6 +4,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/aws"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/gcloud"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/terraform"
@@ -96,21 +97,54 @@ func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
 	return allPresent, missing
 }
 
+// NewGKEPrerequisiteChecker returns the requirement set for GKE clusters:
+// terraform (provisioning engine), the gcloud CLI, and gke-gcloud-auth-plugin
+// (kubeconfig exec auth). GCP credentials are preflighted by the GKE provider
+// itself, where the error can name the project in use.
+func NewGKEPrerequisiteChecker() *PrerequisiteChecker {
+	return &PrerequisiteChecker{
+		requirements: []Requirement{
+			{
+				Name:        "terraform",
+				Command:     "terraform",
+				IsInstalled: func() bool { return terraform.NewTerraformInstaller().IsInstalled() },
+				InstallHelp: func() string { return terraform.NewTerraformInstaller().GetInstallHelp() },
+				Install:     func() error { return terraform.NewTerraformInstaller().Install() },
+			},
+			{
+				Name:        "gcloud",
+				Command:     "gcloud",
+				IsInstalled: func() bool { return gcloud.NewGcloudInstaller().IsInstalled() },
+				InstallHelp: func() string { return gcloud.NewGcloudInstaller().GetInstallHelp() },
+				Install:     func() error { return gcloud.NewGcloudInstaller().Install() },
+			},
+			{
+				Name:        "gke-gcloud-auth-plugin",
+				Command:     "gke-gcloud-auth-plugin",
+				IsInstalled: func() bool { return gcloud.NewAuthPluginInstaller().IsInstalled() },
+				InstallHelp: func() string { return gcloud.NewAuthPluginInstaller().GetInstallHelp() },
+				Install:     func() error { return gcloud.NewAuthPluginInstaller().Install() },
+			},
+		},
+	}
+}
+
 func CheckPrerequisites() error {
 	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
 	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }
 
 // CheckForClusterType runs the prerequisite gate for the given cluster type:
-// Docker/k3d/helm for local k3d clusters, terraform + AWS CLI for EKS. GKE has
-// no backend yet, so it passes through and fails at the provider factory
-// instead of demanding tools it will never use.
+// Docker/k3d/helm for local k3d clusters, terraform + the cloud CLI for the
+// cloud types. Unknown types pass through and fail at the provider factory.
 func CheckForClusterType(clusterType models.ClusterType) error {
 	switch clusterType {
 	case models.ClusterTypeK3d, "":
 		return CheckPrerequisites()
 	case models.ClusterTypeEKS:
 		return NewInstallerWithChecker(NewEKSPrerequisiteChecker()).CheckAndInstallNonInteractive(ui.IsNonInteractive())
+	case models.ClusterTypeGKE:
+		return NewInstallerWithChecker(NewGKEPrerequisiteChecker()).CheckAndInstallNonInteractive(ui.IsNonInteractive())
 	default:
 		return nil
 	}
