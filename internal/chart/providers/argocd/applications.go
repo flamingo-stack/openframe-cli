@@ -65,6 +65,11 @@ type Manager struct {
 	// install). The force-sync path sets a shorter value — re-syncing an existing
 	// platform should not block for an hour.
 	waitTimeout time.Duration
+
+	// groupWait bounds how long syncChildApplications waits for each sync group
+	// to converge before triggering the next one. Zero means the default
+	// (defaultGroupWait). Tests set a tiny value for speed.
+	groupWait time.Duration
 }
 
 // WithWaitTimeout sets a custom WaitForApplications timeout and returns the

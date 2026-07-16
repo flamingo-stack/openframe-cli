@@ -3,6 +3,8 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,9 +96,31 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	// 4) Sync the child Applications too. Syncing only the root updates child
 	// specs but does not roll them out: children that are not auto-sync would
 	// stay OutOfSync and WaitForApplications would then block until its timeout.
-	// Best-effort — a child that already has an operation in flight is skipped.
+	// Children labeled with SyncGroupLabel are synced group-by-group, gated on
+	// health, so dependency layers land in order. Best-effort — a child that
+	// already has an operation in flight is skipped.
 	return m.syncChildApplications(ctx, prune)
 }
+
+// SyncGroupLabel is the deploy-ordering label the openframe-oss-tenant app
+// templates stamp on every child Application (1=foundation … 5=platform).
+// Children sharing a value form a group; groups are synced lowest-first, each
+// gated on the previous group reaching Healthy+Synced, so the resource-heavy
+// layers don't all land on the cluster at once.
+const SyncGroupLabel = "openframe.io/sync-group"
+
+// defaultSyncGroup mirrors the manifests' template default for apps without an
+// explicit group ({{ $app.syncGroup | default "3" }}); a labeled install where
+// some app misses the label slots it into the middle group.
+const defaultSyncGroup = 3
+
+// defaultGroupWait bounds how long each group may take to converge before the
+// next group is triggered anyway. The gate is deliberately best-effort: child
+// Applications carry `automated` sync policies and may converge on their own
+// regardless of trigger order, and WaitForApplications remains the
+// authoritative readiness gate after RefreshAndSync — failing the whole
+// upgrade on a slow group would only degrade UX without adding safety.
+const defaultGroupWait = 5 * time.Minute
 
 // trackingInstanceLabel is ArgoCD's LABEL resource-tracking marker: resources
 // managed by an Application carry app.kubernetes.io/instance=<app>. Child
@@ -136,6 +160,12 @@ func trackingOwner(labels, annotations map[string]string) string {
 // but that may touch Applications that are not OpenFrame-owned (a real risk on
 // a shared cluster), which the fallback warning makes visible.
 //
+// Children carrying the SyncGroupLabel are synced group-by-group (lowest
+// first), each group gated on the previous one converging to Healthy+Synced
+// (bounded by groupWait, best-effort — see defaultGroupWait). When NO child
+// carries the group label (legacy manifests) all children are synced at once,
+// exactly the previous behaviour.
+//
 // Per-child failures no longer vanish (audit F8): individual errors are
 // counted and surfaced — a warning on partial failure, an error when NOT ONE
 // child could be synced (previously `app upgrade --sync` would then "succeed"
@@ -147,20 +177,20 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 		return fmt.Errorf("listing applications to sync: %w", err)
 	}
 
-	var children []string
+	var children []unstructured.Unstructured
 	for i := range list.Items {
 		name := list.Items[i].GetName()
 		if name == AppOfAppsName {
 			continue
 		}
 		if trackingOwner(list.Items[i].GetLabels(), list.Items[i].GetAnnotations()) == AppOfAppsName {
-			children = append(children, name)
+			children = append(children, list.Items[i])
 		}
 	}
 	if children == nil {
 		for i := range list.Items {
-			if name := list.Items[i].GetName(); name != AppOfAppsName {
-				children = append(children, name)
+			if list.Items[i].GetName() != AppOfAppsName {
+				children = append(children, list.Items[i])
 			}
 		}
 		if len(children) > 0 {
@@ -169,7 +199,31 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 		}
 	}
 
-	patched, failed, firstErr := m.syncApplicationsByName(ctx, children, prune)
+	var patched, failed int
+	var firstErr error
+	groups, labeled := groupChildren(children)
+	if !labeled {
+		// Legacy manifests without the group label: one ungated pass over all.
+		patched, failed, firstErr = m.syncApplicationsByName(ctx, groups[0].names, prune)
+	} else {
+		for i, g := range groups {
+			pterm.Info.Printf("Sync group %d: syncing %d application(s): %s\n", g.number, len(g.names), strings.Join(g.names, ", "))
+			p, f, e := m.syncApplicationsByName(ctx, g.names, prune)
+			patched, failed = patched+p, failed+f
+			if firstErr == nil {
+				firstErr = e
+			}
+			// No gate after the last group — WaitForApplications takes over.
+			if i == len(groups)-1 {
+				break
+			}
+			if notReady := m.waitGroupReady(ctx, g.names); len(notReady) > 0 {
+				pterm.Warning.Printf("Sync group %d not fully ready after %s (waiting on: %s); continuing with the next group\n",
+					g.number, m.groupWaitBudget(), strings.Join(notReady, ", "))
+			}
+		}
+	}
+
 	if failed > 0 && patched == 0 {
 		return fmt.Errorf("could not trigger a sync on any of the %d child applications (first error: %w)", failed, firstErr)
 	}
@@ -177,6 +231,84 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 		pterm.Warning.Printf("Triggered sync on %d application(s); %d failed (first error: %v)\n", patched, failed, firstErr)
 	}
 	return nil
+}
+
+// syncGroup is one deploy-ordering group: its number and the (sorted) names of
+// the child Applications in it.
+type syncGroup struct {
+	number int
+	names  []string
+}
+
+// groupChildren buckets child Applications by their SyncGroupLabel value,
+// returning the groups sorted lowest-first and whether ANY child carried the
+// label. When labeled is false the single returned group holds every child
+// (legacy manifests → caller keeps the ungated single-pass behaviour). A child
+// missing the label — or carrying a non-numeric value — on an otherwise
+// labeled install falls into defaultSyncGroup, mirroring the template default.
+func groupChildren(children []unstructured.Unstructured) (groups []syncGroup, labeled bool) {
+	byNumber := map[int][]string{}
+	var all []string
+	for i := range children {
+		name := children[i].GetName()
+		all = append(all, name)
+		group := defaultSyncGroup
+		if v := children[i].GetLabels()[SyncGroupLabel]; v != "" {
+			labeled = true
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				group = n
+			}
+		}
+		byNumber[group] = append(byNumber[group], name)
+	}
+	if !labeled {
+		return []syncGroup{{number: defaultSyncGroup, names: all}}, false
+	}
+	for n, names := range byNumber {
+		sort.Strings(names)
+		groups = append(groups, syncGroup{number: n, names: names})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].number < groups[j].number })
+	return groups, true
+}
+
+// groupWaitBudget returns the per-group convergence budget (default when unset).
+func (m *Manager) groupWaitBudget() time.Duration {
+	if m.groupWait > 0 {
+		return m.groupWait
+	}
+	return defaultGroupWait
+}
+
+// waitGroupReady polls until every named Application is Healthy+Synced or the
+// group budget elapses, returning the names still not ready (nil when the
+// group converged). Read errors abort the wait rather than block the rollout —
+// the gate is an ordering optimization, not a correctness barrier.
+func (m *Manager) waitGroupReady(ctx context.Context, names []string) []string {
+	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	var notReady []string
+	pollUntil(ctx, m.groupWaitBudget(), func() bool {
+		list, err := apps.List(ctx, metav1.ListOptions{})
+		if err != nil {
+			notReady = nil // can't read — stop gating, let the sync proceed
+			return true
+		}
+		status := make(map[string]bool, len(list.Items))
+		for i := range list.Items {
+			obj := list.Items[i].Object
+			health, _, _ := unstructured.NestedString(obj, "status", "health", "status")
+			syncStatus, _, _ := unstructured.NestedString(obj, "status", "sync", "status")
+			status[list.Items[i].GetName()] = health == ArgoCDHealthHealthy && syncStatus == ArgoCDSyncSynced
+		}
+		notReady = notReady[:0]
+		for _, name := range names {
+			if !status[name] {
+				notReady = append(notReady, name)
+			}
+		}
+		return len(notReady) == 0
+	})
+	return notReady
 }
 
 // syncApplicationsByName applies the sync-operation patch to each named
