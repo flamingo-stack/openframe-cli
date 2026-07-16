@@ -87,7 +87,7 @@ var toolDocs = map[string]InstallDocs{
 	"terraform": {
 		Darwin:  "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
 		Linux:   "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
-		Windows: "terraform: Download from https://developer.hashicorp.com/terraform/install",
+		Windows: "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
 		Default: "terraform: Please install terraform from https://developer.hashicorp.com/terraform/install",
 	},
 	"gcloud": {
