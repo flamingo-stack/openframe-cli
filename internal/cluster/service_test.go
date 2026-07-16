@@ -1,10 +1,10 @@
 package cluster
 
 import (
+	"context"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
@@ -40,25 +40,6 @@ func TestNewClusterService(t *testing.T) {
 	}
 }
 
-func TestNewClusterServiceWithOptions(t *testing.T) {
-	exec := createTestExecutor()
-	customManager := k3d.CreateClusterManagerWithExecutor(exec)
-
-	service := NewClusterServiceWithOptions(exec, customManager)
-
-	if service == nil {
-		t.Fatal("NewClusterServiceWithOptions should not return nil")
-	}
-
-	if service.executor != exec {
-		t.Error("service should store the provided executor")
-	}
-
-	if service.manager != customManager {
-		t.Error("service should store the provided manager")
-	}
-}
-
 func TestClusterService_CreateCluster(t *testing.T) {
 	exec := createTestExecutor()
 	service := NewClusterService(exec)
@@ -71,7 +52,7 @@ func TestClusterService_CreateCluster(t *testing.T) {
 		K8sVersion: "v1.25.0",
 	}
 
-	_, err := service.CreateCluster(config)
+	_, err := service.CreateCluster(context.Background(), config)
 	// With mock executor, error can occur if cluster already exists or kubeconfig issues
 	// We just verify it doesn't panic
 	_ = err
@@ -81,7 +62,7 @@ func TestClusterService_DeleteCluster(t *testing.T) {
 	exec := createTestExecutor()
 	service := NewClusterService(exec)
 
-	err := service.DeleteCluster("test-cluster", models.ClusterTypeK3d, false)
+	err := service.DeleteCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false)
 	// With mock executor, this should not fail
 	if err != nil {
 		t.Errorf("DeleteCluster should not error with mock executor: %v", err)
@@ -124,7 +105,7 @@ func TestClusterService_CleanupCluster(t *testing.T) {
 	exec := createTestExecutor()
 	service := NewClusterService(exec)
 
-	err := service.CleanupCluster("test-cluster", models.ClusterTypeK3d, false, false)
+	_, err := service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
 	if err != nil {
 		t.Errorf("CleanupCluster should not error: %v", err)
 	}
@@ -175,7 +156,7 @@ func TestClusterService_WithRealExecutor(t *testing.T) {
 	}
 
 	// In dry-run mode, this should not actually create anything
-	_, err := service.CreateCluster(config)
+	_, err := service.CreateCluster(context.Background(), config)
 	// Dry-run might still error if k3d is not available, which is acceptable in tests
 	_ = err
 }

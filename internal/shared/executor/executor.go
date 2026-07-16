@@ -1,7 +1,9 @@
 package executor
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/redact"
+	"github.com/pterm/pterm"
 )
 
 // WSL error exit codes
@@ -22,22 +27,61 @@ const (
 
 // WSLError represents an error specific to WSL operations
 type WSLError struct {
-	Operation   string
-	ExitCode    int
-	Stderr      string
-	Suggestion  string
+	Operation  string
+	ExitCode   int
+	Stderr     string
+	Suggestion string
 }
 
 func (e *WSLError) Error() string {
 	msg := fmt.Sprintf("WSL error during %s (exit code: %d)", e.Operation, e.ExitCode)
-	if e.Stderr != "" {
-		msg += fmt.Sprintf(": %s", e.Stderr)
+	// Same log-noise strip as CommandError: k3d/helm run via WSL on Windows,
+	// so this error carries the same logrus progress wall on failure.
+	if detail := errorDetail(e.Stderr); detail != "" {
+		msg += fmt.Sprintf(": %s", detail)
 	}
 	if e.Suggestion != "" {
 		msg += fmt.Sprintf("\nSuggestion: %s", e.Suggestion)
 	}
 	return msg
 }
+
+// CommandError is returned when an external command exits non-zero. It carries
+// the child's exit code so the top level can propagate it (exit-code fidelity
+// for automation) AND the child's stderr — without it the message degrades to
+// the useless "exit status 1" (`*exec.ExitError`'s own string), and the actual
+// reason ("port 6550 already allocated", "no space left on device") was only
+// ever printed under --verbose. Modelled on WSLError above.
+//
+// Stderr arrives already redacted from the executor (secrets can be echoed back
+// by child processes).
+type CommandError struct {
+	Command  string
+	ExitCode int
+	Stderr   string
+	cause    error
+}
+
+// maxStderrInError bounds how much of a chatty child's stderr lands in the
+// error string; the full text is still available via the Stderr field.
+const maxStderrInError = 2000
+
+func (e *CommandError) Error() string {
+	msg := fmt.Sprintf("command failed: %s (exit code: %d)", e.Command, e.ExitCode)
+	// Informational logrus records (k3d's INFO[0000] progress wall) are
+	// stripped and the detail is bounded to maxStderrInError (both inside
+	// errorDetail) so the ERRO/FATA line that explains the failure stays
+	// visible; the full text remains in the Stderr field.
+	if reason := errorDetail(e.Stderr); reason != "" {
+		return msg + ": " + reason
+	}
+	// No stderr (e.g. the child only wrote to stdout): fall back to the exec
+	// error, which at least carries the signal/exit description.
+	return fmt.Sprintf("%s: %v", msg, e.cause)
+}
+
+// Unwrap exposes the underlying exec error so errors.As/Is still reach it.
+func (e *CommandError) Unwrap() error { return e.cause }
 
 // wslAvailabilityCache caches the WSL availability check result
 var (
@@ -104,31 +148,6 @@ func ResetWSLCache() {
 	defer wslCheckMutex.Unlock()
 	wslChecked = false
 	wslUbuntuChecked = false
-}
-
-// WakeUpWSL sends a simple command to WSL to ensure it's responsive
-// This is useful before critical operations as WSL can become unresponsive when idle
-// Returns nil if WSL is responsive, error otherwise
-func WakeUpWSL() error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-
-	// Quick ping to WSL - just echo something
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "echo", "ping")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("WSL wake-up failed: %w", err)
-	}
-
-	if strings.TrimSpace(string(output)) != "ping" {
-		return fmt.Errorf("WSL wake-up returned unexpected output: %s", string(output))
-	}
-
-	return nil
 }
 
 // TryRecoverWSL attempts to recover WSL connectivity by terminating and restarting the distribution
@@ -272,6 +291,7 @@ type ExecuteOptions struct {
 	Dir     string            // Working directory
 	Env     map[string]string // Environment variables
 	Timeout time.Duration     // Execution timeout
+	Stdin   []byte            // Data piped to the process stdin (e.g. `helm -f -`); nil = no stdin
 }
 
 // RealCommandExecutor implements CommandExecutor using actual system commands
@@ -304,8 +324,7 @@ func (e *RealCommandExecutor) Execute(ctx context.Context, name string, args ...
 func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options ExecuteOptions) (*CommandResult, error) {
 	start := time.Now()
 
-	// Wrap command for Windows if needed (kubectl/helm via WSL)
-	command, args := e.wrapCommandForWindows(options.Command, options.Args)
+	command, args := options.Command, options.Args
 
 	// Build full command string for logging (use original command for readability)
 	fullCommand := options.Command
@@ -318,35 +337,36 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		Stderr: "",
 	}
 
-	// Handle dry-run mode
+	// Handle dry-run mode. The "Would run:" line prints UNCONDITIONALLY (not
+	// only under --verbose): showing what would execute is dry-run's entire
+	// purpose — without it a dry-run was indistinguishable from a real
+	// successful run (audit B6/T2-9). pterm.Info honors --silent.
 	if e.dryRun {
-		if e.verbose {
-			fmt.Printf("Would run: %s\n", fullCommand)
-		}
+		pterm.Info.Printf("Would run: %s\n", redact.Redact(fullCommand))
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
 	// Create the command with wrapped command/args
-	cmd := exec.CommandContext(ctx, command, args...)
-	
+	cmd := exec.CommandContext(ctx, command, args...) // #nosec G204 -- central executor: explicit argv (no shell); callers pass internal tool names + controlled args
+
 	// Set working directory if specified
 	if options.Dir != "" {
 		cmd.Dir = options.Dir
 	}
-	
+
 	// Set environment variables if specified
 	if len(options.Env) > 0 {
 		// Start with current environment and add custom variables
 		cmd.Env = append(os.Environ(), e.buildEnvStrings(options.Env)...)
 	}
-	
+
 	// Apply timeout if specified
 	if options.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
-		cmd = exec.CommandContext(ctx, command, args...)
+		cmd = exec.CommandContext(ctx, command, args...) // #nosec G204 -- central executor: explicit argv (no shell); callers pass internal tool names + controlled args
 
 		// Reapply directory and env since we recreated the command
 		if options.Dir != "" {
@@ -357,31 +377,48 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			cmd.Env = append(os.Environ(), e.buildEnvStrings(options.Env)...)
 		}
 	}
-	
-	
+
+	// Pipe stdin data if provided (e.g. helm reading values from `-f -`).
+	// Set once here so it survives the timeout-driven command recreation above.
+	if len(options.Stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(options.Stdin)
+	}
+
 	// Execute the command
 	stdout, err := cmd.Output()
 	result.Duration = time.Since(start)
 	result.Stdout = string(stdout)
-	
+
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			result.ExitCode = exitError.ExitCode()
-			result.Stderr = string(exitError.Stderr)
+			// Redact at the population chokepoint: callers embed Stderr in
+			// user-facing errors even in non-verbose mode (e.g. the helm
+			// manager's "Helm output: %s"), and a child process can echo a
+			// token back. Control-flow substring checks downstream match
+			// generic phrases, never secret values, so redaction is safe here.
+			result.Stderr = redact.Redact(string(exitError.Stderr))
 		} else {
 			result.ExitCode = -1
 		}
 
-		// Log error in verbose mode
+		// Log error in verbose mode. pterm.Debug, not fmt.Printf: the latter
+		// writes straight to stdout, so these diagnostics survived --silent and
+		// corrupted machine-readable output (`cluster list -o json`).
 		if e.verbose {
-			fmt.Printf("Command failed: %s (exit code: %d)\n", fullCommand, result.ExitCode)
+			pterm.Debug.Printfln("Command failed: %s (exit code: %d)", redact.Redact(fullCommand), result.ExitCode)
 			if result.Stderr != "" {
-				fmt.Printf("Stderr: %s\n", result.Stderr)
+				pterm.Debug.Printfln("Stderr: %s", redact.Redact(result.Stderr))
 			}
 		}
 
-		// Check for WSL-specific errors on Windows
-		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "kubectl" || options.Command == "helm" || options.Command == "k3d") {
+		// Check for WSL-specific errors on Windows.
+		// Error fields are REDACTED at construction: unlike the verbose prints
+		// above, these errors reach user-facing output through the error handler
+		// even in non-verbose mode, so a secret in argv or echoed back on stderr
+		// (e.g. a URL-embedded token) must never survive into them (audit B5).
+		if runtime.GOOS == "windows" && (command == "wsl" || options.Command == "helm" || options.Command == "k3d") {
 			// For WSL commands, stderr is often redirected to stdout via 2>&1
 			// Use stdout as error output if stderr is empty
 			errorOutput := result.Stderr
@@ -394,8 +431,8 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     errorOutput,
-					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+					Stderr:     redact.Redact(errorOutput),
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, redact.Redact(fullCommand)),
 				}
 				return result, wslErr
 			}
@@ -404,21 +441,27 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s via WSL", options.Command),
 					ExitCode:   result.ExitCode,
-					Stderr:     errorOutput,
-					Suggestion: GetWSLErrorSuggestion(result.ExitCode, fullCommand),
+					Stderr:     redact.Redact(errorOutput),
+					Suggestion: GetWSLErrorSuggestion(result.ExitCode, redact.Redact(fullCommand)),
 				}
 				return result, wslErr
 			}
 		}
 
-		return result, fmt.Errorf("command failed: %s (exit code: %d): %w", fullCommand, result.ExitCode, err)
+		// result.Stderr was already redacted where it was populated.
+		return result, &CommandError{
+			Command:  redact.Redact(fullCommand),
+			ExitCode: result.ExitCode,
+			Stderr:   result.Stderr,
+			cause:    err,
+		}
 	}
-	
+
 	result.ExitCode = 0
-	
-	// Log success in verbose mode
+
+	// Log success in verbose mode (see above: pterm.Debug, not fmt.Printf).
 	if e.verbose {
-		fmt.Printf("Command completed successfully: %s (took %v)\n", fullCommand, result.Duration)
+		pterm.Debug.Printfln("Command completed successfully: %s (took %v)", redact.Redact(fullCommand), result.Duration)
 	}
 
 	return result, nil
@@ -431,168 +474,4 @@ func (e *RealCommandExecutor) buildEnvStrings(env map[string]string) []string {
 		envStrings = append(envStrings, fmt.Sprintf("%s=%s", key, value))
 	}
 	return envStrings
-}
-
-// shellEscape escapes an argument for safe use when passing to WSL
-// WSL passes arguments directly to the target command, so we only need to handle
-// characters that could confuse the WSL argument parser itself (spaces, quotes, backslashes)
-// We should NOT escape characters like {}, $, etc. that are part of command syntax (e.g., jsonpath)
-func shellEscape(arg string) string {
-	// Only escape if the argument contains spaces, quotes, or backslashes
-	// These are the characters that WSL argument parsing cares about
-	needsEscape := false
-	for _, ch := range arg {
-		if ch == ' ' || ch == '"' || ch == '\'' || ch == '\\' {
-			needsEscape = true
-			break
-		}
-	}
-
-	if !needsEscape {
-		return arg
-	}
-
-	// For arguments with spaces or quotes, wrap in double quotes
-	// and escape internal double quotes and backslashes
-	escaped := strings.ReplaceAll(arg, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-	return "\"" + escaped + "\""
-}
-
-// wrapCommandForWindows wraps kubectl, helm, and k3d commands to run directly in WSL2
-// This avoids issues with batch file wrappers not preserving special characters
-// and ensures all Kubernetes tools run in the same environment
-func (e *RealCommandExecutor) wrapCommandForWindows(command string, args []string) (string, []string) {
-	// Only wrap on Windows
-	if runtime.GOOS != "windows" {
-		return command, args
-	}
-
-	// Only wrap kubectl, helm, and k3d commands
-	if command != "kubectl" && command != "helm" && command != "k3d" {
-		return command, args
-	}
-
-	// Determine WSL user - try to detect from environment or use default
-	wslUser := os.Getenv("WSL_USER")
-	if wslUser == "" {
-		// Default to "runner" for CI environments, but could be configured
-		wslUser = "runner"
-	}
-
-	// Escape arguments that contain special characters for shell interpretation
-	escapedArgs := make([]string, len(args))
-	for i, arg := range args {
-		escapedArgs[i] = shellEscape(arg)
-	}
-
-	// For k3d, we need Docker access which requires elevated permissions
-	// Use 'sudo -E' to run k3d with necessary permissions while preserving environment
-	// The -E flag preserves environment variables like KUBECONFIG
-	if command == "k3d" {
-		// Build command with sudo -E prefix
-		newArgs := make([]string, 0, len(escapedArgs)+6)
-		newArgs = append(newArgs, "-d", "Ubuntu", "-u", wslUser, "sudo", "-E", command)
-		newArgs = append(newArgs, escapedArgs...)
-		return "wsl", newArgs
-	}
-
-	// For helm, run directly via WSL with environment variables set
-	// This is more reliable than using a wrapper script, as passing arguments through
-	// 'bash /script.sh arg1 arg2' can fail in some WSL/CI environments
-	// We use bash -c to first create the helm directories, then run helm with proper env vars
-	//
-	// NOTE: Docker runs INSIDE WSL2 Ubuntu (not Docker Desktop), so k3d is accessible
-	// via 127.0.0.1 from within WSL. We only need to rewrite 0.0.0.0 to 127.0.0.1.
-	if command == "helm" {
-		// Filter out --kube-context arguments on Windows/WSL
-		// The kubeconfig's current context is already set correctly by k3d, and the
-		// sed rewrite ensures the server address is correct. Using --kube-context
-		// forces helm to look up the context's server address, which may not match
-		// the rewritten address if the context was stored before the rewrite.
-		// By removing --kube-context, helm uses the current context which works reliably.
-		filteredArgs := make([]string, 0, len(escapedArgs))
-		skipNext := false
-		for _, arg := range escapedArgs {
-			if skipNext {
-				skipNext = false
-				continue
-			}
-			if arg == "--kube-context" {
-				skipNext = true // Skip the next argument (the context name)
-				continue
-			}
-			// Also handle --kube-context=value format
-			if strings.HasPrefix(arg, "--kube-context=") {
-				continue
-			}
-			filteredArgs = append(filteredArgs, arg)
-		}
-
-		// Build the helm command with filtered arguments
-		helmCmd := "helm"
-		for _, arg := range filteredArgs {
-			helmCmd += " " + arg
-		}
-
-		// Create directories and run helm in a single bash command
-		// This ensures directories exist before helm tries to use them
-		// We use 2>&1 to redirect stderr to stdout so error messages are captured
-		// through the WSL/bash chain (otherwise stderr from helm gets lost)
-		//
-		// The kubeconfig may have 0.0.0.0 as the server address, which doesn't work.
-		// Rewrite it to 127.0.0.1 since Docker runs inside WSL2 Ubuntu.
-		bashScript := "mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && " +
-			"export HELM_CACHE_HOME=/tmp/helm/cache && " +
-			"export HELM_CONFIG_HOME=/tmp/helm/config && " +
-			"export HELM_DATA_HOME=/tmp/helm/data && " +
-			"export HOME=/home/" + wslUser + " && " +
-			// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
-			"if [ -f ~/.kube/config ]; then " +
-			"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
-			"fi && " +
-			helmCmd + " 2>&1"
-
-		newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
-		return "wsl", newArgs
-	}
-
-	// For kubectl, run via bash with proper HOME set
-	// Docker runs INSIDE WSL2 Ubuntu, so k3d is accessible via 127.0.0.1
-	// We only need to rewrite 0.0.0.0 to 127.0.0.1 (not to the gateway IP)
-	//
-	// Filter out --context arguments on Windows/WSL for the same reason as helm:
-	// the current context is already correct, and explicit context lookup may use stale server addresses.
-	filteredKubectlArgs := make([]string, 0, len(escapedArgs))
-	skipNextKubectl := false
-	for _, arg := range escapedArgs {
-		if skipNextKubectl {
-			skipNextKubectl = false
-			continue
-		}
-		if arg == "--context" {
-			skipNextKubectl = true // Skip the next argument (the context name)
-			continue
-		}
-		// Also handle --context=value format
-		if strings.HasPrefix(arg, "--context=") {
-			continue
-		}
-		filteredKubectlArgs = append(filteredKubectlArgs, arg)
-	}
-
-	kubectlCmd := "kubectl"
-	for _, arg := range filteredKubectlArgs {
-		kubectlCmd += " " + arg
-	}
-
-	bashScript := "export HOME=/home/" + wslUser + " && " +
-		// Rewrite 0.0.0.0 to 127.0.0.1 (Docker runs inside WSL2, so localhost works)
-		"if [ -f ~/.kube/config ]; then " +
-		"sed -i \"s|server: https://0\\.0\\.0\\.0:|server: https://127.0.0.1:|g\" ~/.kube/config 2>/dev/null || true; " +
-		"fi && " +
-		kubectlCmd
-
-	newArgs := []string{"-d", "Ubuntu", "-u", wslUser, "bash", "-c", bashScript}
-	return "wsl", newArgs
 }

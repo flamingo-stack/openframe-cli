@@ -12,7 +12,7 @@ func TestGenerateTestClusterName(t *testing.T) {
 	name1 := GenerateTestClusterName()
 	time.Sleep(1 * time.Second)
 	name2 := GenerateTestClusterName()
-	
+
 	assert.True(t, strings.HasPrefix(name1, "integration-test-"))
 	assert.True(t, strings.HasPrefix(name2, "integration-test-"))
 	assert.NotEqual(t, name1, name2)
@@ -23,10 +23,10 @@ func TestCreateTestCluster(t *testing.T) {
 	if !K3d.IsAvailable() {
 		t.Skip("k3d not available")
 	}
-	
+
 	name := GenerateTestClusterName()
 	defer CleanupTestCluster(name)
-	
+
 	err := CreateTestCluster(name)
 	if err != nil {
 		t.Logf("Failed to create cluster (may be expected): %v", err)

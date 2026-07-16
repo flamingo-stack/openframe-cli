@@ -7,9 +7,10 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	clusterDomain "github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/rest"
 )
 
-// MockClusterLister implements ClusterLister interface for testing
+// MockClusterLister implements the ClusterAccess interface for testing.
 type MockClusterLister struct {
 	clusters []clusterDomain.ClusterInfo
 	err      error
@@ -21,6 +22,14 @@ func (m *MockClusterLister) ListClusters() ([]clusterDomain.ClusterInfo, error) 
 		return nil, m.err
 	}
 	return m.clusters, nil
+}
+
+// GetRestConfig implements the rest-config half of ClusterAccess.
+func (m *MockClusterLister) GetRestConfig(string) (*rest.Config, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &rest.Config{}, nil
 }
 
 // NewMockClusterLister creates a new mock cluster lister
@@ -41,7 +50,7 @@ func (m *MockClusterLister) SetError(err error) {
 }
 
 func TestNewChartServiceDeferred(t *testing.T) {
-	service, err := NewChartServiceDeferred(false, false)
+	service, err := NewChartServiceDeferred(NewMockClusterLister(), false, false)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, service)
@@ -55,7 +64,7 @@ func TestNewChartServiceDeferred(t *testing.T) {
 }
 
 func TestNewChartServiceDeferred_WithDryRun(t *testing.T) {
-	service, err := NewChartServiceDeferred(true, false)
+	service, err := NewChartServiceDeferred(NewMockClusterLister(), true, false)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, service)
@@ -64,7 +73,7 @@ func TestNewChartServiceDeferred_WithDryRun(t *testing.T) {
 }
 
 func TestNewChartServiceDeferred_WithVerbose(t *testing.T) {
-	service, err := NewChartServiceDeferred(false, true)
+	service, err := NewChartServiceDeferred(NewMockClusterLister(), false, true)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, service)
@@ -73,7 +82,7 @@ func TestNewChartServiceDeferred_WithVerbose(t *testing.T) {
 }
 
 func TestInstallationWorkflow_Creation(t *testing.T) {
-	service, err := NewChartServiceDeferred(false, false)
+	service, err := NewChartServiceDeferred(NewMockClusterLister(), false, false)
 	assert.NoError(t, err)
 	clusterService := NewMockClusterLister()
 

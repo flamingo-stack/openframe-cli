@@ -1,0 +1,105 @@
+package argocd
+
+import (
+	"fmt"
+	"strings"
+)
+
+// appAssessment summarizes one polling tick over the ArgoCD applications.
+type appAssessment struct {
+	ready         int      // currently Healthy AND Synced
+	healthyNames  []string // names of currently-Healthy apps
+	notReady      []string // "name (status)" labels for apps not yet ready (display)
+	notReadyNames []string // bare names of apps not yet ready (for kubectl commands)
+}
+
+// appNames returns the names of the given applications, preserving order.
+func appNames(apps []Application) []string {
+	names := make([]string, 0, len(apps))
+	for _, app := range apps {
+		names = append(names, app.Name)
+	}
+	return names
+}
+
+// assessApplications classifies the applications for one polling tick and
+// marks apps that are currently Healthy+Synced in everReady (the session-wide
+// set of apps that have ever been ready).
+func assessApplications(apps []Application, everReady map[string]bool) appAssessment {
+	var a appAssessment
+	for _, app := range apps {
+		if app.Health == ArgoCDHealthHealthy {
+			a.healthyNames = append(a.healthyNames, app.Name)
+		}
+		if app.Health == ArgoCDHealthHealthy && app.Sync == ArgoCDSyncSynced {
+			a.ready++
+			// Once marked, apps stay counted even if they go out of sync later.
+			everReady[app.Name] = true
+			continue
+		}
+		// Show the most important status issue.
+		var status string
+		switch {
+		case app.Health != ArgoCDHealthHealthy && app.Sync != ArgoCDSyncSynced:
+			status = fmt.Sprintf("%s/%s", app.Health, app.Sync)
+		case app.Health != ArgoCDHealthHealthy:
+			status = fmt.Sprintf("Health: %s", app.Health)
+		default:
+			status = fmt.Sprintf("Sync: %s", app.Sync)
+		}
+		a.notReady = append(a.notReady, fmt.Sprintf("%s (%s)", app.Name, status))
+		a.notReadyNames = append(a.notReadyNames, app.Name)
+	}
+	return a
+}
+
+// isDeploymentComplete reports whether every currently-visible application is
+// ready. The high-water-mark guard withholds completion when the API
+// momentarily returns fewer apps than we have ever seen, so success is never
+// declared against a partial listing.
+func isDeploymentComplete(totalApps, currentlyReady, maxSeenTotal int) bool {
+	return totalApps > 0 && currentlyReady == totalApps && totalApps >= maxSeenTotal
+}
+
+// repoServerErrorPatterns are condition-message fragments indicating the
+// ArgoCD repo-server is failing to serve manifests for an application.
+var repoServerErrorPatterns = []string{
+	"EOF",
+	"Unavailable",
+	"error reading from server",
+	"failed to generate manifest",
+}
+
+// classifyAppIssues splits apps into those stuck in Unknown health/sync and
+// those whose condition message points at repo-server trouble. issueCounts is
+// updated in place: incremented for apps showing a repo-server error and
+// cleared for apps that no longer do.
+//
+// Deterministic manifest errors (see fatalmanifest.go) are excluded even
+// though they match "failed to generate manifest": restarting the repo-server
+// cannot make a missing chart path appear, so counting them here only produced
+// pointless recovery restarts before the fail-fast fired.
+func classifyAppIssues(apps []Application, issueCounts map[string]int) (unknown, conditionErrors []Application) {
+	for _, app := range apps {
+		if app.Health == ArgoCDStatusUnknown || app.Sync == ArgoCDStatusUnknown {
+			unknown = append(unknown, app)
+		}
+
+		hasRepoErr := false
+		if app.Condition != "" && !isDeterministicManifestError(app.Condition) {
+			for _, p := range repoServerErrorPatterns {
+				if strings.Contains(app.Condition, p) {
+					hasRepoErr = true
+					break
+				}
+			}
+		}
+		if hasRepoErr {
+			conditionErrors = append(conditionErrors, app)
+			issueCounts[app.Name]++
+		} else {
+			delete(issueCounts, app.Name)
+		}
+	}
+	return unknown, conditionErrors
+}

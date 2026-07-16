@@ -45,7 +45,7 @@ func testCommandStructure(t *testing.T, commandName string, cmdFunc func() *cobr
 	assert.Equal(t, commandName, cmd.Name(), "Command name should match")
 	assert.NotEmpty(t, cmd.Short, "Command should have short description")
 	assert.NotEmpty(t, cmd.Long, "Command should have long description")
-	
+
 	// Root commands don't have RunE, sub-commands do
 	if commandName != "cluster" {
 		assert.NotNil(t, cmd.RunE, "Command should have RunE function")

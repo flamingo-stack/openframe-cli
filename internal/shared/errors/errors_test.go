@@ -1,13 +1,45 @@
 package errors
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"github.com/stretchr/testify/assert"
 )
+
+// TestIsUserInterruption_Structural locks the fix: real cancellation is detected
+// via errors.Is(context.Canceled) (incl. %w-wrapped), a timeout is NOT mislabeled
+// as a user cancellation, and an unrelated error mentioning "cancel" is not a
+// false positive. Prompt Ctrl-C markers ("^C"/"interrupted") still count.
+func TestIsUserInterruption_Structural(t *testing.T) {
+	eh := NewErrorHandler(false)
+
+	// Genuine cancellation, bare and wrapped.
+	assert.True(t, eh.isUserInterruption(context.Canceled))
+	assert.True(t, eh.isUserInterruption(fmt.Errorf("operation cancelled: %w", context.Canceled)))
+
+	// A timeout is context.DeadlineExceeded — must NOT read as user cancellation.
+	assert.False(t, eh.isUserInterruption(context.DeadlineExceeded))
+	assert.False(t, eh.isUserInterruption(fmt.Errorf("wait timed out: %w", context.DeadlineExceeded)))
+
+	// Coincidental text must not false-match (no wrapped context.Canceled).
+	assert.False(t, eh.isUserInterruption(errors.New("upstream returned: context canceled by peer")))
+	assert.False(t, eh.isUserInterruption(errors.New("cluster create failed")))
+
+	// Prompt Ctrl-C markers still detected.
+	assert.True(t, eh.isUserInterruption(fmt.Errorf("selection failed: %w", errors.New("^C"))))
+	assert.True(t, eh.isUserInterruption(errors.New("interrupted")))
+
+	// nil is safe.
+	assert.False(t, eh.isUserInterruption(nil))
+}
 
 func TestValidationError_Error(t *testing.T) {
 	tests := []struct {
@@ -60,61 +92,6 @@ func TestValidationError_Error(t *testing.T) {
 	}
 }
 
-func TestCommandError_Error(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      *CommandError
-		expected string
-	}{
-		{
-			name: "with args",
-			err: &CommandError{
-				Command: "kubectl",
-				Args:    []string{"get", "pods"},
-				Err:     errors.New("connection refused"),
-			},
-			expected: "command 'kubectl [get pods]' failed: connection refused",
-		},
-		{
-			name: "without args",
-			err: &CommandError{
-				Command: "ping",
-				Args:    []string{},
-				Err:     errors.New("host unreachable"),
-			},
-			expected: "command 'ping []' failed: host unreachable",
-		},
-		{
-			name: "nil args",
-			err: &CommandError{
-				Command: "echo",
-				Args:    nil,
-				Err:     errors.New("test error"),
-			},
-			expected: "command 'echo []' failed: test error",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.err.Error())
-		})
-	}
-}
-
-func TestCommandError_Unwrap(t *testing.T) {
-	originalErr := errors.New("original error")
-	cmdErr := &CommandError{
-		Command: "test",
-		Args:    []string{"arg1"},
-		Err:     originalErr,
-	}
-
-	unwrapped := cmdErr.Unwrap()
-	assert.Equal(t, originalErr, unwrapped)
-	assert.True(t, errors.Is(cmdErr, originalErr))
-}
-
 func TestNewErrorHandler(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -141,7 +118,7 @@ func TestNewErrorHandler(t *testing.T) {
 
 func TestErrorHandler_HandleError_Nil(t *testing.T) {
 	handler := NewErrorHandler(false)
-	
+
 	// Should not panic with nil error
 	assert.NotPanics(t, func() {
 		handler.HandleError(nil)
@@ -177,57 +154,37 @@ func TestErrorHandler_HandleError_ValidationError_NoValue(t *testing.T) {
 	})
 }
 
-func TestErrorHandler_HandleError_CommandError(t *testing.T) {
-	tests := []struct {
-		name    string
-		verbose bool
-		err     *CommandError
-	}{
-		{
-			name:    "verbose mode",
-			verbose: true,
-			err: &CommandError{
-				Command: "kubectl",
-				Args:    []string{"get", "pods"},
-				Err:     errors.New("connection failed"),
-			},
-		},
-		{
-			name:    "non-verbose mode",
-			verbose: false,
-			err: &CommandError{
-				Command: "docker",
-				Args:    []string{"ps"},
-				Err:     errors.New("daemon not running"),
-			},
-		},
-	}
+// TestErrorHandler_CommandError_ShowsChildStderr is the M1.1 guard: a failed
+// external command must surface the CHILD'S reason to the user, not the
+// useless "exit status 1". Before this, the handler matched a CommandError
+// type that nothing ever constructed, so real failures (executor.CommandError)
+// fell through to the generic dump with the reason discarded.
+func TestErrorHandler_CommandError_ShowsChildStderr(t *testing.T) {
+	var buf bytes.Buffer
+	oldBasic, oldErr := pterm.DefaultBasicText, pterm.Error
+	pterm.DefaultBasicText = *pterm.DefaultBasicText.WithWriter(&buf)
+	pterm.Error = *pterm.Error.WithWriter(&buf)
+	t.Cleanup(func() { pterm.DefaultBasicText, pterm.Error = oldBasic, oldErr })
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := NewErrorHandler(tt.verbose)
-
-			// Test that the function doesn't panic and runs successfully
-			// Note: pterm output cannot be easily captured in tests
-			assert.NotPanics(t, func() {
-				handler.HandleError(tt.err)
-			})
-		})
+	cmdErr := &executor.CommandError{
+		Command:  "k3d cluster create dev",
+		ExitCode: 1,
+		Stderr:   "failed to bind port 6550: address already in use",
 	}
+	// Wrapped, the way real callers return it.
+	NewErrorHandler(false).HandleError(fmt.Errorf("cluster create operation failed: %w", cmdErr))
+
+	out := buf.String()
+	assert.Contains(t, out, "address already in use", "the child's stderr must reach the user")
+	assert.Contains(t, out, "k3d cluster create dev", "the failing command must be shown")
+	assert.Contains(t, out, "Exit code: 1", "the exit code must be shown")
 }
 
-func TestErrorHandler_HandleError_CommandError_NoArgs(t *testing.T) {
-	handler := NewErrorHandler(false)
-	err := &CommandError{
-		Command: "uptime",
-		Args:    []string{},
-		Err:     errors.New("test error"),
-	}
-
-	// Test that the function doesn't panic and runs successfully
-	// Note: pterm output cannot be easily captured in tests
+// TestErrorHandler_CommandError_FallsBackWithoutStderr: a child that wrote
+// nothing to stderr still produces a legible message rather than panicking.
+func TestErrorHandler_CommandError_FallsBackWithoutStderr(t *testing.T) {
 	assert.NotPanics(t, func() {
-		handler.HandleError(err)
+		NewErrorHandler(false).HandleError(&executor.CommandError{Command: "uptime", ExitCode: 2})
 	})
 }
 
@@ -262,115 +219,12 @@ func TestErrorHandler_HandleError_GenericError(t *testing.T) {
 	}
 }
 
-func TestCreateValidationError(t *testing.T) {
-	field := "email"
-	value := "invalid-email"
-	message := "must be valid email format"
-
-	err := CreateValidationError(field, value, message)
-
-	assert.NotNil(t, err)
-	assert.Equal(t, field, err.Field)
-	assert.Equal(t, value, err.Value)
-	assert.Equal(t, message, err.Message)
-	assert.Contains(t, err.Error(), field)
-	assert.Contains(t, err.Error(), value)
-	assert.Contains(t, err.Error(), message)
-}
-
-func TestCreateCommandError(t *testing.T) {
-	command := "kubectl"
-	args := []string{"get", "pods"}
-	originalErr := errors.New("connection failed")
-
-	err := CreateCommandError(command, args, originalErr)
-
-	assert.NotNil(t, err)
-	assert.Equal(t, command, err.Command)
-	assert.Equal(t, args, err.Args)
-	assert.Equal(t, originalErr, err.Err)
-	assert.Contains(t, err.Error(), command)
-	assert.Contains(t, err.Error(), "connection failed")
-}
-
-func TestIsValidationError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "validation error",
-			err:      &ValidationError{Field: "test", Message: "test"},
-			expected: true,
-		},
-		{
-			name:     "command error",
-			err:      &CommandError{Command: "test", Err: errors.New("test")},
-			expected: false,
-		},
-		{
-			name:     "generic error",
-			err:      errors.New("test error"),
-			expected: false,
-		},
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsValidationError(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestIsCommandError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "command error",
-			err:      &CommandError{Command: "test", Err: errors.New("test")},
-			expected: true,
-		},
-		{
-			name:     "validation error",
-			err:      &ValidationError{Field: "test", Message: "test"},
-			expected: false,
-		},
-		{
-			name:     "generic error",
-			err:      errors.New("test error"),
-			expected: false,
-		},
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsCommandError(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestErrorHandler_TypeAssertion(t *testing.T) {
 	handler := NewErrorHandler(true)
 
 	// Test that the handler correctly identifies error types
 	validationErr := &ValidationError{Field: "test", Message: "test"}
-	commandErr := &CommandError{Command: "test", Err: errors.New("test")}
+	commandErr := &executor.CommandError{Command: "test", ExitCode: 1, Stderr: "test"}
 	genericErr := errors.New("test")
 
 	// These should not panic
@@ -393,7 +247,7 @@ func TestErrorTypes_Interfaces(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Implements(t, (*error)(nil), err)
 
-	err = &CommandError{Command: "test", Err: errors.New("test")}
+	err = &executor.CommandError{Command: "test", ExitCode: 1}
 	assert.NotNil(t, err)
 	assert.Implements(t, (*error)(nil), err)
 }
@@ -440,46 +294,16 @@ func TestValidationError_EdgeCases(t *testing.T) {
 	}
 }
 
-func TestCommandError_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      *CommandError
-		expected string
-	}{
-		{
-			name: "empty command",
-			err: &CommandError{
-				Command: "",
-				Args:    []string{"arg1"},
-				Err:     errors.New("no command specified"),
-			},
-			expected: "command ' [arg1]' failed: no command specified",
-		},
-		{
-			name: "args with spaces",
-			err: &CommandError{
-				Command: "ssh",
-				Args:    []string{"-o", "StrictHostKeyChecking=no", "user@host"},
-				Err:     errors.New("connection timeout"),
-			},
-			expected: "command 'ssh [-o StrictHostKeyChecking=no user@host]' failed: connection timeout",
-		},
-		{
-			name: "nested wrapped error",
-			err: &CommandError{
-				Command: "kubectl",
-				Args:    []string{"apply", "-f", "manifest.yaml"},
-				Err:     fmt.Errorf("apply failed: %w", fmt.Errorf("resource conflict: %w", errors.New("already exists"))),
-			},
-			expected: "command 'kubectl [apply -f manifest.yaml]' failed: apply failed: resource conflict: already exists",
-		},
-	}
+// TestCommandError_LongStderrIsTruncated: a chatty child must not flood the
+// error string; the tail (where the real failure usually is) survives.
+func TestCommandError_LongStderrIsTruncated(t *testing.T) {
+	long := strings.Repeat("noise\n", 2000) + "FINAL REASON: disk full"
+	err := &executor.CommandError{Command: "helm install", ExitCode: 1, Stderr: long}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.err.Error())
-		})
-	}
+	msg := err.Error()
+	assert.Less(t, len(msg), len(long), "the message must be bounded")
+	assert.Contains(t, msg, "FINAL REASON: disk full", "the tail of stderr must survive truncation")
+	assert.Contains(t, msg, "helm install")
 }
 
 func TestErrorHandler_NilHandling(t *testing.T) {
@@ -510,26 +334,12 @@ func TestErrorHandler_NilHandling(t *testing.T) {
 	}
 }
 
-
 // Benchmark tests
 func BenchmarkValidationError_Error(b *testing.B) {
 	err := &ValidationError{
 		Field:   "email",
 		Value:   "invalid@email",
 		Message: "must be valid email format",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = err.Error()
-	}
-}
-
-func BenchmarkCommandError_Error(b *testing.B) {
-	err := &CommandError{
-		Command: "kubectl",
-		Args:    []string{"get", "pods"},
-		Err:     errors.New("connection failed"),
 	}
 
 	b.ResetTimer()

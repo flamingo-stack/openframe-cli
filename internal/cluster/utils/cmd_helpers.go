@@ -1,14 +1,17 @@
 package utils
 
+// NOTE: this package must never import tests/... — the shipped binary used to
+// compile testutil (and testify) in via the integration-test helpers that
+// lived here (audit B7).
+
 import (
-	"strings"
+	stderrors "errors"
 	"sync"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
-	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -40,20 +43,6 @@ func GetCommandService() *cluster.ClusterService {
 	return cluster.NewClusterService(exec)
 }
 
-// GetSuppressedCommandService creates a command service with UI suppression for automation
-func GetSuppressedCommandService() *cluster.ClusterService {
-	// Use injected executor if available (for testing)
-	if globalFlags != nil && globalFlags.Executor != nil {
-		return cluster.NewClusterServiceSuppressed(globalFlags.Executor)
-	}
-
-	// Create real executor with current flags
-	dryRun := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.DryRun
-	verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
-	exec := executor.NewRealCommandExecutor(dryRun, verbose)
-	return cluster.NewClusterServiceSuppressed(exec)
-}
-
 // WrapCommandWithCommonSetup wraps a command function with common CLI setup and error handling
 func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) error) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
@@ -61,32 +50,24 @@ func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) 
 
 		// Execute the command
 		err := runFunc(cmd, args)
-		if err != nil {
-			// Check if error has already been handled by global error handler
-			if alreadyHandledErr, isAlreadyHandled := err.(*errors.AlreadyHandledError); isAlreadyHandled {
-				// Error has already been displayed by HandleGlobalError
-				// Return the original error so test framework can detect failure
-				return alreadyHandledErr.OriginalError
-			}
-
-			// Handle error with proper context - show user-friendly message
-			verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
-			handler := errors.NewErrorHandler(verbose)
-			handler.HandleError(err)
-
-			// For validation errors and critical failures, return error for proper exit code
-			if errors.IsValidationError(err) ||
-				strings.Contains(err.Error(), "not found") ||
-				strings.Contains(err.Error(), "cluster create operation failed") ||
-				strings.Contains(err.Error(), "cluster name") || // Cluster name validation errors
-				strings.Contains(err.Error(), "node count must") { // Node count validation errors
-				return err // Return error for proper exit code
-			}
-
-			// For other errors, return nil to prevent Cobra double-printing
+		if err == nil {
 			return nil
 		}
-		return err
+
+		// Already displayed inside runFunc (e.g. via HandleGlobalError): keep the
+		// sentinel so main.go exits non-zero without re-printing.
+		var handled *errors.AlreadyHandledError
+		if stderrors.As(err, &handled) {
+			return err
+		}
+
+		// Otherwise display it once here and mark it handled. Every command error
+		// now yields a non-zero exit code (previously only string-matched errors
+		// did, so genuine failures could exit 0) — the root has SilenceErrors, so
+		// cobra will not re-print, and main.go skips the sentinel.
+		verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
+		errors.NewErrorHandler(verbose).HandleError(err)
+		return &errors.AlreadyHandledError{OriginalError: err}
 	}
 }
 
@@ -111,33 +92,17 @@ func GetGlobalFlags() *cluster.FlagContainer {
 	return globalFlags
 }
 
+// SetTestExecutor injects a mock executor into the global flag container. It
+// exists ONLY for cmd-layer tests (paired with ResetGlobalFlags in cleanup);
+// production never calls it.
 func SetTestExecutor(exec executor.CommandExecutor) {
 	InitGlobalFlags()
 	globalFlags.Executor = exec
 }
 
+// ResetGlobalFlags clears the global flag container (test cleanup).
 func ResetGlobalFlags() {
 	globalFlagsMutex.Lock()
 	defer globalFlagsMutex.Unlock()
 	globalFlags = nil
-}
-
-// Compatibility functions for integration tests
-var integrationTestFlags *cluster.FlagContainer
-
-func getOrCreateIntegrationFlags() *cluster.FlagContainer {
-	if integrationTestFlags == nil {
-		integrationTestFlags = testutil.CreateIntegrationTestFlags()
-	}
-	return integrationTestFlags
-}
-
-func SetVerboseForIntegrationTesting(v bool) {
-	flags := getOrCreateIntegrationFlags()
-	testutil.SetVerboseMode(flags, v)
-}
-
-func ResetTestFlags() {
-	integrationTestFlags = nil
-	ResetGlobalFlags()
 }

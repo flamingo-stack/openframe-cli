@@ -2,6 +2,9 @@
 /build/
 openframe
 openframe-*
+# ...but keep the committed example values (the runtime openframe-helm-values.yaml
+# stays ignored so local values are never committed).
+!openframe-helm-values.example.yaml
 
 # Test coverage
 coverage.out
@@ -9,6 +12,11 @@ coverage.html
 
 # Release artifacts
 /releases/
+# goreleaser output + cosign keyless signing artifacts (never committed)
+/dist/
+*.sig
+*.pem
+*.sbom.json
 
 # Go workspace
 *.swp
@@ -23,3 +31,7 @@ coverage.html
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated per-file doc stubs (external doc-orchestrator bot). All documentation
+# lives in docs/; these hidden .md files next to source must not be committed.
+.*.md

@@ -6,53 +6,166 @@ name: Release
 
 permissions:
   contents: write
+  id-token: write # required for cosign keyless (OIDC) signing
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to Release (e.g., v1.2.3)"
-        required: true
+        description: "Version to Release (x.y.z). Leave empty for auto patch bump."
+        required: false
         type: string
+        default: ''
 
 # =============================================================================
 # JOBS
 # =============================================================================
 
 jobs:
+  version:
+    name: Resolve Version
+    uses: ./.github/workflows/version.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
-    name: "Release ${{ inputs.version }}"
+    name: "Release"
+    needs: [version]
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' && 
-      inputs.version != ''
+    if: github.event_name == 'workflow_dispatch'
     steps:
+      # The self-updater pins the cosign signing identity to
+      # release.yml@refs/heads/main (internal/shared/selfupdate/cosign.go). The
+      # Fulcio certificate carries the DISPATCHING ref, so a release run from any
+      # other branch would publish assets that every `openframe update` rejects
+      # ("release signature verification failed"). Fail loudly instead of
+      # skipping so the dispatcher sees why.
+      - name: 'Guard: releases only from main'
+        if: github.ref != 'refs/heads/main'
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          echo "==================================================================="
+          echo "===  GUARD: release dispatched from a non-main ref"
+          echo "==================================================================="
+          echo "::error::Releases must be dispatched from main (got $DISPATCH_REF). The cosign identity pinned by the self-updater only accepts release.yml@refs/heads/main, so assets signed from this ref would fail verification for every user."
+          exit 1
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Don't leave the checkout token in .git/config for later steps to
+          # inherit (zizmor: artipacked). The tag push below authenticates with
+          # an explicit token instead.
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: 'go.mod'
           cache: true
 
+      # --- Gates: never tag or publish an unverified commit -------------------
+      - name: 'Gate: lint'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: latest
+
+      - name: 'Gate: unit tests'
+        run: |
+          echo "==================================================================="
+          echo "===  GATE: unit tests (root, cmd, internal, tests/testutil)"
+          echo "==================================================================="
+          make test-unit
+
       - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           install-only: true
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # Pin the cosign version: the signing flags are coupled to it (v3
+          # removed --new-bundle-format and makes `--bundle` new-format by
+          # default, which is what the .goreleaser.yml signs block relies on).
+          cosign-release: 'v3.1.1'
+
+      - name: Install syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
       - name: Create and push tag
+        id: tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
+          # Explicit auth for the push, since the checkout no longer persists it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git tag -a "${VERSION}" -m "Release ${VERSION}"
-          git push origin "${VERSION}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${VERSION}"
 
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ inputs.version }}
+          GORELEASER_CURRENT_TAG: ${{ needs.version.outputs.version }}
         run: |
           goreleaser release --clean
+
+      # --- Smoke: verify what was actually shipped ----------------------------
+      - name: 'Smoke: released binary reports the injected version'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          echo "==================================================================="
+          echo "===  SMOKE: dist binary runs and reports ${VERSION}"
+          echo "==================================================================="
+          # Guards the ldflags injection (-X cmd.version): a broken injection
+          # ships binaries reporting "dev", which disables self-update.
+          BIN="$(find dist -type f -name openframe -path '*linux*amd64*' | head -1)"
+          if [ -z "$BIN" ]; then echo "::error::no linux/amd64 binary found in dist/"; find dist -type f | head -20; exit 1; fi
+          got="$("$BIN" --version)"
+          echo "$got"
+          if ! echo "$got" | grep -qF "$VERSION"; then
+            echo "::error::released binary does not report ${VERSION} — ldflags version injection is broken"
+            exit 1
+          fi
+
+      - name: 'Smoke: published asset URLs resolve (WSL auto-install contract)'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          echo "==================================================================="
+          echo "===  SMOKE: bare-tag download URLs resolve for ${VERSION}"
+          echo "==================================================================="
+          # wsllauncher and `openframe update` download exactly these bare-tag
+          # URLs (releases are tagged "x.y.z", no "v" prefix). A 404 here means
+          # every released Windows binary breaks on first run (audit T0-3).
+          for asset in "openframe-cli_linux_amd64.tar.gz" "checksums.txt" "checksums.txt.bundle"; do
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
+            ok=""
+            for i in 1 2 3 4 5 6; do
+              if curl -fsSL -o /dev/null -I "$url"; then ok=1; break; fi
+              echo "retry $i: $url not yet resolvable"; sleep 5
+            done
+            if [ -z "$ok" ]; then echo "::error::released asset URL does not resolve: $url"; exit 1; fi
+            echo "OK: $url"
+          done
+
+      # --- Cleanup: never leave a half-published release behind ---------------
+      # A leftover tag wedges the next dispatch: version.yml resolves the next
+      # version from published releases, so a re-run picks the same version and
+      # the tag push fails until someone hand-deletes the tag. A half-published
+      # release failing smoke must not stay visible as `latest` either.
+      - name: 'Cleanup: delete tag & release on failure'
+        if: failure() && steps.tag.outcome == 'success'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  CLEANUP: rolling back tag/release ${VERSION} after failure"
+          echo "==================================================================="
+          gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --yes && echo "deleted release ${VERSION}" || echo "no release ${VERSION} to delete"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ":refs/tags/${VERSION}" && echo "deleted tag ${VERSION}"

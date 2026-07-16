@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
@@ -129,8 +130,10 @@ func TestWrapCommandWithCommonSetup(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil for generic errors after handling them
-		assert.Nil(t, err)
+		// After handling+displaying, the error surfaces as a non-nil handled
+		// sentinel so the process exits non-zero (previously it returned nil).
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
 	})
 
 	t.Run("handles verbose mode in error handling", func(t *testing.T) {
@@ -144,8 +147,8 @@ func TestWrapCommandWithCommonSetup(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil for generic errors after handling them
-		assert.Nil(t, err)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
 
 		// Clean up
 		globalFlags.Global.Verbose = false
@@ -238,44 +241,6 @@ func TestTestingSupport(t *testing.T) {
 		assert.Nil(t, globalFlags)
 	})
 
-	t.Run("ResetTestFlags", func(t *testing.T) {
-		InitGlobalFlags()
-		integrationTestFlags = &cluster.FlagContainer{}
-
-		ResetTestFlags()
-
-		assert.Nil(t, globalFlags)
-		assert.Nil(t, integrationTestFlags)
-	})
-}
-
-func TestIntegrationTestSupport(t *testing.T) {
-	t.Run("getOrCreateIntegrationFlags creates new flags", func(t *testing.T) {
-		integrationTestFlags = nil
-
-		flags := getOrCreateIntegrationFlags()
-
-		assert.NotNil(t, flags)
-		assert.Same(t, flags, integrationTestFlags)
-	})
-
-	t.Run("getOrCreateIntegrationFlags returns existing flags", func(t *testing.T) {
-		existing := &cluster.FlagContainer{}
-		integrationTestFlags = existing
-
-		flags := getOrCreateIntegrationFlags()
-
-		assert.Same(t, existing, flags)
-	})
-
-	t.Run("SetVerboseForIntegrationTesting", func(t *testing.T) {
-		integrationTestFlags = nil
-
-		SetVerboseForIntegrationTesting(true)
-
-		assert.NotNil(t, integrationTestFlags)
-		// Note: The actual verbose setting is handled by testutil.SetVerboseMode
-	})
 }
 
 func TestFlagContainerLifecycle(t *testing.T) {
@@ -343,8 +308,10 @@ func TestCmdHelpersEdgeCases(t *testing.T) {
 		cmd := &cobra.Command{}
 		err := wrappedFunc(cmd, []string{})
 
-		// WrapCommandWithCommonSetup returns nil after handling the error to prevent double error messages
-		assert.Nil(t, err)
+		// After handling+displaying, the error surfaces as a non-nil handled
+		// sentinel so the process exits non-zero (even with nil global flags).
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
 
 		// Clean up
 		globalFlags = originalFlags
@@ -432,8 +399,10 @@ func TestComprehensiveFunctionCoverage(t *testing.T) {
 
 				cmd := &cobra.Command{}
 				err := wrappedFunc(cmd, []string{})
-				// WrapCommandWithCommonSetup returns nil after handling the error to prevent double error messages
-				assert.Nil(t, err)
+				// After handling+displaying, the error surfaces as a non-nil
+				// handled sentinel so the process exits non-zero.
+				require.Error(t, err)
+				assert.ErrorIs(t, err, assert.AnError)
 			})
 		}
 	})
@@ -511,25 +480,6 @@ func TestComprehensiveFunctionCoverage(t *testing.T) {
 	})
 }
 
-func TestPrivateHelperFunctions(t *testing.T) {
-	t.Run("getOrCreateIntegrationFlags functionality", func(t *testing.T) {
-		// Reset integration flags
-		integrationTestFlags = nil
-
-		// First call should create new flags
-		flags1 := getOrCreateIntegrationFlags()
-		assert.NotNil(t, flags1)
-		assert.Same(t, flags1, integrationTestFlags)
-
-		// Second call should return existing flags
-		flags2 := getOrCreateIntegrationFlags()
-		assert.Same(t, flags1, flags2)
-
-		// Clean up
-		integrationTestFlags = nil
-	})
-}
-
 func TestErrorScenarios(t *testing.T) {
 	t.Run("WrapCommandWithCommonSetup with nil error", func(t *testing.T) {
 		InitGlobalFlags()
@@ -576,30 +526,4 @@ func TestBoundaryConditions(t *testing.T) {
 		assert.Same(t, first, globalFlags, "Multiple initializations should not create new instances")
 	})
 
-	t.Run("ResetTestFlags comprehensive cleanup", func(t *testing.T) {
-		// Set up both global and integration flags
-		InitGlobalFlags()
-		integrationTestFlags = &cluster.FlagContainer{}
-
-		assert.NotNil(t, globalFlags)
-		assert.NotNil(t, integrationTestFlags)
-
-		// Reset everything
-		ResetTestFlags()
-
-		assert.Nil(t, globalFlags)
-		assert.Nil(t, integrationTestFlags)
-	})
-
-	t.Run("SetVerboseForIntegrationTesting creates flags if needed", func(t *testing.T) {
-		integrationTestFlags = nil
-
-		// This should create integration flags if they don't exist
-		SetVerboseForIntegrationTesting(true)
-
-		assert.NotNil(t, integrationTestFlags)
-
-		// Clean up
-		integrationTestFlags = nil
-	})
 }

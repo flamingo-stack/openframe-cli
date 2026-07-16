@@ -68,13 +68,16 @@ func TestNgrokConfig_WithoutAllowedIPs(t *testing.T) {
 func TestNgrokConfig_RegistrationFields(t *testing.T) {
 	startTime := time.Now()
 	config := &NgrokConfig{
-		AuthToken:                 "auth_token_123",
-		APIKey:                    "api_key_456",
-		Domain:                    "example.ngrok.io",
-		RegistrationCompleted:     true,
-		RegistrationStartTime:     startTime,
+		AuthToken:             "auth_token_123",
+		APIKey:                "api_key_456",
+		Domain:                "example.ngrok.io",
+		RegistrationCompleted: true,
+		RegistrationStartTime: startTime,
 	}
 
+	assert.Equal(t, "auth_token_123", config.AuthToken)
+	assert.Equal(t, "api_key_456", config.APIKey)
+	assert.Equal(t, "example.ngrok.io", config.Domain)
 	assert.True(t, config.RegistrationCompleted)
 	assert.Equal(t, startTime, config.RegistrationStartTime)
 }
@@ -238,6 +241,9 @@ func TestNgrokConfig_IPAllowlistScenarios(t *testing.T) {
 			}
 
 			// Test the configuration matches expected setup
+			assert.Equal(t, "test_token", config.AuthToken)
+			assert.Equal(t, "test_key", config.APIKey)
+			assert.Equal(t, "test.ngrok.io", config.Domain)
 			assert.Equal(t, tc.useAllowedIPs, config.UseAllowedIPs)
 			assert.Equal(t, tc.allowedIPs, config.AllowedIPs)
 

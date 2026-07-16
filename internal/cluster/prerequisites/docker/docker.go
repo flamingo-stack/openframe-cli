@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/pterm/pterm"
 )
 
 type DockerInstaller struct{}
@@ -17,22 +19,19 @@ func commandExists(cmd string) bool {
 	return err == nil
 }
 
+// isDockerInstalled reports whether the docker CLI is present.
+//
+// No Windows branch: on Windows the root command forwards the whole CLI into
+// WSL before any command runs, so this code only executes as a Linux process
+// (see wsllauncher). The old branch probed WSL from the outside and hardcoded
+// the "Ubuntu" distro, contradicting the distro-agnostic launcher.
 func isDockerInstalled() bool {
-	// On Windows, check if Docker is installed in WSL2
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "docker")
-		return cmd.Run() == nil
-	}
-	// Just check if docker command exists, don't try to connect to daemon
 	return commandExists("docker")
 }
 
+// IsDockerRunning reports whether the docker daemon answers. See
+// isDockerInstalled for why there is no Windows branch.
 func IsDockerRunning() bool {
-	// On Windows, check Docker in WSL2 directly
-	if runtime.GOOS == "windows" {
-		return isDockerRunningWSL()
-	}
-
 	if !commandExists("docker") {
 		return false
 	}
@@ -44,37 +43,8 @@ func IsDockerRunning() bool {
 	return err == nil
 }
 
-// isDockerRunningWSL checks if Docker is running in WSL2 on Windows
-func isDockerRunningWSL() bool {
-	// First check if WSL and Ubuntu are available
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "command", "-v", "docker")
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-
-	// Check if Docker daemon is running in WSL2
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd = exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "bash", "-c", "sudo docker ps > /dev/null 2>&1")
-	return cmd.Run() == nil
-}
-
-func IsDockerInstalledButNotRunning() bool {
-	// Docker command exists but daemon is not accessible
-	return isDockerInstalled() && !IsDockerRunning()
-}
-
 func dockerInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "Docker: Install Docker Desktop from https://docker.com/products/docker-desktop or run 'brew install --cask docker'"
-	case "linux":
-		return "Docker: Install using your package manager or from https://docs.docker.com/engine/install/"
-	case "windows":
-		return "Docker: Install Docker Desktop from https://docker.com/products/docker-desktop"
-	default:
-		return "Docker: Please install Docker from https://docker.com/"
-	}
+	return platform.InstallHint("docker")
 }
 
 func NewDockerInstaller() *DockerInstaller {
@@ -95,54 +65,96 @@ func (d *DockerInstaller) Install() error {
 		return d.installMacOS()
 	case "linux":
 		return d.installLinux()
-	case "windows":
-		return d.installWindows()
 	default:
+		// Windows is unsupported here by design: the CLI forwards into WSL and
+		// runs as linux, so native-Windows install code is never reached.
 		return fmt.Errorf("automatic Docker installation not supported on %s", runtime.GOOS)
 	}
 }
 
 func (d *DockerInstaller) installMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic Docker installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic Docker installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
-	fmt.Println("Installing Docker Desktop via Homebrew...")
+	pterm.Info.Println("Installing Docker Desktop via Homebrew...")
 	cmd := exec.Command("brew", "install", "--cask", "docker")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install Docker Desktop: %w", err)
 	}
 
-	fmt.Println("Starting Docker Desktop...")
+	pterm.Info.Println("Starting Docker Desktop...")
 	cmd = exec.Command("open", "-a", "Docker")
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Warning: Could not start Docker Desktop automatically: %v\n", err)
-		fmt.Println("Please start Docker Desktop manually from Applications")
+		pterm.Warning.Printfln("Could not start Docker Desktop automatically: %v", err)
+		pterm.Info.Println("Please start Docker Desktop manually from Applications")
 	}
 
 	return nil
 }
 
 func (d *DockerInstaller) installLinux() error {
-	if commandExists("apt") {
+	switch {
+	case commandExists("apk"):
+		return d.installAlpine()
+	case commandExists("apt"):
 		return d.installUbuntu()
-	} else if commandExists("yum") {
+	case commandExists("yum"):
 		return d.installRedHat()
-	} else if commandExists("dnf") {
+	case commandExists("dnf"):
 		return d.installFedora()
-	} else if commandExists("pacman") {
+	case commandExists("pacman"):
 		return d.installArch()
-	} else {
+	default:
 		return fmt.Errorf("no supported package manager found. Please install Docker manually from https://docs.docker.com/engine/install/")
 	}
 }
 
+// installAlpine installs Docker on Alpine Linux following
+// https://wiki.alpinelinux.org/wiki/Docker — apk add docker, then enable and
+// start the OpenRC service. Alpine's default user is often root (and may not
+// ship sudo, e.g. in WSL/containers), so sudo is only prefixed when needed.
+// Enabling/starting the service is best-effort: under WSL or containers OpenRC
+// may not be the init system, but `apk add docker` already provides the engine,
+// which can be started directly (see StartDocker).
+func (d *DockerInstaller) installAlpine() error {
+	pterm.Info.Println("Installing Docker on Alpine Linux...")
+
+	run := func(args ...string) error {
+		if os.Geteuid() != 0 && commandExists("sudo") {
+			args = append([]string{"sudo"}, args...)
+		}
+		return d.runCommand(args[0], args[1:]...)
+	}
+
+	if err := run("apk", "add", "--no-cache", "docker"); err != nil {
+		return fmt.Errorf("failed to install Docker with apk: %w", err)
+	}
+	if err := run("rc-update", "add", "docker", "default"); err != nil {
+		pterm.Warning.Printfln("Could not enable the docker service (rc-update): %v", err)
+	}
+	if err := run("rc-service", "docker", "start"); err != nil {
+		pterm.Warning.Printfln("Could not start the docker service (rc-service): %v", err)
+	}
+
+	// Add the current user to the docker group (Alpine uses addgroup, not usermod).
+	if user := os.Getenv("USER"); user != "" && user != "root" {
+		if err := run("addgroup", user, "docker"); err != nil {
+			pterm.Warning.Printfln("Could not add user to the docker group: %v", err)
+		} else {
+			pterm.Info.Println("Log out and back in for Docker group permissions to take effect")
+		}
+	}
+
+	return nil
+}
+
 func (d *DockerInstaller) installUbuntu() error {
-	fmt.Println("Installing Docker on Ubuntu/Debian...")
-	
+	pterm.Info.Println("Installing Docker on Ubuntu/Debian...")
+
 	commands := [][]string{
 		{"sudo", "apt", "update"},
 		{"sudo", "apt", "install", "-y", "apt-transport-https", "ca-certificates", "curl", "gnupg", "lsb-release"},
@@ -184,9 +196,9 @@ func (d *DockerInstaller) installUbuntu() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -194,8 +206,8 @@ func (d *DockerInstaller) installUbuntu() error {
 }
 
 func (d *DockerInstaller) installRedHat() error {
-	fmt.Println("Installing Docker on CentOS/RHEL...")
-	
+	pterm.Info.Println("Installing Docker on CentOS/RHEL...")
+
 	commands := [][]string{
 		{"sudo", "yum", "install", "-y", "yum-utils"},
 		{"sudo", "yum-config-manager", "--add-repo", "https://download.docker.com/linux/centos/docker-ce.repo"},
@@ -214,9 +226,9 @@ func (d *DockerInstaller) installRedHat() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -224,8 +236,8 @@ func (d *DockerInstaller) installRedHat() error {
 }
 
 func (d *DockerInstaller) installFedora() error {
-	fmt.Println("Installing Docker on Fedora...")
-	
+	pterm.Info.Println("Installing Docker on Fedora...")
+
 	commands := [][]string{
 		{"sudo", "dnf", "install", "-y", "dnf-plugins-core"},
 		{"sudo", "dnf", "config-manager", "--add-repo", "https://download.docker.com/linux/fedora/docker-ce.repo"},
@@ -244,9 +256,9 @@ func (d *DockerInstaller) installFedora() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
 
@@ -254,8 +266,8 @@ func (d *DockerInstaller) installFedora() error {
 }
 
 func (d *DockerInstaller) installArch() error {
-	fmt.Println("Installing Docker on Arch Linux...")
-	
+	pterm.Info.Println("Installing Docker on Arch Linux...")
+
 	commands := [][]string{
 		{"sudo", "pacman", "-S", "--noconfirm", "docker"},
 		{"sudo", "systemctl", "enable", "docker"},
@@ -272,294 +284,23 @@ func (d *DockerInstaller) installArch() error {
 	user := os.Getenv("USER")
 	if user != "" {
 		if err := d.runCommand("sudo", "usermod", "-aG", "docker", user); err != nil {
-			fmt.Printf("Warning: Could not add user to docker group: %v\n", err)
+			pterm.Warning.Printfln("Could not add user to docker group: %v", err)
 		} else {
-			fmt.Println("Note: You may need to log out and back in for Docker group permissions to take effect")
+			pterm.Info.Println("You may need to log out and back in for Docker group permissions to take effect")
 		}
 	}
-
-	return nil
-}
-
-func (d *DockerInstaller) installWindows() error {
-	fmt.Println("Installing Docker CE via WSL2 on Windows...")
-	fmt.Println("This will install Docker Engine (same as Linux) without Docker Desktop")
-
-	// Step 1: Ensure WSL2 is installed
-	if err := d.ensureWSL2(); err != nil {
-		return fmt.Errorf("failed to setup WSL2: %w", err)
-	}
-
-	// Step 2: Ensure Ubuntu is installed in WSL2
-	if err := d.ensureUbuntuWSL(); err != nil {
-		return fmt.Errorf("failed to install Ubuntu in WSL2: %w", err)
-	}
-
-	// Step 3: Install Docker CE inside WSL2 Ubuntu
-	if err := d.installDockerInWSL(); err != nil {
-		return fmt.Errorf("failed to install Docker in WSL2: %w", err)
-	}
-
-	// Step 4: Configure Docker to expose socket and start on boot
-	if err := d.configureDockerWSL(); err != nil {
-		return fmt.Errorf("failed to configure Docker: %w", err)
-	}
-
-	// Step 5: Create Windows docker command wrapper
-	if err := d.createDockerWrapper(); err != nil {
-		return fmt.Errorf("failed to create docker command wrapper: %w", err)
-	}
-
-	fmt.Println("\n✓ Docker CE installed successfully in WSL2!")
-	fmt.Println("Docker is now available via the 'docker' command on Windows")
-	return nil
-}
-
-func (d *DockerInstaller) ensureWSL2() error {
-	// Check if WSL is installed
-	cmd := exec.Command("wsl", "--status")
-	if err := cmd.Run(); err != nil {
-		fmt.Println("WSL2 not found. Installing WSL2...")
-		fmt.Println("Note: This will require a system restart")
-
-		// Install WSL2
-		installCmd := exec.Command("wsl", "--install", "--no-distribution")
-		installCmd.Stdout = os.Stdout
-		installCmd.Stderr = os.Stderr
-		if err := installCmd.Run(); err != nil {
-			return fmt.Errorf("failed to install WSL2. Please run as Administrator: %w", err)
-		}
-
-		fmt.Println("\n⚠ IMPORTANT: You must restart your computer now for WSL2 to work")
-		fmt.Println("After restart, run this command again to continue Docker installation")
-		os.Exit(0)
-	}
-
-	// Set WSL2 as default version
-	cmd = exec.Command("wsl", "--set-default-version", "2")
-	cmd.Run() // Ignore errors, might already be set
-
-	return nil
-}
-
-func (d *DockerInstaller) ensureUbuntuWSL() error {
-	// Check if Ubuntu is already installed using multiple methods
-	// Method 1: Check using wsl -l -v (more reliable, includes version info)
-	cmd := exec.Command("wsl", "-l", "-v")
-	output, err := cmd.Output()
-
-	// Convert output handling potential UTF-16 encoding on Windows
-	outputStr := d.decodeWSLOutput(output)
-
-	if err == nil && (strings.Contains(outputStr, "Ubuntu") || strings.Contains(outputStr, "ubuntu")) {
-		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Method 2: Try to run a command in Ubuntu distribution
-	cmd = exec.Command("wsl", "-d", "Ubuntu", "echo", "test")
-	if err := cmd.Run(); err == nil {
-		fmt.Println("✓ Ubuntu already installed in WSL2")
-		return nil
-	}
-
-	// Ubuntu not found, install it
-	fmt.Println("Installing Ubuntu in WSL2...")
-	cmd = exec.Command("wsl", "--install", "-d", "Ubuntu", "--no-launch")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// Check if error is because distribution already exists
-		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "ERROR_ALREADY_EXISTS") {
-			fmt.Println("✓ Ubuntu already exists in WSL2")
-			return nil
-		}
-		return fmt.Errorf("failed to install Ubuntu: %w", err)
-	}
-
-	fmt.Println("✓ Ubuntu installed successfully")
-	return nil
-}
-
-// decodeWSLOutput handles UTF-16 LE with BOM encoding that WSL sometimes uses on Windows
-func (d *DockerInstaller) decodeWSLOutput(data []byte) string {
-	// Check for UTF-16 LE BOM
-	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE {
-		// UTF-16 LE with BOM detected
-		// Convert UTF-16 to UTF-8
-		u16 := make([]uint16, 0, len(data)/2)
-		for i := 2; i < len(data)-1; i += 2 {
-			u16 = append(u16, uint16(data[i])|uint16(data[i+1])<<8)
-		}
-		runes := make([]rune, 0, len(u16))
-		for _, v := range u16 {
-			if v == 0 {
-				continue
-			}
-			runes = append(runes, rune(v))
-		}
-		return string(runes)
-	}
-	// Regular UTF-8
-	return string(data)
-}
-
-func (d *DockerInstaller) installDockerInWSL() error {
-	fmt.Println("Installing Docker CE inside WSL2 Ubuntu...")
-
-	// Create installation script that matches our Linux installation
-	installScript := `#!/bin/bash
-set -e
-
-# Check if docker is already installed
-if command -v docker &> /dev/null; then
-    echo "Docker already installed in WSL2"
-    exit 0
-fi
-
-echo "Installing Docker CE..."
-
-# Update package index
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-
-# Install prerequisites
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common
-
-# Add Docker's official GPG key
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-# Add Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Install Docker CE
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Add current user to docker group
-sudo usermod -aG docker $USER
-
-echo "Docker CE installed successfully"
-`
-
-	// Execute installation script in WSL2
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", installScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to install Docker in WSL2: %w", err)
-	}
-
-	return nil
-}
-
-func (d *DockerInstaller) configureDockerWSL() error {
-	fmt.Println("Configuring Docker to start automatically...")
-
-	configScript := `#!/bin/bash
-set -e
-
-# Create systemd override to start Docker on WSL boot
-# Note: WSL2 uses its own init system
-
-# Configure Docker to listen on both unix socket and tcp (for Windows access)
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<EOF
-{
-  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"],
-  "iptables": false
-}
-EOF
-
-# Create a script to start Docker daemon
-sudo tee /usr/local/bin/start-docker.sh > /dev/null <<'SCRIPT'
-#!/bin/bash
-if ! pgrep -x dockerd > /dev/null; then
-    sudo dockerd > /dev/null 2>&1 &
-fi
-SCRIPT
-
-sudo chmod +x /usr/local/bin/start-docker.sh
-
-# Add to bashrc to start on WSL launch
-if ! grep -q "start-docker.sh" ~/.bashrc; then
-    echo "/usr/local/bin/start-docker.sh" >> ~/.bashrc
-fi
-
-# Start Docker now
-sudo /usr/local/bin/start-docker.sh
-
-# Wait for Docker to be ready
-for i in {1..30}; do
-    if docker ps > /dev/null 2>&1; then
-        echo "Docker is running"
-        break
-    fi
-    sleep 1
-done
-
-echo "Docker configured successfully"
-`
-
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "bash", "-c", configScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to configure Docker: %w", err)
-	}
-
-	return nil
-}
-
-func (d *DockerInstaller) createDockerWrapper() error {
-	fmt.Println("Creating docker command for Windows...")
-
-	// Create a batch file wrapper that calls docker in WSL2
-	wrapperDir := os.Getenv("USERPROFILE") + "\\bin"
-	os.MkdirAll(wrapperDir, 0755)
-
-	wrapperPath := wrapperDir + "\\docker.bat"
-	wrapperContent := `@echo off
-wsl -d Ubuntu docker %*
-`
-
-	if err := os.WriteFile(wrapperPath, []byte(wrapperContent), 0755); err != nil {
-		return fmt.Errorf("failed to create docker wrapper: %w", err)
-	}
-
-	// Add to PATH if not already there
-	addPathScript := fmt.Sprintf(`
-$binDir = "%s"
-$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($currentPath -notlike "*$binDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$binDir", "User")
-    $env:Path = "$env:Path;$binDir"
-    Write-Host "Added $binDir to PATH"
-} else {
-    Write-Host "PATH already contains $binDir"
-}
-`, wrapperDir)
-
-	cmd := exec.Command("powershell", "-Command", addPathScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run() // Ignore errors
-
-	fmt.Printf("✓ Docker wrapper created at: %s\n", wrapperPath)
-	fmt.Println("Note: You may need to restart your terminal for PATH changes to take effect")
 
 	return nil
 }
 
 func (d *DockerInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 G702 -- explicit argv, no shell; command and args are internal, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }
 
 func (d *DockerInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
+	cmd := exec.Command("bash", "-c", command) // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 	// Completely silence output during installation
 	return cmd.Run()
 }
@@ -572,7 +313,9 @@ func StartDocker() error {
 	case "linux":
 		return startDockerLinux()
 	case "windows":
-		return startDockerWindows()
+		// Unreachable in the supported flow (the CLI runs inside WSL as linux);
+		// the previous WSL-from-Windows starter hardcoded the Ubuntu distro.
+		return fmt.Errorf("starting Docker from the native Windows launcher is not supported — run openframe inside WSL")
 	default:
 		return fmt.Errorf("starting Docker is not supported on %s", runtime.GOOS)
 	}
@@ -605,7 +348,18 @@ func startDockerLinux() error {
 		}
 		return nil
 	}
-	
+
+	// OpenRC (Alpine)
+	if commandExists("rc-service") {
+		if exec.Command("rc-service", "docker", "start").Run() == nil {
+			return nil
+		}
+		if err := exec.Command("sudo", "rc-service", "docker", "start").Run(); err != nil {
+			return fmt.Errorf("failed to start Docker daemon with rc-service: %w", err)
+		}
+		return nil
+	}
+
 	// Try service command (older systems)
 	if commandExists("service") {
 		cmd := exec.Command("sudo", "service", "docker", "start")
@@ -614,78 +368,16 @@ func startDockerLinux() error {
 		}
 		return nil
 	}
-	
+
 	return fmt.Errorf("unable to start Docker daemon: no supported init system found")
 }
 
-func startDockerWindows() error {
-	// First, try to start Docker CE in WSL2 (our preferred setup)
-	if err := startDockerInWSL(); err == nil {
-		return nil
-	}
-
-	// Fallback: Try to start Docker Desktop on Windows
-	cmd := exec.Command("cmd", "/c", "start", "", "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe")
-	if err := cmd.Run(); err != nil {
-		// Try alternative path
-		cmd = exec.Command("powershell", "-Command", "Start-Process", "'Docker Desktop'")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to start Docker (tried WSL2 Docker CE and Docker Desktop): %w", err)
-		}
-	}
-	return nil
-}
-
-// startDockerInWSL starts Docker CE daemon inside WSL2 Ubuntu
-func startDockerInWSL() error {
-	// Check if Ubuntu WSL distribution exists
-	cmd := exec.Command("wsl", "-d", "Ubuntu", "echo", "ok")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Ubuntu WSL distribution not available: %w", err)
-	}
-
-	// Start Docker daemon using the start-docker.sh script or directly
-	startScript := `
-if [ -x /usr/local/bin/start-docker.sh ]; then
-    sudo /usr/local/bin/start-docker.sh
-else
-    if ! pgrep -x dockerd > /dev/null; then
-        sudo dockerd > /dev/null 2>&1 &
-    fi
-fi
-
-# Wait for Docker to be ready (up to 30 seconds)
-for i in $(seq 1 30); do
-    if sudo docker ps > /dev/null 2>&1; then
-        echo "docker_ready"
-        exit 0
-    fi
-    sleep 1
-done
-echo "docker_timeout"
-exit 1
-`
-
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-
-	cmd = exec.CommandContext(ctx, "wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", startScript)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to start Docker in WSL: %w", err)
-	}
-
-	result := strings.TrimSpace(string(output))
-	if result == "docker_timeout" {
-		return fmt.Errorf("timeout waiting for Docker to start in WSL")
-	}
-
-	return nil
-}
-
-// WaitForDocker waits for Docker daemon to become available
+// WaitForDocker waits for the Docker daemon to become available. The budget is
+// generous because a cold Docker Desktop start on macOS routinely exceeds the
+// old 30s ceiling; the poll returns as soon as the daemon answers, so healthy
+// setups pay nothing extra.
 func WaitForDocker() error {
-	maxAttempts := 30 // 30 seconds timeout
+	maxAttempts := 120 // seconds
 	for i := 0; i < maxAttempts; i++ {
 		if IsDockerRunning() {
 			return nil

@@ -32,6 +32,16 @@ Examples:
   openframe cluster create
   openframe cluster delete`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// This command group defines its own PersistentPreRunE, which shadows
+			// the root's, so honor --silent here too.
+			if s, _ := cmd.Flags().GetBool("silent"); s {
+				ui.SetSilent()
+			}
+			// Machine output (json/yaml) is machine mode: no logo, no prerequisite
+			// gate, so stdout stays clean for scripts.
+			if out, _ := cmd.Flags().GetString("output"); out == "json" || out == "yaml" {
+				return nil
+			}
 			// Show logo for subcommands, but not for the root cluster command
 			if cmd.Use != "cluster" {
 				ui.ShowLogoWithContext(cmd.Context())

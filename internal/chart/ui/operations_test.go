@@ -8,15 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// testError is a simple error implementation for testing
-type testError struct {
-	msg string
-}
-
-func (e *testError) Error() string {
-	return e.msg
-}
-
 func init() {
 	testutil.InitializeTestMode()
 }
@@ -125,112 +116,11 @@ func TestSelectClusterForInstall_EmptyClusterList(t *testing.T) {
 	assert.Empty(t, selectedCluster)
 }
 
-func TestShowOperationCancelled(t *testing.T) {
-	ui := NewOperationsUI()
-
-	// This method outputs to terminal, we just test it doesn't panic
-	assert.NotPanics(t, func() {
-		ui.ShowOperationCancelled("chart installation")
-	})
-
-	assert.NotPanics(t, func() {
-		ui.ShowOperationCancelled("test operation")
-	})
-}
-
 func TestShowNoClusterMessage(t *testing.T) {
 	ui := NewOperationsUI()
 
 	// This method outputs to terminal, we just test it doesn't panic
 	assert.NotPanics(t, func() {
-		ui.ShowNoClusterMessage()
-	})
-}
-
-func TestConfirmInstallation(t *testing.T) {
-	// Skip this test as it requires user interaction even in test mode
-	// The method is a simple wrapper around sharedUI.ConfirmActionInteractive
-	// which is already tested in the shared UI package
-	t.Skip("ConfirmInstallation requires user interaction - tested in integration tests")
-}
-
-func TestShowInstallationStart(t *testing.T) {
-	ui := NewOperationsUI()
-
-	tests := []string{"test-cluster", "cluster-123", ""}
-
-	for _, clusterName := range tests {
-		t.Run("cluster_"+clusterName, func(t *testing.T) {
-			// This method outputs to terminal, we just test it doesn't panic
-			assert.NotPanics(t, func() {
-				ui.ShowInstallationStart(clusterName)
-			})
-		})
-	}
-}
-
-func TestShowInstallationComplete(t *testing.T) {
-	ui := NewOperationsUI()
-
-	// This method outputs to terminal, we just test it doesn't panic
-	assert.NotPanics(t, func() {
-		ui.ShowInstallationComplete()
-	})
-}
-
-func TestShowInstallationError(t *testing.T) {
-	ui := NewOperationsUI()
-
-	testErrors := []error{
-		assert.AnError,
-		&testError{msg: "test error"},
-		nil, // Test with nil error
-	}
-
-	for i, err := range testErrors {
-		t.Run("error_case_"+string(rune('A'+i)), func(t *testing.T) {
-			// This method outputs to terminal, we just test it doesn't panic
-			assert.NotPanics(t, func() {
-				ui.ShowInstallationError(err)
-			})
-		})
-	}
-}
-
-func TestOperationsUI_MethodsExist(t *testing.T) {
-	ui := NewOperationsUI()
-
-	// Test that all expected methods exist by calling them
-	assert.NotNil(t, ui.SelectClusterForInstall)
-	assert.NotNil(t, ui.ShowOperationCancelled)
-	assert.NotNil(t, ui.ShowNoClusterMessage)
-	assert.NotNil(t, ui.ConfirmInstallation)
-	assert.NotNil(t, ui.ConfirmInstallationOnCluster)
-	assert.NotNil(t, ui.ShowInstallationStart)
-	assert.NotNil(t, ui.ShowInstallationComplete)
-	assert.NotNil(t, ui.ShowInstallationError)
-}
-
-func TestOperationsUI_Integration(t *testing.T) {
-	// Test a complete flow scenario
-	ui := NewOperationsUI()
-
-	clusters := []models.ClusterInfo{
-		{Name: "integration-test-cluster", Status: "running"},
-	}
-
-	// Test successful cluster selection with argument
-	selectedCluster, err := ui.SelectClusterForInstall(clusters, []string{"integration-test-cluster"})
-	assert.NoError(t, err)
-	assert.Equal(t, "integration-test-cluster", selectedCluster)
-
-	// Skip confirmation test as it requires user interaction
-
-	// Test UI methods don't panic
-	assert.NotPanics(t, func() {
-		ui.ShowInstallationStart(selectedCluster)
-		ui.ShowInstallationComplete()
-		ui.ShowOperationCancelled("test operation")
 		ui.ShowNoClusterMessage()
 	})
 }

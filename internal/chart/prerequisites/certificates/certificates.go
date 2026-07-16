@@ -1,12 +1,18 @@
 package certificates
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/platform"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
+	"github.com/pterm/pterm"
 )
 
 type CertificateInstaller struct{}
@@ -25,33 +31,8 @@ func isMkcertInstalled() bool {
 	return commandExists("mkcert")
 }
 
-func areCertificatesGenerated() bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	certDir := filepath.Join(homeDir, ".config", "openframe", "certs")
-	certFile := filepath.Join(certDir, "localhost.pem")
-	keyFile := filepath.Join(certDir, "localhost-key.pem")
-
-	_, certErr := os.Stat(certFile)
-	_, keyErr := os.Stat(keyFile)
-
-	return certErr == nil && keyErr == nil
-}
-
 func certificateInstallHelp() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "Certificates: mkcert will be installed via Homebrew and certificates generated automatically"
-	case "linux":
-		return "Certificates: mkcert will be downloaded and certificates generated automatically"
-	case "windows":
-		return "Certificates: Please install mkcert manually from https://github.com/FiloSottile/mkcert and run 'mkcert localhost 127.0.0.1'"
-	default:
-		return "Certificates: Please install mkcert from https://github.com/FiloSottile/mkcert"
-	}
+	return platform.InstallHint("certificates")
 }
 
 func NewCertificateInstaller() *CertificateInstaller {
@@ -106,7 +87,7 @@ func (c *CertificateInstaller) installMkcert() error {
 
 func (c *CertificateInstaller) installMkcertMacOS() error {
 	if !commandExists("brew") {
-		return fmt.Errorf("Homebrew is required for automatic mkcert installation on macOS. Please install brew first: https://brew.sh")
+		return fmt.Errorf("automatic mkcert installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
 	cmd := exec.Command("brew", "install", "mkcert")
@@ -118,29 +99,26 @@ func (c *CertificateInstaller) installMkcertMacOS() error {
 }
 
 func (c *CertificateInstaller) installMkcertLinux() error {
-	homeDir, err := os.UserHomeDir()
+	// Verified, pinned download (SHA256) into ~/.openframe/bin — replacing the
+	// unverified `curl dl.filippo.io/mkcert/latest?for=linux/amd64` install, which
+	// hardcoded amd64 and ran an unauthenticated binary that injects a root CA
+	// (audit T0.3). The bin dir is on this process's PATH (prepended at startup),
+	// so the later `mkcert` invocations resolve it.
+	binDir, err := download.UserBinDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return fmt.Errorf("resolving bin directory: %w", err)
 	}
 
-	binDir := filepath.Join(homeDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	pterm.Info.Printf("Downloading verified mkcert %s...\n", download.Mkcert.Version)
+	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Mkcert, binDir)
+	if err != nil {
+		return fmt.Errorf("installing verified mkcert: %w", err)
 	}
-
-	mkcertPath := filepath.Join(binDir, "mkcert")
-
-	// Download mkcert
-	downloadCmd := fmt.Sprintf("curl -fsSL -o %s https://dl.filippo.io/mkcert/latest?for=linux/amd64", mkcertPath)
-	if err := c.runShellCommand(downloadCmd); err != nil {
-		return fmt.Errorf("failed to download mkcert: %w", err)
-	}
-
-	// Make executable
-	if err := os.Chmod(mkcertPath, 0755); err != nil {
-		return fmt.Errorf("failed to make mkcert executable: %w", err)
-	}
-
+	download.PrependToPath(binDir)
+	pterm.Success.Printf("Installed verified mkcert %s to %s\n", download.Mkcert.Version, path)
 	return nil
 }
 
@@ -151,7 +129,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 	}
 
 	certDir := filepath.Join(homeDir, ".config", "openframe", "certs")
-	if err := os.MkdirAll(certDir, 0755); err != nil {
+	if err := os.MkdirAll(certDir, 0750); err != nil {
 		return fmt.Errorf("failed to create certificate directory: %w", err)
 	}
 
@@ -189,58 +167,8 @@ func (c *CertificateInstaller) generateCertificates() error {
 	// Platform-specific trust handling - EXACTLY as in certificates.sh
 	switch runtime.GOOS {
 	case "darwin":
-		// Resolve login keychain
-		kcCmd := exec.Command("bash", "-c", `security default-keychain -d user | tr -d '"'`)
-		kcOutput, _ := kcCmd.Output()
-		keychain := strings.TrimSpace(string(kcOutput))
-
-		// If empty, try default locations
-		if keychain == "" || !fileExists(keychain) {
-			keychain = filepath.Join(homeDir, "Library/Keychains/login.keychain-db")
-			if !fileExists(keychain) {
-				// Return empty if not found
-				keychain = ""
-			}
-		}
-
-		if keychain != "" && fileExists(keychain) {
-			// Remove old mkcert certificates from keychain
-			findCmd := fmt.Sprintf(`security find-certificate -a -c "mkcert" -Z "%s" | awk '/SHA-1 hash:/ {print $3}'`, keychain)
-			shaCmd := exec.Command("bash", "-c", findCmd)
-			shaOutput, _ := shaCmd.Output()
-
-			if len(shaOutput) > 0 {
-				shas := strings.TrimSpace(string(shaOutput))
-				for _, sha := range strings.Split(shas, "\n") {
-					if sha != "" {
-						deleteCmd := exec.Command("security", "delete-certificate", "-Z", sha, keychain)
-						deleteCmd.Run() // Best effort
-					}
-				}
-			}
-
-			// Add mkcert CA to login keychain (silently unless password needed)
-			rootCAPem := filepath.Join(caRoot, "rootCA.pem")
-			trustCmd := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem)
-			// First try silently
-			output, err := trustCmd.CombinedOutput()
-			if err != nil {
-				outputStr := string(output)
-				if strings.Contains(outputStr, "User interaction is not allowed") {
-					// Need user interaction - run interactively
-					trustCmd = exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem)
-					trustCmd.Stdin = os.Stdin
-					trustCmd.Stdout = os.Stdout
-					trustCmd.Stderr = os.Stderr
-					if err := trustCmd.Run(); err != nil {
-						// User likely cancelled - return error to indicate incomplete setup
-						return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
-					}
-				} else if strings.Contains(outputStr, "authorization was canceled by the user") {
-					return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
-				}
-				// Other errors are non-fatal, continue with certificate generation
-			}
+		if err := trustCADarwin(caRoot, homeDir); err != nil {
+			return err
 		}
 
 	case "linux":
@@ -248,9 +176,13 @@ func (c *CertificateInstaller) generateCertificates() error {
 		if !commandExists("certutil") {
 			if commandExists("apt-get") {
 				updateCmd := exec.Command("sudo", "apt-get", "update", "-y")
-				updateCmd.Run()
+				if err := updateCmd.Run(); err != nil {
+					pterm.Debug.Printf("apt-get update failed (certutil install is optional): %v\n", err)
+				}
 				installCmd := exec.Command("sudo", "apt-get", "install", "-y", "libnss3-tools", "ca-certificates")
-				installCmd.Run()
+				if err := installCmd.Run(); err != nil {
+					pterm.Debug.Printf("apt-get install of certutil/ca-certificates failed (optional): %v\n", err)
+				}
 			}
 		}
 
@@ -273,7 +205,7 @@ func (c *CertificateInstaller) generateCertificates() error {
 			for _, dbPath := range nssDBPaths {
 				certDBPath := filepath.Join(dbPath, "cert9.db")
 				if fileExists(certDBPath) {
-					listCmd := exec.Command("certutil", "-L", "-d", "sql:"+dbPath)
+					listCmd := exec.Command("certutil", "-L", "-d", "sql:"+dbPath) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
 					output, _ := listCmd.Output()
 
 					lines := strings.Split(string(output), "\n")
@@ -282,8 +214,10 @@ func (c *CertificateInstaller) generateCertificates() error {
 							parts := strings.Fields(line)
 							if len(parts) > 0 {
 								nick := parts[0]
-								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick)
-								deleteCmd.Run() // Best effort
+								deleteCmd := exec.Command("certutil", "-D", "-d", "sql:"+dbPath, "-n", nick) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
+								if err := deleteCmd.Run(); err != nil {                                      // best effort
+									pterm.Debug.Printf("best-effort removal of old mkcert NSS nickname %q failed: %v\n", nick, err)
+								}
 							}
 						}
 					}
@@ -296,21 +230,27 @@ func (c *CertificateInstaller) generateCertificates() error {
 		installSystemCmd.Stdin = os.Stdin
 		installSystemCmd.Stdout = os.Stdout
 		installSystemCmd.Stderr = os.Stderr
-		installSystemCmd.Run()
+		if err := installSystemCmd.Run(); err != nil {
+			pterm.Debug.Printf("mkcert -install (system,nss trust stores) failed: %v\n", err)
+		}
 
 		// Refresh trust stores
 		if commandExists("update-ca-certificates") {
 			updateCmd := exec.Command("sudo", "update-ca-certificates")
-			updateCmd.Run()
+			if err := updateCmd.Run(); err != nil {
+				pterm.Debug.Printf("update-ca-certificates failed: %v\n", err)
+			}
 		}
 		if commandExists("update-ca-trust") {
 			updateCmd := exec.Command("sudo", "update-ca-trust", "extract")
-			updateCmd.Run()
+			if err := updateCmd.Run(); err != nil {
+				pterm.Debug.Printf("update-ca-trust extract failed: %v\n", err)
+			}
 		}
 	}
 
 	// Generate localhost certificates (silently)
-	generateCmd := exec.Command("bash", "-c",
+	generateCmd := exec.Command("bash", "-c", // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
 		fmt.Sprintf("cd '%s' && mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1 >/dev/null 2>&1", certDir))
 	if err := generateCmd.Run(); err != nil {
 		return fmt.Errorf("failed to generate certificates: %w", err)
@@ -319,14 +259,97 @@ func (c *CertificateInstaller) generateCertificates() error {
 	return nil
 }
 
-func (c *CertificateInstaller) runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	// Completely silence output during installation
-	return cmd.Run()
+// trustCADarwin adds the mkcert root CA to the macOS login keychain, removing any
+// stale mkcert certificates first. It shells out to `security`, but the fragile
+// parts — resolving the keychain, parsing the certificate list, and classifying
+// the add-trusted-cert result — are pure helpers (below) so they can be tested
+// off a real keychain.
+func trustCADarwin(caRoot, homeDir string) error {
+	kcOut, _ := exec.Command("security", "default-keychain", "-d", "user").Output()
+	keychain := resolveLoginKeychain(string(kcOut), homeDir, fileExists)
+	if keychain == "" {
+		return nil // no login keychain — nothing to trust into
+	}
+
+	// Remove old mkcert certificates from the keychain (best-effort).
+	findOut, _ := exec.Command("security", "find-certificate", "-a", "-c", "mkcert", "-Z", keychain).Output() // #nosec G204 -- explicit argv, no shell; keychain is program-derived
+	for _, sha := range parseMkcertCertSHAs(string(findOut)) {
+		if err := exec.Command("security", "delete-certificate", "-Z", sha, keychain).Run(); err != nil { // #nosec G204 -- explicit argv, no shell; values are program-derived
+			pterm.Debug.Printf("best-effort removal of old mkcert certificate failed: %v\n", err)
+		}
+	}
+
+	// Add the mkcert CA (silently; fall back to interactive if macOS asks).
+	rootCAPem := filepath.Join(caRoot, "rootCA.pem")
+	trustArgs := []string{"add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, rootCAPem}
+	out, err := exec.Command("security", trustArgs...).CombinedOutput() // #nosec G204 -- explicit argv, no shell; values are program-derived
+	switch classifyAddTrustedCert(string(out), err) {
+	case trustNeedsInteractive:
+		ic := exec.Command("security", trustArgs...) // #nosec G204 -- explicit argv, no shell; values are program-derived
+		ic.Stdin, ic.Stdout, ic.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := ic.Run(); err != nil {
+			return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
+		}
+	case trustCancelled:
+		return fmt.Errorf("certificate trust was not established (user cancelled or error occurred)")
+	case trustAdded, trustOtherError:
+		// Added, or a non-fatal error — continue with certificate generation.
+	}
+	return nil
 }
 
-func (c *CertificateInstaller) runShellCommand(command string) error {
-	cmd := exec.Command("bash", "-c", command)
-	// Completely silence output during installation
-	return cmd.Run()
+// resolveLoginKeychain picks the macOS login keychain: the one reported by
+// `security default-keychain` (quotes stripped) when it exists on disk, else
+// ~/Library/Keychains/login.keychain-db, else "" when neither is present. Pure —
+// exists abstracts the filesystem so it is testable off macOS.
+func resolveLoginKeychain(defaultKeychainOut, homeDir string, exists func(string) bool) string {
+	kc := strings.Trim(strings.TrimSpace(defaultKeychainOut), `"`)
+	if kc != "" && exists(kc) {
+		return kc
+	}
+	login := filepath.Join(homeDir, "Library/Keychains/login.keychain-db")
+	if exists(login) {
+		return login
+	}
+	return ""
+}
+
+// parseMkcertCertSHAs extracts SHA-1 hashes from `security find-certificate -a -Z`
+// output, whose relevant lines look like "    SHA-1 hash: A1B2C3…". Parsing in Go
+// (instead of a piped awk) makes it unit-testable.
+func parseMkcertCertSHAs(out string) []string {
+	var shas []string
+	for _, line := range strings.Split(out, "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "SHA-1 hash:"); ok {
+			if h := strings.TrimSpace(after); h != "" {
+				shas = append(shas, h)
+			}
+		}
+	}
+	return shas
+}
+
+// addTrustedCertOutcome classifies the result of `security add-trusted-cert`.
+type addTrustedCertOutcome int
+
+const (
+	trustAdded            addTrustedCertOutcome = iota // succeeded
+	trustNeedsInteractive                              // macOS blocked non-interactive auth; retry with a prompt
+	trustCancelled                                     // the user cancelled the authorization
+	trustOtherError                                    // some other, non-fatal error
+)
+
+// classifyAddTrustedCert maps the command's combined output + error to an outcome.
+func classifyAddTrustedCert(output string, err error) addTrustedCertOutcome {
+	if err == nil {
+		return trustAdded
+	}
+	switch {
+	case strings.Contains(output, "User interaction is not allowed"):
+		return trustNeedsInteractive
+	case strings.Contains(output, "authorization was canceled by the user"):
+		return trustCancelled
+	default:
+		return trustOtherError
+	}
 }

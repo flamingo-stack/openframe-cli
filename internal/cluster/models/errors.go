@@ -25,22 +25,13 @@ func (e ErrProviderNotFound) Error() string {
 
 // ErrInvalidClusterConfig indicates the cluster configuration is invalid
 type ErrInvalidClusterConfig struct {
-	Field   string
-	Value   interface{}
-	Reason  string
+	Field  string
+	Value  interface{}
+	Reason string
 }
 
 func (e ErrInvalidClusterConfig) Error() string {
 	return fmt.Sprintf("invalid cluster config - %s: %v (%s)", e.Field, e.Value, e.Reason)
-}
-
-// ErrClusterAlreadyExists indicates a cluster with the same name already exists
-type ErrClusterAlreadyExists struct {
-	Name string
-}
-
-func (e ErrClusterAlreadyExists) Error() string {
-	return fmt.Sprintf("cluster '%s' already exists", e.Name)
 }
 
 // ErrClusterOperation indicates a general cluster operation failure
@@ -71,11 +62,6 @@ func NewProviderNotFoundError(clusterType ClusterType) error {
 // NewInvalidConfigError creates a new invalid config error
 func NewInvalidConfigError(field string, value interface{}, reason string) error {
 	return ErrInvalidClusterConfig{Field: field, Value: value, Reason: reason}
-}
-
-// NewClusterAlreadyExistsError creates a new cluster already exists error
-func NewClusterAlreadyExistsError(name string) error {
-	return ErrClusterAlreadyExists{Name: name}
 }
 
 // NewClusterOperationError creates a new cluster operation error

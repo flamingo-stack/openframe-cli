@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	sharedConfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
@@ -27,21 +26,6 @@ func (s *Service) GetCertificateDirectory() string {
 	return s.pathResolver.GetCertificateDirectory()
 }
 
-// GetCertificateFiles returns the paths to certificate and key files
-func (s *Service) GetCertificateFiles() (certFile, keyFile string) {
-	return s.pathResolver.GetCertificateFiles()
-}
-
-// GetHelmValuesFile returns the path to the Helm values file
-func (s *Service) GetHelmValuesFile() string {
-	return s.pathResolver.GetHelmValuesFile()
-}
-
-// GetLogDirectory returns the log directory from shared config
-func (s *Service) GetLogDirectory() string {
-	return s.systemService.GetLogDirectory()
-}
-
 // GetPathResolver returns the path resolver instance
 func (s *Service) GetPathResolver() *PathResolver {
 	return s.pathResolver
@@ -57,7 +41,7 @@ func (s *Service) Initialize() error {
 	// Ensure certificate directory exists
 	certDir := s.GetCertificateDirectory()
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(certDir, 0755); err != nil {
+		if err := os.MkdirAll(certDir, 0750); err != nil {
 			return err
 		}
 	}
@@ -84,22 +68,4 @@ func (s *Service) BuildInstallConfig(
 		Silent:      false,
 		AppOfApps:   appOfAppsConfig,
 	}
-}
-
-// GetDefaultManifestsPath returns the default path to manifests
-func (s *Service) GetDefaultManifestsPath() string {
-	// Try to find manifests in the current working directory
-	if wd, err := os.Getwd(); err == nil {
-		manifestsPath := filepath.Join(wd, "internal", "chart", "manifests")
-		if _, err := os.Stat(manifestsPath); err == nil {
-			return manifestsPath
-		}
-	}
-
-	// Fallback to home directory location
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(homeDir, ".config", "openframe", "manifests")
-	}
-
-	return ""
 }

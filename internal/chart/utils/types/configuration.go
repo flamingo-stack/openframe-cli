@@ -1,6 +1,8 @@
 package types
 
-import "time"
+import (
+	"time"
+)
 
 // DockerRegistryConfig holds Docker registry settings
 type DockerRegistryConfig struct {
@@ -9,13 +11,12 @@ type DockerRegistryConfig struct {
 	Email    string
 }
 
-// DeploymentMode represents the deployment mode (OSS, SaaS, or SaaS Shared)
+// DeploymentMode represents the deployment mode. The CLI supports only the
+// OSS (oss-tenant) deployment; the type is retained as a single-valued enum.
 type DeploymentMode string
 
 const (
-	DeploymentModeOSS        DeploymentMode = "oss"
-	DeploymentModeSaaS       DeploymentMode = "saas"
-	DeploymentModeSaaSShared DeploymentMode = "saas-shared"
+	DeploymentModeOSS DeploymentMode = "oss"
 )
 
 // IngressType represents the type of ingress to use
@@ -43,13 +44,6 @@ type NgrokConfig struct {
 	RegistrationStartTime time.Time `json:"registrationStartTime,omitempty"`
 }
 
-// SaaSConfig holds SaaS-specific configuration
-type SaaSConfig struct {
-	RepositoryPassword string `json:"repositoryPassword"`
-	SaaSBranch         string `json:"saasBranch"`
-	OSSBranch          string `json:"ossBranch"`
-}
-
 // IngressConfig holds ingress configuration options
 type IngressConfig struct {
 	Type        IngressType  `json:"type"`
@@ -57,7 +51,7 @@ type IngressConfig struct {
 }
 
 // NgrokRegistrationURLs contains the URLs for Ngrok registration and documentation
-var NgrokRegistrationURLs = struct {
+var NgrokRegistrationURLs = struct { // #nosec G101 -- public ngrok documentation URLs, not credentials
 	SignUp        string
 	Dashboard     string
 	APIKeyDocs    string
@@ -73,28 +67,11 @@ var NgrokRegistrationURLs = struct {
 
 // ChartConfiguration holds all configurable options for chart installation
 type ChartConfiguration struct {
-	BaseHelmValuesPath string                 // Path to the original helm-values.yaml (read-only)
+	BaseHelmValuesPath string                 // Path to the original openframe-helm-values.yaml (read-only)
 	TempHelmValuesPath string                 // Path to the temporary helm values file for installation
 	ExistingValues     map[string]interface{} // Current values from the file
 	ModifiedSections   []string               // Track which sections were modified
-	DeploymentMode     *DeploymentMode        // nil means use existing, otherwise use this value
 	Branch             *string                // nil means use existing, otherwise use this value
 	DockerRegistry     *DockerRegistryConfig  // nil means use existing, otherwise use this value
 	IngressConfig      *IngressConfig         // nil means use existing, otherwise use this value
-	SaaSConfig         *SaaSConfig            // nil means use existing, otherwise use this value
-}
-
-// GetRepositoryURL returns the appropriate repository URL based on deployment mode
-func GetRepositoryURL(mode DeploymentMode) string {
-	switch mode {
-	case DeploymentModeSaaSShared:
-		return "https://github.com/flamingo-stack/openframe-saas-shared"
-	case DeploymentModeSaaS:
-		return "https://github.com/flamingo-stack/openframe-saas-tenant"
-	case DeploymentModeOSS:
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
-	default:
-		// Default to OSS repository
-		return "https://github.com/flamingo-stack/openframe-oss-tenant"
-	}
 }

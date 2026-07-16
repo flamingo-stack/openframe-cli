@@ -54,41 +54,6 @@ func TestHelmInstaller_Install(t *testing.T) {
 	// Note: We skip actual installation testing as it's slow and environment-dependent
 }
 
-func TestInstallScript(t *testing.T) {
-	// Skip this test on non-Linux systems
-	if runtime.GOOS != "linux" {
-		t.Skip("Linux-specific test, skipping on", runtime.GOOS)
-	}
-
-	installer := NewHelmInstaller()
-
-	// This will likely fail in test environment due to network/permissions
-	err := installer.installScript()
-
-	if err != nil {
-		// Should be a reasonable error message
-		validErrors := []string{
-			"failed to install Helm via script",
-			"exit status",
-			"executable file not found",
-			"permission denied",
-			"no such host",
-		}
-
-		hasValidError := false
-		for _, validError := range validErrors {
-			if containsSubstring(err.Error(), validError) {
-				hasValidError = true
-				break
-			}
-		}
-
-		if !hasValidError {
-			t.Errorf("Unexpected error type: %v", err)
-		}
-	}
-}
-
 // Helper function to check if a string contains a substring
 func containsSubstring(str, substr string) bool {
 	return len(str) >= len(substr) &&

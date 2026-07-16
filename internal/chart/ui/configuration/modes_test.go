@@ -3,6 +3,7 @@ package configuration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/ui/templates"
@@ -20,10 +21,11 @@ func TestConfigurationWizard_ConfigureWithDefaults_OSS(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, values)
 
-	// Test temporary file creation
+	// Test temporary file creation — unique name (not the old fixed filename).
 	tempFile, err := modifier.CreateTemporaryValuesFile(values)
 	assert.NoError(t, err)
-	assert.Equal(t, "helm-values-tmp.yaml", tempFile)
+	assert.Contains(t, tempFile, "helm-values-tmp-")
+	assert.True(t, strings.HasSuffix(tempFile, ".yaml"))
 
 	// Clean up temporary file
 	defer os.Remove(tempFile)
@@ -34,7 +36,7 @@ func TestConfigurationWizard_ConfigureWithExistingFile(t *testing.T) {
 
 	// Create temporary directory with existing helm values file
 	tmpDir := t.TempDir()
-	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
+	helmValuesPath := filepath.Join(tmpDir, "openframe-helm-values.yaml")
 
 	existingYAML := `global:
   repoBranch: develop
@@ -70,12 +72,10 @@ func TestConfigurationWizard_Integration_LoadAndApply(t *testing.T) {
 
 	// Create temporary directory with existing helm values
 	tmpDir := t.TempDir()
-	helmValuesPath := filepath.Join(tmpDir, "helm-values.yaml")
+	helmValuesPath := filepath.Join(tmpDir, "openframe-helm-values.yaml")
 
-	originalYAML := `deployment:
-  oss:
-    repository:
-      branch: main
+	originalYAML := `repository:
+  branch: main
 registry:
   docker:
     username: default
@@ -95,10 +95,8 @@ registry:
 
 	// Create configuration with changes for OSS deployment
 	newBranch := "develop"
-	deploymentMode := types.DeploymentModeOSS
 	config := &types.ChartConfiguration{
-		Branch:         &newBranch,
-		DeploymentMode: &deploymentMode,
+		Branch: &newBranch,
 		DockerRegistry: &types.DockerRegistryConfig{
 			Username: "newuser",
 			Password: "newpass",
@@ -124,10 +122,8 @@ registry:
 	updatedValues, err := modifier.LoadExistingValues(tempHelmValuesPath)
 	assert.NoError(t, err)
 
-	// Verify deployment structure changes
-	deployment := updatedValues["deployment"].(map[string]interface{})
-	oss := deployment["oss"].(map[string]interface{})
-	repository := oss["repository"].(map[string]interface{})
+	// Verify the top-level repository.branch changed
+	repository := updatedValues["repository"].(map[string]interface{})
 	assert.Equal(t, "develop", repository["branch"])
 
 	registry := updatedValues["registry"].(map[string]interface{})
@@ -138,28 +134,8 @@ registry:
 }
 
 func TestConfigurationWizard_DeploymentModes(t *testing.T) {
-	tests := []struct {
-		name     string
-		mode     types.DeploymentMode
-		expected string
-	}{
-		{
-			name:     "OSS deployment mode",
-			mode:     types.DeploymentModeOSS,
-			expected: "oss",
-		},
-		{
-			name:     "SaaS deployment mode",
-			mode:     types.DeploymentModeSaaS,
-			expected: "saas",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, string(tt.mode))
-		})
-	}
+	// Only the OSS (oss-tenant) deployment mode is supported.
+	assert.Equal(t, "oss", string(types.DeploymentModeOSS))
 }
 
 func TestConfigurationWizard_LoadBaseValues(t *testing.T) {
@@ -169,7 +145,7 @@ func TestConfigurationWizard_LoadBaseValues(t *testing.T) {
 	config, err := wizard.loadBaseValues()
 	assert.NoError(t, err)
 	assert.NotNil(t, config)
-	assert.Equal(t, "helm-values.yaml", config.BaseHelmValuesPath)
+	assert.Equal(t, "openframe-helm-values.yaml", config.BaseHelmValuesPath)
 	assert.Empty(t, config.TempHelmValuesPath)
 	assert.NotNil(t, config.ExistingValues)
 	assert.Empty(t, config.ModifiedSections)

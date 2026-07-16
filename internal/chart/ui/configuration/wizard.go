@@ -26,38 +26,15 @@ func NewConfigurationWizard() *ConfigurationWizard {
 
 // ConfigureHelmValues reads existing Helm values and prompts user for configuration changes
 func (w *ConfigurationWizard) ConfigureHelmValues() (*types.ChartConfiguration, error) {
-	// Step 1: Show deployment mode selection
-	deploymentMode, err := w.showDeploymentModeSelection()
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 2: Show configuration mode selection
+	// Show configuration mode selection (deployment is always OSS)
 	modeChoice, err := w.showConfigurationModeSelection()
 	if err != nil {
 		return nil, err
 	}
 
 	if modeChoice == "default" {
-		return w.configureWithDefaults(deploymentMode)
+		return w.configureWithDefaults()
 	}
 
-	return w.configureInteractive(deploymentMode)
-}
-
-// ConfigureHelmValuesWithMode configures helm values with pre-selected deployment mode
-func (w *ConfigurationWizard) ConfigureHelmValuesWithMode(deploymentMode types.DeploymentMode) (*types.ChartConfiguration, error) {
-	// Skip deployment mode selection, use provided mode
-
-	// Step 1: Show configuration mode selection
-	modeChoice, err := w.showConfigurationModeSelection()
-	if err != nil {
-		return nil, err
-	}
-
-	if modeChoice == "default" {
-		return w.configureWithDefaults(deploymentMode)
-	}
-
-	return w.configureInteractive(deploymentMode)
+	return w.configureInteractive()
 }

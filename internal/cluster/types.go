@@ -21,16 +21,6 @@ type FlagContainer struct {
 	TestManager *k3d.K3dManager          `json:"-"` // Test K3D cluster manager for unit tests
 }
 
-// GetGlobal implements models.CommandFlags interface
-func (f *FlagContainer) GetGlobal() *models.GlobalFlags {
-	return f.Global
-}
-
-// GetExecutor implements models.CommandExecutor interface
-func (f *FlagContainer) GetExecutor() executor.CommandExecutor {
-	return f.Executor
-}
-
 // NewFlagContainer creates a new flag container with initialized flags
 func NewFlagContainer() *FlagContainer {
 	return &FlagContainer{
@@ -52,14 +42,4 @@ func (f *FlagContainer) SyncGlobalFlags() {
 		f.Delete.GlobalFlags = *f.Global
 		f.Cleanup.GlobalFlags = *f.Global
 	}
-}
-
-// Reset resets all flags to their zero values (for testing)
-func (f *FlagContainer) Reset() {
-	f.Global = &models.GlobalFlags{}
-	f.Create = &models.CreateFlags{} // Empty for reset, defaults are set in NewFlagContainer
-	f.List = &models.ListFlags{}
-	f.Status = &models.StatusFlags{}
-	f.Delete = &models.DeleteFlags{}
-	f.Cleanup = &models.CleanupFlags{}
 }

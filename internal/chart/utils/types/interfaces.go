@@ -2,44 +2,33 @@ package types
 
 import (
 	"context"
-	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
-	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/git"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	clusterDomain "github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"k8s.io/client-go/rest"
 )
 
-// Core Service Interfaces
-
-// ChartInstaller orchestrates the complete chart installation process
-type ChartInstaller interface {
-	InstallCharts(config config.ChartInstallConfig) error
-}
-
-// Provider Interfaces
+// This file keeps ONLY the interfaces that are actually implemented and
+// consumed. It used to declare 13 — a speculative service-locator layer
+// (ServiceFactory, ServiceOrchestrator, WorkflowExecutor, OperationsUI, ...)
+// with zero implementations or callers (audit B7).
 
 // ClusterLister provides cluster listing capabilities
 type ClusterLister interface {
 	ListClusters() ([]clusterDomain.ClusterInfo, error)
 }
 
-// HelmProvider manages Helm chart operations
-type HelmProvider interface {
-	InstallArgoCD(ctx context.Context, config config.ChartInstallConfig) error
-	InstallAppOfAppsFromLocal(ctx context.Context, config config.ChartInstallConfig, certFile, keyFile string) error
-	IsChartInstalled(ctx context.Context, releaseName, namespace string) (bool, error)
-	GetChartStatus(ctx context.Context, releaseName, namespace string) (models.ChartInfo, error)
+// ClusterAccess provides the read-only cluster capabilities the app subsystem
+// needs — listing clusters and resolving a rest.Config for one — WITHOUT
+// depending on cluster-creation code. Keeping the app (chart) subsystem behind
+// this interface isolates it from the cluster subsystem (req 18/19); the
+// concrete implementation is injected by the composition root (cmd / bootstrap),
+// which is allowed to import both.
+type ClusterAccess interface {
+	ClusterLister
+	GetRestConfig(name string) (*rest.Config, error)
 }
-
-// GitProvider manages Git repository operations
-type GitProvider interface {
-	CloneChartRepository(ctx context.Context, config *models.AppOfAppsConfig) (*git.CloneResult, error)
-	Cleanup(tempDir string)
-}
-
-// Service Component Interfaces
 
 // ArgoCDService manages ArgoCD installation and lifecycle
 type ArgoCDService interface {
@@ -56,94 +45,43 @@ type AppOfAppsService interface {
 	GetStatus(ctx context.Context, namespace string) (models.ChartInfo, error)
 }
 
-// Configuration Interfaces
-
-// ConfigBuilder constructs installation configurations
-type ConfigBuilder interface {
-	BuildInstallConfig(force, dryRun, verbose bool, clusterName string,
-		githubRepo, githubBranch, certDir string) (config.ChartInstallConfig, error)
-}
-
-// PathResolver resolves configuration and certificate paths
-type PathResolver interface {
-	GetCertificateDirectory() string
-	GetCertificateFiles() (certFile, keyFile string)
-	GetHelmValuesFile() string
-}
-
-// UI Interfaces
-
-// ClusterSelector provides cluster selection capabilities
-type ClusterSelector interface {
-	SelectCluster(clusters []clusterDomain.ClusterInfo, args []string) (string, error)
-}
-
-// OperationsUI provides user interface operations for chart management
-type OperationsUI interface {
-	SelectClusterForInstall(clusters []clusterDomain.ClusterInfo, args []string) (string, error)
-	ShowOperationCancelled(operation string)
-	ShowNoClusterMessage()
-	ConfirmInstallation(clusterName string) (bool, error)
-	ConfirmInstallationOnCluster(clusterName string) (bool, error)
-	ShowInstallationStart(clusterName string)
-	ShowInstallationComplete()
-	ShowInstallationError(err error)
-	PromptForGitHubCredentials(repoURL string) (username, token string, err error)
-}
-
-// Orchestration Interfaces
-
-// ServiceOrchestrator manages the coordination of services
-type ServiceOrchestrator interface {
-	ExecuteInstallation(req InstallationRequest) error
-}
-
-// WorkflowExecutor executes complex workflows with step tracking
-type WorkflowExecutor interface {
-	Execute() *WorkflowResult
-	AddStep(name, description string, execute func() error, required bool)
-}
-
-// Factory Interfaces
-
-// ServiceFactory creates service instances with proper dependency injection
-type ServiceFactory interface {
-	CreateInstaller() ChartInstaller
-	CreateConfigBuilder() ConfigBuilder
-	CreateClusterSelector(clusterLister ClusterLister) ClusterSelector
-	GetOperationsUI() OperationsUI
-}
-
-// Result Types for Orchestration
-
-// WorkflowResult represents the result of a workflow execution
-type WorkflowResult struct {
-	Success     bool
-	Error       error
-	Steps       []StepResult
-	TotalTime   time.Duration
-	ClusterName string
-}
-
-// StepResult represents the result of a workflow step
-type StepResult struct {
-	StepName  string
-	Success   bool
-	Error     error
-	Duration  time.Duration
-	Timestamp time.Time
-}
-
 // InstallationRequest contains all parameters for chart installation
 type InstallationRequest struct {
-	Args           []string
-	Force          bool
-	DryRun         bool
-	Verbose        bool
-	GitHubRepo     string
-	GitHubBranch   string
-	CertDir        string
-	DeploymentMode string       // Deployment mode: "oss-tenant", "saas-tenant", "saas-shared", or empty for interactive
-	NonInteractive bool         // Skip all prompts, use existing helm-values.yaml
-	KubeConfig     *rest.Config // Kubernetes REST config for cluster communication
+	Args         []string
+	Force        bool
+	DryRun       bool
+	Verbose      bool
+	GitHubRepo   string
+	GitHubBranch string
+	// GitHubRefExplicit is true when the operator explicitly set --ref.
+	// When set, GitHubBranch is pinned into the helm values (repository.branch) so it
+	// wins over the values-file branch and both the app-of-apps clone and the child
+	// Applications' targetRevision track that ref.
+	GitHubRefExplicit bool
+	CertDir           string
+	NonInteractive    bool // Skip all prompts, use existing openframe-helm-values.yaml
+	// RequireExistingValues makes a missing openframe-helm-values.yaml a hard
+	// error instead of "deploy chart defaults". Set by upgrade (Mode 1): an
+	// upgrade with an empty values map would replace the release values with
+	// chart defaults, silently wiping registry credentials and ingress settings
+	// when run from the wrong directory (audit F3/T1-2). Fresh installs and
+	// bootstrap keep the defaults-with-warning behavior — a clean machine has no
+	// values file yet.
+	RequireExistingValues bool
+	// SyncStragglersOnStall: on the upgrade (ref-change) path, let the
+	// application wait sync OutOfSync-but-healthy stragglers once progress
+	// stalls (children with autoSync off never pick a new ref up themselves).
+	SyncStragglersOnStall bool
+	KubeConfig            *rest.Config // Kubernetes REST config for cluster communication
+	// KubeContext is the kube-context name KubeConfig was resolved from
+	// (--context or the interactive target selector). When set, every helm CLI
+	// call targets it too, so the helm CLI, the native client checks, and the
+	// ArgoCD wait all watch the SAME cluster (audit F4: three different targets
+	// could be used within a single install).
+	KubeContext string
+	// ClusterAccess resolves clusters and their rest.Config for the install
+	// target. Injected by the composition root so the app subsystem never imports
+	// cluster-creation code (req 18/19). Required for interactive/named-cluster
+	// installs; may be nil when KubeConfig is supplied directly.
+	ClusterAccess ClusterAccess
 }

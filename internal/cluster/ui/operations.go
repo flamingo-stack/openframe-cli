@@ -148,14 +148,17 @@ func (ui *OperationsUI) SelectClusterForCleanup(clusters []models.ClusterInfo, a
 			return "", fmt.Errorf("cluster '%s' not found", clusterName)
 		}
 
-		// Always ask for confirmation
-		confirmed, err := ui.confirmCleanup(clusterName, force)
-		if err != nil {
-			return "", err
-		}
-		if !confirmed {
-			pterm.Info.Println("Cleanup cancelled.")
-			return "", nil
+		// Ask for confirmation unless forced (--force is documented as "skip
+		// confirmation prompts"; the old behavior of prompting anyway hung CI).
+		if !force {
+			confirmed, err := ui.confirmCleanup(clusterName)
+			if err != nil {
+				return "", err
+			}
+			if !confirmed {
+				pterm.Info.Println("Cleanup cancelled.")
+				return "", nil
+			}
 		}
 
 		return clusterName, nil
@@ -177,36 +180,35 @@ func (ui *OperationsUI) SelectClusterForCleanup(clusters []models.ClusterInfo, a
 		return "", nil
 	}
 
-	// Always ask for confirmation
-	confirmed, err := ui.confirmCleanup(clusterName, force)
-	if err != nil {
-		return "", err
-	}
-	if !confirmed {
-		pterm.Info.Println("Cleanup cancelled.")
-		return "", nil
+	// Ask for confirmation unless forced (same semantics as the argument path).
+	if !force {
+		confirmed, err := ui.confirmCleanup(clusterName)
+		if err != nil {
+			return "", err
+		}
+		if !confirmed {
+			pterm.Info.Println("Cleanup cancelled.")
+			return "", nil
+		}
 	}
 
 	return clusterName, nil
 }
 
-// confirmCleanup asks for user confirmation before cleaning up a cluster
-func (ui *OperationsUI) confirmCleanup(clusterName string, force bool) (bool, error) {
-	prompt := fmt.Sprintf("Are you sure you want to cleanup cluster '%s'?", pterm.Cyan(clusterName))
-	if force {
-		prompt = fmt.Sprintf("Are you sure you want to perform AGGRESSIVE cleanup on cluster '%s'?\n%s",
-			pterm.Cyan(clusterName),
-			pterm.Gray("This will remove ALL images, volumes, networks, and system resources."))
-	}
-
-	return pterm.DefaultInteractiveConfirm.
-		WithDefaultText(prompt).
-		WithDefaultValue(false).
-		Show()
+// confirmCleanup asks for user confirmation before cleaning up a cluster.
+// Non-interactive sessions fail fast with a --force hint instead of blocking.
+func (ui *OperationsUI) confirmCleanup(clusterName string) (bool, error) {
+	return sharedUI.RequireConfirmation(
+		fmt.Sprintf("Are you sure you want to cleanup cluster '%s'?", pterm.Cyan(clusterName)),
+		"--force", false)
 }
 
-// confirmDeletion asks for user confirmation before deleting a cluster
+// confirmDeletion asks for user confirmation before deleting a cluster.
+// Non-interactive sessions fail fast with a --force hint instead of blocking.
 func (ui *OperationsUI) confirmDeletion(clusterName string) (bool, error) {
+	if sharedUI.IsNonInteractive() {
+		return false, fmt.Errorf("confirmation required but the session is non-interactive; re-run with --force")
+	}
 	return sharedUI.ConfirmDeletion("cluster", clusterName)
 }
 
@@ -222,24 +224,61 @@ func (ui *OperationsUI) ShowOperationStart(operation, clusterName string) {
 	}
 }
 
+// ShowCleanupSummary reports what cleanup actually removed.
+//
+// It deliberately does not print a fixed list of accomplishments: cleanup is
+// best-effort, every phase can fail independently, and the previous summary
+// ("Removed unused Docker images / Freed up disk space / Optimized cluster
+// performance") was printed verbatim even when nothing was removed and every
+// phase had failed.
+func (ui *OperationsUI) ShowCleanupSummary(clusterName string, result models.CleanupResult) {
+	if result.Partial() {
+		pterm.Warning.Printf("Cluster '%s' cleanup finished with problems\n", pterm.Cyan(clusterName))
+	} else {
+		pterm.Success.Printf("Cluster '%s' cleanup completed\n", pterm.Cyan(clusterName))
+	}
+
+	// DefaultBasicText, not bare pterm.Printf/fmt.Println: those write straight
+	// to stdout and survive --silent, whose contract is "errors only".
+	pterm.DefaultBasicText.Println()
+	if result.Removed() == 0 {
+		pterm.Info.Println("Nothing to remove: the cluster had no OpenFrame resources left.")
+	} else {
+		pterm.Info.Printf("Removed:\n")
+		for _, line := range []struct {
+			n     int
+			label string
+		}{
+			{result.ApplicationsDeleted, "ArgoCD application(s)"},
+			{result.FinalizersCleared, "stuck application finalizer(s) cleared"},
+			{result.ReleasesRemoved, "Helm release(s)"},
+			{result.NamespacesDeleted, "namespace(s)"},
+			{result.NodesPruned, "node(s) pruned of unused container images"},
+		} {
+			if line.n > 0 {
+				pterm.DefaultBasicText.Printf("  %d %s\n", line.n, line.label)
+			}
+		}
+	}
+
+	if result.Partial() {
+		pterm.DefaultBasicText.Println()
+		pterm.Warning.Printf("These phases did not complete; some resources may remain:\n")
+		for _, f := range result.Failures {
+			pterm.DefaultBasicText.Printf("  • %s\n", f)
+		}
+		pterm.Info.Printf("Re-run with --force, or delete the cluster: openframe cluster delete %s\n", clusterName)
+	}
+}
+
 // ShowOperationSuccess displays a friendly success message
 func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 	switch strings.ToLower(operation) {
-	case "cleanup":
-		pterm.Success.Printf("Cluster '%s' cleanup completed\n", pterm.Cyan(clusterName))
-
-		// Show cleanup summary
-		fmt.Println()
-		pterm.Info.Printf("Cleanup Summary:\n")
-		pterm.Printf("  Removed unused Docker images\n")
-		pterm.Printf("  Freed up disk space\n")
-		pterm.Printf("  Optimized cluster performance\n")
-
 	case "delete":
 		pterm.Success.Printf("Cluster '%s' deleted successfully\n", pterm.Cyan(clusterName))
 
 		// Show detailed deletion box
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		boxContent := fmt.Sprintf(
 			"NAME:         %s\n"+
 				"TYPE:         %s\n"+
@@ -259,17 +298,17 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 			Println(boxContent)
 
 		// Show deletion summary
-		fmt.Println()
+		pterm.DefaultBasicText.Println()
 		pterm.Info.Printf("Deletion Summary:\n")
-		pterm.Printf("  Cluster and nodes removed\n")
-		pterm.Printf("  Docker containers cleaned up\n")
-		pterm.Printf("  Network configuration removed\n")
-		pterm.Printf("  Kubeconfig entries cleaned\n")
+		pterm.DefaultBasicText.Printf("  Cluster and nodes removed\n")
+		pterm.DefaultBasicText.Printf("  Docker containers cleaned up\n")
+		pterm.DefaultBasicText.Printf("  Network configuration removed\n")
+		pterm.DefaultBasicText.Printf("  Kubeconfig entries cleaned\n")
 
 	default:
 		pterm.Success.Printf("Operation '%s' completed for cluster '%s'\n", operation, pterm.Cyan(clusterName))
 	}
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 }
 
 // ShowOperationError displays a friendly error message
@@ -287,16 +326,18 @@ func (ui *OperationsUI) ShowOperationError(operation, clusterName string, err er
 func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dryRun bool, skipWizard bool) {
 	pterm.Info.Printf("Configuration Summary\n")
 
-	// Clean, simple format without heavy table styling
-	fmt.Printf("   Name: %s\n", pterm.Cyan(config.Name))
-	fmt.Printf("   Type: %s\n", string(config.Type))
-	fmt.Printf("  Nodes: %d\n", config.NodeCount)
+	// Clean, simple format without heavy table styling. DefaultBasicText (not
+	// raw fmt): --silent redirects it, while raw fmt leaked these lines into
+	// "silent" output (verification report saw the leak and graded it silent).
+	pterm.DefaultBasicText.Printf("   Name: %s\n", pterm.Cyan(config.Name))
+	pterm.DefaultBasicText.Printf("   Type: %s\n", string(config.Type))
+	pterm.DefaultBasicText.Printf("  Nodes: %d\n", config.NodeCount)
 
 	if config.K8sVersion != "" {
-		fmt.Printf("Version: %s\n", config.K8sVersion)
+		pterm.DefaultBasicText.Printf("Version: %s\n", config.K8sVersion)
 	}
 
-	fmt.Println()
+	pterm.DefaultBasicText.Println()
 
 	if dryRun {
 		pterm.Warning.Println("DRY RUN MODE - No cluster will be created")

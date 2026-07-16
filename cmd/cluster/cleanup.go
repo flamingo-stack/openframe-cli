@@ -3,9 +3,12 @@ package cluster
 import (
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -75,19 +78,29 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to detect cluster type: %w", err)
 	}
 
-	// Execute cluster cleanup through service layer
-	err = service.CleanupCluster(clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose, utils.GetGlobalFlags().Cleanup.Force)
+	// Inject the ArgoCD-backed application cleaner (composition root: only the
+	// command layer may import both the cluster and the chart subsystems).
+	// Without it, cleanup skips the Application delete/finalizer-strip phases and
+	// the argocd namespace can stay stuck in Terminating. Best-effort: a cluster
+	// that is unreachable or has no ArgoCD simply cleans up without it.
+	if cfg, cerr := service.GetRestConfig(clusterName); cerr == nil {
+		if mgr, merr := argocd.NewManagerWithConfig(executor.NewRealCommandExecutor(false, globalFlags.Global.Verbose), cfg); merr == nil {
+			service = service.WithApplicationCleaner(mgr)
+		} else if globalFlags.Global.Verbose {
+			pterm.Warning.Printf("ArgoCD cleanup unavailable: %v\n", merr)
+		}
+	} else if globalFlags.Global.Verbose {
+		pterm.Warning.Printf("Cluster not reachable for ArgoCD cleanup: %v\n", cerr)
+	}
+
+	// Execute cluster cleanup through service layer. A nil error with failed
+	// phases is a partial cleanup: the summary names what was left behind.
+	result, err := service.CleanupCluster(cmd.Context(), clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose, utils.GetGlobalFlags().Cleanup.Force)
 	if err != nil {
 		operationsUI.ShowOperationError("cleanup", clusterName, err)
 		return err
 	}
 
-	// Show friendly success message
-	operationsUI.ShowOperationSuccess("cleanup", clusterName)
+	operationsUI.ShowCleanupSummary(clusterName, result)
 	return nil
-}
-
-// GetCleanupCmdForTesting returns the cleanup command for testing purposes
-func GetCleanupCmdForTesting() *cobra.Command {
-	return getCleanupCmd()
 }

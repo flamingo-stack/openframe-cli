@@ -119,22 +119,14 @@ func TestCreateClusterManagerWithExecutor(t *testing.T) {
 	})
 }
 
-func TestCreateDefaultClusterManager(t *testing.T) {
-	t.Run("panics as expected", func(t *testing.T) {
-		assert.Panics(t, func() {
-			CreateDefaultClusterManager()
-		})
-	})
-}
-
 func TestK3dManager_CreateCluster(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         models.ClusterConfig
-		setupMock      func(*MockExecutor)
+		name            string
+		config          models.ClusterConfig
+		setupMock       func(*MockExecutor)
 		setupKubeconfig bool
-		expectedError  string
-		expectedArgs   []string
+		expectedError   string
+		expectedArgs    []string
 	}{
 		{
 			name: "successful cluster creation",
@@ -148,6 +140,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				// Using Maybe() to allow flexible number of calls as implementation may vary
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
@@ -165,6 +162,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				// Using Maybe() to allow flexible number of calls as implementation may vary
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 			},
@@ -206,6 +208,11 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 			setupMock: func(m *MockExecutor) {
 				// Mock bash or wsl for kubeconfig directory prep and cleanup
 				m.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The Linux inotify pre-check reads current limits (sysctl -n) and only
+				// escalates via `sudo -n` when they are low; report them sufficient so no
+				// escalation happens. .Maybe(): on darwin the whole step is skipped.
+				m.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error")).Maybe()
 			},
@@ -254,6 +261,11 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 	executor := &MockExecutor{}
 	// Mock bash or wsl for kubeconfig directory prep and cleanup
 	executor.On("Execute", mock.Anything, "bash", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+	// The Linux inotify pre-check reads current limits (sysctl -n) and only
+	// escalates via `sudo -n` when they are low; report them sufficient so no
+	// escalation happens. .Maybe(): on darwin the whole step is skipped.
+	executor.On("Execute", mock.Anything, "sysctl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "999999"}, nil).Maybe()
+	executor.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 
@@ -774,103 +786,6 @@ func TestParseNodeCount(t *testing.T) {
 	}
 }
 
-func TestParseClusterInfoURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "standard cluster-info output",
-			input:    "Kubernetes control plane is running at https://127.0.0.1:6550",
-			expected: "https://127.0.0.1:6550",
-		},
-		{
-			name:     "cluster-info with additional lines",
-			input:    "Kubernetes control plane is running at https://127.0.0.1:6550\nCoreDNS is running at https://127.0.0.1:6550/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy",
-			expected: "https://127.0.0.1:6550",
-		},
-		{
-			name:     "cluster-info with ANSI codes",
-			input:    "\x1b[32mKubernetes control plane\x1b[0m is running at \x1b[33mhttps://127.0.0.1:6550\x1b[0m",
-			expected: "https://127.0.0.1:6550",
-		},
-		{
-			name:     "http URL",
-			input:    "Kubernetes control plane is running at http://localhost:8080",
-			expected: "http://localhost:8080",
-		},
-		{
-			name:     "no URL found",
-			input:    "Some random output without URLs",
-			expected: "",
-		},
-		{
-			name:     "empty input",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "URL with different port",
-			input:    "Kubernetes control plane is running at https://192.168.1.100:16443",
-			expected: "https://192.168.1.100:16443",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseClusterInfoURL(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestStripANSICodes(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "no ANSI codes",
-			input:    "plain text",
-			expected: "plain text",
-		},
-		{
-			name:     "simple color code",
-			input:    "\x1b[32mgreen text\x1b[0m",
-			expected: "green text",
-		},
-		{
-			name:     "multiple color codes",
-			input:    "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[34mblue\x1b[0m",
-			expected: "red green blue",
-		},
-		{
-			name:     "bold and underline",
-			input:    "\x1b[1mbold\x1b[0m \x1b[4munderline\x1b[0m",
-			expected: "bold underline",
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "URL with ANSI codes",
-			input:    "\x1b[33mhttps://127.0.0.1:6550\x1b[0m",
-			expected: "https://127.0.0.1:6550",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := stripANSICodes(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestExtractHostPort(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -990,67 +905,6 @@ func TestIsTemporaryError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isTemporaryError(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestExtractIPFromRouteOutput(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "already valid IP",
-			input:    "172.21.96.1",
-			expected: "172.21.96.1",
-		},
-		{
-			name:     "full ip route output",
-			input:    "default via 172.21.96.1 dev eth0 proto kernel",
-			expected: "172.21.96.1",
-		},
-		{
-			name:     "ip route output with trailing newline",
-			input:    "default via 172.21.96.1 dev eth0 proto kernel\n",
-			expected: "172.21.96.1",
-		},
-		{
-			name:     "ip route output with extra whitespace",
-			input:    "  default via 172.21.96.1 dev eth0 proto kernel  ",
-			expected: "172.21.96.1",
-		},
-		{
-			name:     "resolv.conf nameserver output",
-			input:    "nameserver 172.21.96.1",
-			expected: "172.21.96.1",
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "whitespace only",
-			input:    "   ",
-			expected: "",
-		},
-		{
-			name:     "no valid IP in output",
-			input:    "default via gateway dev eth0",
-			expected: "",
-		},
-		{
-			name:     "multiple IPs returns first",
-			input:    "192.168.1.1 172.21.96.1",
-			expected: "192.168.1.1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractIPFromRouteOutput(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

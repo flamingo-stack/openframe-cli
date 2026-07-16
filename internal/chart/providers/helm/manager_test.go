@@ -2,26 +2,24 @@ package helm
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
-// createTestHelmManager creates a HelmManager for testing with a mock rest.Config
+// createTestHelmManager creates a HelmManager for testing with a fake clientset
+// so the native (client-go) connectivity checks and deployment waits work
+// without a real cluster.
 func createTestHelmManager(exec executor.CommandExecutor) *HelmManager {
-	// Create a minimal rest.Config for testing
-	// Note: In tests, we use the manager directly without calling New since the
-	// kubernetes clients would fail to initialize with this fake config
 	return &HelmManager{
-		executor: exec,
-		verbose:  false,
+		executor:   exec,
+		kubeClient: k8sfake.NewSimpleClientset(),
+		verbose:    false,
 	}
 }
 
@@ -196,136 +194,11 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 	}
 }
 
-func TestHelmManager_InstallArgoCD(t *testing.T) {
-	// Skip on Windows because helm commands are wrapped in WSL making command matching unreliable
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows due to WSL command wrapping")
-	}
-
-	tests := []struct {
-		name          string
-		config        config.ChartInstallConfig
-		setupMock     func(*MockExecutor)
-		expectError   bool
-		checkCommands func(t *testing.T, commands [][]string)
-	}{
-		{
-			name: "successful installation",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				// All commands should succeed
-			},
-			expectError: false,
-			checkCommands: func(t *testing.T, commands [][]string) {
-				// Verify expected commands were called
-				require.GreaterOrEqual(t, len(commands), 3)
-
-				// Commands may be wrapped in wsl on Windows, so check the command name flexibly
-				// Should have added repo and updated - check for "helm" or "wsl" as first command
-				if len(commands[0]) > 0 {
-					firstCmd := commands[0][0]
-					assert.True(t, firstCmd == "helm" || firstCmd == "wsl", "First command should be helm or wsl, got %s", firstCmd)
-				}
-
-				// Should have upgrade/install command
-				installCmd := commands[2]
-				// On Windows, command might be: wsl -d Ubuntu helm upgrade...
-				// On Unix, command might be: helm upgrade...
-				cmdStart := 0
-				if len(installCmd) > 0 && installCmd[0] == "wsl" {
-					// Skip wsl wrapper args to find actual helm command
-					for i, arg := range installCmd {
-						if arg == "helm" {
-							cmdStart = i
-							break
-						}
-					}
-				}
-
-				if cmdStart < len(installCmd) {
-					assert.Equal(t, "helm", installCmd[cmdStart])
-					if cmdStart+1 < len(installCmd) {
-						assert.Equal(t, "upgrade", installCmd[cmdStart+1])
-					}
-					if cmdStart+2 < len(installCmd) {
-						assert.Equal(t, "--install", installCmd[cmdStart+2])
-					}
-				}
-
-				// Check that install command contains expected flags
-				installCmdStr := strings.Join(installCmd, " ")
-				assert.Contains(t, installCmdStr, "argo-cd")
-				assert.Contains(t, installCmdStr, "argo/argo-cd")
-				assert.Contains(t, installCmdStr, "--version=8.2.7")
-				assert.Contains(t, installCmdStr, "--namespace")
-				assert.Contains(t, installCmdStr, "argocd")
-				assert.Contains(t, installCmdStr, "--create-namespace")
-				assert.Contains(t, installCmdStr, "--wait")
-				assert.Contains(t, installCmdStr, "--timeout")
-				// Timeout may vary (7m for ArgoCD, 30m for app-of-apps)
-				assert.True(t, strings.Contains(installCmdStr, "7m") || strings.Contains(installCmdStr, "30m"), "Should contain timeout value")
-				assert.Contains(t, installCmdStr, "argocd-values")
-			},
-		},
-		{
-			name: "dry run installation",
-			config: config.ChartInstallConfig{
-				DryRun: true,
-			},
-			setupMock: func(m *MockExecutor) {
-				// All commands should succeed
-			},
-			expectError: false,
-			checkCommands: func(t *testing.T, commands [][]string) {
-				require.GreaterOrEqual(t, len(commands), 3)
-				installCmd := commands[2]
-				installCmdStr := strings.Join(installCmd, " ")
-				assert.Contains(t, installCmdStr, "--dry-run")
-			},
-		},
-		{
-			name: "repo add fails",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm repo add argo https://argoproj.github.io/argo-helm", assert.AnError)
-			},
-			expectError:   true,
-			checkCommands: func(t *testing.T, commands [][]string) {},
-		},
-		{
-			name: "repo update fails",
-			config: config.ChartInstallConfig{
-				DryRun: false,
-			},
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm repo update", assert.AnError)
-			},
-			expectError:   true,
-			checkCommands: func(t *testing.T, commands [][]string) {},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockExec := NewMockExecutor()
-			tt.setupMock(mockExec)
-
-			manager := createTestHelmManager(mockExec)
-			err := manager.InstallArgoCD(context.Background(), tt.config)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				tt.checkCommands(t, mockExec.GetCommands())
-			}
-		})
-	}
-}
+// metadataCmd is the argv GetChartStatus issues. `helm get metadata` is used
+// instead of `helm status` because status's JSON carries no chart version, and
+// its top-level "version" field is the release REVISION — verified against helm
+// v4.2.2 on a live release.
+const metadataCmd = "helm get metadata argocd -n argocd --output json"
 
 func TestHelmManager_GetChartStatus(t *testing.T) {
 	tests := []struct {
@@ -334,25 +207,56 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 		namespace   string
 		setupMock   func(*MockExecutor)
 		expectError bool
+		wantStatus  string
+		wantVersion string
+		wantApp     string
 	}{
 		{
 			name:        "successful status retrieval",
 			releaseName: "argocd",
 			namespace:   "argocd",
 			setupMock: func(m *MockExecutor) {
-				m.SetResult("helm status argocd -n argocd --output json", &executor.CommandResult{
+				m.SetResult(metadataCmd, &executor.CommandResult{
 					ExitCode: 0,
-					Stdout:   `{"name":"argocd","namespace":"argocd","info":{"status":"deployed"}}`,
+					Stdout:   `{"name":"argocd","namespace":"argocd","status":"deployed","version":"7.7.5","appVersion":"v2.13.0","revision":3}`,
 				})
 			},
-			expectError: false,
+			wantStatus:  "deployed",
+			wantVersion: "7.7.5",
+			wantApp:     "v2.13.0",
+		},
+		{
+			// The point of M2.4: the method used to return a literal
+			// "deployed"/"1.0.0" regardless of what helm reported, so a broken
+			// release looked healthy and every chart claimed version 1.0.0.
+			name:        "a failed release is reported as failed",
+			releaseName: "argocd",
+			namespace:   "argocd",
+			setupMock: func(m *MockExecutor) {
+				m.SetResult(metadataCmd, &executor.CommandResult{
+					ExitCode: 0,
+					Stdout:   `{"name":"argocd","namespace":"argocd","status":"failed","version":"7.7.5","appVersion":"v2.13.0"}`,
+				})
+			},
+			wantStatus:  "failed",
+			wantVersion: "7.7.5",
+			wantApp:     "v2.13.0",
 		},
 		{
 			name:        "status command fails",
 			releaseName: "argocd",
 			namespace:   "argocd",
 			setupMock: func(m *MockExecutor) {
-				m.SetError("helm status argocd -n argocd --output json", assert.AnError)
+				m.SetError(metadataCmd, assert.AnError)
+			},
+			expectError: true,
+		},
+		{
+			name:        "unparseable output is an error, not a fabricated status",
+			releaseName: "argocd",
+			namespace:   "argocd",
+			setupMock: func(m *MockExecutor) {
+				m.SetResult(metadataCmd, &executor.CommandResult{ExitCode: 0, Stdout: `not json`})
 			},
 			expectError: true,
 		},
@@ -372,7 +276,9 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.releaseName, info.Name)
 				assert.Equal(t, tt.namespace, info.Namespace)
-				assert.Equal(t, "deployed", info.Status)
+				assert.Equal(t, tt.wantStatus, info.Status)
+				assert.Equal(t, tt.wantVersion, info.Version, "the chart version must come from helm, not a constant")
+				assert.Equal(t, tt.wantApp, info.AppVersion)
 			}
 		})
 	}

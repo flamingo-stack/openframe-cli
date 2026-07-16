@@ -20,10 +20,96 @@ concurrency:
 # =============================================================================
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: golangci-lint
+        # Blocking gate: the audit backlog is cleared (`golangci-lint run ./...`
+        # reports 0 issues), so any NEW finding fails the pipeline.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: latest
+
+      - name: 'Check: go.mod/go.sum are tidy'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: go.mod/go.sum are tidy (go mod tidy -diff)"
+          echo "==================================================================="
+          go mod tidy -diff
+
+  release-build-matrix:
+    # Compile-only guard for the FULL GoReleaser platform matrix. The three
+    # e2e runner legs already compile linux/amd64, windows/amd64 and
+    # darwin/arm64 (including their test files via `make test-unit`), but the
+    # release ships SIX combos — a GOOS/GOARCH break on the un-runnered three
+    # (linux/arm64, windows/arm64, darwin/amd64) would otherwise surface only
+    # when the release itself fails. For those three, `go vet` also
+    # cross-compiles the TEST files, catching windows/darwin-only breakage in
+    # test code that no runner ever builds.
+    name: Release build matrix (compile-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: 'Build: all six GoReleaser platform combos'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cross-compile the full release matrix (6 GOOS/GOARCH)"
+          echo "==================================================================="
+          # Keep in sync with .goreleaser.yml (goos: linux,windows,darwin ×
+          # goarch: amd64,arm64).
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
+            echo "--- go build ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...
+          done
+
+      - name: 'Vet (incl. test files) for combos without a runner'
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: go vet for the un-runnered combos (compiles test code)"
+          echo "==================================================================="
+          # The runner legs vet-compile their own combos; these three are never
+          # built anywhere else.
+          for target in linux/arm64 windows/arm64 darwin/amd64; do
+            echo "--- go vet ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
+          done
+
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 70
+
+    env:
+      # Path to the built binary for this matrix leg. On Windows it forwards the
+      # whole CLI into WSL; on Linux it runs natively. Used by every test step.
+      OF_BIN: ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+      # Cluster used by the lifecycle steps; its k3d kube-context is k3d-<name>.
+      OF_CLUSTER: openframe-test
+      OF_CONTEXT: k3d-openframe-test
 
     strategy:
       fail-fast: false
@@ -41,20 +127,449 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: 'go.mod'
           cache: true
-        
-      - name: Run integration tests
+
+      # The Windows binary re-runs the whole CLI inside WSL2, so the runner needs
+      # a WSL distro that can run Docker (k3d needs a Docker daemon). Alpine is the
+      # lightest official distro; the CLI's Docker installer now supports it (apk).
+      # Only `bash` is pre-installed (the launcher uses `bash -lc`) — Docker itself
+      # is installed by the CLI (`prerequisites install`) below, exercising the new
+      # apk path; the daemon is then started explicitly (WSL has no OpenRC init).
+      - name: Install Alpine in WSL
+        if: matrix.os == 'windows'
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Alpine-3.23
+          set-as-default: 'true'
+          additional-packages: bash
+
+      # --- Build & stage (all platforms, incl. darwin) -----------------------
+      - name: Build & stage CLI
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  SETUP: build CLI for ${{ matrix.os }}/${{ matrix.arch }}"
+          echo "==================================================================="
+          make build
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            # The cluster and the Kubernetes client live in WSL, so the CLI needs a
+            # *Linux* openframe binary there. `make build` is a dev version with no
+            # published release to auto-download, so build the Linux binary and
+            # stream it into the default WSL distro's ~/.openframe/bin via stdin —
+            # no Windows→WSL path translation, which is where the launcher looks.
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
+            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
+          fi
+
+      # --- Simplest: no cluster, read-only (all platforms, incl. darwin) -----
+      - name: 'CLI: version & help'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: version, help & completion (read-only, no cluster)"
+          echo "==================================================================="
+          "$OF_BIN" --version
+          "$OF_BIN" --help
+          # Per-command --help is exercised exhaustively in the next step.
+          echo "--- completion: every supported shell generates cleanly"
+          # Shell-completion generation is pure (no cluster/network) — smoke every shell.
+          for sh in bash zsh fish powershell; do "$OF_BIN" completion "$sh" >/dev/null; done
+          echo "--- update check (text + json; network-tolerant)"
+          # Self-update check needs neither Docker nor k3d, so it runs everywhere
+          # (incl. darwin); tolerate transient network issues on the runner.
+          "$OF_BIN" update check || echo "update check skipped (network)"
+          # json mode must keep stdout machine-clean (no spinner) and stay parseable.
+          "$OF_BIN" update check -o json || echo "update check -o json skipped (network)"
+          echo "--- update rollback with no prior update"
+          # Rollback with no prior update must exit cleanly with a "nothing to roll
+          # back" notice (offline, no download), not error out or hang.
+          "$OF_BIN" update rollback
+
+      # Exhaustive --help over the WHOLE command tree, on the real (built/staged)
+      # binary. Complements the hermetic cmd/help_matrix_test.go by covering the
+      # actual binary (ldflags, embeds, and on Windows the WSL forward). Discovery
+      # is dynamic — a newly added command is covered with no hand-maintained list.
+      # Pure and non-interactive (no cluster, no network), so it runs on every OS.
+      - name: 'CLI: every command --help (exhaustive)'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: --help on EVERY command (real binary, non-interactive)"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          walk_help() {
+            local path="$1"
+            # $path is a space-separated command path ("cluster create") that MUST
+            # word-split into separate argv entries — intentional, so quiet SC2086.
+            # shellcheck disable=SC2086
+            "$OF_BIN" $path --help >/tmp/h.out 2>&1 || { cat /tmp/h.out; fail "'openframe $path --help' exited non-zero"; }
+            grep -q '^Usage:' /tmp/h.out || { cat /tmp/h.out; fail "'openframe $path --help' printed no Usage section"; }
+            echo "  OK: openframe $path --help"
+            # Leaf commands list no subcommands, so grep matching nothing is fine.
+            local subs
+            subs=$(sed -n '/Available Commands:/,/^$/p' /tmp/h.out | grep -E '^  [a-z]' | awk '{print $1}' || true)
+            for s in $subs; do
+              [ "$s" = "help" ] && continue
+              walk_help "${path:+$path }$s"
+            done
+          }
+          walk_help ""
+
+      # Self-update against the REAL latest release: the only test that
+      # exercises the live trust chain end to end (GitHub release lookup →
+      # cosign signature of checksums.txt against the pinned identity →
+      # SHA256 of the archive → atomic swap → --version smoke test → rollback).
+      # Runs on a COPY of the binary, never the one under test.
+      #
+      # Not on Windows: the native launcher forwards the whole CLI into WSL, so
+      # this would exercise the Linux binary there, not the Windows one.
+      - name: 'Update: apply the real latest release, then roll back'
+        if: matrix.os != 'windows'
+        shell: bash
+        env:
+          # GH_TOKEN for the curl below; GITHUB_TOKEN is what `openframe update`
+          # itself reads. Exporting only GH_TOKEN left the CLI unauthenticated,
+          # which rate-limited to HTTP 403 on shared macOS runner IPs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: openframe update (real release, cosign-verified) + rollback"
+          echo "==================================================================="
+          LATEST="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name)"
+          [ -n "$LATEST" ] && [ "$LATEST" != "null" ] || { echo "::error::could not resolve the latest release"; exit 1; }
+          echo "latest published release: $LATEST"
+
+          # A dev build refuses to self-update, so stamp an old version in.
+          WORK="$(mktemp -d)"; export HOME="$WORK/home"; mkdir -p "$HOME"
+          go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$WORK/openframe" .
+          OF="$WORK/openframe"
+          [ "$("$OF" --version | cut -d' ' -f1)" = "0.0.1" ] || { echo "::error::ldflags version injection broken"; exit 1; }
+
+          echo "--- update to the latest release (verifies the cosign bundle)"
+          "$OF" update --yes
+          got="$("$OF" --version | cut -d' ' -f1)"
+          [ "$got" = "$LATEST" ] || { echo "::error::after update --version is $got, want $LATEST"; exit 1; }
+          echo "updated 0.0.1 -> $got"
+
+          echo "--- rollback restores the previous binary (offline)"
+          "$OF" update rollback --yes
+          back="$("$OF" --version | cut -d' ' -f1)"
+          [ "$back" = "0.0.1" ] || { echo "::error::after rollback --version is $back, want 0.0.1"; exit 1; }
+
+          echo "--- rollback again: nothing left to restore, clean exit"
+          "$OF" update rollback --yes
+
+          echo "--- explicit tag, both spellings (ForTag tolerates the v prefix)"
+          for spelling in "$LATEST" "v${LATEST#v}"; do
+            W2="$(mktemp -d)"; HOME="$W2/home"; mkdir -p "$HOME"
+            go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$W2/openframe" .
+            HOME="$W2/home" "$W2/openframe" update "$spelling" --yes
+            v="$(HOME="$W2/home" "$W2/openframe" --version | cut -d' ' -f1)"
+            [ "$v" = "$LATEST" ] || { echo "::error::update $spelling landed on $v, want $LATEST"; exit 1; }
+            echo "OK: update $spelling -> $v"
+          done
+
+          echo "--- an unsigned/nonexistent release is refused"
+          W3="$(mktemp -d)"; HOME="$W3/home"; mkdir -p "$HOME"
+          go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$W3/openframe" .
+          if HOME="$W3/home" "$W3/openframe" update 99.99.99 --yes; then
+            echo "::error::update to a nonexistent release must fail"; exit 1
+          fi
+          echo "update + rollback OK"
+
+      # Windows only: run the CLI's own prerequisite installer inside WSL. This
+      # exercises the apk Docker install path (installAlpine) and installs k3d +
+      # helm via verified download. The Docker daemon is started separately below
+      # (installAlpine's OpenRC start is a no-op under WSL's initless environment).
+      - name: 'Prereqs: install (WSL, exercises apk Docker install)'
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: prerequisites install inside WSL (apk Docker path)"
+          echo "==================================================================="
+          "$OF_BIN" prerequisites install || echo "prereq install returned nonzero (daemon is started next)"
+
+      # Start the Docker daemon inside WSL. Alpine WSL has no OpenRC init, so mount
+      # cgroups and launch dockerd directly (vfs storage driver avoids overlayfs
+      # issues under the WSL2 kernel). Dump the log if it never comes up.
+      - name: 'Start Docker in WSL'
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  SETUP: start dockerd inside WSL (Alpine, initless)"
+          echo "==================================================================="
+          # rc-service is unreliable in initless WSL (it returns 0 without actually
+          # bringing up the daemon), so start dockerd directly and detached
+          # (setsid, </dev/null) so it survives this shell and keeps the WSL VM and
+          # daemon alive for later steps. vfs avoids overlayfs issues under WSL2.
+          wsl -u root -- sh -c '
+            command -v dockerd >/dev/null || { echo "dockerd not installed"; exit 1; }
+            rc-service docker stop >/dev/null 2>&1 || true
+            pkill dockerd >/dev/null 2>&1 || true
+            mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
+            setsid dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs </dev/null >/var/log/dockerd.log 2>&1 &
+            sleep 1
+          '
+          for i in $(seq 1 30); do
+            if wsl -u root -- docker info >/dev/null 2>&1; then echo "docker is up"; break; fi
+            echo "waiting for dockerd ($i)..."; sleep 2
+          done
+          if ! wsl -u root -- docker info >/dev/null 2>&1; then
+            echo "=== dockerd did not come up; diagnostics ==="
+            wsl -u root -- cat /var/log/dockerd.log 2>/dev/null || echo "(dockerd wrote no log)"
+            wsl -u root -- sh -c 'command -v dockerd; ls -la /var/run/docker.sock 2>&1; ls /sys/fs/cgroup 2>&1 | head; uname -r'
+            exit 1
+          fi
+          wsl -u root -- docker version
+
+      # Runs on all platforms (incl. darwin): `check` only reports, never installs,
+      # so it is safe on the macOS runner (which has no Docker). Informational —
+      # missing tools are expected pre-bootstrap, hence `|| echo`.
+      - name: 'CLI: prerequisites check'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: prerequisites check (report-only, informational)"
+          echo "==================================================================="
+          "$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"
+
+      # Everything below needs a Docker daemon + k3d. It runs on linux and on
+      # windows (the Windows binary forwards into WSL, where Docker was started
+      # above), exercising the real cluster lifecycle on both. darwin stays
+      # read-only (no nested Docker on the macOS runner).
+      - name: 'CLI: cluster queries (empty)'
         if: matrix.os != 'darwin'
         shell: bash
-        timeout-minutes: 60
-        run: make build && ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }} bootstrap openframe-test --deployment-mode=oss-tenant --non-interactive --verbose
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cluster list on an empty state (text/json/yaml)"
+          echo "==================================================================="
+          "$OF_BIN" cluster list
+          "$OF_BIN" cluster list -o json
+          "$OF_BIN" cluster list -o yaml
 
+      # --- Medium: dry-run, still no real changes ----------------------------
+      - name: 'CLI: dry-run create & install'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: dry-run create & install (no real changes)"
+          echo "==================================================================="
+          "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard --dry-run
+          # No cluster exists yet, so an install (even --dry-run) correctly exits
+          # non-zero ("no cluster selected"); this just smokes that it reaches the
+          # cluster check without crashing.
+          "$OF_BIN" app install --non-interactive --dry-run || echo "app install without a cluster exits non-zero (expected pre-create)"
+
+      # Guard: --silent must suppress non-error output. A dry-run create
+      # normally prints an INFO "Configuration Summary" box; with --silent it must
+      # be gone, while the same run without --silent must still show it.
+      - name: 'CLI: --silent suppresses output'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: --silent suppresses INFO output (with positive control)"
+          echo "==================================================================="
+          "$OF_BIN" --silent cluster create sil-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >silent.out 2>&1 || true
+          "$OF_BIN"          cluster create loud-$RANDOM --type k3d --nodes 1 --skip-wizard --dry-run >loud.out 2>&1 || true
+          # Strict contract: --silent means ZERO non-error output, not merely
+          # "no summary box" — the 0.4.7 verification report found blank lines
+          # leaking through raw fmt prints and graded them as silence.
+          if [ -s silent.out ]; then echo "::error::--silent produced output:"; cat silent.out; exit 1; fi
+          if ! grep -qi 'Configuration Summary' loud.out; then echo "::error::control run printed no summary — test is moot, check the assertion"; exit 1; fi
+          echo "silent output empty, control printed the summary — OK"
+
+      # --- Complex: real cluster lifecycle (heaviest, last) ------------------
+      - name: 'Cluster: create'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: real cluster create + list/status (text/json/yaml)"
+          echo "==================================================================="
+          "$OF_BIN" cluster create "$OF_CLUSTER" --type k3d --nodes 1 --skip-wizard
+          echo "--- cluster list & status after create"
+          "$OF_BIN" cluster list
+          "$OF_BIN" cluster status "$OF_CLUSTER"
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o json
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o yaml
+
+      # Guard: --non-interactive with a cluster present but NO cluster
+      # name must fail fast, never drop into the interactive picker (which hangs
+      # CI until the job timeout). Runs with a short timeout so a regression that
+      # reintroduces the prompt is caught as exit 124, not a 40-minute hang.
+      # Validation matrix: invalid parameters must exit non-zero with the
+      # documented message, and machine output must stay parseable. These need
+      # real tools on the runner (the text-mode prerequisite gate), so they
+      # live here rather than in the hermetic unit-level CLI matrix.
+      - name: 'CLI: validation matrix (negative + machine output)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: invalid parameters exit non-zero; JSON stays parseable"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          expect_fail() {
+            desc="$1"; shift
+            if "$OF_BIN" "$@" </dev/null >/tmp/neg.out 2>&1; then
+              cat /tmp/neg.out; fail "expected failure: $desc"
+            fi
+            echo "OK (non-zero): $desc"
+          }
+          expect_fail "status with invalid --output"      cluster status "$OF_CLUSTER" -o bogus
+          expect_fail "list with invalid --output"        cluster list -o bogus
+          expect_fail "machine status without a name"     cluster status -o json
+          expect_fail "status of a nonexistent cluster"   cluster status no-such-cluster -o json
+          # Machine output contract: valid JSON on stdout, parseable by jq.
+          "$OF_BIN" cluster list -o json | jq -e 'type == "array"' >/dev/null \
+            || fail "cluster list -o json is not a JSON array"
+          "$OF_BIN" cluster status "$OF_CLUSTER" -o json | jq -e '.name and (.ready_servers | type == "number") and (.total_servers | type == "number")' >/dev/null \
+            || fail "cluster status -o json lacks name/ready_servers/total_servers"
+          echo "validation matrix OK"
+
+      # Guard (verification report N2): an explicit --context IS the install
+      # target — it must be accepted in non-interactive mode without a cluster
+      # name (0.4.7 failed this exact invocation with "requires a cluster name").
+      - name: 'App: --context works as the target in non-interactive mode'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app install --context <ctx> --non-interactive --dry-run"
+          echo "==================================================================="
+          "$OF_BIN" app install --context "$OF_CONTEXT" --non-interactive --dry-run
+
+      - name: 'App: --non-interactive without a name fails fast'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: --non-interactive fails fast, never drops into a prompt"
+          echo "==================================================================="
+          set +e
+          timeout 60 "$OF_BIN" app install --non-interactive
+          code=$?
+          set -e
+          if [ "$code" -eq 124 ]; then echo "::error::app install --non-interactive hung on a prompt"; exit 1; fi
+          if [ "$code" -eq 0 ]; then echo "::error::app install --non-interactive without a cluster name must fail, got exit 0"; exit 1; fi
+          echo "fast-fail OK (exit $code)"
+
+      - name: 'App: install'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 40
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: real app install (non-interactive, full ArgoCD wait)"
+          echo "==================================================================="
+          "$OF_BIN" app install "$OF_CLUSTER" --non-interactive --verbose
+
+      - name: 'App: status & access'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app status (text/json/yaml) & access after install"
+          echo "==================================================================="
+          "$OF_BIN" app status --context "$OF_CONTEXT"
+          "$OF_BIN" app status --context "$OF_CONTEXT" -o json
+          "$OF_BIN" app status --context "$OF_CONTEXT" -o yaml
+          "$OF_BIN" app access --context "$OF_CONTEXT"
+
+      # Guard (verification report N1): an upgrade with NO values file must
+      # fail fast naming the file — an empty values map would make helm replace
+      # the release values with chart defaults, wiping the configuration.
+      - name: 'App: upgrade without a values file fails fast'
+        if: matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app upgrade --ref refuses to run without a values file"
+          echo "==================================================================="
+          BIN="$GITHUB_WORKSPACE/${OF_BIN#./}"
+          tmp="$(mktemp -d)"
+          set +e
+          out="$(cd "$tmp" && "$BIN" app upgrade --ref main "$OF_CLUSTER" 2>&1)"
+          code=$?
+          set -e
+          echo "$out" | tail -5
+          if [ "$code" -eq 0 ]; then echo "::error::upgrade without a values file must fail"; exit 1; fi
+          if ! echo "$out" | grep -q "openframe-helm-values.yaml"; then
+            echo "::error::the error must name the missing values file"; exit 1
+          fi
+          echo "fail-fast OK (exit $code)"
+
+      - name: 'App: upgrade (dry-run then force-sync)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: app upgrade — dry-run, then force-sync"
+          echo "==================================================================="
+          "$OF_BIN" app upgrade --context "$OF_CONTEXT" --dry-run
+          echo "--- force-sync"
+          "$OF_BIN" app upgrade --context "$OF_CONTEXT" --sync --verbose
+
+      # cluster cleanup is a first-class non-interactive command with logic no
+      # other step exercises against a real cluster: kube-context-pinned Helm
+      # uninstalls, ArgoCD finalizer stripping, and node image pruning via crictl
+      # (k3d nodes run containerd, not docker). Runs on the live, populated cluster
+      # so all phases have something to do; --force skips the confirmation prompt.
+      # It leaves the cluster empty; the teardown then deletes it.
+      - name: 'Cluster: cleanup (releases + crictl image prune)'
+        if: matrix.os != 'darwin'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cluster cleanup --force (non-interactive)"
+          echo "==================================================================="
+          "$OF_BIN" cluster cleanup "$OF_CLUSTER" --force
+
+      # --- Teardown (runs even if a step above failed) -----------------------
+      - name: 'Teardown: uninstall & delete cluster'
+        if: always() && matrix.os != 'darwin'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEARDOWN: app uninstall & cluster delete --force"
+          echo "==================================================================="
+          "$OF_BIN" app uninstall --context "$OF_CONTEXT" --yes || true
+          "$OF_BIN" cluster delete "$OF_CLUSTER" --force || true
 
       - name: Run unit tests
-        run: make test-unit
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil)"
+          echo "==================================================================="
+          make test-unit
+
+      - name: Run unit tests with race detector
+        # Linux only (race detector needs CGO/gcc). Now a blocking gate: the
+        # codebase is race-clean (the pterm spinner was replaced with a
+        # synchronized wrapper in internal/shared/ui/spinner).
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests with -race (linux only)"
+          echo "==================================================================="
+          make test-race

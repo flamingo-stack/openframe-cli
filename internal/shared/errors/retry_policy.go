@@ -2,11 +2,16 @@ package errors
 
 import (
 	"context"
+	stderrors "errors"
+	"io"
 	"math"
 	"math/rand"
+	"net"
+	"strings"
+	"syscall"
 	"time"
 
-	"github.com/pterm/pterm"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // RetryPolicy defines retry behavior for recoverable errors
@@ -40,13 +45,21 @@ func NewExponentialBackoffPolicy(maxAttempts int, baseDelay time.Duration) *Expo
 		MaxDelay:    5 * time.Minute,
 		Multiplier:  2.0,
 		Jitter:      true,
+		// Substrings for tools we shell out to, whose Go error is only an exit
+		// code. These are the strings the tools ACTUALLY print. "network timeout"
+		// used to be listed here and is a phrase Go never emits: the standard
+		// library says "i/o timeout" (verified), so that entry matched nothing.
 		RetryableErrs: map[string]bool{
-			"network timeout":       true,
+			"i/o timeout":           true,
 			"connection refused":    true,
+			"connection reset":      true,
+			"tls handshake timeout": true,
+			"unexpected eof":        true,
 			"temporary failure":     true,
 			"resource not ready":    true,
 			"cluster not ready":     true,
 			"service unavailable":   true,
+			"too many requests":     true,
 		},
 	}
 }
@@ -56,13 +69,27 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 	if attempt >= p.MaxAttempts {
 		return false
 	}
+	if err == nil {
+		return false
+	}
 
-	// Check if it's a recoverable error
-	if recoverableErr, ok := err.(RecoverableError); ok {
+	// Check if it's a recoverable error. errors.As unwraps %w chains, so a
+	// recoverable error stays recognized after being wrapped.
+	var recoverableErr RecoverableError
+	if stderrors.As(err, &recoverableErr) {
 		return recoverableErr.IsRecoverable()
 	}
 
-	// Check if error message indicates it's retryable
+	// Structural classification first — it does not depend on the wording of
+	// somebody else's error string.
+	if retry, decided := classifyTransient(err); decided {
+		return retry
+	}
+
+	// Fallback for shelled-out tools (helm, k3d, docker): their failure is an
+	// exit code, and the reason only exists as text on stderr. Since
+	// executor.CommandError carries that stderr in its Error() string, matching
+	// substrings here actually reaches the tool's own message.
 	errMsg := err.Error()
 	for retryablePattern := range p.RetryableErrs {
 		if contains(errMsg, retryablePattern) {
@@ -73,6 +100,50 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 	return false
 }
 
+// classifyTransient answers "is this error transient?" structurally, returning
+// decided=false when it has no opinion.
+//
+// Order matters, and was verified against the standard library: an
+// http.Client timeout satisfies BOTH net.Error.Timeout() and
+// errors.Is(err, context.DeadlineExceeded), while a cancelled request is a
+// net.Error whose Timeout() is false. So the timeout check must come first, or
+// every network timeout would be misfiled as "the operation is over".
+func classifyTransient(err error) (retry, decided bool) {
+	// A timed-out network operation is the canonical retryable failure.
+	var netErr net.Error
+	if stderrors.As(err, &netErr) && netErr.Timeout() {
+		return true, true
+	}
+
+	// The user pressed Ctrl-C, or the overall budget is spent. Retrying is
+	// pointless and, for cancellation, wrong.
+	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+		return false, true
+	}
+
+	// Connection-level failures against an API server that is still starting.
+	for _, errno := range []error{
+		syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.EPIPE,
+		syscall.EHOSTUNREACH, syscall.ENETUNREACH,
+	} {
+		if stderrors.Is(err, errno) {
+			return true, true
+		}
+	}
+	if stderrors.Is(err, io.ErrUnexpectedEOF) {
+		return true, true
+	}
+
+	// Kubernetes API server backpressure and optimistic-concurrency conflicts.
+	if apierrors.IsConflict(err) || apierrors.IsTooManyRequests(err) ||
+		apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) ||
+		apierrors.IsTimeout(err) {
+		return true, true
+	}
+
+	return false, false
+}
+
 // GetDelay calculates the delay for the next retry attempt
 func (p *ExponentialBackoffPolicy) GetDelay(attempt int) time.Duration {
 	if attempt <= 0 {
@@ -80,16 +151,20 @@ func (p *ExponentialBackoffPolicy) GetDelay(attempt int) time.Duration {
 	}
 
 	delay := time.Duration(float64(p.BaseDelay) * math.Pow(p.Multiplier, float64(attempt-1)))
-	
+
 	if delay > p.MaxDelay {
 		delay = p.MaxDelay
 	}
 
-	// Add jitter to prevent thundering herd
+	// Add non-negative jitter to prevent thundering herd. Jitter is additive in
+	// [0, 10%] so it never shortens the intended backoff (the previous
+	// [-10%, +10%] form could reduce the delay below the computed value).
 	if p.Jitter {
-		jitterAmount := float64(delay) * 0.1 // 10% jitter
-		jitter := time.Duration(jitterAmount * (2.0*rand.Float64() - 1.0))
-		delay = delay + jitter
+		jitter := time.Duration(float64(delay) * 0.1 * rand.Float64()) //nolint:gosec // jitter, not security-sensitive
+		delay += jitter
+		if delay > p.MaxDelay {
+			delay = p.MaxDelay
+		}
 	}
 
 	return delay
@@ -100,43 +175,9 @@ func (p *ExponentialBackoffPolicy) GetMaxAttempts() int {
 	return p.MaxAttempts
 }
 
-// LinearBackoffPolicy implements linear backoff retry policy
-type LinearBackoffPolicy struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	Increment   time.Duration
-}
-
-// NewLinearBackoffPolicy creates a new linear backoff policy
-func NewLinearBackoffPolicy(maxAttempts int, baseDelay, increment time.Duration) *LinearBackoffPolicy {
-	return &LinearBackoffPolicy{
-		MaxAttempts: maxAttempts,
-		BaseDelay:   baseDelay,
-		Increment:   increment,
-	}
-}
-
-// ShouldRetry determines if an error should be retried
-func (p *LinearBackoffPolicy) ShouldRetry(err error, attempt int) bool {
-	if attempt >= p.MaxAttempts {
-		return false
-	}
-	return IsRecoverable(err)
-}
-
-// GetDelay calculates linear delay
-func (p *LinearBackoffPolicy) GetDelay(attempt int) time.Duration {
-	return p.BaseDelay + time.Duration(attempt)*p.Increment
-}
-
-// GetMaxAttempts returns maximum attempts
-func (p *LinearBackoffPolicy) GetMaxAttempts() int {
-	return p.MaxAttempts
-}
-
 // RetryExecutor handles retry logic with policies
 type RetryExecutor struct {
-	policy RetryPolicy
+	policy  RetryPolicy
 	onRetry func(err error, attempt int, delay time.Duration)
 }
 
@@ -147,16 +188,10 @@ func NewRetryExecutor(policy RetryPolicy) *RetryExecutor {
 	}
 }
 
-// WithRetryCallback sets a callback function called on each retry
-func (r *RetryExecutor) WithRetryCallback(callback func(err error, attempt int, delay time.Duration)) *RetryExecutor {
-	r.onRetry = callback
-	return r
-}
-
 // Execute executes a function with retry logic
 func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) error {
 	var lastErr error
-	
+
 	for attempt := 0; attempt < r.policy.GetMaxAttempts(); attempt++ {
 		// Check context cancellation
 		select {
@@ -203,155 +238,41 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) err
 	return lastErr
 }
 
-// ExecuteWithResult executes a function returning a result with retry logic
-func (r *RetryExecutor) ExecuteWithResult(ctx context.Context, operation func() (interface{}, error)) (interface{}, error) {
-	var lastErr error
-	var lastResult interface{}
-	
-	for attempt := 0; attempt < r.policy.GetMaxAttempts(); attempt++ {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Execute the operation
-		result, err := operation()
-		if err == nil {
-			return result, nil // Success
-		}
-
-		lastErr = err
-		lastResult = result
-
-		// Check if we should retry
-		if !r.policy.ShouldRetry(err, attempt) {
-			break
-		}
-
-		// This is our last attempt
-		if attempt == r.policy.GetMaxAttempts()-1 {
-			break
-		}
-
-		// Calculate delay
-		delay := r.policy.GetDelay(attempt + 1)
-
-		// Call retry callback if set
-		if r.onRetry != nil {
-			r.onRetry(err, attempt+1, delay)
-		}
-
-		// Wait for the delay period or context cancellation
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(delay):
-			// Continue to next attempt
-		}
-	}
-
-	return lastResult, lastErr
-}
-
-// DefaultRetryCallback provides a standard retry callback with progress indication
-func DefaultRetryCallback(operation string) func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Warning.Printf("⚠️  %s failed (attempt %d): %v\n", operation, attempt, err)
-		pterm.Info.Printf("🔄 Retrying in %s...\n", delay.Round(time.Second))
-	}
-}
-
-// QuietRetryCallback provides a minimal retry callback
-func QuietRetryCallback() func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Debug.Printf("Retry attempt %d after %v: %v\n", attempt, delay, err)
-	}
-}
-
-// VerboseRetryCallback provides detailed retry information
-func VerboseRetryCallback() func(error, int, time.Duration) {
-	return func(err error, attempt int, delay time.Duration) {
-		pterm.Warning.Printf("Operation failed on attempt %d: %v\n", attempt, err)
-		pterm.Info.Printf("Waiting %s before retry attempt %d...\n", delay.Round(time.Millisecond), attempt+1)
-		
-		if recoverableErr, ok := err.(RecoverableError); ok && recoverableErr.IsRecoverable() {
-			pterm.Debug.Printf("Error is recoverable with suggested retry after %v\n", recoverableErr.GetRetryAfter())
-		}
-	}
-}
-
 // Predefined retry policies for common scenarios
 
-// NetworkRetryPolicy for network-related operations
-func NetworkRetryPolicy() RetryPolicy {
-	policy := NewExponentialBackoffPolicy(5, 2*time.Second)
-	policy.MaxDelay = 30 * time.Second
-	policy.RetryableErrs = map[string]bool{
-		"network timeout":        true,
-		"connection refused":     true,
-		"connection reset":       true,
-		"no route to host":       true,
-		"dns resolution failed":  true,
-		"tls handshake timeout": true,
-	}
-	return policy
-}
-
-// ResourceRetryPolicy for resource availability operations
-func ResourceRetryPolicy() RetryPolicy {
-	policy := NewExponentialBackoffPolicy(10, 5*time.Second)
-	policy.MaxDelay = 2 * time.Minute
-	policy.RetryableErrs = map[string]bool{
-		"resource not ready":     true,
-		"cluster not ready":      true,
-		"service unavailable":    true,
-		"temporarily unavailable": true,
-		"resource busy":          true,
-	}
-	return policy
-}
-
-// InstallationRetryPolicy for installation operations
+// InstallationRetryPolicy for installation operations.
+//
+// The substrings are the fallback for helm/kubectl failures, which reach us as
+// "exit status 1" plus the tool's stderr. Structural classification
+// (classifyTransient) handles everything the Go type system can see.
+//
+// "tiller not ready" used to be listed here: Tiller was removed in Helm 3
+// (2019) and this CLI drives Helm 3/4, so it could never match. Likewise
+// "rate limited" — GitHub and the Kubernetes API server both say "too many
+// requests".
 func InstallationRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(3, 10*time.Second)
 	policy.MaxDelay = 5 * time.Minute
 	policy.RetryableErrs = map[string]bool{
-		"helm not ready":         true,
-		"tiller not ready":       true,
-		"resource conflict":      true,
-		"temporary failure":      true,
-		"rate limited":           true,
+		// helm's own transient conditions
+		"another operation (install/upgrade/rollback) is in progress": true,
+		"the server is currently unable to handle the request":        true,
+		"etcdserver: request timed out":                               true,
+		// generic transport failures visible only as text from a child process
+		"i/o timeout":           true,
+		"connection refused":    true,
+		"connection reset":      true,
+		"tls handshake timeout": true,
+		"unexpected eof":        true,
+		"too many requests":     true,
+		"temporary failure":     true,
 	}
 	return policy
 }
 
-// Helper functions
-
-// IsRecoverable checks if an error is recoverable
-func IsRecoverable(err error) bool {
-	if recoverableErr, ok := err.(RecoverableError); ok {
-		return recoverableErr.IsRecoverable()
-	}
-	return false
-}
-
-// contains checks if a string contains a substring (case-insensitive)
+// contains reports whether str contains substr, case-insensitively. (The prior
+// hand-rolled implementation was case-sensitive despite its name and duplicated
+// strings.Contains with extra, redundant branches.)
 func contains(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		   (str == substr || 
-		   (len(str) > len(substr) && 
-		    (str[:len(substr)] == substr || 
-		     str[len(str)-len(substr):] == substr ||
-		     containsSubstring(str, substr))))
-}
-
-func containsSubstring(str, substr string) bool {
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(str), strings.ToLower(substr))
 }

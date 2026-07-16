@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 )
 
+// DefaultHelmValuesFile is the base helm values filename the CLI reads/writes in
+// the working directory (non-interactive installs read it as-is).
+const DefaultHelmValuesFile = "openframe-helm-values.yaml"
+
 // PathResolver handles path resolution for chart-related files and directories
 type PathResolver struct{}
 
@@ -30,29 +34,17 @@ func (p *PathResolver) GetCertificateDirectory() string {
 	// Check if the directory exists
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
 		// Create the directory if it doesn't exist
-		os.MkdirAll(certDir, 0755)
+		_ = os.MkdirAll(certDir, 0750)
 	}
 
 	return certDir
 }
 
-// GetManifestsDirectory returns the relative path to the manifests directory
-func (p *PathResolver) GetManifestsDirectory() string {
-	// Return relative path from typical execution context
-	// This assumes execution from the project root or CLI directory
-	return "cli/internal/chart/manifests"
-}
-
 // GetHelmValuesFile returns the path to the helm values file
 func (p *PathResolver) GetHelmValuesFile() string {
-	// Return relative path to helm-values.yaml in CLI directory
+	// Return relative path to the helm values file in the CLI directory
 	// This file should be dynamically read at runtime
-	return "./helm-values.yaml"
-}
-
-// GetArgocdValuesFile returns the relative path to the ArgoCD values file
-func (p *PathResolver) GetArgocdValuesFile() string {
-	return filepath.Join(p.GetManifestsDirectory(), "argocd-values.yaml")
+	return "./" + DefaultHelmValuesFile
 }
 
 // GetCertificateFiles returns the paths to the certificate files

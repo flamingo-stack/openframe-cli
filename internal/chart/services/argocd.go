@@ -11,6 +11,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
+	"k8s.io/client-go/rest"
 )
 
 // ArgoCD handles ArgoCD installation logic
@@ -21,18 +22,35 @@ type ArgoCD struct {
 	executor      executor.CommandExecutor
 }
 
-// NewArgoCD creates a new ArgoCD service
-func NewArgoCD(helmManager *helm.HelmManager, pathResolver *config.PathResolver, exec executor.CommandExecutor) *ArgoCD {
-	// Create a non-verbose executor for ArgoCD operations to reduce command spam
-	// We'll handle verbose logging at a higher level in the ArgoCD manager
+// NewArgoCDForTarget creates an ArgoCD service whose wait manager watches the
+// SAME cluster the install targets: the given rest.Config when available,
+// otherwise the named cluster's context. A bare manager would lazily
+// resolve the kubeconfig's CURRENT context, which during an install may be a
+// completely different cluster — the wait would then time out against (or,
+// worse, report ready from) the wrong target (audit F4).
+func NewArgoCDForTarget(helmManager *helm.HelmManager, pathResolver *config.PathResolver, exec executor.CommandExecutor, kubeConfig *rest.Config, clusterName string) (*ArgoCD, error) {
 	argoCDExecutor := executor.NewRealCommandExecutor(false, false) // Never verbose for internal operations
+
+	var manager *argocd.Manager
+	switch {
+	case kubeConfig != nil:
+		m, err := argocd.NewManagerWithConfig(argoCDExecutor, kubeConfig)
+		if err != nil {
+			return nil, err
+		}
+		manager = m
+	case clusterName != "":
+		manager = argocd.NewManagerWithCluster(argoCDExecutor, clusterName)
+	default:
+		manager = argocd.NewManager(argoCDExecutor)
+	}
 
 	return &ArgoCD{
 		helmManager:   helmManager,
 		pathResolver:  pathResolver,
-		argoCDManager: argocd.NewManager(argoCDExecutor),
+		argoCDManager: manager,
 		executor:      exec,
-	}
+	}, nil
 }
 
 // Install installs ArgoCD using Helm
@@ -72,10 +90,10 @@ func (a *ArgoCD) WaitForApplications(ctx context.Context, config config.ChartIns
 
 // IsInstalled checks if ArgoCD is installed
 func (a *ArgoCD) IsInstalled(ctx context.Context) (bool, error) {
-	return a.helmManager.IsChartInstalled(ctx, "argo-cd", "argocd")
+	return a.helmManager.IsChartInstalled(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace)
 }
 
 // GetStatus returns the status of ArgoCD installation
 func (a *ArgoCD) GetStatus(ctx context.Context) (models.ChartInfo, error) {
-	return a.helmManager.GetChartStatus(ctx, "argo-cd", "argocd")
+	return a.helmManager.GetChartStatus(ctx, argocd.ArgoCDReleaseName, argocd.ArgoCDNamespace)
 }

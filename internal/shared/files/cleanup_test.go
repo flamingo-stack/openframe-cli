@@ -114,6 +114,26 @@ func TestFileCleanup_CleanupOnSuccessOnly_Behavior(t *testing.T) {
 	})
 }
 
+// TestFileCleanup_ForcedRestoreRemovesSecretTempOnError locks in the security
+// guarantee: the production error/interruption path calls RestoreFiles (forced),
+// which must remove a registered temp file even in success-only mode — so a
+// secret-bearing temp file (e.g. helm-values-tmp.yaml) never leaks on failure or
+// Ctrl-C (audit I2 / req 25).
+func TestFileCleanup_ForcedRestoreRemovesSecretTempOnError(t *testing.T) {
+	cleanup := NewFileCleanup()
+	cleanup.SetCleanupOnSuccessOnly(true) // even in this mode…
+
+	tmpDir := t.TempDir()
+	tempFile := filepath.Join(tmpDir, "helm-values-tmp.yaml")
+	require.NoError(t, os.WriteFile(tempFile, []byte("password: s3cret"), 0o600))
+	require.NoError(t, cleanup.RegisterTempFile(tempFile))
+	require.FileExists(t, tempFile)
+
+	// …the error/interruption path (RestoreFiles, forced) must still delete it.
+	require.NoError(t, cleanup.RestoreFiles(false))
+	assert.NoFileExists(t, tempFile, "forced restore must remove the secret temp file even in success-only mode")
+}
+
 func TestFileCleanup_RegularMode_AlwaysCleanup(t *testing.T) {
 	cleanup := NewFileCleanup()
 	// Default mode (not success-only) - should always cleanup
@@ -162,75 +182,4 @@ func TestFileCleanup_SignalInterruption_Scenario(t *testing.T) {
 
 	// Verify file was cleaned up (CTRL-C should always cleanup, regardless of success-only mode)
 	assert.NoFileExists(t, tempFile, "Temporary file should be cleaned up on CTRL-C interruption")
-}
-
-func TestFileCleanup_BackupFile_MemoryOnly(t *testing.T) {
-	cleanup := NewFileCleanup()
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test-file.txt")
-	originalContent := "original content"
-
-	// Create original file
-	err := os.WriteFile(testFile, []byte(originalContent), 0644)
-	require.NoError(t, err)
-
-	// Backup file using memory-only mode
-	err = cleanup.BackupFile(testFile, true)
-	assert.NoError(t, err)
-
-	// Verify no physical backup file was created
-	assert.NoFileExists(t, testFile+".cli-backup", "No physical backup should be created in memory-only mode")
-
-	// Modify the original file
-	err = os.WriteFile(testFile, []byte("modified content"), 0644)
-	require.NoError(t, err)
-
-	// Restore the file
-	err = cleanup.RestoreFiles(false)
-	assert.NoError(t, err)
-
-	// Verify original content was restored
-	content, err := os.ReadFile(testFile)
-	require.NoError(t, err)
-	assert.Equal(t, originalContent, string(content), "Original content should be restored from memory")
-}
-
-func TestFileCleanup_BackupFile_PhysicalBackup(t *testing.T) {
-	cleanup := NewFileCleanup()
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test-file.txt")
-	originalContent := "original content"
-
-	// Create original file
-	err := os.WriteFile(testFile, []byte(originalContent), 0644)
-	require.NoError(t, err)
-
-	// Backup file using physical backup mode
-	err = cleanup.BackupFile(testFile, false)
-	assert.NoError(t, err)
-
-	// Verify physical backup file was created
-	backupFile := testFile + ".cli-backup"
-	assert.FileExists(t, backupFile, "Physical backup should be created")
-
-	// Verify backup content matches original
-	backupContent, err := os.ReadFile(backupFile)
-	require.NoError(t, err)
-	assert.Equal(t, originalContent, string(backupContent), "Backup content should match original")
-
-	// Modify the original file
-	err = os.WriteFile(testFile, []byte("modified content"), 0644)
-	require.NoError(t, err)
-
-	// Restore the file
-	err = cleanup.RestoreFiles(false)
-	assert.NoError(t, err)
-
-	// Verify original content was restored
-	content, err := os.ReadFile(testFile)
-	require.NoError(t, err)
-	assert.Equal(t, originalContent, string(content), "Original content should be restored from physical backup")
-
-	// Verify backup file was cleaned up
-	assert.NoFileExists(t, backupFile, "Physical backup should be cleaned up after restore")
 }

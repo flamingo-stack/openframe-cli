@@ -14,21 +14,21 @@ func GenerateTestClusterName() string {
 
 // CreateTestCluster creates a k3d cluster for testing with shorter timeout
 func CreateTestCluster(name string) error {
-	cmd := exec.Command("k3d", "cluster", "create", name, "--agents", "1", "--timeout", "60s")
+	cmd := exec.Command("k3d", "cluster", "create", name, "--agents", "1", "--timeout", "60s") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	return cmd.Run()
 }
 
 // DeleteTestCluster removes a test cluster
 func DeleteTestCluster(name string) error {
-	cmd := exec.Command("k3d", "cluster", "delete", name)
+	cmd := exec.Command("k3d", "cluster", "delete", name) // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	return cmd.Run()
 }
 
 // ClusterExists checks if a cluster exists (with caching for better performance)
 func ClusterExists(name string) (bool, error) {
 	// Use k3d directly to check if cluster exists - more reliable and faster than CLI
-	cmd := exec.Command("k3d", "cluster", "list", name, "--no-headers")
-	cmd.Env = append(cmd.Env, "DOCKER_CLI_EXPERIMENTAL=enabled") // Speed up docker operations
+	cmd := exec.Command("k3d", "cluster", "list", name, "--no-headers") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
+	cmd.Env = append(cmd.Env, "DOCKER_CLI_EXPERIMENTAL=enabled")        // Speed up docker operations
 	err := cmd.Run()
 	// If k3d command succeeds, cluster exists
 	return err == nil, nil
@@ -36,18 +36,18 @@ func ClusterExists(name string) (bool, error) {
 
 // StopTestCluster stops a test cluster
 func StopTestCluster(name string) error {
-	cmd := exec.Command("k3d", "cluster", "stop", name)
+	cmd := exec.Command("k3d", "cluster", "stop", name) // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	return cmd.Run()
 }
 
 // CleanupTestCluster ensures a test cluster is cleaned up (optimized)
 func CleanupTestCluster(name string) {
 	// Use k3d directly for faster cleanup - skip CLI overhead
-	DeleteTestCluster(name)
-	
+	_ = DeleteTestCluster(name)
+
 	// Wait briefly for Docker resources to be released
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Ensure any remaining Docker resources for this cluster are cleaned up
 	cleanupClusterSpecificResources(name)
 }
@@ -60,7 +60,7 @@ func CleanupAllTestClusters() {
 	if err != nil {
 		return
 	}
-	
+
 	// Parse cluster names and delete test clusters
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	deletedAny := false
@@ -70,7 +70,7 @@ func CleanupAllTestClusters() {
 			continue
 		}
 		clusterName := fields[0] // First field is cluster name
-		if clusterName != "" && (strings.Contains(clusterName, "test") || 
+		if clusterName != "" && (strings.Contains(clusterName, "test") ||
 			strings.Contains(clusterName, "cleanup") ||
 			strings.Contains(clusterName, "integration") ||
 			strings.Contains(clusterName, "collision") ||
@@ -86,12 +86,12 @@ func CleanupAllTestClusters() {
 			deletedAny = true
 		}
 	}
-	
+
 	// If we deleted any clusters, wait for Docker to settle
 	if deletedAny {
 		time.Sleep(500 * time.Millisecond)
 	}
-	
+
 	// Also clean up any leftover Docker networks and containers
 	cleanupDockerResources()
 }
@@ -103,40 +103,40 @@ func cleanupDockerResources() {
 	if output, err := cmd.Output(); err == nil {
 		networks := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, network := range networks {
-			if network != "" && (strings.Contains(network, "test") || 
+			if network != "" && (strings.Contains(network, "test") ||
 				strings.Contains(network, "collision") ||
 				strings.Contains(network, "interrupt") ||
 				strings.Contains(network, "stress") ||
 				strings.Contains(network, "multi") ||
 				strings.Contains(network, "integration")) {
-				exec.Command("docker", "network", "rm", network).Run()
+				_ = exec.Command("docker", "network", "rm", network).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 			}
 		}
 	}
-	
+
 	// Clean up leftover k3d containers
 	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-", "--format", "{{.Names}}")
 	if output, err := cmd.Output(); err == nil {
 		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, container := range containers {
-			if container != "" && (strings.Contains(container, "test") || 
+			if container != "" && (strings.Contains(container, "test") ||
 				strings.Contains(container, "collision") ||
 				strings.Contains(container, "interrupt") ||
 				strings.Contains(container, "stress") ||
 				strings.Contains(container, "multi") ||
 				strings.Contains(container, "integration")) {
-				exec.Command("docker", "rm", "-f", container).Run()
+				_ = exec.Command("docker", "rm", "-f", container).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 			}
 		}
 	}
-	
+
 	// Clean up any leftover k3d registries that might conflict
 	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-.*-registry", "--format", "{{.Names}}")
 	if output, err := cmd.Output(); err == nil {
 		registries := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, registry := range registries {
 			if registry != "" {
-				exec.Command("docker", "rm", "-f", registry).Run()
+				_ = exec.Command("docker", "rm", "-f", registry).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 			}
 		}
 	}
@@ -146,15 +146,15 @@ func cleanupDockerResources() {
 func cleanupClusterSpecificResources(clusterName string) {
 	// Remove specific cluster network
 	networkName := fmt.Sprintf("k3d-%s", clusterName)
-	exec.Command("docker", "network", "rm", networkName).Run()
-	
+	_ = exec.Command("docker", "network", "rm", networkName).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
+
 	// Remove specific cluster containers
-	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}")
+	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 	if output, err := cmd.Output(); err == nil {
 		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, container := range containers {
 			if container != "" {
-				exec.Command("docker", "rm", "-f", container).Run()
+				_ = exec.Command("docker", "rm", "-f", container).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 			}
 		}
 	}

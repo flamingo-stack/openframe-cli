@@ -1,0 +1,157 @@
+# Baseline Helm values for the Argo CD chart (targets chart 10.x / app v3.x).
+#
+# This file is embedded into the CLI binary via go:embed (see values.go) and is
+# the BASELINE for the ArgoCD install the CLI performs BEFORE the app-of-apps is
+# cloned from the platform repo. Keep component keys (redis, dex, applicationSet,
+# notifications) aligned with the pinned chart version.
+#
+# USER OVERRIDES: a user can override any value here without rebuilding the CLI
+# by adding a top-level `argocd:` section to openframe-helm-values.yaml; that
+# subtree is deep-merged over this baseline (maps merge, scalars/lists replace)
+# and the CLI prints a warning naming the overridden keys. Only the `argocd:`
+# subtree is used — the rest of that file targets the app-of-apps chart. Example:
+#   argocd:
+#     dex:
+#       enabled: true        # re-enable dex (disabled by default below)
+# See MergedArgoCDValues in values.go.
+#
+# SECURITY — developer account default:
+#   configs.secret.extra.accounts.developer.password below is a bcrypt hash of
+#   the well-known password "developer". This is an intentional DEVELOPER
+#   CONVENIENCE default for local oss-tenant / demo clusters, NOT a production
+#   credential. It ships the same known password to every install. For anything
+#   beyond local development, rotate this account (or manage it out-of-band).
+fullnameOverride: argocd
+
+configs:
+  cm:
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
+    # Ignore ArgoCD-injected pre-delete-hook finalizers on child Apps -> stops perpetual finalizer OutOfSync on parents (eg. telepresence).
+    resource.customizations.ignoreDifferences.argoproj.io_Application: |
+      jqPathExpressions:
+        - '.metadata.finalizers[] | select(test("pre-delete-finalizer"))'
+    accounts.developer: login
+  params:
+    controller.sync.timeout.seconds: "1800"
+    applicationsetcontroller.enable.progressive.syncs: "true"  # Enables ApplicationSet RollingSync
+  secret:
+    extra:
+      # bcrypt hash of password "developer".
+      accounts.developer.password: "$2a$10$DITDUUgWOAXP4xvwRnjh1uqfQftV9OQnqcq0d2TApl8q7AUxnSq0K"
+  rbac:
+    policy.default: ''
+    policy.csv: |
+      p, role:developer, applications, *,        shareds/*,       allow
+      p, role:developer, logs,         get,      shareds/*,       allow
+      p, role:developer, applications, get,      datasources/*,   allow
+      p, role:developer, applications, sync,     datasources/*,   allow
+      p, role:developer, applications, action/*, datasources/*,   allow
+      p, role:developer, logs,         get,      datasources/*,   allow
+      p, role:developer, projects,     get,      shareds,         allow
+      p, role:developer, projects,     get,      datasources,     allow
+
+      g, developer, role:developer
+
+
+controller:
+  # 17 child apps flip status simultaneously during install; the defaults
+  # queued those transitions and slowed reconciliation on cold start.
+  extraArgs:
+    - --status-processors=20
+    - --operation-processors=10
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8082"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 800Mi
+    limits:
+      cpu: 500m
+      memory: 1.5Gi
+
+
+server:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8083"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 400Mi
+    limits:
+      cpu: 300m
+      memory: 600Mi
+
+
+repoServer:
+  podAnnotations:
+    loki.grafana.com/scrape: "true"
+  # 1500m (was 500m): on a cold install the repo-server renders all 17 helm
+  # charts back-to-back and the 500m cap throttled it — slow first renders
+  # surfaced as "connection refused" on the apps.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 400Mi
+    limits:
+      cpu: 1500m
+      memory: 1Gi
+  env:
+    - name: ARGOCD_EXEC_TIMEOUT
+      value: "180s"
+
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+dex:
+  # Dex (SSO) is disabled: the chart defaults it on (dex.enabled: true), but
+  # OpenFrame's local/oss-tenant login uses the local `developer` account
+  # configured above, never dex. Beyond being dead weight on local k3d, the
+  # dexidp/dex:v2.45.1 arm64 image intermittently SIGSEGVs under emulation on
+  # Apple Silicon (exit 139) before its first log line -> CrashLoopBackOff ->
+  # the 7m `helm --wait` never completes -> fresh installs fail. Disabling it
+  # removes the blocker; re-enable and pin a known-good image if SSO is needed.
+  enabled: false
+
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 59m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

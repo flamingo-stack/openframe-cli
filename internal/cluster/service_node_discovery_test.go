@@ -230,8 +230,15 @@ func TestClusterService_isK3dWorkerNode(t *testing.T) {
 	}
 }
 
-func TestClusterService_cleanupDockerResources_Integration(t *testing.T) {
-	// Integration test to verify the full flow works
+// TestClusterService_cleanupNodeImages_UsesCrictlNotDocker is the regression
+// guard for the no-op prune.
+//
+// k3d nodes are rancher/k3s containers running containerd; they contain no
+// docker binary, so `docker exec <node> docker image prune` exited 127 on every
+// node of every cleanup. The failures were swallowed, so cleanup reported
+// success and reclaimed nothing. The previous version of this test asserted
+// that `docker image prune` WAS executed — it pinned the broken behaviour.
+func TestClusterService_cleanupNodeImages_UsesCrictlNotDocker(t *testing.T) {
 	mockExec := executor.NewMockCommandExecutor()
 
 	// Mock the node discovery
@@ -239,26 +246,45 @@ func TestClusterService_cleanupDockerResources_Integration(t *testing.T) {
 		Stdout: "k3d-test-cluster-server-0\nk3d-test-cluster-agent-0\nk3d-test-cluster-serverlb",
 	})
 
-	// Mock the cleanup commands for each valid node
-	mockExec.SetResponse("docker exec k3d-test-cluster-server-0 docker image prune -f", &executor.CommandResult{})
-	mockExec.SetResponse("docker exec k3d-test-cluster-server-0 docker container prune -f", &executor.CommandResult{})
-	mockExec.SetResponse("docker exec k3d-test-cluster-agent-0 docker image prune -f", &executor.CommandResult{})
-	mockExec.SetResponse("docker exec k3d-test-cluster-agent-0 docker container prune -f", &executor.CommandResult{})
+	service := NewClusterService(mockExec)
+
+	pruned, err := service.cleanupNodeImages(context.Background(), "test-cluster", true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, pruned, "server and agent nodes are pruned; serverlb is not a cluster node")
+
+	assert.True(t, mockExec.WasCommandExecuted("docker ps"))
+	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-server-0 crictl rmi --prune"))
+	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-agent-0 crictl rmi --prune"))
+
+	// The load balancer is not a cluster node.
+	assert.False(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-serverlb crictl rmi --prune"))
+
+	// No command may invoke a docker binary INSIDE a node: there isn't one.
+	for _, cmd := range mockExec.GetExecutedCommands() {
+		assert.NotContains(t, cmd, "docker exec k3d-test-cluster-server-0 docker",
+			"k3d nodes run containerd and ship no docker binary")
+		assert.NotContains(t, cmd, "container prune", "containerd has no container prune")
+		assert.NotContains(t, cmd, "volume prune", "the node's volumes belong to the host daemon")
+		assert.NotContains(t, cmd, "network prune", "the node's networks belong to the host daemon")
+	}
+}
+
+// TestClusterService_cleanupNodeImages_ReportsFailure: a node whose prune fails
+// must be counted as failed, not silently as cleaned.
+func TestClusterService_cleanupNodeImages_ReportsFailure(t *testing.T) {
+	mockExec := executor.NewMockCommandExecutor()
+	mockExec.SetResponse("docker ps --filter label=k3d.cluster=test-cluster --filter status=running --format {{.Names}}", &executor.CommandResult{
+		Stdout: "k3d-test-cluster-server-0\nk3d-test-cluster-agent-0",
+	})
+	mockExec.SetResponse("docker exec k3d-test-cluster-agent-0 crictl rmi --prune", &executor.CommandResult{
+		ExitCode: 1,
+		Stderr:   "connection refused",
+	})
 
 	service := NewClusterService(mockExec)
 
-	err := service.cleanupDockerResources(context.Background(), "test-cluster", true, false)
-
-	require.NoError(t, err, "cleanupDockerResources should succeed")
-
-	// Verify all expected commands were called
-	assert.True(t, mockExec.WasCommandExecuted("docker ps"))
-	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-server-0 docker image prune -f"))
-	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-server-0 docker container prune -f"))
-	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-agent-0 docker image prune -f"))
-	assert.True(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-agent-0 docker container prune -f"))
-
-	// Verify serverlb commands were NOT called (filtered out)
-	assert.False(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-serverlb docker image prune -f"))
-	assert.False(t, mockExec.WasCommandExecuted("docker exec k3d-test-cluster-serverlb docker container prune -f"))
+	pruned, err := service.cleanupNodeImages(context.Background(), "test-cluster", false)
+	assert.Equal(t, 1, pruned, "only the node that actually pruned may be counted")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "k3d-test-cluster-agent-0")
 }

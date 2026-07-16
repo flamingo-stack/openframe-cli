@@ -1,56 +1,54 @@
 graph TB
-    subgraph "CLI Layer"
-        Root[Root Command]
-        Bootstrap[Bootstrap Command]
-        Cluster[Cluster Commands]
-        Chart[Chart Commands] 
-        Dev[Dev Commands]
+    subgraph "CLI (cmd/)"
+        Root[root]
+        Bootstrap[bootstrap]
+        Cluster[cluster]
+        App[app]
+        Prereq[prerequisites]
+        Update[update]
     end
-    
-    subgraph "Service Layer"
-        ClusterSvc[Cluster Service]
-        ChartSvc[Chart Service]
-        InterceptSvc[Intercept Service]
-        ScaffoldSvc[Scaffold Service]
+
+    subgraph "Domain (internal/)"
+        ClusterSvc[cluster service]
+        ChartSvc[chart service]
+        K8sAccess[k8s access API]
+        PrereqSvc[prerequisites]
     end
-    
-    subgraph "Provider Layer"
-        K3D[K3D Provider]
-        Helm[Helm Provider]
-        ArgoCD[ArgoCD Provider]
-        Telepresence[Telepresence Provider]
-        Kubectl[Kubectl Provider]
+
+    subgraph "Providers / Integrations"
+        K3D[k3d]
+        Helm[helm]
+        Git[git clone]
+        ArgoCD[ArgoCD dynamic client]
     end
-    
+
     subgraph "External Systems"
         Docker[Docker]
-        K8s[Kubernetes]
-        Git[Git Repositories]
-        Registry[Container Registry]
+        K8s[Kubernetes API]
+        Repo[openframe-oss-tenant repo]
     end
-    
+
     Root --> Bootstrap
     Root --> Cluster
-    Root --> Chart
-    Root --> Dev
-    
+    Root --> App
+    Root --> Prereq
+    Root --> Update
+
+    Bootstrap --> PrereqSvc
     Bootstrap --> ClusterSvc
     Bootstrap --> ChartSvc
     Cluster --> ClusterSvc
-    Chart --> ChartSvc
-    Dev --> InterceptSvc
-    Dev --> ScaffoldSvc
-    
+    App --> ChartSvc
+    App --> K8sAccess
+    Prereq --> PrereqSvc
+
     ClusterSvc --> K3D
+    ChartSvc --> Git
     ChartSvc --> Helm
     ChartSvc --> ArgoCD
-    InterceptSvc --> Telepresence
-    InterceptSvc --> Kubectl
-    ScaffoldSvc --> Kubectl
-    
+    K8sAccess --> K8s
+
     K3D --> Docker
+    Git --> Repo
     Helm --> K8s
     ArgoCD --> K8s
-    ArgoCD --> Git
-    Telepresence --> K8s
-    Kubectl --> K8s

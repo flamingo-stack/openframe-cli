@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	kernel32              = syscall.NewLazyDLL("kernel32.dll")
-	procGetLongPathNameW  = kernel32.NewProc("GetLongPathNameW")
+	kernel32             = syscall.NewLazyDLL("kernel32.dll")
+	procGetLongPathNameW = kernel32.NewProc("GetLongPathNameW")
 )
 
 // expandShortPath expands Windows 8.3 short filenames to their full long path names.

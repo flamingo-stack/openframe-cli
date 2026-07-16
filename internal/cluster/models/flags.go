@@ -80,7 +80,7 @@ func AddDeleteFlags(cmd *cobra.Command, flags *DeleteFlags) {
 
 // AddCleanupFlags adds cleanup-specific flags to a command
 func AddCleanupFlags(cmd *cobra.Command, flags *CleanupFlags) {
-	cmd.Flags().BoolVarP(&flags.Force, "force", "f", false, "Enable aggressive cleanup (remove all images, volumes, networks)")
+	cmd.Flags().BoolVarP(&flags.Force, "force", "f", false, "Skip confirmation prompt and enable aggressive cleanup (remove all images, volumes, networks)")
 }
 
 // ValidateClusterName validates cluster name according to Kubernetes naming conventions

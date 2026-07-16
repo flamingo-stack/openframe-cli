@@ -41,20 +41,20 @@ func TestFlagContainer_SyncGlobalFlags(t *testing.T) {
 		container.SyncGlobalFlags()
 
 		// Verify that all command flags have the global values
-		assert.Equal(t, container.Global.Verbose, container.Create.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Create.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Create.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Create.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.List.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.List.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.List.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.List.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Status.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Status.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Status.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Status.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Delete.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Delete.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Delete.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Delete.DryRun)
 
-		assert.Equal(t, container.Global.Verbose, container.Cleanup.GlobalFlags.Verbose)
-		assert.Equal(t, container.Global.DryRun, container.Cleanup.GlobalFlags.DryRun)
+		assert.Equal(t, container.Global.Verbose, container.Cleanup.Verbose)
+		assert.Equal(t, container.Global.DryRun, container.Cleanup.DryRun)
 	})
 
 	t.Run("handles nil global flags", func(t *testing.T) {
@@ -65,33 +65,6 @@ func TestFlagContainer_SyncGlobalFlags(t *testing.T) {
 		assert.NotPanics(t, func() {
 			container.SyncGlobalFlags()
 		})
-	})
-}
-
-func TestFlagContainer_Reset(t *testing.T) {
-	t.Run("resets all flags to zero values", func(t *testing.T) {
-		container := NewFlagContainer()
-
-		// Set some values
-		container.Global.Verbose = true
-		container.Create.ClusterType = "gke"
-		container.Create.NodeCount = 5
-		container.List.Quiet = true
-		container.Delete.GlobalFlags.Force = true
-
-		// Reset the container
-		container.Reset()
-
-		// Verify all flags are reset to zero values
-		assert.False(t, container.Global.Verbose)
-		assert.False(t, container.Global.DryRun)
-
-		assert.Empty(t, container.Create.ClusterType)
-		assert.Equal(t, 0, container.Create.NodeCount)
-		assert.Empty(t, container.Create.K8sVersion)
-
-		assert.False(t, container.List.Quiet)
-		assert.False(t, container.Delete.GlobalFlags.Force)
 	})
 }
 
@@ -121,10 +94,10 @@ func TestFlagContainer_TestManager(t *testing.T) {
 func TestDomainTypes(t *testing.T) {
 	t.Run("domain types work correctly", func(t *testing.T) {
 		// Test that domain types are accessible
-		var clusterType models.ClusterType = models.ClusterTypeK3d
+		var clusterType = models.ClusterTypeK3d
 		assert.Equal(t, models.ClusterTypeK3d, clusterType)
 
-		var domainType models.ClusterType = models.ClusterTypeGKE
+		var domainType = models.ClusterTypeGKE
 		assert.Equal(t, models.ClusterTypeGKE, domainType)
 	})
 
@@ -230,17 +203,6 @@ func TestErrorTypes(t *testing.T) {
 		// Test type assertion (check if error contains expected type)
 		var invalidConfigErr models.ErrInvalidClusterConfig
 		assert.True(t, errors.As(err, &invalidConfigErr))
-	})
-
-	t.Run("cluster already exists error", func(t *testing.T) {
-		err := models.NewClusterAlreadyExistsError("test-cluster")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "test-cluster")
-		assert.Contains(t, err.Error(), "already exists")
-
-		// Test type assertion (check if error contains expected type)
-		var alreadyExistsErr models.ErrClusterAlreadyExists
-		assert.True(t, errors.As(err, &alreadyExistsErr))
 	})
 
 	t.Run("cluster operation error", func(t *testing.T) {

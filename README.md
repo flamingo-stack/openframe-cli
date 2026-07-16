@@ -24,7 +24,7 @@ OpenFrame CLI is part of the broader [OpenFrame](https://openframe.ai) ecosystem
 
 ### 🚀 Complete Environment Bootstrapping
 - **One-command setup**: Bootstrap entire OpenFrame environments with `openframe bootstrap`
-- **Multi-mode deployment**: Support for OSS tenant, SaaS tenant, and SaaS shared modes
+- **OSS-tenant deployment**: Installs the public `openframe-oss-tenant` chart — no credentials or mode selection needed
 - **Automated cluster creation**: Creates K3D clusters with all necessary components
 - **ArgoCD integration**: Automatic chart installation and application management
 
@@ -53,7 +53,7 @@ graph TB
     subgraph "CLI Commands"
         Bootstrap[openframe bootstrap]
         Cluster[openframe cluster]
-        Chart[openframe chart]
+        App[openframe app]
         Dev[openframe dev]
     end
     
@@ -79,7 +79,7 @@ graph TB
     Bootstrap --> ClusterSvc
     Bootstrap --> ChartSvc
     Cluster --> ClusterSvc
-    Chart --> ChartSvc
+    App --> ChartSvc
     Dev --> DevSvc
     
     ClusterSvc --> K3D
@@ -161,12 +161,56 @@ The bootstrap process creates:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `openframe bootstrap` | Complete environment setup | `openframe bootstrap my-cluster` |
-| `openframe cluster create` | Create Kubernetes cluster | `openframe cluster create --nodes 3` |
-| `openframe cluster delete` | Remove existing cluster | `openframe cluster delete my-cluster` |
-| `openframe cluster status` | Show cluster information | `openframe cluster status` |
-| `openframe chart install` | Install charts with ArgoCD | `openframe chart install` |
-| `openframe dev intercept` | Start service intercepts | `openframe dev intercept my-service` |
+| `openframe bootstrap` | Create a cluster and deploy OpenFrame | `openframe bootstrap my-cluster` |
+| `openframe cluster create` | Create a Kubernetes cluster | `openframe cluster create dev --nodes 1` |
+| `openframe cluster list` | List clusters | `openframe cluster list -o json` |
+| `openframe cluster status` | Show cluster status | `openframe cluster status dev` |
+| `openframe cluster delete` | Delete a cluster | `openframe cluster delete dev --force` |
+| `openframe app install` | Install ArgoCD + app-of-apps | `openframe app install -c k3d-dev` |
+| `openframe app upgrade` | Re-sync or move to a new ref | `openframe app upgrade -c k3d-dev --sync` |
+| `openframe app status` | Report platform readiness | `openframe app status -c k3d-dev` |
+| `openframe app access` | Show ArgoCD sign-in details | `openframe app access -c k3d-dev` |
+| `openframe app uninstall` | Remove the app (keep the cluster) | `openframe app uninstall -c k3d-dev --yes` |
+| `openframe prerequisites` | Check/install required tools | `openframe prerequisites install` |
+| `openframe update` | Self-update the CLI | `openframe update check` |
+
+### Usage Examples
+
+Cluster lifecycle:
+
+```bash
+openframe cluster create dev --type k3d --nodes 1 --skip-wizard
+openframe cluster list                          # add -o json|yaml for scripts
+openframe cluster status dev
+openframe cluster delete dev --force
+```
+
+Deploy and manage the platform (OSS tenant deployment):
+
+```bash
+openframe app install                           # interactive: pick context
+openframe app install dev --non-interactive     # reuse existing openframe-helm-values.yaml
+openframe app install -c k3d-dev --ref v1.3.0   # deploy a specific release tag
+openframe app status  -c k3d-dev                # -o json|yaml supported
+openframe app access  -c k3d-dev                # ArgoCD URL + admin credentials
+openframe app upgrade -c k3d-dev --sync         # force ArgoCD to re-sync current ref
+openframe app upgrade -c k3d-dev --ref v1.4.0   # move to a new release tag
+openframe app uninstall -c k3d-dev --yes
+```
+
+Keep the CLI up to date (each release is checksum- and cosign-verified before it
+replaces the running binary; the previous version is kept for rollback):
+
+```bash
+openframe update            # update to the latest release
+openframe update check      # report availability only (-o json|yaml)
+openframe update v1.4.0     # switch to a specific release (up or down)
+openframe update rollback   # revert to the previous version, offline
+```
+
+Non-interactive flags (`--non-interactive`, `--yes`, `--force`, `--skip-wizard`)
+make every command scriptable; prompts are also skipped automatically in CI or
+when stdin is not a terminal.
 
 ## Technology Stack
 

@@ -83,7 +83,7 @@ func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute cluster deletion through service layer
-	err = service.DeleteCluster(clusterName, clusterType, globalFlags.Delete.Force)
+	err = service.DeleteCluster(cmd.Context(), clusterName, clusterType, globalFlags.Delete.Force)
 	if err != nil {
 		operationsUI.ShowOperationError("delete", clusterName, err)
 		return sharedErrors.HandleGlobalError(err, globalFlags.Global.Verbose)

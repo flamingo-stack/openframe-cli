@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"testing"
 
-	chartCmd "github.com/flamingo-stack/openframe-cli/cmd/chart"
+	appCmd "github.com/flamingo-stack/openframe-cli/cmd/app"
 	clusterCmd "github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
@@ -29,10 +29,10 @@ func TestServiceStructure(t *testing.T) {
 
 	// Test that the service can access the required commands
 	clusterCmd := clusterCmd.GetClusterCmd()
-	chartCmd := chartCmd.GetChartCmd()
+	appCmd := appCmd.GetAppCmd()
 
 	assert.NotNil(t, clusterCmd, "Should be able to get cluster command")
-	assert.NotNil(t, chartCmd, "Should be able to get chart command")
+	assert.NotNil(t, appCmd, "Should be able to get app command")
 
 	// Verify cluster command has create subcommand
 	var createCmd *cobra.Command
@@ -44,15 +44,15 @@ func TestServiceStructure(t *testing.T) {
 	}
 	assert.NotNil(t, createCmd, "Cluster command should have create subcommand")
 
-	// Verify chart command has install subcommand
+	// Verify app command has install subcommand
 	var installCmd *cobra.Command
-	for _, cmd := range chartCmd.Commands() {
+	for _, cmd := range appCmd.Commands() {
 		if cmd.Use == "install [cluster-name]" {
 			installCmd = cmd
 			break
 		}
 	}
-	assert.NotNil(t, installCmd, "Chart command should have install subcommand")
+	assert.NotNil(t, installCmd, "App command should have install subcommand")
 }
 
 func TestServiceExecuteMethodExists(t *testing.T) {
