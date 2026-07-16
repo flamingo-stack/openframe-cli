@@ -2,9 +2,12 @@ package terraform
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
@@ -28,9 +31,16 @@ func commandExists(cmd string) bool {
 	return err == nil
 }
 
-// IsInstalled reports whether a working terraform binary is reachable. The
-// CLI-managed bin dir is prepended to PATH so a previously installed pinned
-// binary is found even in a fresh shell.
+// Minimum terraform version the generated root modules require
+// (required_version = ">= 1.15.0" in the templates). An older system
+// terraform must count as NOT installed, so the pinned binary gets installed
+// into ~/.openframe/bin — which then wins PATH resolution.
+const minMajor, minMinor = 1, 15
+
+// IsInstalled reports whether a terraform binary that satisfies the
+// templates' version constraint is reachable. The CLI-managed bin dir is
+// prepended to PATH so a previously installed pinned binary is found even in
+// a fresh shell.
 func (t *TerraformInstaller) IsInstalled() bool {
 	if binDir, err := download.UserBinDir(); err == nil {
 		download.PrependToPath(binDir)
@@ -40,7 +50,33 @@ func (t *TerraformInstaller) IsInstalled() bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "terraform", "version").Run() == nil
+	out, err := exec.CommandContext(ctx, "terraform", "version", "-json").Output()
+	if err != nil {
+		return false
+	}
+	var v struct {
+		TerraformVersion string `json:"terraform_version"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return false
+	}
+	return versionSatisfies(v.TerraformVersion, minMajor, minMinor)
+}
+
+// versionSatisfies reports whether version ("1.15.8") is >= major.minor.
+// Unparseable versions are treated as too old — the safe direction, since it
+// triggers a pinned install rather than a mid-provisioning failure.
+func versionSatisfies(version string, major, minor int) bool {
+	parts := strings.SplitN(strings.TrimPrefix(version, "v"), ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	gotMajor, err1 := strconv.Atoi(parts[0])
+	gotMinor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return gotMajor > major || (gotMajor == major && gotMinor >= minor)
 }
 
 func (t *TerraformInstaller) GetInstallHelp() string {

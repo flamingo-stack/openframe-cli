@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"k8s.io/client-go/rest"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 func TestIsLocalAPIServer(t *testing.T) {
@@ -57,6 +58,33 @@ func TestApplyInsecureTLSConfig_BypassesLocalOnly(t *testing.T) {
 	}
 	if string(rem.CAData) != "ca" {
 		t.Error("remote cluster: CA must be preserved")
+	}
+}
+
+// TestApplyInsecureTLSConfig_CloudExecConfigsUntouched locks the cloud-cluster
+// guarantee: EKS/GKE rest.Configs (public endpoint + CA + exec-plugin auth)
+// pass through the chart subsystem's "defense-in-depth" insecure wraps without
+// any TLS downgrade — the local-only guard must keep covering them.
+func TestApplyInsecureTLSConfig_CloudExecConfigsUntouched(t *testing.T) {
+	hosts := []string{
+		"https://ABCDEF123.gr7.us-east-1.eks.amazonaws.com", // EKS
+		"https://34.10.20.30",                               // GKE (bare public IP)
+	}
+	for _, host := range hosts {
+		cfg := ApplyInsecureTLSConfig(&rest.Config{
+			Host:            host,
+			TLSClientConfig: rest.TLSClientConfig{CAData: []byte("ca")},
+			ExecProvider:    &clientcmdapi.ExecConfig{Command: "aws"},
+		})
+		if cfg.Insecure {
+			t.Errorf("%s: TLS must NOT be bypassed for a cloud endpoint", host)
+		}
+		if string(cfg.CAData) != "ca" {
+			t.Errorf("%s: CA must be preserved for a cloud endpoint", host)
+		}
+		if cfg.ExecProvider == nil {
+			t.Errorf("%s: exec auth must be preserved", host)
+		}
 	}
 }
 
