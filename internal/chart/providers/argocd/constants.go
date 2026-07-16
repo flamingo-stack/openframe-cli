@@ -10,7 +10,7 @@ const (
 	ArgoCDNamespace    = "argocd"
 	ArgoCDReleaseName  = "argo-cd"
 	ArgoCDChartRef     = "argo/argo-cd"
-	ArgoCDChartVersion = "10.1.3"
+	ArgoCDChartVersion = "10.1.4"
 	ArgoHelmRepoURL    = "https://argoproj.github.io/argo-helm"
 )
 
