@@ -10,11 +10,12 @@ This repository (`flamingo-stack/openframe-cli`) is the CLI. The platform and ap
 - [Prerequisites](./getting-started/prerequisites.md) — System requirements and dependencies
 - [Quick Start](./getting-started/quick-start.md) — Install and bootstrap in a few minutes
 - [First Steps](./getting-started/first-steps.md) — Core commands and workflows
+- [Cloud Clusters](./getting-started/cloud-clusters.md) — Provision EKS/GKE clusters with Terraform
 
 ## Commands
 
 - `openframe bootstrap` — Create a cluster and install the platform in one step
-- `openframe cluster {create,delete,list,status,cleanup}` — Manage k3d clusters
+- `openframe cluster {create,delete,list,status,cleanup}` — Manage k3d and cloud (EKS/GKE) clusters
 - `openframe app {install,upgrade,status,access,uninstall}` — Manage the OpenFrame app-of-apps deployment
 - `openframe prerequisites {check,install}` — Check and install required tools
 - `openframe update` (`check`, `rollback`, `update <version>`) — Self-update the CLI

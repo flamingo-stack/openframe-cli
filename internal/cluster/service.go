@@ -24,6 +24,12 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// bootstrapNodeCount is the k3d node count for `openframe bootstrap` — one
+// more than `cluster create`'s default of 3 because bootstrap immediately
+// installs the full platform. Kept as a named constant so the discrepancy is
+// a decision, not an accident (audit follow-up).
+const bootstrapNodeCount = 4
+
 // ApplicationCleaner removes the ArgoCD Application CRs that own the platform
 // workloads, and strips the resources-finalizer from any left in Terminating.
 //
@@ -963,12 +969,15 @@ func CreateClusterWithPrerequisitesNonInteractive(ctx context.Context, clusterNa
 		service = NewClusterService(exec)
 	}
 
-	// Build cluster configuration
+	// Build cluster configuration. Bootstrap deliberately uses one node MORE
+	// than `cluster create`'s default of 3: it immediately installs the full
+	// platform (17 ArgoCD apps), which needs the extra headroom — a bare
+	// cluster does not.
 	config := models.ClusterConfig{
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  4,
+		NodeCount:  bootstrapNodeCount,
 	}
 	if clusterName == "" {
 		config.Name = "openframe-dev" // default name

@@ -1,6 +1,6 @@
 # OpenFrame CLI Makefile
 
-.PHONY: all build build-all clean test test-unit test-race test-integration lint fmt vet tidy help
+.PHONY: all build build-all clean test test-unit test-race test-integration test-tfvalidate lint fmt vet tidy help
 
 # Variables
 BINARY_NAME := openframe
@@ -49,6 +49,15 @@ test-race: ## Run unit tests with the race detector (requires CGO)
 test-integration: ## Run integration tests (real k3d clusters; needs docker + k3d)
 	@echo "Running integration tests (real clusters!)..."
 	@go test -tags integration -count=1 ./tests/integration/...
+
+# Terraform template validation is opt-in via a build tag: it runs a real
+# `terraform init` (downloads the pinned modules + providers — network, ~min)
+# and `terraform validate` on the generated EKS/GKE root modules. No cloud
+# credentials needed; the strongest pre-e2e check of the templates.
+test-tfvalidate: ## Validate generated terraform templates (needs terraform + network)
+	@echo "Validating terraform templates (downloads providers)..."
+	@go test -tags tfvalidate -count=1 -timeout 15m -run '^TestTerraformValidate$$' \
+		./internal/cluster/providers/eks/... ./internal/cluster/providers/gke/...
 
 test: test-unit test-integration ## Run unit + integration tests
 
