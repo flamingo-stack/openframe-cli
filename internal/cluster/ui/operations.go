@@ -344,7 +344,7 @@ func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dr
 		if config.Cloud.MachineType != "" {
 			pterm.DefaultBasicText.Printf("Instance: %s\n", config.Cloud.MachineType)
 		}
-		pterm.Warning.Println("Cloud clusters create resources that incur costs (managed control plane, VM nodes, NAT)")
+		pterm.Warning.Println(CostHint(config.Type))
 	}
 
 	pterm.DefaultBasicText.Println()

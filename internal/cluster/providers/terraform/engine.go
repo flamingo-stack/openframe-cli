@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 )
 
 // Runner is the subset of *tfexec.Terraform the engine uses; an interface so
@@ -16,8 +19,11 @@ import (
 type Runner interface {
 	Init(ctx context.Context, opts ...tfexec.InitOption) error
 	Apply(ctx context.Context, opts ...tfexec.ApplyOption) error
+	ApplyJSON(ctx context.Context, w io.Writer, opts ...tfexec.ApplyOption) error
 	Destroy(ctx context.Context, opts ...tfexec.DestroyOption) error
+	DestroyJSON(ctx context.Context, w io.Writer, opts ...tfexec.DestroyOption) error
 	Plan(ctx context.Context, opts ...tfexec.PlanOption) (bool, error)
+	ShowPlanFile(ctx context.Context, planPath string, opts ...tfexec.ShowOption) (*tfjson.Plan, error)
 	Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
 }
 
@@ -84,42 +90,79 @@ func (e *Engine) Init(ctx context.Context, dir string) error {
 	return nil
 }
 
-// Apply runs terraform apply in dir. It is idempotent: re-running after a
-// partial failure resumes from the recorded state.
+// Apply runs terraform apply in dir, streaming per-resource progress lines
+// (via terraform's machine-readable -json output) so a 15-minute cloud apply
+// is never a silent wait. It is idempotent: re-running after a partial
+// failure resumes from the recorded state.
 func (e *Engine) Apply(ctx context.Context, dir string) error {
 	tf, err := e.newRunner(dir)
 	if err != nil {
 		return err
 	}
-	if err := tf.Apply(ctx); err != nil {
+	if err := tf.ApplyJSON(ctx, newProgressWriter(e.verbose)); err != nil {
 		return fmt.Errorf("terraform apply failed: %w", err)
 	}
 	return nil
 }
 
-// Destroy runs terraform destroy in dir.
+// Destroy runs terraform destroy in dir, streaming progress like Apply.
 func (e *Engine) Destroy(ctx context.Context, dir string) error {
 	tf, err := e.newRunner(dir)
 	if err != nil {
 		return err
 	}
-	if err := tf.Destroy(ctx); err != nil {
+	if err := tf.DestroyJSON(ctx, newProgressWriter(e.verbose)); err != nil {
 		return fmt.Errorf("terraform destroy failed: %w", err)
 	}
 	return nil
 }
 
-// Plan runs terraform plan in dir and reports whether changes are pending.
-func (e *Engine) Plan(ctx context.Context, dir string) (bool, error) {
+// PlanSummary is the resource-change footprint of a terraform plan.
+type PlanSummary struct {
+	Add     int
+	Change  int
+	Destroy int
+}
+
+// HasChanges reports whether the plan would modify anything.
+func (s PlanSummary) HasChanges() bool { return s.Add+s.Change+s.Destroy > 0 }
+
+// Plan runs terraform plan in dir and summarizes the pending changes by
+// resource action (create/update/delete).
+func (e *Engine) Plan(ctx context.Context, dir string) (PlanSummary, error) {
 	tf, err := e.newRunner(dir)
 	if err != nil {
-		return false, err
+		return PlanSummary{}, err
 	}
-	changes, err := tf.Plan(ctx)
+	planFile := filepath.Join(dir, "tfplan")
+	defer func() { _ = os.Remove(planFile) }()
+
+	changes, err := tf.Plan(ctx, tfexec.Out(planFile))
 	if err != nil {
-		return false, fmt.Errorf("terraform plan failed: %w", err)
+		return PlanSummary{}, fmt.Errorf("terraform plan failed: %w", err)
 	}
-	return changes, nil
+	if !changes {
+		return PlanSummary{}, nil
+	}
+	plan, err := tf.ShowPlanFile(ctx, planFile)
+	if err != nil {
+		return PlanSummary{}, fmt.Errorf("terraform show failed: %w", err)
+	}
+	var summary PlanSummary
+	for _, rc := range plan.ResourceChanges {
+		switch {
+		case rc.Change.Actions.Create():
+			summary.Add++
+		case rc.Change.Actions.Update():
+			summary.Change++
+		case rc.Change.Actions.Delete():
+			summary.Destroy++
+		case rc.Change.Actions.Replace():
+			summary.Add++
+			summary.Destroy++
+		}
+	}
+	return summary, nil
 }
 
 // Outputs returns the root-module outputs of dir as raw JSON values.

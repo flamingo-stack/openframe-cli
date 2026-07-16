@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/manifoldco/promptui"
 	"github.com/pterm/pterm"
 )
 
@@ -48,4 +52,32 @@ func SelectClusterByName(clusters []ClusterInfo, prompt string) (string, error) 
 func selectFromList(prompt string, items []string) (int, string, error) {
 	// Use common UI function
 	return sharedUI.SelectFromList(prompt, items)
+}
+
+// CostHint is the running-cost warning shown for cloud cluster types. The
+// figures are deliberately rough baselines, not quotes.
+func CostHint(clusterType models.ClusterType) string {
+	switch clusterType {
+	case models.ClusterTypeEKS:
+		return "This creates billed AWS resources: EKS control plane (~$73/mo), EC2 nodes, and a NAT gateway (~$33/mo + traffic)"
+	case models.ClusterTypeGKE:
+		return "This creates billed GCP resources: GKE cluster management fee (~$73/mo), VM nodes, and networking"
+	default:
+		return "Cloud clusters create resources that incur costs"
+	}
+}
+
+// ConfirmTypedClusterName requires the user to re-type the cluster name
+// before a cloud destroy — a stronger gate than yes/no, because the action
+// deletes billed infrastructure irreversibly.
+func ConfirmTypedClusterName(name string) (bool, error) {
+	pterm.Warning.Printf("Deleting a cloud cluster destroys all its cloud resources.\n")
+	prompt := promptui.Prompt{
+		Label: fmt.Sprintf("Type the cluster name (%s) to confirm", name),
+	}
+	entered, err := prompt.Run()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(entered) == name, nil
 }

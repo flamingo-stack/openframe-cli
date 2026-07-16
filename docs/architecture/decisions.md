@@ -83,13 +83,23 @@ for the OSS tenant deployment.
 
 ## D5 — Cluster providers behind a unified interface
 
-Cluster creation goes through a `Provider` interface parameterized by
-**provider** (k3d local now; GKE/EKS later) and **target** (local vs cloud).
-Only **k3d** is implemented; cloud providers return a clear "coming soon"
-message. No new providers are added now — the interface exists so they can be
-added later without touching the rest of the CLI.
+Cluster creation goes through a `Provider` interface with three backends:
+**k3d** (local), **EKS**, and **GKE** (cloud). Backends are selected via the
+`provider.New(type)` factory, keyed on `ClusterConfig.Type`; the rest of the
+CLI never knows which backend runs. Cloud providers additionally implement
+`Planner` (`--dry-run` renders a real `terraform plan` footprint).
 
-For OSS the target is always **local** (k3d). SaaS targets (cloud) are future work.
+The cloud backends share one terraform engine (D7/D8): each generates a
+pinned, self-contained root module on the public `terraform-aws-modules` /
+`terraform-google-modules` modules and drives `terraform` via terraform-exec.
+Kubeconfig entries carry no static credentials — auth runs through the
+provider CLI exec plugins (`aws eks get-token`, `gke-gcloud-auth-plugin`),
+with the context named after the cluster so exact-match context resolution
+works unchanged.
+
+For OSS the default remains **local** (k3d); cloud clusters are an explicit
+`--type eks|gke` opt-in with a cost warning and a typed-name confirmation on
+delete.
 
 ---
 
@@ -109,6 +119,33 @@ typed argo-cd clientset. Benefits:
 - unblocks keeping `k8s.io/*` on the latest stable release.
 
 ---
+
+## D7 — Terraform (BUSL) as the provisioning engine, installed verified
+
+Cloud clusters are provisioned with **HashiCorp Terraform**, not OpenTofu.
+BUSL 1.1 only restricts "hosted or embedded" offerings **competitive with
+HashiCorp's products**; this CLI uses terraform as an internal tool to
+provision the user's own infrastructure, which is not a competitive offering.
+The binary is installed like every other prerequisite: a pinned version with
+SHA256 verification into `~/.openframe/bin` (no curl-pipe-bash, no sudo). An
+already-installed `terraform` on PATH in `~/.openframe/bin` is preferred.
+
+If a server-side scenario ever provisions clusters *as a service* with
+terraform, that is a different BUSL use profile and needs its own review.
+
+## D8 — Local terraform state in per-cluster workspaces
+
+Each cloud cluster owns a workspace under `~/.openframe/clusters/<name>/`:
+the generated root module, `terraform.tfvars.json`, local state, and a
+`cluster.json` registry record (type, status, endpoint/CA). The registry is
+what makes cloud clusters visible to `list`/`status`/`delete` without cloud
+API calls, and the state file is the only pointer to billed resources — so a
+workspace is **never deleted on a failed apply**, only after a successful
+destroy. Re-running `create` resumes an interrupted apply.
+
+Remote state is opt-in via `--backend-config s3://bucket/prefix` (EKS) or
+`gcs://bucket/prefix` (GKE) for users who need the state to survive the
+machine that created the cluster.
 
 ## Platform support
 

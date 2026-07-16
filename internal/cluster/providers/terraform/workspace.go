@@ -84,22 +84,29 @@ func (w *Workspace) Exists() bool {
 	return err == nil
 }
 
-// Scaffold creates the workspace directories and writes the generated root
-// module, tfvars, and the initial record. It refuses to overwrite an existing
-// terraform state (a partially-created cluster must be resumed or destroyed,
-// never silently re-scaffolded over).
-func (w *Workspace) Scaffold(record Record, mainTF []byte, tfvars any) error {
-	if err := os.MkdirAll(w.TerraformDir(), 0o750); err != nil {
-		return fmt.Errorf("creating workspace %s: %w", w.dir, err)
+// WriteModule writes a generated root module (main.tf + terraform.tfvars.json)
+// into dir. Used by Scaffold for real workspaces and by plan previews for
+// throwaway directories.
+func WriteModule(dir string, mainTF []byte, tfvars any) error {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("creating module dir %s: %w", dir, err)
 	}
 	varsJSON, err := json.MarshalIndent(tfvars, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding tfvars: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(w.TerraformDir(), "main.tf"), mainTF, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), mainTF, 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(w.TerraformDir(), "terraform.tfvars.json"), varsJSON, 0o600); err != nil {
+	return os.WriteFile(filepath.Join(dir, "terraform.tfvars.json"), varsJSON, 0o600)
+}
+
+// Scaffold creates the workspace directories and writes the generated root
+// module, tfvars, and the initial record. It refuses to overwrite an existing
+// terraform state (a partially-created cluster must be resumed or destroyed,
+// never silently re-scaffolded over).
+func (w *Workspace) Scaffold(record Record, mainTF []byte, tfvars any) error {
+	if err := WriteModule(w.TerraformDir(), mainTF, tfvars); err != nil {
 		return err
 	}
 	return w.WriteRecord(record)
