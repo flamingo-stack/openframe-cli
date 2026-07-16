@@ -6,6 +6,7 @@ require (
 	github.com/elastic/go-sysinfo v1.15.5
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/hashicorp/terraform-exec v0.25.2
+	github.com/hashicorp/terraform-json v0.27.2
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pterm/pterm v0.12.83
 	github.com/sigstore/sigstore-go v1.2.2
@@ -83,7 +84,6 @@ require (
 	github.com/gookit/color v1.6.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
-	github.com/hashicorp/terraform-json v0.27.2 // indirect
 	github.com/in-toto/attestation v1.2.0 // indirect
 	github.com/in-toto/in-toto-golang v0.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

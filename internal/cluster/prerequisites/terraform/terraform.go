@@ -84,14 +84,14 @@ func (t *TerraformInstaller) GetInstallHelp() string {
 }
 
 // Install downloads the pinned Terraform release, verifies its SHA256, and
-// installs it into ~/.openframe/bin (no sudo).
+// installs it into ~/.openframe/bin (no sudo). Unlike docker/k3d (which run
+// inside WSL on Windows), terraform is installed natively on all three
+// platforms — the provisioning engine invokes it directly.
 func (t *TerraformInstaller) Install() error {
 	switch runtime.GOOS {
-	case "darwin", "linux":
+	case "darwin", "linux", "windows":
 		return t.installVerified()
 	default:
-		// Windows is unsupported here by design: the CLI forwards into WSL and
-		// runs as linux, so native-Windows install code is never reached.
 		return fmt.Errorf("automatic terraform installation not supported on %s", runtime.GOOS)
 	}
 }

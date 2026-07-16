@@ -83,13 +83,54 @@ func containsAny(str string, substrings []string) bool {
 	return false
 }
 
-func TestCheckForClusterType_CloudTypesSkipLocalGate(t *testing.T) {
-	// The Docker/k3d/helm gate is for local clusters only; cloud types must
-	// pass through regardless of what is installed on this machine.
-	for _, clusterType := range []models.ClusterType{models.ClusterTypeGKE, models.ClusterTypeEKS} {
-		if err := CheckForClusterType(clusterType); err != nil {
-			t.Errorf("CheckForClusterType(%s) should not require local tools: %v", clusterType, err)
+// TestCheckerForClusterType verifies the type→requirements dispatch WITHOUT
+// invoking CheckForClusterType: that function runs real installers in
+// non-interactive mode, and an earlier version of this test did exactly that —
+// it downloaded terraform onto CI runners and failed on `gcloud components
+// install` (CI regression). Only the pure mapping is unit-testable.
+func TestCheckerForClusterType(t *testing.T) {
+	names := func(c *PrerequisiteChecker) []string {
+		var out []string
+		for _, r := range c.requirements {
+			out = append(out, r.Name)
 		}
+		return out
+	}
+
+	cases := []struct {
+		clusterType models.ClusterType
+		want        []string
+	}{
+		{models.ClusterTypeK3d, []string{"Docker", "k3d", "helm"}},
+		{models.ClusterType(""), []string{"Docker", "k3d", "helm"}},
+		{models.ClusterTypeEKS, []string{"terraform", "AWS CLI"}},
+		{models.ClusterTypeGKE, []string{"terraform", "gcloud", "gke-gcloud-auth-plugin"}},
+	}
+	for _, tc := range cases {
+		checker := checkerForClusterType(tc.clusterType)
+		if checker == nil {
+			t.Fatalf("checkerForClusterType(%q) = nil, want a requirement set", tc.clusterType)
+		}
+		got := names(checker)
+		if len(got) != len(tc.want) {
+			t.Fatalf("checkerForClusterType(%q) = %v, want %v", tc.clusterType, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("checkerForClusterType(%q)[%d] = %s, want %s", tc.clusterType, i, got[i], tc.want[i])
+			}
+		}
+		// Every requirement must be fully wired — a nil func would panic the
+		// installer flow at runtime.
+		for _, r := range checker.requirements {
+			if r.IsInstalled == nil || r.Install == nil || r.InstallHelp == nil {
+				t.Errorf("%s/%s: requirement funcs must all be set", tc.clusterType, r.Name)
+			}
+		}
+	}
+
+	if checkerForClusterType("unknown") != nil {
+		t.Error("unknown types must return nil (gate passes, provider factory rejects)")
 	}
 }
 
