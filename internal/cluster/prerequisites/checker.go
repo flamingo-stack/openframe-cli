@@ -134,18 +134,31 @@ func CheckPrerequisites() error {
 	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }
 
-// CheckForClusterType runs the prerequisite gate for the given cluster type:
+// checkerForClusterType returns the requirement set for a cluster type:
 // Docker/k3d/helm for local k3d clusters, terraform + the cloud CLI for the
-// cloud types. Unknown types pass through and fail at the provider factory.
-func CheckForClusterType(clusterType models.ClusterType) error {
+// cloud types. Unknown types return nil — they pass the gate and fail at the
+// provider factory instead. Pure dispatch (no checks, no installs), so tests
+// can verify the mapping without touching the machine.
+func checkerForClusterType(clusterType models.ClusterType) *PrerequisiteChecker {
 	switch clusterType {
 	case models.ClusterTypeK3d, "":
-		return CheckPrerequisites()
+		return NewPrerequisiteChecker()
 	case models.ClusterTypeEKS:
-		return NewInstallerWithChecker(NewEKSPrerequisiteChecker()).CheckAndInstallNonInteractive(ui.IsNonInteractive())
+		return NewEKSPrerequisiteChecker()
 	case models.ClusterTypeGKE:
-		return NewInstallerWithChecker(NewGKEPrerequisiteChecker()).CheckAndInstallNonInteractive(ui.IsNonInteractive())
+		return NewGKEPrerequisiteChecker()
 	default:
 		return nil
 	}
+}
+
+// CheckForClusterType runs the prerequisite gate for the given cluster type,
+// installing missing tools (auto-approved when non-interactive).
+func CheckForClusterType(clusterType models.ClusterType) error {
+	checker := checkerForClusterType(clusterType)
+	if checker == nil {
+		return nil
+	}
+	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
+	return NewInstallerWithChecker(checker).CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }
