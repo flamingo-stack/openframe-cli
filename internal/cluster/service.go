@@ -153,13 +153,14 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 		return restConfig, nil // Exit gracefully without error
 	}
 
-	// Cluster doesn't exist, proceed with creation
+	// Cluster doesn't exist, proceed with creation. Cloud creates stream
+	// per-resource progress lines from the terraform engine, which a spinner's
+	// redraws would garble — so the spinner is k3d-only.
 	var sp *spinner.Spinner
-	if !s.suppressUI {
+	if !s.suppressUI && config.Type == models.ClusterTypeK3d {
 		sp = spinner.New()
 		sp.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
 	} else {
-		// In non-interactive mode, just show a simple info message
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
 	}
 
@@ -195,9 +196,10 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, name string, cluster
 		return err
 	}
 
-	// Show deletion progress
+	// Show deletion progress. Cloud destroys stream terraform progress lines,
+	// so the spinner is k3d-only (same reasoning as CreateCluster).
 	var sp *spinner.Spinner
-	if !s.suppressUI {
+	if !s.suppressUI && clusterType == models.ClusterTypeK3d {
 		sp = spinner.New()
 		sp.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
 	} else {

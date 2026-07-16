@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,14 +37,29 @@ func (f *fakeRunner) Apply(ctx context.Context, opts ...tfexec.ApplyOption) erro
 	return f.applyErr
 }
 
+func (f *fakeRunner) ApplyJSON(ctx context.Context, w io.Writer, opts ...tfexec.ApplyOption) error {
+	return f.Apply(ctx)
+}
+
 func (f *fakeRunner) Destroy(ctx context.Context, opts ...tfexec.DestroyOption) error {
 	*f.calls = append(*f.calls, "destroy")
 	return nil
 }
 
+func (f *fakeRunner) DestroyJSON(ctx context.Context, w io.Writer, opts ...tfexec.DestroyOption) error {
+	return f.Destroy(ctx)
+}
+
 func (f *fakeRunner) Plan(ctx context.Context, opts ...tfexec.PlanOption) (bool, error) {
 	*f.calls = append(*f.calls, "plan")
 	return true, nil
+}
+
+func (f *fakeRunner) ShowPlanFile(ctx context.Context, planPath string, opts ...tfexec.ShowOption) (*tfjson.Plan, error) {
+	*f.calls = append(*f.calls, "show")
+	return &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
+		{Change: &tfjson.Change{Actions: tfjson.Actions{tfjson.ActionCreate}}},
+	}}, nil
 }
 
 func (f *fakeRunner) Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error) {
@@ -229,4 +246,44 @@ func TestTemplateEmbedsModulePins(t *testing.T) {
 	assert.Contains(t, tf, `source  = "terraform-google-modules/network/google"`)
 	assert.Contains(t, tf, `version = "~> 18.0"`)
 	assert.Contains(t, tf, "deletion_protection = false")
+}
+
+func TestPlanCluster_NewClusterDoesNotRegister(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+
+	summary, err := p.PlanCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+	assert.True(t, summary.HasChanges())
+	assert.Equal(t, []string{"init", "plan", "show"}, *calls)
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound, "a plan preview must not register the cluster")
+}
+
+func TestCreateCluster_WritesGCSBackend(t *testing.T) {
+	p, _, registry := newTestProvider(t, nil)
+	config := gkeConfig("demo")
+	config.Cloud.BackendConfig = "gcs://my-bucket/clusters/demo"
+
+	_, err := p.CreateCluster(context.Background(), config)
+	require.NoError(t, err)
+
+	backend, err := os.ReadFile(filepath.Join(registry.Workspace("demo").TerraformDir(), "backend.tf"))
+	require.NoError(t, err)
+	assert.Contains(t, string(backend), `backend "gcs"`)
+	assert.Contains(t, string(backend), `bucket = "my-bucket"`)
+	assert.Contains(t, string(backend), `prefix = "clusters/demo"`)
+}
+
+func TestCreateCluster_RejectsS3Backend(t *testing.T) {
+	p, calls, _ := newTestProvider(t, nil)
+	config := gkeConfig("demo")
+	config.Cloud.BackendConfig = "s3://my-bucket/prefix"
+
+	_, err := p.CreateCluster(context.Background(), config)
+	var invalid models.ErrInvalidClusterConfig
+	require.ErrorAs(t, err, &invalid)
+	assert.Contains(t, err.Error(), "must be gcs://")
+	assert.Empty(t, *calls)
 }

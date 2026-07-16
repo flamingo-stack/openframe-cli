@@ -21,13 +21,14 @@ type CreateFlags struct {
 	SkipWizard  bool
 
 	// Cloud-only flags (EKS/GKE)
-	Region      string
-	Profile     string // AWS
-	Project     string // GCP
-	MachineType string
-	MinNodes    int
-	MaxNodes    int
-	Spot        bool
+	Region        string
+	Profile       string // AWS
+	Project       string // GCP
+	MachineType   string
+	MinNodes      int
+	MaxNodes      int
+	Spot          bool
+	BackendConfig string
 }
 
 // ListFlags contains flags specific to list command
@@ -77,6 +78,7 @@ func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
 	cmd.Flags().IntVar(&flags.MinNodes, "min-nodes", 0, "Node group minimum size (cloud only)")
 	cmd.Flags().IntVar(&flags.MaxNodes, "max-nodes", 0, "Node group maximum size (cloud only)")
 	cmd.Flags().BoolVar(&flags.Spot, "spot", false, "Use spot capacity for nodes (cloud only)")
+	cmd.Flags().StringVar(&flags.BackendConfig, "backend-config", "", "Remote terraform state: s3://bucket/prefix (eks) or gcs://bucket/prefix (gke); default is local state")
 }
 
 // AddListFlags adds list-specific flags to a command
@@ -165,6 +167,9 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 	}
 	if clusterType == ClusterTypeGKE && flags.SkipWizard && flags.Project == "" {
 		return fmt.Errorf("--project is required for --type gke with --skip-wizard")
+	}
+	if flags.BackendConfig != "" && !isCloud {
+		return fmt.Errorf("--backend-config only applies to cloud cluster types (eks, gke)")
 	}
 	if flags.MinNodes < 0 || flags.MaxNodes < 0 {
 		return fmt.Errorf("node bounds must not be negative: min=%d max=%d", flags.MinNodes, flags.MaxNodes)

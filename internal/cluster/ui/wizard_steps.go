@@ -177,6 +177,10 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		}
 	}
 
+	if config.Cloud != nil {
+		pterm.Warning.Println(CostHint(config.Type))
+	}
+
 	// Use pterm for consistent styling
 	if err := renderConfigurationTable(data); err != nil {
 		// Fallback to simple display

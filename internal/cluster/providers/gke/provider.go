@@ -9,6 +9,7 @@ package gke
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -57,10 +58,71 @@ func (p *Provider) preflightCredentials(ctx context.Context, project string) err
 	return nil
 }
 
+// backendTF renders the gcs backend block for a GKE workspace.
+func backendTF(cfg tfengine.BackendConfig) []byte {
+	return []byte(fmt.Sprintf(
+		"terraform {\n  backend \"gcs\" {\n    bucket = %q\n    prefix = %q\n  }\n}\n",
+		cfg.Bucket, cfg.Prefix))
+}
+
+// parseBackend validates the optional --backend-config value for GKE.
+func parseBackend(config models.ClusterConfig) (*tfengine.BackendConfig, error) {
+	if config.Cloud.BackendConfig == "" {
+		return nil, nil
+	}
+	cfg, err := tfengine.ParseBackendURL(config.Cloud.BackendConfig)
+	if err != nil {
+		return nil, models.NewInvalidConfigError("backend-config", config.Cloud.BackendConfig, err.Error())
+	}
+	if cfg.Scheme != "gcs" {
+		return nil, models.NewInvalidConfigError("backend-config", config.Cloud.BackendConfig, "GKE remote state must be gcs://bucket/prefix")
+	}
+	return &cfg, nil
+}
+
+// PlanCluster previews what CreateCluster would do — a real terraform plan —
+// without registering the cluster or touching any state. A brand-new cluster
+// is planned in a throwaway directory; an existing (failed/interrupted)
+// workspace is planned in place to show what a resume would change.
+func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig) (tfengine.PlanSummary, error) {
+	if err := validate(config); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+
+	dir := p.registry.Workspace(config.Name).TerraformDir()
+	if !p.registry.Workspace(config.Name).Exists() {
+		vars, err := tfvarsFor(config)
+		if err != nil {
+			return tfengine.PlanSummary{}, err
+		}
+		tmp, err := os.MkdirTemp("", "openframe-plan-*")
+		if err != nil {
+			return tfengine.PlanSummary{}, err
+		}
+		defer func() { _ = os.RemoveAll(tmp) }()
+		if err := tfengine.WriteModule(tmp, mainTF, vars); err != nil {
+			return tfengine.PlanSummary{}, err
+		}
+		dir = tmp
+	}
+
+	if err := p.engine.Init(ctx, dir); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	return p.engine.Plan(ctx, dir)
+}
+
 // CreateCluster provisions the cluster and returns a rest.Config for it.
 // Re-running after a failed apply resumes the same workspace.
 func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
 	if err := validate(config); err != nil {
+		return nil, err
+	}
+	backend, err := parseBackend(config)
+	if err != nil {
 		return nil, err
 	}
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
@@ -85,6 +147,11 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 		}
 		if err := ws.Scaffold(record, mainTF, vars); err != nil {
 			return nil, err
+		}
+		if backend != nil {
+			if err := ws.WriteBackend(backendTF(*backend)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// An existing workspace means a previous create failed or was interrupted;

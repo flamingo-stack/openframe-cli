@@ -14,6 +14,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/eks"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/gke"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"k8s.io/client-go/rest"
 )
 
@@ -41,6 +42,14 @@ type Provider interface {
 	GetKubeconfig(ctx context.Context, name string, clusterType models.ClusterType) (string, error)
 }
 
+// Planner is the optional preview capability of cloud providers: a real
+// terraform plan of what CreateCluster would do, without registering the
+// cluster or touching state. k3d has no meaningful plan, so this is a
+// separate interface rather than a tenth Provider method.
+type Planner interface {
+	PlanCluster(ctx context.Context, config models.ClusterConfig) (terraform.PlanSummary, error)
+}
+
 // Compile-time assertions that the backends satisfy Provider.
 //
 // Backends are selected through New (factory.go). The old decorative factory
@@ -50,4 +59,6 @@ var (
 	_ Provider = (*k3d.K3dManager)(nil)
 	_ Provider = (*eks.Provider)(nil)
 	_ Provider = (*gke.Provider)(nil)
+	_ Planner  = (*eks.Provider)(nil)
+	_ Planner  = (*gke.Provider)(nil)
 )

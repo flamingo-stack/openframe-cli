@@ -1,13 +1,18 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +67,44 @@ Examples:
 	}
 
 	return createCmd
+}
+
+// planPreviewFn is the cloud dry-run implementation. A package variable so
+// cmd-layer tests can stub it out: the real one shells out to terraform,
+// which unit tests must never do.
+var planPreviewFn = cloudPlanPreview
+
+// cloudPlanPreview runs a real terraform plan for a cloud config and prints
+// the resource footprint. Terraform not being installed is a soft skip — the
+// prerequisite gate only runs on a real create, and a dry-run must not
+// install anything.
+func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
+	if _, err := terraform.FindTerraform(); err != nil {
+		pterm.Info.Println("terraform is not installed — skipping the plan preview (it installs automatically on a real create)")
+		return nil
+	}
+
+	exec := executor.NewRealCommandExecutor(false, utils.GetGlobalFlags().Global.Verbose)
+	p, err := provider.New(config.Type, exec)
+	if err != nil {
+		return err
+	}
+	planner, ok := p.(provider.Planner)
+	if !ok {
+		return nil
+	}
+
+	pterm.Info.Printf("Computing terraform plan for %s cluster '%s'...\n", config.Type, config.Name)
+	summary, err := planner.PlanCluster(ctx, config)
+	if err != nil {
+		return err
+	}
+	if !summary.HasChanges() {
+		pterm.Success.Println("Plan: no changes — the cluster already matches this configuration")
+		return nil
+	}
+	pterm.Success.Printf("Plan: %d to add, %d to change, %d to destroy\n", summary.Add, summary.Change, summary.Destroy)
+	return nil
 }
 
 func runCreateCluster(cmd *cobra.Command, args []string) error {
@@ -130,13 +173,14 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 		if config.Type == models.ClusterTypeEKS || config.Type == models.ClusterTypeGKE {
 			cf := globalFlags.Create
 			config.Cloud = &models.CloudConfig{
-				Region:      cf.Region,
-				Profile:     cf.Profile,
-				Project:     cf.Project,
-				MachineType: cf.MachineType,
-				MinNodes:    cf.MinNodes,
-				MaxNodes:    cf.MaxNodes,
-				Spot:        cf.Spot,
+				Region:        cf.Region,
+				Profile:       cf.Profile,
+				Project:       cf.Project,
+				MachineType:   cf.MachineType,
+				MinNodes:      cf.MinNodes,
+				MaxNodes:      cf.MaxNodes,
+				Spot:          cf.Spot,
+				BackendConfig: cf.BackendConfig,
 			}
 		}
 	}
@@ -146,8 +190,12 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 		operationsUI := ui.NewOperationsUI()
 		operationsUI.ShowConfigurationSummary(config, globalFlags.Create.DryRun, globalFlags.Create.SkipWizard)
 
-		// If dry-run, don't actually create the cluster
+		// If dry-run, don't actually create the cluster. For cloud types the
+		// dry-run is a real terraform plan of what create would provision.
 		if globalFlags.Create.DryRun {
+			if config.Type == models.ClusterTypeEKS || config.Type == models.ClusterTypeGKE {
+				return planPreviewFn(cmd.Context(), config)
+			}
 			return nil
 		}
 	}

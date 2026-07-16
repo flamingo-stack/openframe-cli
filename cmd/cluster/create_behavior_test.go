@@ -1,8 +1,10 @@
 package cluster
 
 import (
+	"context"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
@@ -72,10 +74,19 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
-func TestRunCreateCluster_CloudDryRunShowsSummaryAndExits(t *testing.T) {
+func TestRunCreateCluster_CloudDryRunRunsPlanPreview(t *testing.T) {
 	for _, clusterType := range []string{"eks", "gke"} {
 		t.Run(clusterType, func(t *testing.T) {
 			setupCreate(t)
+			// Stub the preview: the real one shells out to terraform.
+			var previewed *models.ClusterConfig
+			orig := planPreviewFn
+			planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+				previewed = &config
+				return nil
+			}
+			t.Cleanup(func() { planPreviewFn = orig })
+
 			cmd := getCreateCmd()
 			gf := utils.GetGlobalFlags()
 			gf.Create.SkipWizard = true
@@ -84,13 +95,39 @@ func TestRunCreateCluster_CloudDryRunShowsSummaryAndExits(t *testing.T) {
 			gf.Create.Region = "us-east-1"
 			gf.Create.Project = "my-project"
 
-			// Dry-run exits after the summary — before the prerequisite gate
-			// (which may install tools) and before any terraform runs, so this
-			// is hermetic.
 			if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
 				t.Fatalf("%s dry-run should return nil, got %v", clusterType, err)
 			}
+			if previewed == nil {
+				t.Fatal("cloud dry-run must invoke the terraform plan preview")
+			}
+			if previewed.Cloud == nil || previewed.Cloud.Region != "us-east-1" {
+				t.Fatalf("preview received wrong config: %+v", previewed)
+			}
 		})
+	}
+}
+
+func TestRunCreateCluster_K3dDryRunSkipsPlanPreview(t *testing.T) {
+	setupCreate(t)
+	called := false
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
+
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+
+	if err := runCreateCluster(cmd, []string{"local-cluster"}); err != nil {
+		t.Fatalf("k3d dry-run should return nil, got %v", err)
+	}
+	if called {
+		t.Fatal("k3d dry-run must not invoke the terraform plan preview")
 	}
 }
 

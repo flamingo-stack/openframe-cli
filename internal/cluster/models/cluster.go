@@ -32,6 +32,10 @@ type CloudConfig struct {
 	MinNodes    int    `json:"min_nodes,omitempty"`
 	MaxNodes    int    `json:"max_nodes,omitempty"`
 	Spot        bool   `json:"spot,omitempty"`
+	// BackendConfig is an optional remote-state location
+	// (s3://bucket/prefix for EKS, gcs://bucket/prefix for GKE);
+	// empty means local state in the cluster workspace.
+	BackendConfig string `json:"backend_config,omitempty"`
 }
 
 // ClusterInfo represents information about a cluster

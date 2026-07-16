@@ -332,3 +332,17 @@ func TestFlagValidation(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestValidateCreateFlags_BackendConfig(t *testing.T) {
+	t.Run("accepted for cloud types", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", NodeCount: 3, BackendConfig: "s3://bucket/prefix"}
+		assert.NoError(t, ValidateCreateFlags(flags))
+	})
+
+	t.Run("rejected for k3d", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "k3d", NodeCount: 3, BackendConfig: "s3://bucket/prefix"}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only applies to cloud cluster types")
+	})
+}
