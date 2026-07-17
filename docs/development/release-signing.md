@@ -63,6 +63,10 @@ Two layers, neither needing certificates locally:
   assets on real Windows/macOS runners and verify them against the OS trust
   stores (`Get-AuthenticodeSignature` incl. timestamp; `codesign --verify` +
   Developer ID authority check, best-effort `spctl` notarization assessment).
+  Both checks pin the signer identity — Authenticode subject
+  `Flamingo AI, Inc.`, Apple `TeamIdentifier=F7LDSU8JPJ` — so a binary signed
+  by *some* trusted-but-wrong publisher still fails. On verification failure
+  the `cleanup-on-failed-verification` job yanks the release and tag.
 
 ## Verifying a released binary
 

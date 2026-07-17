@@ -218,10 +218,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # Post-publish signature verification: download the PUBLISHED assets on real
   # Windows/macOS runners and verify what users actually get — the OS trust
-  # store checks here can't run on the release runner. No secrets needed.
-  # A failure does NOT auto-yank the release (the release job's cleanup only
-  # covers its own failure): a bad signature at this point means investigate
-  # and delete the release manually.
+  # store checks here can't run on the release runner. No secrets needed: the
+  # pinned identities below are public facts, visible in any signed binary.
+  # A verification failure triggers cleanup-on-failed-verification, which
+  # yanks the release and tag (same philosophy as the release job's own
+  # cleanup: never leave a bad release visible as latest).
   verify-windows-signature:
     name: "Verify: Windows Authenticode"
     needs: [version, release]
@@ -236,7 +237,7 @@ jobs:
           foreach ($arch in @("amd64", "arm64")) {
             $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:VERSION/openframe-cli_windows_$arch.zip"
             Write-Host "Verifying $url"
-            Invoke-WebRequest -Uri $url -OutFile "openframe_$arch.zip"
+            Invoke-WebRequest -Uri $url -OutFile "openframe_$arch.zip" -MaximumRetryCount 5 -RetryIntervalSec 5
             Expand-Archive "openframe_$arch.zip" -DestinationPath "extracted_$arch"
             $sig = Get-AuthenticodeSignature -FilePath "extracted_$arch/openframe.exe"
 
@@ -247,6 +248,14 @@ jobs:
             }
             if ($sig.Status -ne "Valid") {
               Write-Error "Signature verification failed for ${arch}: $($sig.Status) — $($sig.StatusMessage)"
+              exit 1
+            }
+            # "Valid" only proves SOME trusted publisher signed it — pin ours.
+            # Subject of the Azure Trusted Signing cert (the verified legal
+            # entity; stable across the short-lived certs the service issues):
+            #   CN=Flamingo AI, Inc., O=Flamingo AI, Inc., L=Miami, S=Florida, C=US
+            if ($sig.SignerCertificate.Subject -notlike "*Flamingo AI, Inc.*") {
+              Write-Error "Unexpected signer for ${arch}: $($sig.SignerCertificate.Subject)"
               exit 1
             }
             if (-not $sig.TimeStamperCertificate) {
@@ -282,9 +291,36 @@ jobs:
               echo "::error::${arch} binary is not signed with a Developer ID Application certificate"
               exit 1
             fi
+            # The Authority check only proves the certificate class — pin the
+            # signer to our Apple team (Flamingo AI, Inc.).
+            if ! echo "$info" | grep -q "TeamIdentifier=F7LDSU8JPJ"; then
+              echo "::error::${arch} binary signed by an unexpected team: $(echo "$info" | grep TeamIdentifier || echo 'TeamIdentifier missing')"
+              exit 1
+            fi
             # Notarization check is best-effort: spctl needs quarantine context
             # and the ticket can lag right after publication (bare binaries
             # can't be stapled), so log the assessment without failing.
             spctl --assess --type open --context context:primary-signature --verbose "$bin" || true
           done
           echo "All macOS signatures verified"
+
+  # A bad signature must not stay visible as `latest`. The release job's own
+  # cleanup only covers its own failure, so failed verification yanks the
+  # release + tag here. Gated on release success: if the release job failed it
+  # already rolled itself back (verification is then skipped anyway).
+  cleanup-on-failed-verification:
+    name: "Cleanup: yank release on failed verification"
+    needs: [version, release, verify-windows-signature, verify-macos-signature]
+    if: failure() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete release and tag
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  CLEANUP: yanking release ${VERSION} after failed verification"
+          echo "==================================================================="
+          gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --yes && echo "deleted release ${VERSION}" || echo "no release ${VERSION} to delete"
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${VERSION}" && echo "deleted tag ${VERSION}" || echo "no tag ${VERSION} to delete"
