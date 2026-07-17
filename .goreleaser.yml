@@ -29,6 +29,13 @@ builds:
       - -X github.com/flamingo-stack/openframe-cli/cmd.version={{.Version}}
       - -X github.com/flamingo-stack/openframe-cli/cmd.commit={{.Commit}}
       - -X github.com/flamingo-stack/openframe-cli/cmd.date={{.Date}}
+    # Release-only code signing (macOS: codesign + notarytool; Windows: Azure
+    # Trusted Signing). Must run before archiving so archives/checksums cover
+    # the signed binaries. No-op unless OPENFRAME_SIGN=1 — see the script.
+    hooks:
+      post:
+        - cmd: ./scripts/sign-binary.sh {{ .Os }} {{ .Arch }} "{{ .Path }}"
+          output: true
 
 archives:
   - id: openframe-cli-archive
