@@ -214,3 +214,77 @@ jobs:
           if [[ -n "${KEYCHAIN_PATH:-}" && -f "${KEYCHAIN_PATH}" ]]; then
             security delete-keychain "$KEYCHAIN_PATH"
           fi
+
+  # ---------------------------------------------------------------------------
+  # Post-publish signature verification: download the PUBLISHED assets on real
+  # Windows/macOS runners and verify what users actually get — the OS trust
+  # store checks here can't run on the release runner. No secrets needed.
+  # A failure does NOT auto-yank the release (the release job's cleanup only
+  # covers its own failure): a bad signature at this point means investigate
+  # and delete the release manually.
+  verify-windows-signature:
+    name: "Verify: Windows Authenticode"
+    needs: [version, release]
+    runs-on: windows-latest
+    steps:
+      - name: Download and verify published Windows binaries
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($arch in @("amd64", "arm64")) {
+            $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:VERSION/openframe-cli_windows_$arch.zip"
+            Write-Host "Verifying $url"
+            Invoke-WebRequest -Uri $url -OutFile "openframe_$arch.zip"
+            Expand-Archive "openframe_$arch.zip" -DestinationPath "extracted_$arch"
+            $sig = Get-AuthenticodeSignature -FilePath "extracted_$arch/openframe.exe"
+
+            Write-Host "  Status: $($sig.Status)"
+            if ($sig.SignerCertificate) {
+              Write-Host "  Signer: $($sig.SignerCertificate.Subject)"
+              Write-Host "  Issuer: $($sig.SignerCertificate.Issuer)"
+            }
+            if ($sig.Status -ne "Valid") {
+              Write-Error "Signature verification failed for ${arch}: $($sig.Status) — $($sig.StatusMessage)"
+              exit 1
+            }
+            if (-not $sig.TimeStamperCertificate) {
+              Write-Error "Signature for ${arch} is not timestamped"
+              exit 1
+            }
+            Write-Host "  Timestamp Authority: $($sig.TimeStamperCertificate.Subject)"
+          }
+          Write-Host "All Windows signatures verified"
+
+  verify-macos-signature:
+    name: "Verify: macOS signature & notarization"
+    needs: [version, release]
+    runs-on: macos-latest
+    steps:
+      - name: Download and verify published macOS binaries
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/openframe-cli_darwin_${arch}.tar.gz"
+            echo "Verifying $url"
+            curl -fsSL --retry 3 -o "openframe_${arch}.tar.gz" "$url"
+            mkdir -p "extracted_${arch}"
+            tar -xzf "openframe_${arch}.tar.gz" -C "extracted_${arch}"
+            bin="extracted_${arch}/openframe"
+
+            codesign --verify --strict --verbose=2 "$bin"
+            info="$(codesign -dvv "$bin" 2>&1)"
+            echo "$info"
+            if ! echo "$info" | grep -q "Authority=Developer ID Application"; then
+              echo "::error::${arch} binary is not signed with a Developer ID Application certificate"
+              exit 1
+            fi
+            # Notarization check is best-effort: spctl needs quarantine context
+            # and the ticket can lag right after publication (bare binaries
+            # can't be stapled), so log the assessment without failing.
+            spctl --assess --type open --context context:primary-signature --verbose "$bin" || true
+          done
+          echo "All macOS signatures verified"

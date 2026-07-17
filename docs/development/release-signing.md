@@ -48,6 +48,22 @@ Same names as `openframe-oss-tenant`, so org-level secrets cover both repos.
 | `AZURE_CODE_SIGNING_ACCOUNT_NAME` | Trusted Signing account |
 | `AZURE_CERTIFICATE_PROFILE_NAME` | Certificate profile |
 
+## Testing
+
+Two layers, neither needing certificates locally:
+
+- **Unit tests** — `tests/scripts/sign_binary_test.go` (part of
+  `make test-unit`) runs `scripts/sign-binary.sh` with PATH stubs for
+  `codesign`/`xcrun`/`java`/`curl`/`jq` that record their argv. They pin the
+  `OPENFRAME_SIGN` gate, the per-OS dispatch, fail-fast on missing env, and the
+  exact flags passed to codesign/notarytool/jsign (identity, hardened runtime,
+  endpoint scheme-stripping, alias, timestamp URL, call ordering).
+- **Post-publish verification** — the `verify-windows-signature` /
+  `verify-macos-signature` jobs in the release workflow download the published
+  assets on real Windows/macOS runners and verify them against the OS trust
+  stores (`Get-AuthenticodeSignature` incl. timestamp; `codesign --verify` +
+  Developer ID authority check, best-effort `spctl` notarization assessment).
+
 ## Verifying a released binary
 
 macOS:
