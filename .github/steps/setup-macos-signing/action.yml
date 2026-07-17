@@ -1,0 +1,48 @@
+name: Setup macOS code signing
+description: >-
+  Import the Apple Developer ID certificate into a throwaway keychain and
+  export KEYCHAIN_PATH / SIGNING_IDENTITY for later steps. Mirrors the setup
+  portion of .github/steps/sign-macos-package in openframe-oss-tenant; the
+  actual signing happens in scripts/sign-binary.sh, driven by GoReleaser
+  build hooks. Delete the keychain afterwards with an `if: always()` step.
+inputs:
+  apple_certificate_p12:
+    description: 'Base64 encoded Apple Developer certificate (.p12)'
+    required: true
+  apple_certificate_password:
+    description: 'Password for the .p12 certificate'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Import certificate into throwaway keychain
+      shell: bash
+      env:
+        APPLE_CERTIFICATE_P12: ${{ inputs.apple_certificate_p12 }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ inputs.apple_certificate_password }}
+      run: |
+        CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+        KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+
+        # Decode certificate and create keychain
+        echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_PATH"
+        security create-keychain -p "$APPLE_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+        security default-keychain -s "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$APPLE_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+
+        # Import certificate and let codesign use the key non-interactively
+        security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+
+        security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+        rm "$CERTIFICATE_PATH"
+        echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+        SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+        if [[ -z "$SIGNING_IDENTITY" ]]; then
+          echo "::error::No Developer ID Application identity found in keychain"
+          exit 1
+        fi
+        echo "Found signing identity: $SIGNING_IDENTITY"
+        echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
