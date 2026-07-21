@@ -1,5 +1,0 @@
-deployment:
-    oss:
-        enabled: true
-    saas:
-        enabled: false
