@@ -31,7 +31,10 @@ jobs:
   release:
     name: "Release"
     needs: [version]
-    runs-on: ubuntu-latest
+    # macOS runner: binaries are code-signed in GoReleaser build hooks before
+    # archiving (checksums must cover the signed bits), and codesign/notarytool
+    # only exist on macOS. Windows Authenticode uses jsign, which runs anywhere.
+    runs-on: macos-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
       # The self-updater pins the cosign signing identity to
@@ -94,6 +97,25 @@ jobs:
       - name: Install syft (SBOM generator)
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
+      # --- Code signing setup (used by scripts/sign-binary.sh via GoReleaser
+      # build hooks). Mirrors openframe-oss-tenant's sign-macos-package /
+      # sign-windows-package steps and uses the same org secrets.
+      - name: Setup macOS code signing
+        uses: ./.github/steps/setup-macos-signing
+        with:
+          apple_certificate_p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install jsign (Azure Trusted Signing client)
+        env:
+          JSIGN_VERSION: "7.5"
+          JSIGN_SHA256: "602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c"
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/jsign.jar" \
+            "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+          echo "${JSIGN_SHA256}  $RUNNER_TEMP/jsign.jar" | shasum -a 256 -c -
+          echo "JSIGN_JAR=$RUNNER_TEMP/jsign.jar" >> "$GITHUB_ENV"
+
       - name: Create and push tag
         id: tag
         env:
@@ -110,6 +132,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ needs.version.outputs.version }}
+          # Enables scripts/sign-binary.sh in the build hooks. KEYCHAIN_PATH,
+          # SIGNING_IDENTITY and JSIGN_JAR arrive via GITHUB_ENV from the
+          # signing setup steps above.
+          OPENFRAME_SIGN: "1"
+          APPLE_ID_USERNAME: ${{ secrets.APPLE_ID_USERNAME }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_CODE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT_NAME }}
+          AZURE_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
         run: |
           goreleaser release --clean
 
@@ -123,8 +158,11 @@ jobs:
           echo "==================================================================="
           # Guards the ldflags injection (-X cmd.version): a broken injection
           # ships binaries reporting "dev", which disables self-update.
-          BIN="$(find dist -type f -name openframe -path '*linux*amd64*' | head -1)"
-          if [ -z "$BIN" ]; then echo "::error::no linux/amd64 binary found in dist/"; find dist -type f | head -20; exit 1; fi
+          # Runner is macOS/arm64, so exercise the darwin/arm64 binary — this
+          # also proves the signed, notarized binary still executes.
+          BIN="$(find dist -type f -name openframe -path '*darwin*arm64*' | head -1)"
+          if [ -z "$BIN" ]; then echo "::error::no darwin/arm64 binary found in dist/"; find dist -type f | head -20; exit 1; fi
+          codesign --verify --strict --verbose=2 "$BIN"
           got="$("$BIN" --version)"
           echo "$got"
           if ! echo "$got" | grep -qF "$VERSION"; then
@@ -169,3 +207,120 @@ jobs:
           echo "==================================================================="
           gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --yes && echo "deleted release ${VERSION}" || echo "no release ${VERSION} to delete"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ":refs/tags/${VERSION}" && echo "deleted tag ${VERSION}"
+
+      - name: 'Cleanup: delete signing keychain'
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "${KEYCHAIN_PATH}" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Post-publish signature verification: download the PUBLISHED assets on real
+  # Windows/macOS runners and verify what users actually get — the OS trust
+  # store checks here can't run on the release runner. No secrets needed: the
+  # pinned identities below are public facts, visible in any signed binary.
+  # A verification failure triggers cleanup-on-failed-verification, which
+  # yanks the release and tag (same philosophy as the release job's own
+  # cleanup: never leave a bad release visible as latest).
+  verify-windows-signature:
+    name: "Verify: Windows Authenticode"
+    needs: [version, release]
+    runs-on: windows-latest
+    steps:
+      - name: Download and verify published Windows binaries
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($arch in @("amd64", "arm64")) {
+            $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:VERSION/openframe-cli_windows_$arch.zip"
+            Write-Host "Verifying $url"
+            Invoke-WebRequest -Uri $url -OutFile "openframe_$arch.zip" -MaximumRetryCount 5 -RetryIntervalSec 5
+            Expand-Archive "openframe_$arch.zip" -DestinationPath "extracted_$arch"
+            $sig = Get-AuthenticodeSignature -FilePath "extracted_$arch/openframe.exe"
+
+            Write-Host "  Status: $($sig.Status)"
+            if ($sig.SignerCertificate) {
+              Write-Host "  Signer: $($sig.SignerCertificate.Subject)"
+              Write-Host "  Issuer: $($sig.SignerCertificate.Issuer)"
+            }
+            if ($sig.Status -ne "Valid") {
+              Write-Error "Signature verification failed for ${arch}: $($sig.Status) — $($sig.StatusMessage)"
+              exit 1
+            }
+            # "Valid" only proves SOME trusted publisher signed it — pin ours.
+            # Subject of the Azure Trusted Signing cert (the verified legal
+            # entity; stable across the short-lived certs the service issues):
+            #   CN=Flamingo AI, Inc., O=Flamingo AI, Inc., L=Miami, S=Florida, C=US
+            if ($sig.SignerCertificate.Subject -notlike "*Flamingo AI, Inc.*") {
+              Write-Error "Unexpected signer for ${arch}: $($sig.SignerCertificate.Subject)"
+              exit 1
+            }
+            if (-not $sig.TimeStamperCertificate) {
+              Write-Error "Signature for ${arch} is not timestamped"
+              exit 1
+            }
+            Write-Host "  Timestamp Authority: $($sig.TimeStamperCertificate.Subject)"
+          }
+          Write-Host "All Windows signatures verified"
+
+  verify-macos-signature:
+    name: "Verify: macOS signature & notarization"
+    needs: [version, release]
+    runs-on: macos-latest
+    steps:
+      - name: Download and verify published macOS binaries
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/openframe-cli_darwin_${arch}.tar.gz"
+            echo "Verifying $url"
+            curl -fsSL --retry 3 -o "openframe_${arch}.tar.gz" "$url"
+            mkdir -p "extracted_${arch}"
+            tar -xzf "openframe_${arch}.tar.gz" -C "extracted_${arch}"
+            bin="extracted_${arch}/openframe"
+
+            codesign --verify --strict --verbose=2 "$bin"
+            info="$(codesign -dvv "$bin" 2>&1)"
+            echo "$info"
+            if ! echo "$info" | grep -q "Authority=Developer ID Application"; then
+              echo "::error::${arch} binary is not signed with a Developer ID Application certificate"
+              exit 1
+            fi
+            # The Authority check only proves the certificate class — pin the
+            # signer to our Apple team (Flamingo AI, Inc.).
+            if ! echo "$info" | grep -q "TeamIdentifier=F7LDSU8JPJ"; then
+              echo "::error::${arch} binary signed by an unexpected team: $(echo "$info" | grep TeamIdentifier || echo 'TeamIdentifier missing')"
+              exit 1
+            fi
+            # Notarization check is best-effort: spctl needs quarantine context
+            # and the ticket can lag right after publication (bare binaries
+            # can't be stapled), so log the assessment without failing.
+            spctl --assess --type open --context context:primary-signature --verbose "$bin" || true
+          done
+          echo "All macOS signatures verified"
+
+  # A bad signature must not stay visible as `latest`. The release job's own
+  # cleanup only covers its own failure, so failed verification yanks the
+  # release + tag here. Gated on release success: if the release job failed it
+  # already rolled itself back (verification is then skipped anyway).
+  cleanup-on-failed-verification:
+    name: "Cleanup: yank release on failed verification"
+    needs: [version, release, verify-windows-signature, verify-macos-signature]
+    if: failure() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete release and tag
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  CLEANUP: yanking release ${VERSION} after failed verification"
+          echo "==================================================================="
+          gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --yes && echo "deleted release ${VERSION}" || echo "no release ${VERSION} to delete"
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${VERSION}" && echo "deleted tag ${VERSION}" || echo "no tag ${VERSION} to delete"

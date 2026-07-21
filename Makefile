@@ -14,9 +14,10 @@ GOARCH := $(shell go env GOARCH)
 BINARY_SUFFIX := $(if $(filter windows,$(GOOS)),.exe,)
 
 # Unit-test package set. Includes the root package (main_test.go — the only
-# exit-code fidelity tests) and tests/testutil, which `./cmd/... ./internal/...`
-# silently skipped. Deliberately excludes ./tests/integration/... (real clusters).
-UNIT_PKGS := . ./cmd/... ./internal/... ./tests/testutil/...
+# exit-code fidelity tests), tests/testutil and tests/scripts (release script
+# tests), which `./cmd/... ./internal/...` silently skipped. Deliberately
+# excludes ./tests/integration/... (real clusters).
+UNIT_PKGS := . ./cmd/... ./internal/... ./tests/testutil/... ./tests/scripts/...
 
 # Default target
 all: build
