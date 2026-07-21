@@ -68,10 +68,8 @@ type gcloudConfiguration struct {
 	} `json:"properties"`
 }
 
-// Projects returns the unique GCP projects named by the user's gcloud
-// configurations, sorted. Configurations without a project (or with the
-// literal "none") are skipped.
-func (d *GKEDiscoverer) Projects(ctx context.Context) ([]string, error) {
+// configurations lists and parses the user's named gcloud configurations.
+func (d *GKEDiscoverer) configurations(ctx context.Context) ([]gcloudConfiguration, error) {
 	result, err := d.exec.Execute(ctx, "gcloud", "config", "configurations", "list", "--format=json")
 	if err != nil {
 		return nil, fmt.Errorf("listing gcloud configurations: %w", err)
@@ -79,6 +77,17 @@ func (d *GKEDiscoverer) Projects(ctx context.Context) ([]string, error) {
 	var configs []gcloudConfiguration
 	if err := json.Unmarshal([]byte(result.Stdout), &configs); err != nil {
 		return nil, fmt.Errorf("parsing gcloud configurations: %w", err)
+	}
+	return configs, nil
+}
+
+// Projects returns the unique GCP projects named by the user's gcloud
+// configurations, sorted. Configurations without a project (or with the
+// literal "none") are skipped.
+func (d *GKEDiscoverer) Projects(ctx context.Context) ([]string, error) {
+	configs, err := d.configurations(ctx)
+	if err != nil {
+		return nil, err
 	}
 	seen := map[string]bool{}
 	var projects []string
@@ -92,6 +101,21 @@ func (d *GKEDiscoverer) Projects(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(projects)
 	return projects, nil
+}
+
+// ConfigurationForProject returns the name of the first gcloud configuration
+// pointing at the given project, or "" when none does.
+func (d *GKEDiscoverer) ConfigurationForProject(ctx context.Context, project string) (string, error) {
+	configs, err := d.configurations(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range configs {
+		if strings.TrimSpace(c.Properties.Core.Project) == project {
+			return c.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // gkeCluster is the subset of `gcloud container clusters list --format=json`

@@ -107,3 +107,17 @@ func TestMatchContext(t *testing.T) {
 	assert.Equal(t, "gamma", matchContext(contexts, "proj", "us-central1", "gamma"))
 	assert.Equal(t, "", matchContext(contexts, "proj", "us-central1", "delta"))
 }
+
+func TestConfigurationForProject(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("gcloud config configurations list", &executor.CommandResult{ExitCode: 0, Stdout: configurationsJSON})
+	d := NewGKEDiscoverer(mock)
+
+	name, err := d.ConfigurationForProject(context.Background(), "tenant-runners-db9z")
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tenant-runners", name)
+
+	name, err = d.ConfigurationForProject(context.Background(), "unknown-project")
+	require.NoError(t, err)
+	assert.Equal(t, "", name)
+}

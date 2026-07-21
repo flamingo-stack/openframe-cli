@@ -78,10 +78,16 @@ create, only after a successful delete.
 
 ```bash
 openframe cluster list                # local + cloud clusters
+openframe cluster list --all          # + external clusters discovered in your GCP projects
+openframe cluster use my-gke          # switch kubectl context (and gcloud configuration)
 openframe cluster status my-eks
 openframe cluster delete my-eks       # terraform destroy; asks to re-type the name
 openframe app install                 # install OpenFrame onto the current context
 ```
+
+`cluster use` works for external (discovered) GKE clusters too: it fetches
+credentials via gcloud when the kubeconfig has no entry yet, and activates
+the gcloud configuration matching the cluster's project.
 
 `cluster delete --force` skips the typed confirmation (for CI). `cluster
 cleanup` does not apply to cloud clusters — use `delete`.

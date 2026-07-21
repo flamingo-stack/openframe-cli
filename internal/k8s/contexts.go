@@ -7,6 +7,7 @@
 package k8s
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -55,6 +56,39 @@ func ResolveContextForCluster(kubeconfigPath, clusterName string) string {
 		}
 	}
 	return k3d
+}
+
+// HasContext reports whether the kubeconfig at path contains a context with
+// the given name. An unreadable kubeconfig counts as "no".
+func HasContext(path, name string) bool {
+	contexts, _, err := LoadContexts(path)
+	if err != nil {
+		return false
+	}
+	for _, c := range contexts {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SwitchContext sets current-context in the kubeconfig at path. It only
+// changes the pointer — never contexts, clusters, or users — so it cannot
+// damage entries owned by other tools.
+func SwitchContext(path, name string) error {
+	cfg, err := clientcmd.LoadFromFile(path)
+	if err != nil {
+		return fmt.Errorf("loading kubeconfig: %w", err)
+	}
+	if _, ok := cfg.Contexts[name]; !ok {
+		return fmt.Errorf("kubeconfig has no context '%s'", name)
+	}
+	cfg.CurrentContext = name
+	if err := clientcmd.WriteToFile(*cfg, path); err != nil {
+		return fmt.Errorf("writing kubeconfig: %w", err)
+	}
+	return nil
 }
 
 // LoadContexts reads the kubeconfig at path and returns its contexts (sorted by
