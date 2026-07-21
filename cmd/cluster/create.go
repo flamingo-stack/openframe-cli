@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
@@ -92,6 +93,12 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 	planner, ok := p.(provider.Planner)
 	if !ok {
 		return nil
+	}
+
+	if config.Type == models.ClusterTypeGKE {
+		if err := discovery.NewAuthFlow(exec).Ensure(ctx, true); err != nil {
+			return err
+		}
 	}
 
 	pterm.Info.Printf("Computing terraform plan for %s cluster '%s'...\n", config.Type, config.Name)
@@ -225,6 +232,15 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 	// dry-run must not mutate the system.
 	if err := prerequisites.CheckForClusterType(config.Type); err != nil {
 		return err
+	}
+
+	// Single auth flow: for GKE, offer `gcloud auth login` (+ ADC for
+	// terraform) right here instead of failing later in the provider
+	// preflight with a "run this command" error.
+	if config.Type == models.ClusterTypeGKE {
+		if err := discovery.NewAuthFlow(utils.CommandExecutor()).Ensure(cmd.Context(), true); err != nil {
+			return err
+		}
 	}
 
 	// Execute cluster creation through service layer

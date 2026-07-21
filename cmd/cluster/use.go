@@ -101,7 +101,11 @@ func useExternalGKE(ctx context.Context, exec executor.CommandExecutor, kubeconf
 	case discovery.CLIMissing:
 		return fmt.Errorf("cluster '%s' is not known locally, and gcloud is not installed to look for it in GCP", name)
 	case discovery.NotAuthenticated:
-		return fmt.Errorf("cluster '%s' is not known locally; run 'gcloud auth login' to look for it in your GCP projects", name)
+		// One unambiguous flow: offer the login right here (interactive only).
+		pterm.Info.Printf("Cluster '%s' is not known locally — looking for it in your GCP projects requires a Google Cloud login\n", name)
+		if err := discovery.NewAuthFlow(exec).Ensure(ctx, false); err != nil {
+			return err
+		}
 	}
 
 	result, err := d.Discover(ctx)
