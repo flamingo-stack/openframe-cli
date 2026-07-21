@@ -96,3 +96,51 @@ func TestDefaultKubeconfigPath_EnvWins(t *testing.T) {
 	t.Setenv("KUBECONFIG", "/custom/kubeconfig")
 	assert.Equal(t, "/custom/kubeconfig", DefaultKubeconfigPath())
 }
+
+func TestSwitchContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	kubeconfig := `apiVersion: v1
+kind: Config
+current-context: alpha
+clusters:
+- name: c1
+  cluster:
+    server: https://a.example
+contexts:
+- name: alpha
+  context:
+    cluster: c1
+    user: u
+- name: beta
+  context:
+    cluster: c1
+    user: u
+users:
+- name: u
+`
+	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !HasContext(path, "beta") || HasContext(path, "ghost") {
+		t.Fatal("HasContext misreports")
+	}
+
+	if err := SwitchContext(path, "beta"); err != nil {
+		t.Fatalf("SwitchContext: %v", err)
+	}
+	_, current, err := LoadContexts(path)
+	if err != nil || current != "beta" {
+		t.Fatalf("current-context = %q (err %v), want beta", current, err)
+	}
+
+	// Switching only flips the pointer — both contexts must survive.
+	contexts, _, _ := LoadContexts(path)
+	if len(contexts) != 2 {
+		t.Fatalf("contexts damaged: %v", contexts)
+	}
+
+	if err := SwitchContext(path, "ghost"); err == nil {
+		t.Fatal("switching to a missing context must fail")
+	}
+}
