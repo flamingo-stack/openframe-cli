@@ -77,11 +77,18 @@ func restConfigFor(rec tfengine.Record) (*rest.Config, error) {
 // mergeIntoDefaultKubeconfig writes the cluster's context into the user's
 // kubeconfig (honoring $KUBECONFIG) and switches the current context to it —
 // the same post-create behavior the k3d provider gets from k3d itself.
+// It refuses to overwrite a same-named context that points at a DIFFERENT
+// server (see the GKE twin for rationale).
 func mergeIntoDefaultKubeconfig(rec tfengine.Record) error {
 	pathOpts := clientcmd.NewDefaultPathOptions()
 	existing, err := pathOpts.GetStartingConfig()
 	if err != nil {
 		return fmt.Errorf("loading kubeconfig: %w", err)
+	}
+	if prior, ok := existing.Contexts[rec.Name]; ok {
+		if cluster, ok := existing.Clusters[prior.Cluster]; ok && cluster.Server != rec.Endpoint {
+			return fmt.Errorf("kubeconfig context '%s' already exists and points at %s — refusing to overwrite it; rename the existing context or pick another cluster name", rec.Name, cluster.Server)
+		}
 	}
 	generated, err := kubeconfigFor(rec)
 	if err != nil {

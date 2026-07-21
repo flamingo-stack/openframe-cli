@@ -919,12 +919,20 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 		return nil
 	}
 
-	// Convert to UI display format
+	// Convert to UI display format. Local clusters have no explicit source —
+	// label them "local" so the SOURCE column is never ambiguous.
 	displayClusters := make([]uiCluster.ClusterDisplayInfo, len(clusters))
 	for i, cluster := range clusters {
+		source := string(cluster.Source)
+		if source == "" {
+			source = "local"
+		}
 		displayClusters[i] = uiCluster.ClusterDisplayInfo{
 			Name:      cluster.Name,
 			Type:      string(cluster.Type),
+			Source:    source,
+			Context:   cluster.Context,
+			Project:   cluster.Project,
 			Status:    cluster.Status,
 			NodeCount: cluster.NodeCount,
 			CreatedAt: cluster.CreatedAt,

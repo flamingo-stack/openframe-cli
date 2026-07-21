@@ -13,6 +13,9 @@ import (
 type ClusterDisplayInfo struct {
 	Name      string
 	Type      string
+	Source    string // "local" | "openframe" | "external"
+	Context   string // kubeconfig context, when known
+	Project   string // GCP project (cloud clusters)
 	Status    string
 	NodeCount int
 	CreatedAt time.Time
@@ -42,20 +45,54 @@ func (s *DisplayService) ShowClusterList(clusters []ClusterDisplayInfo, out io.W
 		return
 	}
 
-	// Create table data
-	tableData := pterm.TableData{
-		{"NAME", "TYPE", "STATUS", "NODES", "CREATED"},
+	// The SOURCE/CONTEXT/PROJECT columns only appear when the list contains
+	// cloud entries — a purely local listing keeps its compact shape.
+	hasCloud := false
+	for _, c := range clusters {
+		if c.Source != "" && c.Source != "local" {
+			hasCloud = true
+			break
+		}
 	}
 
+	header := []string{"NAME", "TYPE", "STATUS", "NODES", "CREATED"}
+	if hasCloud {
+		header = []string{"NAME", "TYPE", "SOURCE", "STATUS", "NODES", "CONTEXT", "PROJECT", "CREATED"}
+	}
+	tableData := pterm.TableData{header}
+
+	orDash := func(s string) string {
+		if s == "" {
+			return "—"
+		}
+		return s
+	}
 	for _, clusterInfo := range clusters {
 		statusColor := sharedUI.GetStatusColor(clusterInfo.Status)
-		tableData = append(tableData, []string{
+		created := ""
+		if !clusterInfo.CreatedAt.IsZero() {
+			created = clusterInfo.CreatedAt.Format("2006-01-02 15:04")
+		}
+		row := []string{
 			pterm.Bold.Sprint(clusterInfo.Name),
 			clusterInfo.Type,
 			statusColor(clusterInfo.Status),
 			fmt.Sprintf("%d", clusterInfo.NodeCount),
-			clusterInfo.CreatedAt.Format("2006-01-02 15:04"),
-		})
+			created,
+		}
+		if hasCloud {
+			row = []string{
+				pterm.Bold.Sprint(clusterInfo.Name),
+				clusterInfo.Type,
+				orDash(clusterInfo.Source),
+				statusColor(clusterInfo.Status),
+				fmt.Sprintf("%d", clusterInfo.NodeCount),
+				orDash(clusterInfo.Context),
+				orDash(clusterInfo.Project),
+				created,
+			}
+		}
+		tableData = append(tableData, row)
 	}
 
 	// Use pterm table for better formatting - but write to the provided writer

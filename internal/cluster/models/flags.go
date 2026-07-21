@@ -35,6 +35,8 @@ type CreateFlags struct {
 type ListFlags struct {
 	GlobalFlags
 	Quiet bool
+	// All additionally discovers external cloud clusters (read-only).
+	All bool
 }
 
 // StatusFlags contains flags specific to status command
@@ -84,6 +86,7 @@ func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
 // AddListFlags adds list-specific flags to a command
 func AddListFlags(cmd *cobra.Command, flags *ListFlags) {
 	cmd.Flags().BoolVarP(&flags.Quiet, "quiet", "q", false, "Only show cluster names")
+	cmd.Flags().BoolVarP(&flags.All, "all", "a", false, "Also discover external cloud clusters (read-only; needs provider CLI auth)")
 }
 
 // AddStatusFlags adds status-specific flags to a command
@@ -160,13 +163,16 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 	}
 
 	// The wizard prompts for these; in skip-wizard mode they must come from
-	// flags.
+	// flags. EKS is exempt while its creation is gated behind the coming-soon
+	// banner — the banner must win over a missing-flag error.
 	isCloud := clusterType == ClusterTypeEKS || clusterType == ClusterTypeGKE
-	if isCloud && flags.SkipWizard && flags.Region == "" {
-		return fmt.Errorf("--region is required for --type %s with --skip-wizard", flags.ClusterType)
-	}
-	if clusterType == ClusterTypeGKE && flags.SkipWizard && flags.Project == "" {
-		return fmt.Errorf("--project is required for --type gke with --skip-wizard")
+	if clusterType == ClusterTypeGKE && flags.SkipWizard {
+		if flags.Region == "" {
+			return fmt.Errorf("--region is required for --type gke with --skip-wizard")
+		}
+		if flags.Project == "" {
+			return fmt.Errorf("--project is required for --type gke with --skip-wizard")
+		}
 	}
 	if flags.BackendConfig != "" && !isCloud {
 		return fmt.Errorf("--backend-config only applies to cloud cluster types (eks, gke)")

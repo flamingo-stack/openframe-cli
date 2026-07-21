@@ -74,37 +74,35 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
+// While EKS creation is gated behind the coming-soon banner, the plan preview
+// is a GKE-only path (see TestRunCreateCluster_EKSShowsComingSoonBanner).
 func TestRunCreateCluster_CloudDryRunRunsPlanPreview(t *testing.T) {
-	for _, clusterType := range []string{"eks", "gke"} {
-		t.Run(clusterType, func(t *testing.T) {
-			setupCreate(t)
-			// Stub the preview: the real one shells out to terraform.
-			var previewed *models.ClusterConfig
-			orig := planPreviewFn
-			planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
-				previewed = &config
-				return nil
-			}
-			t.Cleanup(func() { planPreviewFn = orig })
+	setupCreate(t)
+	// Stub the preview: the real one shells out to terraform.
+	var previewed *models.ClusterConfig
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		previewed = &config
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
 
-			cmd := getCreateCmd()
-			gf := utils.GetGlobalFlags()
-			gf.Create.SkipWizard = true
-			gf.Create.DryRun = true
-			gf.Create.ClusterType = clusterType
-			gf.Create.Region = "us-east-1"
-			gf.Create.Project = "my-project"
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+	gf.Create.ClusterType = "gke"
+	gf.Create.Region = "us-central1"
+	gf.Create.Project = "my-project"
 
-			if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
-				t.Fatalf("%s dry-run should return nil, got %v", clusterType, err)
-			}
-			if previewed == nil {
-				t.Fatal("cloud dry-run must invoke the terraform plan preview")
-			}
-			if previewed.Cloud == nil || previewed.Cloud.Region != "us-east-1" {
-				t.Fatalf("preview received wrong config: %+v", previewed)
-			}
-		})
+	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+		t.Fatalf("gke dry-run should return nil, got %v", err)
+	}
+	if previewed == nil {
+		t.Fatal("gke dry-run must invoke the terraform plan preview")
+	}
+	if previewed.Cloud == nil || previewed.Cloud.Region != "us-central1" {
+		t.Fatalf("preview received wrong config: %+v", previewed)
 	}
 }
 
@@ -158,5 +156,31 @@ func TestRunClusterStatus_ListFailureSurfacesError(t *testing.T) {
 
 	if err := runClusterStatus(getStatusCmd(), []string{"c1"}); err == nil {
 		t.Fatal("expected an error when cluster listing fails")
+	}
+}
+
+// TestRunCreateCluster_EKSShowsComingSoonBanner: while EKS creation is gated,
+// --type eks must show the banner and exit cleanly — no prerequisite gate, no
+// provider calls, no validation errors about missing --region.
+func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
+	setupCreate(t)
+	called := false
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
+
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.ClusterType = "eks"
+
+	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+		t.Fatalf("eks banner path must return nil, got %v", err)
+	}
+	if called {
+		t.Fatal("eks must not reach the plan preview while gated")
 	}
 }
