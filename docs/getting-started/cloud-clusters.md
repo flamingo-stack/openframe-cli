@@ -19,7 +19,14 @@ Checked and installed automatically on `cluster create`:
 | eks  | terraform (pinned, verified), AWS CLI | working AWS credentials (`aws configure` or `--profile`) |
 | gke  | terraform (pinned, verified), gcloud, gke-gcloud-auth-plugin | `gcloud auth login` + a GCP project |
 
-Credentials are preflighted before anything is created (`aws sts
+**You do not need to log in beforehand.** When a command needs Google Cloud
+access (`create --type gke`, `list --all`, `use`), the CLI checks your gcloud
+auth state and, in an interactive session, offers to run `gcloud auth login`
+(and `gcloud auth application-default login` for Terraform) right there — one
+flow, no manual steps. Non-interactive sessions (CI) never prompt and fail
+with the exact command to run instead.
+
+Credentials are additionally preflighted before anything is created (`aws sts
 get-caller-identity` / `gcloud auth print-access-token`), so a broken login
 fails in seconds, not mid-provisioning.
 

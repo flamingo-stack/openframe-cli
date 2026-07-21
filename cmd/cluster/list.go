@@ -100,12 +100,17 @@ func runListClusters(cmd *cobra.Command, args []string) error {
 func discoverExternalClusters(ctx context.Context, managed []models.ClusterInfo) ([]models.ClusterInfo, []string) {
 	notices := []string{"AWS EKS discovery is coming soon — external EKS clusters are not shown yet"}
 
-	d := discovery.NewGKEDiscoverer(utils.CommandExecutor())
+	exec := utils.CommandExecutor()
+	d := discovery.NewGKEDiscoverer(exec)
 	switch d.AuthStatus(ctx) {
 	case discovery.CLIMissing:
 		return nil, append(notices, "GKE: gcloud is not installed — install it to discover external clusters")
 	case discovery.NotAuthenticated:
-		return nil, append(notices, "GKE: not authenticated — run 'gcloud auth login' to discover external clusters")
+		// One unambiguous flow: offer the login right here (interactive only —
+		// non-interactive sessions get the same message as before).
+		if err := discovery.NewAuthFlow(exec).Ensure(ctx, false); err != nil {
+			return nil, append(notices, "GKE: "+err.Error())
+		}
 	}
 
 	result, err := d.Discover(ctx)
