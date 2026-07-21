@@ -558,7 +558,7 @@ jobs:
         shell: bash
         run: |
           echo "==================================================================="
-          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil)"
+          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil, tests/scripts)"
           echo "==================================================================="
           make test-unit
 

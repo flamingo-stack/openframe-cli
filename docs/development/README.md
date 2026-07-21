@@ -7,6 +7,7 @@ Guides for building, running, and contributing to OpenFrame CLI.
 - **[Architecture Overview](architecture/README.md)** - High-level design, components, and data flows
 - **[Environment Setup](setup/environment.md)** - IDE, tools, and development dependencies
 - **[Local Development](setup/local-development.md)** - Clone, build, run, test, and debug locally
+- **[Release Signing](release-signing.md)** - How release binaries are signed and notarized (macOS/Windows)
 
 ## Key Technologies
 

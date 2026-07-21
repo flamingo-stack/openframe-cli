@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // TestRefreshAndSync_PatchesAppOfApps proves force-sync applies both the hard
@@ -127,6 +129,84 @@ func TestRefreshAndSync_NoClient(t *testing.T) {
 
 	if err := m.RefreshAndSync(context.Background(), false); err == nil {
 		t.Fatal("expected an error when dynamic client is nil")
+	}
+}
+
+// appObjInGroup is appObj plus the deploy-ordering SyncGroupLabel.
+func appObjInGroup(name, health, sync, group string) *unstructured.Unstructured {
+	obj := appObj(name, health, sync)
+	obj.SetLabels(map[string]string{SyncGroupLabel: group})
+	return obj
+}
+
+// TestGroupChildren_SortsAndDefaults locks the grouping rules: groups sort
+// lowest-first, an unlabeled child on a labeled install falls into
+// defaultSyncGroup, and a fully unlabeled install reports labeled=false with
+// every child in one group (legacy single-pass behaviour).
+func TestGroupChildren_SortsAndDefaults(t *testing.T) {
+	children := []unstructured.Unstructured{
+		*appObjInGroup("tenant", ArgoCDHealthHealthy, ArgoCDSyncSynced, "5"),
+		*appObjInGroup("kafka", ArgoCDHealthHealthy, ArgoCDSyncSynced, "3"),
+		*appObjInGroup("zookeeper", ArgoCDHealthHealthy, ArgoCDSyncSynced, "2"),
+		*appObjInGroup("cassandra", ArgoCDHealthHealthy, ArgoCDSyncSynced, "2"),
+		*appObj("unlabeled", ArgoCDHealthHealthy, ArgoCDSyncSynced), // → defaultSyncGroup
+	}
+
+	groups, labeled := groupChildren(children)
+	if !labeled {
+		t.Fatal("labeled = false, want true")
+	}
+	wantNumbers := []int{2, 3, 5}
+	if len(groups) != len(wantNumbers) {
+		t.Fatalf("got %d groups, want %d: %+v", len(groups), len(wantNumbers), groups)
+	}
+	for i, n := range wantNumbers {
+		if groups[i].number != n {
+			t.Errorf("groups[%d].number = %d, want %d", i, groups[i].number, n)
+		}
+	}
+	if got := strings.Join(groups[0].names, ","); got != "cassandra,zookeeper" {
+		t.Errorf("group 2 = %q, want cassandra,zookeeper", got)
+	}
+	if got := strings.Join(groups[1].names, ","); got != "kafka,unlabeled" {
+		t.Errorf("group 3 = %q, want kafka,unlabeled (unlabeled must default to group %d)", got, defaultSyncGroup)
+	}
+
+	// Fully unlabeled install → single group, labeled=false.
+	groups, labeled = groupChildren(children[4:])
+	if labeled || len(groups) != 1 || len(groups[0].names) != 1 {
+		t.Errorf("unlabeled install: labeled=%v groups=%+v, want one unlabeled group", labeled, groups)
+	}
+}
+
+// TestRefreshAndSync_GroupedChildrenAllSynced proves the grouped path still
+// triggers a sync operation on every labeled child (groups gate the ORDER,
+// never drop apps), including a child whose group never converges — the gate
+// is best-effort and must not block later groups.
+func TestRefreshAndSync_GroupedChildrenAllSynced(t *testing.T) {
+	m := fakeManager(
+		appObj(AppOfAppsName, ArgoCDHealthHealthy, ArgoCDSyncSynced),
+		appObjInGroup("ingress-nginx", ArgoCDHealthHealthy, ArgoCDSyncSynced, "1"),
+		// Group 2 never reaches Healthy against the controllerless fake:
+		// the gate must time out (tiny groupWait) and move on, not hang.
+		appObjInGroup("zookeeper", ArgoCDHealthProgressing, ArgoCDSyncOutOfSync, "2"),
+		appObjInGroup("kafka", ArgoCDHealthHealthy, ArgoCDSyncSynced, "3"),
+	)
+	m.groupWait = 10 * time.Millisecond
+
+	if err := m.RefreshAndSync(context.Background(), false); err != nil {
+		t.Fatalf("RefreshAndSync: %v", err)
+	}
+
+	res := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
+	for _, name := range []string{"ingress-nginx", "zookeeper", "kafka"} {
+		got, err := res.Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if _, ok := got.Object["operation"]; !ok {
+			t.Errorf("%s must have a sync .operation set", name)
+		}
 	}
 }
 
