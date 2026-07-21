@@ -10,7 +10,8 @@ This repository (`flamingo-stack/openframe-cli`) is the CLI. The platform and ap
 - [Prerequisites](./getting-started/prerequisites.md) — System requirements and dependencies
 - [Quick Start](./getting-started/quick-start.md) — Install and bootstrap in a few minutes
 - [First Steps](./getting-started/first-steps.md) — Core commands and workflows
-- [Cloud Clusters](./getting-started/cloud-clusters.md) — Provision EKS/GKE clusters with Terraform
+- [Cloud Clusters](./getting-started/cloud-clusters.md) — Provision EKS/GKE clusters with Terraform (reference)
+- [GKE Workflow](./getting-started/gke-workflow.md) — Step-by-step: from zero to a running GKE cluster
 
 ## Commands
 

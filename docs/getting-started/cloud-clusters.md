@@ -1,5 +1,10 @@
 # Cloud Clusters (EKS / GKE)
 
+> Looking for a step-by-step walkthrough? See the
+> [GKE Workflow](./gke-workflow.md) — this page is the reference.
+> AWS EKS creation is currently gated behind a coming-soon banner; the
+> sections below describe both providers for when it is enabled.
+
 Besides local k3d clusters, `openframe cluster create` can provision managed
 Kubernetes clusters in AWS (EKS) or Google Cloud (GKE) using Terraform under
 the hood. The CLI installs its own verified Terraform binary and generates the
