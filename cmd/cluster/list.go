@@ -1,11 +1,14 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 )
@@ -22,8 +25,13 @@ func getListCmd() *cobra.Command {
 Displays cluster information including name, type, status, and node count
 from all registered providers in a formatted table.
 
+With --all, additionally discovers GKE clusters that exist in the GCP
+projects of your gcloud configurations but were created outside openframe.
+Discovered clusters are read-only: openframe never modifies or deletes them.
+
 Examples:
   openframe cluster list
+  openframe cluster list --all
   openframe cluster list --verbose
   openframe cluster list --quiet`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -52,11 +60,19 @@ Examples:
 
 func runListClusters(cmd *cobra.Command, args []string) error {
 	service := utils.GetCommandService()
+	globalFlags := utils.GetGlobalFlags()
 
 	// Get all clusters
 	clusters, err := service.ListClusters()
 	if err != nil {
 		return fmt.Errorf("failed to list clusters: %w", err)
+	}
+
+	var notices []string
+	if globalFlags.List.All {
+		external, discoveryNotices := discoverExternalClusters(cmd.Context(), clusters)
+		clusters = append(clusters, external...)
+		notices = discoveryNotices
 	}
 
 	switch out, _ := cmd.Flags().GetString("output"); out {
@@ -65,11 +81,56 @@ func runListClusters(cmd *cobra.Command, args []string) error {
 	case "yaml":
 		return printClustersYAML(clusters)
 	case "", "text":
-		globalFlags := utils.GetGlobalFlags()
-		return service.DisplayClusterList(clusters, globalFlags.List.Quiet, globalFlags.Global.Verbose)
+		if err := service.DisplayClusterList(clusters, globalFlags.List.Quiet, globalFlags.Global.Verbose); err != nil {
+			return err
+		}
+		for _, notice := range notices {
+			pterm.Info.Println(notice)
+		}
+		return nil
 	default:
 		return fmt.Errorf("invalid --output %q (want \"text\", \"json\", or \"yaml\")", out)
 	}
+}
+
+// discoverExternalClusters runs GKE discovery, dropping entries that are
+// already managed (same name+project as a registry cluster). Auth problems
+// degrade to notices, never errors: a logged-out gcloud must not break list.
+// EKS discovery is not implemented yet — a notice says so.
+func discoverExternalClusters(ctx context.Context, managed []models.ClusterInfo) ([]models.ClusterInfo, []string) {
+	notices := []string{"AWS EKS discovery is coming soon — external EKS clusters are not shown yet"}
+
+	d := discovery.NewGKEDiscoverer(utils.CommandExecutor())
+	switch d.AuthStatus(ctx) {
+	case discovery.CLIMissing:
+		return nil, append(notices, "GKE: gcloud is not installed — install it to discover external clusters")
+	case discovery.NotAuthenticated:
+		return nil, append(notices, "GKE: not authenticated — run 'gcloud auth login' to discover external clusters")
+	}
+
+	result, err := d.Discover(ctx)
+	if err != nil {
+		return nil, append(notices, fmt.Sprintf("GKE discovery failed: %v", err))
+	}
+	for _, w := range result.Warnings {
+		notices = append(notices, "GKE discovery skipped "+w)
+	}
+
+	isManaged := func(c models.ClusterInfo) bool {
+		for _, m := range managed {
+			if m.Name == c.Name && (m.Project == "" || m.Project == c.Project) {
+				return true
+			}
+		}
+		return false
+	}
+	var external []models.ClusterInfo
+	for _, c := range result.Clusters {
+		if !isManaged(c) {
+			external = append(external, c)
+		}
+	}
+	return external, notices
 }
 
 // clusterJSON is the machine-readable shape of a cluster.

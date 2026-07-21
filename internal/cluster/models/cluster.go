@@ -38,10 +38,27 @@ type CloudConfig struct {
 	BackendConfig string `json:"backend_config,omitempty"`
 }
 
+// ClusterSource says who owns a cluster's lifecycle.
+type ClusterSource string
+
+const (
+	// SourceOpenframe: created by this CLI, has a workspace — full lifecycle.
+	SourceOpenframe ClusterSource = "openframe"
+	// SourceExternal: discovered in the cloud without a workspace — strictly
+	// read-only; every mutating command must refuse it.
+	SourceExternal ClusterSource = "external"
+)
+
 // ClusterInfo represents information about a cluster
 type ClusterInfo struct {
 	Name string      `json:"name"`
 	Type ClusterType `json:"type"`
+	// Source is empty for local (k3d) clusters, where ownership is implicit.
+	Source ClusterSource `json:"source,omitempty"`
+	// Context is the kubeconfig context that reaches this cluster, when known.
+	Context string `json:"context,omitempty"`
+	Project string `json:"project,omitempty"`
+	Region  string `json:"region,omitempty"`
 	// Status is a human-readable server fraction ("1/1"). Machine consumers
 	// should prefer ReadyServers/TotalServers (verification report: a string
 	// fraction forces JSON consumers to parse it).

@@ -287,3 +287,67 @@ func TestCreateCluster_RejectsS3Backend(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be gcs://")
 	assert.Empty(t, *calls)
 }
+
+// TestCreateCluster_RefusesExternalNameCollision locks the ownership boundary:
+// a cluster that already exists in the project WITHOUT an openframe workspace
+// is somebody else's — create must refuse before any terraform runs (terraform
+// would build the VPC first and fail mid-apply, leaving billed debris).
+func TestCreateCluster_RefusesExternalNameCollision(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("gcloud container clusters describe demo", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	p.executor = mock
+
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not managed by openframe")
+	assert.Empty(t, *calls, "terraform must not run on a name collision")
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound, "no workspace must be scaffolded")
+}
+
+// TestCreateCluster_ResumeSkipsCollisionCheck: an existing workspace means the
+// cloud cluster is OURS (possibly partially created) — resume must proceed
+// even though describe would find it.
+func TestCreateCluster_ResumeSkipsCollisionCheck(t *testing.T) {
+	p, calls, _ := newTestProvider(t, nil)
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("gcloud container clusters describe demo", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	p.executor = mock
+
+	*calls = nil
+	_, err = p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err, "resume of an owned cluster must not be blocked by the collision check")
+	assert.Contains(t, *calls, "apply")
+}
+
+// TestCreateCluster_RefusesKubeconfigContextClobber: a same-named kubeconfig
+// context pointing at a DIFFERENT server belongs to something else and must
+// not be overwritten.
+func TestCreateCluster_RefusesKubeconfigContextClobber(t *testing.T) {
+	p, _, _ := newTestProvider(t, nil)
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- name: other
+  cluster:
+    server: https://somebody-elses.example:6443
+contexts:
+- name: demo
+  context:
+    cluster: other
+    user: other
+users:
+- name: other
+`
+	require.NoError(t, os.WriteFile(os.Getenv("KUBECONFIG"), []byte(kubeconfig), 0o600))
+
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refusing to overwrite")
+}

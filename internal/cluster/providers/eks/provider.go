@@ -304,6 +304,9 @@ func infoFor(rec tfengine.Record) models.ClusterInfo {
 	return models.ClusterInfo{
 		Name:       rec.Name,
 		Type:       models.ClusterTypeEKS,
+		Source:     models.SourceOpenframe,
+		Context:    rec.Name,
+		Region:     rec.Region,
 		Status:     strings.ToTitle(string(rec.Status[0:1])) + string(rec.Status[1:]),
 		NodeCount:  rec.NodeCount,
 		K8sVersion: rec.K8sVersion,

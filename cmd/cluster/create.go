@@ -107,6 +107,16 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 	return nil
 }
 
+// showEKSComingSoonBanner is the temporary stub for AWS EKS creation.
+func showEKSComingSoonBanner() {
+	pterm.DefaultBox.
+		WithTitle(" 🚧 AWS EKS — coming soon ").
+		WithTitleTopCenter().
+		Println("Creating AWS EKS clusters will be available shortly.\n" +
+			"GKE is fully supported today:\n" +
+			"  openframe cluster create my-gke --type gke --project <project> --region <region>")
+}
+
 func runCreateCluster(cmd *cobra.Command, args []string) error {
 	service := utils.GetCommandService()
 	globalFlags := utils.GetGlobalFlags()
@@ -183,6 +193,15 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 				BackendConfig: cf.BackendConfig,
 			}
 		}
+	}
+
+	// AWS EKS creation is temporarily gated behind a coming-soon banner while
+	// the GKE flow is being finished end-to-end. The EKS provider stays fully
+	// functional for existing clusters (status/delete/resume) — only NEW
+	// creates are gated.
+	if config.Type == models.ClusterTypeEKS {
+		showEKSComingSoonBanner()
+		return nil
 	}
 
 	// Show configuration summary for dry-run or skip-wizard modes

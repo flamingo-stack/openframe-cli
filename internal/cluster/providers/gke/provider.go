@@ -58,6 +58,26 @@ func (p *Provider) preflightCredentials(ctx context.Context, project string) err
 	return nil
 }
 
+// preflightNameCollision refuses to create a cluster whose name already
+// exists in the target project but has no openframe workspace: terraform
+// would build the VPC first and then fail mid-apply on the duplicate cluster,
+// leaving partial billed infrastructure. External clusters are strictly not
+// ours to touch — the user must pick another name.
+//
+// Existence criterion: describe exits 0 AND prints exactly the cluster name
+// (--format=value(name) yields just that). Anything else — non-zero exit,
+// empty or unrelated output — is treated as "does not exist"; a genuinely
+// broken API call fails later with a clearer terraform error anyway.
+func (p *Provider) preflightNameCollision(ctx context.Context, config models.ClusterConfig) error {
+	result, err := p.executor.Execute(ctx, "gcloud", "container", "clusters", "describe", config.Name,
+		"--project", config.Cloud.Project, "--region", config.Cloud.Region, "--format=value(name)")
+	if err != nil || result == nil || strings.TrimSpace(result.Stdout) != config.Name {
+		return nil // not found (or indeterminate) — proceed
+	}
+	return fmt.Errorf("cluster '%s' already exists in project '%s' (region %s) but is not managed by openframe — refusing to touch it; pick another cluster name",
+		config.Name, config.Cloud.Project, config.Cloud.Region)
+}
+
 // backendTF renders the gcs backend block for a GKE workspace.
 func backendTF(cfg tfengine.BackendConfig) []byte {
 	return []byte(fmt.Sprintf(
@@ -130,7 +150,12 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	}
 
 	ws := p.registry.Workspace(config.Name)
+	// The collision check only guards NEW clusters: an existing workspace means
+	// the cloud cluster (partial or complete) is ours and create resumes it.
 	if !ws.Exists() {
+		if err := p.preflightNameCollision(ctx, config); err != nil {
+			return nil, err
+		}
 		vars, err := tfvarsFor(config)
 		if err != nil {
 			return nil, err
@@ -300,6 +325,10 @@ func infoFor(rec tfengine.Record) models.ClusterInfo {
 	return models.ClusterInfo{
 		Name:       rec.Name,
 		Type:       models.ClusterTypeGKE,
+		Source:     models.SourceOpenframe,
+		Context:    rec.Name,
+		Project:    rec.Project,
+		Region:     rec.Region,
 		Status:     strings.ToTitle(string(rec.Status[0:1])) + string(rec.Status[1:]),
 		NodeCount:  rec.NodeCount,
 		K8sVersion: rec.K8sVersion,
