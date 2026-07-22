@@ -292,3 +292,37 @@ func TestCreateCluster_RejectsGCSBackend(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be s3://")
 	assert.Empty(t, *calls)
 }
+
+// TestCreateCluster_RefusesExternalNameCollision mirrors the GKE guard: an
+// unmanaged same-name EKS cluster in the account must block create BEFORE
+// terraform runs.
+func TestCreateCluster_RefusesExternalNameCollision(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("eks describe-cluster --name demo", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	p.executor = mock
+
+	_, err := p.CreateCluster(context.Background(), eksConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not managed by openframe")
+	assert.Empty(t, *calls, "terraform must not run on a name collision")
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound)
+}
+
+// TestCreateCluster_DeclinedPlanAppliesNothing mirrors the GKE decline gate.
+func TestCreateCluster_DeclinedPlanAppliesNothing(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+	p.confirmApply = func(summary tfengine.PlanSummary) bool { return false }
+
+	_, err := p.CreateCluster(context.Background(), eksConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+	assert.NotContains(t, *calls, "apply")
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound, "declined brand-new create must remove the fresh workspace")
+}

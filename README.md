@@ -180,7 +180,8 @@ Cluster lifecycle:
 
 ```bash
 openframe cluster create dev --type k3d --nodes 1 --skip-wizard
-openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard   # cloud (billed!)
+openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard  # cloud (billed!)
+openframe cluster create my-eks --type eks --skip-wizard    # EKS is gated: shows a coming-soon banner, creates nothing
 openframe cluster list                          # add -o json|yaml for scripts
 openframe cluster status dev
 openframe cluster delete dev --force

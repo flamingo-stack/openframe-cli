@@ -1,10 +1,9 @@
 // Package provider defines the unified cluster-provider abstraction.
 //
-// A Provider creates and manages Kubernetes clusters. Today only k3d (local) is
-// implemented; for the recognized cloud types (GKE, EKS) the factory returns
-// ErrProviderNotFound until their backends land. New backends implement the
-// same Provider interface, so the rest of the CLI never needs to know which
-// backend is used.
+// A Provider creates and manages Kubernetes clusters. Three backends are
+// implemented — k3d (local), EKS, and GKE — all selected through the New
+// factory, keyed on the cluster type. Backends implement the same Provider
+// interface, so the rest of the CLI never needs to know which one runs.
 package provider
 
 import (

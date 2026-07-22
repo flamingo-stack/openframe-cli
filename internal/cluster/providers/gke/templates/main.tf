@@ -162,6 +162,10 @@ module "gke" {
       disk_size_gb       = 100
     }
   ]
+
+  # Private nodes need the NAT for egress (image pulls) from the first boot —
+  # nothing else creates an implicit ordering on it.
+  depends_on = [google_compute_router_nat.nat]
 }
 
 output "cluster_name" {

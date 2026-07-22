@@ -123,7 +123,9 @@ func discoverExternalClusters(ctx context.Context, managed []models.ClusterInfo)
 
 	isManaged := func(c models.ClusterInfo) bool {
 		for _, m := range managed {
-			if m.Name == c.Name && (m.Project == "" || m.Project == c.Project) {
+			// Project-aware: a local k3d cluster (empty Project) must not
+			// suppress an external GKE cluster that merely shares its name.
+			if m.Name == c.Name && m.Project == c.Project {
 				return true
 			}
 		}

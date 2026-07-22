@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -178,8 +179,12 @@ func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
 	gf.Create.SkipWizard = true
 	gf.Create.ClusterType = "eks"
 
-	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
-		t.Fatalf("eks banner path must return nil, got %v", err)
+	err := runCreateCluster(cmd, []string{"cloud-cluster"})
+	if err == nil {
+		t.Fatal("gated eks create must exit non-zero — a script must not mistake the banner for success")
+	}
+	if !strings.Contains(err.Error(), "coming soon") {
+		t.Fatalf("expected an actionable coming-soon error, got: %v", err)
 	}
 	if called {
 		t.Fatal("eks must not reach the plan preview while gated")

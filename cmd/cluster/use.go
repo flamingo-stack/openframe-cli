@@ -129,8 +129,10 @@ func useExternalGKE(ctx context.Context, exec executor.CommandExecutor, kubeconf
 	if contextName == "" {
 		// No kubeconfig entry yet — fetch credentials (adds the gke_* context).
 		pterm.Info.Printf("Fetching credentials for '%s' (project %s, %s)...\n", name, found.Project, found.Region)
+		// --location (not --region): discovery's Region field carries the GKE
+		// location, which is a ZONE for zonal clusters.
 		if _, err := exec.Execute(ctx, "gcloud", "container", "clusters", "get-credentials", name,
-			"--project", found.Project, "--region", found.Region); err != nil {
+			"--project", found.Project, "--location", found.Region); err != nil {
 			return fmt.Errorf("could not fetch credentials for '%s' (for private clusters try 'gcloud container fleet memberships get-credentials %s'): %w", name, name, err)
 		}
 		contextName = fmt.Sprintf("gke_%s_%s_%s", found.Project, found.Region, name)

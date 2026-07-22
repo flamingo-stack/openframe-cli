@@ -27,7 +27,7 @@ This command group provides cluster lifecycle management functionality:
   • use - Switch the kubectl context to a cluster
   • cleanup - Remove unused images and resources
 
-Supports K3d clusters for local development and AWS EKS for cloud deployments.
+Supports K3d clusters for local development and Google GKE for cloud deployments (AWS EKS coming soon).
 
 Examples:
   openframe cluster create

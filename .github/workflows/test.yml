@@ -367,9 +367,10 @@ jobs:
             else "$@"; fi
           }
 
-          echo "--- EKS create is gated behind the coming-soon banner (exit 0)"
-          "$OF_BIN" cluster create eks-smoke --type eks --skip-wizard >/tmp/eks.out 2>&1 \
-            || { cat /tmp/eks.out; fail "eks banner path must exit 0"; }
+          echo "--- EKS create is gated: banner + non-zero exit (scripts must not see success)"
+          if "$OF_BIN" cluster create eks-smoke --type eks --skip-wizard >/tmp/eks.out 2>&1; then
+            cat /tmp/eks.out; fail "gated eks create must exit non-zero"
+          fi
           grep -qi "coming soon" /tmp/eks.out || { cat /tmp/eks.out; fail "eks banner text missing"; }
 
           echo "--- unknown --type is rejected"

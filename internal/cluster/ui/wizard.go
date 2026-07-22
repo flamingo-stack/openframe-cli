@@ -90,9 +90,9 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	// list below is meaningless for cloud clusters, whose version comes from
 	// the module default.
 	if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
-		defaultRegion, defaultMachine := "us-east-1", "m6i.large"
+		regionLabel, defaultRegion, defaultMachine := "AWS Region", "us-east-1", "m6i.large"
 		if clusterType == models.ClusterTypeGKE {
-			defaultRegion, defaultMachine = "us-central1", "e2-standard-4"
+			regionLabel, defaultRegion, defaultMachine = "GCP Region", "us-central1", "e2-standard-4"
 
 			project, err := steps.PromptProject()
 			if err != nil {
@@ -101,7 +101,7 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 			w.config.Project = project
 		}
 
-		region, err := steps.PromptRegion(defaultRegion)
+		region, err := steps.PromptRegion(regionLabel, defaultRegion)
 		if err != nil {
 			return ClusterConfig{}, err
 		}

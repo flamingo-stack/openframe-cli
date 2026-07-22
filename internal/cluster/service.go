@@ -280,7 +280,10 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	for _, cloud := range s.cloudProviders() {
 		cloudClusters, err := cloud.ListAllClusters(ctx)
 		if err != nil {
-			return nil, err
+			// A broken cloud registry (local file damage) must not hide the
+			// local clusters or the other provider's results.
+			pterm.Debug.Printf("cloud cluster listing skipped: %v\n", err)
+			continue
 		}
 		clusters = append(clusters, cloudClusters...)
 	}
