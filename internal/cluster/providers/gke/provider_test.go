@@ -241,11 +241,36 @@ func TestTfvarsFor_VersionMapping(t *testing.T) {
 
 func TestTemplateEmbedsModulePins(t *testing.T) {
 	tf := string(mainTF)
-	assert.Contains(t, tf, `source  = "terraform-google-modules/kubernetes-engine/google"`)
+	assert.Contains(t, tf, `source  = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"`)
 	assert.Contains(t, tf, `version = "~> 44.0"`)
 	assert.Contains(t, tf, `source  = "terraform-google-modules/network/google"`)
 	assert.Contains(t, tf, `version = "~> 18.0"`)
 	assert.Contains(t, tf, "deletion_protection = false")
+	// Org-policy compatibility (restrict_vm_external_ips): private nodes with
+	// NAT egress and a public control-plane endpoint.
+	assert.Contains(t, tf, "enable_private_nodes    = true")
+	assert.Contains(t, tf, "enable_private_endpoint = false")
+	assert.Contains(t, tf, `resource "google_compute_router_nat" "nat"`)
+}
+
+// TestCreateCluster_ResumeRefreshesTemplate: a retry after a failed create
+// must regenerate main.tf from the CURRENT embedded template so template
+// bugfixes reach existing workspaces.
+func TestCreateCluster_ResumeRefreshesTemplate(t *testing.T) {
+	p, _, registry := newTestProvider(t, nil)
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	// Simulate a stale workspace from an older CLI version.
+	stalePath := filepath.Join(registry.Workspace("demo").TerraformDir(), "main.tf")
+	require.NoError(t, os.WriteFile(stalePath, []byte("# stale broken template"), 0o600))
+
+	_, err = p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	refreshed, err := os.ReadFile(stalePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(refreshed), "enable_private_nodes", "resume must rewrite main.tf from the current template")
 }
 
 func TestPlanCluster_NewClusterDoesNotRegister(t *testing.T) {

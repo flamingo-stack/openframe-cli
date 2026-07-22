@@ -100,8 +100,30 @@ module "network" {
   depends_on = [google_project_service.required]
 }
 
+# Private nodes have no external IPs (required by orgs enforcing the
+# constraints/compute.vmExternalIpAccess policy — a public-node pool lands in
+# ERROR state there), so egress (image pulls etc.) goes through Cloud NAT.
+resource "google_compute_router" "nat" {
+  name    = "${var.cluster_name}-router"
+  project = var.project
+  region  = var.region
+  network = module.network.network_name
+}
+
+resource "google_compute_router_nat" "nat" {
+  name    = "${var.cluster_name}-nat"
+  project = var.project
+  region  = var.region
+  router  = google_compute_router.nat.name
+
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+
 module "gke" {
-  source  = "terraform-google-modules/kubernetes-engine/google"
+  # The private-cluster submodule: same interface as the root module plus the
+  # private-nodes controls the root module does not expose.
+  source  = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"
   version = "~> 44.0"
 
   project_id = var.project
@@ -115,6 +137,13 @@ module "gke" {
   ip_range_services = "services"
 
   kubernetes_version = var.kubernetes_version != "" ? var.kubernetes_version : "latest"
+
+  # Nodes are private (no external IPs — org-policy friendly; egress via the
+  # Cloud NAT above). The API endpoint stays public so the operator's machine
+  # reaches the cluster without a VPN or Connect Gateway.
+  enable_private_nodes    = true
+  enable_private_endpoint = false
+  master_ipv4_cidr_block  = "172.16.0.0/28"
 
   # The CLI owns this cluster's lifecycle; deletion protection would break
   # 'openframe cluster delete'.

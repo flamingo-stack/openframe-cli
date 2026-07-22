@@ -163,8 +163,20 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 			}
 		}
 	}
-	// An existing workspace means a previous create failed or was interrupted;
-	// keep its tfvars (the state may reference them) and simply resume.
+	// An existing workspace means a previous create failed or was interrupted.
+	// Refresh the generated module from the CURRENT template before resuming:
+	// the retry must pick up template bugfixes (e.g. the private-nodes fix for
+	// org-policy environments), not replay the broken files. The state is
+	// untouched — terraform reconciles it against the refreshed config.
+	if ws.Exists() {
+		vars, err := tfvarsFor(config)
+		if err != nil {
+			return nil, err
+		}
+		if err := tfengine.WriteModule(ws.TerraformDir(), mainTF, vars); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := p.engine.Init(ctx, ws.TerraformDir()); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
