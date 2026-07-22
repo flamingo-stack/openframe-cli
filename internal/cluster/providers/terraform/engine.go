@@ -133,6 +133,9 @@ type PlanSummary struct {
 	// Changes lists every planned resource action, in plan order — the counts
 	// alone don't tell the user WHAT would be created.
 	Changes []PlanChange
+	// PlanJSON is the machine-readable plan (terraform show -json), used by
+	// the optional infracost estimate. Empty when the plan has no changes.
+	PlanJSON []byte
 }
 
 // HasChanges reports whether the plan would modify anything.
@@ -160,6 +163,10 @@ func (e *Engine) Plan(ctx context.Context, dir string) (PlanSummary, error) {
 		return PlanSummary{}, fmt.Errorf("terraform show failed: %w", err)
 	}
 	var summary PlanSummary
+	// Best-effort: the JSON only feeds the optional cost estimate.
+	if data, err := json.Marshal(plan); err == nil {
+		summary.PlanJSON = data
+	}
 	for _, rc := range plan.ResourceChanges {
 		switch {
 		case rc.Change.Actions.Create():
