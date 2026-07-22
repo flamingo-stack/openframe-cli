@@ -117,11 +117,22 @@ func (e *Engine) Destroy(ctx context.Context, dir string) error {
 	return nil
 }
 
+// PlanChange is one resource-level action of a terraform plan, in
+// terraform's own diff notation: "+" create, "~" update, "-" destroy,
+// "-/+" replace.
+type PlanChange struct {
+	Action  string
+	Address string
+}
+
 // PlanSummary is the resource-change footprint of a terraform plan.
 type PlanSummary struct {
 	Add     int
 	Change  int
 	Destroy int
+	// Changes lists every planned resource action, in plan order — the counts
+	// alone don't tell the user WHAT would be created.
+	Changes []PlanChange
 }
 
 // HasChanges reports whether the plan would modify anything.
@@ -153,13 +164,17 @@ func (e *Engine) Plan(ctx context.Context, dir string) (PlanSummary, error) {
 		switch {
 		case rc.Change.Actions.Create():
 			summary.Add++
+			summary.Changes = append(summary.Changes, PlanChange{Action: "+", Address: rc.Address})
 		case rc.Change.Actions.Update():
 			summary.Change++
+			summary.Changes = append(summary.Changes, PlanChange{Action: "~", Address: rc.Address})
 		case rc.Change.Actions.Delete():
 			summary.Destroy++
+			summary.Changes = append(summary.Changes, PlanChange{Action: "-", Address: rc.Address})
 		case rc.Change.Actions.Replace():
 			summary.Add++
 			summary.Destroy++
+			summary.Changes = append(summary.Changes, PlanChange{Action: "-/+", Address: rc.Address})
 		}
 	}
 	return summary, nil

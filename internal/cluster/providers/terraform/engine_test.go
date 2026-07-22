@@ -94,26 +94,36 @@ func TestEngine_LifecycleCalls(t *testing.T) {
 	assert.Equal(t, []string{"init", "apply", "plan", "destroy", "output"}, f.calls)
 }
 
-// action builds a tfjson resource change with the given actions.
-func action(actions ...tfjson.Action) *tfjson.ResourceChange {
-	return &tfjson.ResourceChange{Change: &tfjson.Change{Actions: actions}}
+// action builds a tfjson resource change with the given address and actions.
+func action(address string, actions ...tfjson.Action) *tfjson.ResourceChange {
+	return &tfjson.ResourceChange{Address: address, Change: &tfjson.Change{Actions: actions}}
 }
 
-func TestEngine_PlanSummaryCountsActions(t *testing.T) {
+func TestEngine_PlanSummaryCountsAndListsActions(t *testing.T) {
 	f := &fakeRunner{
 		planChanges: true,
 		plan: &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
-			action(tfjson.ActionCreate),
-			action(tfjson.ActionCreate),
-			action(tfjson.ActionUpdate),
-			action(tfjson.ActionDelete),
-			action(tfjson.ActionDelete, tfjson.ActionCreate), // replace
+			action("module.network.google_compute_network.vpc", tfjson.ActionCreate),
+			action("module.gke.google_container_cluster.primary", tfjson.ActionCreate),
+			action("module.gke.google_container_node_pool.pools", tfjson.ActionUpdate),
+			action("google_project_service.required", tfjson.ActionDelete),
+			action("module.gke.random_string.suffix", tfjson.ActionDelete, tfjson.ActionCreate), // replace
 		}},
 	}
 	summary, err := engineWith(f).Plan(context.Background(), t.TempDir())
 	require.NoError(t, err)
-	assert.Equal(t, PlanSummary{Add: 3, Change: 1, Destroy: 2}, summary)
+	assert.Equal(t, 3, summary.Add)
+	assert.Equal(t, 1, summary.Change)
+	assert.Equal(t, 2, summary.Destroy)
 	assert.True(t, summary.HasChanges())
+	// The per-resource listing preserves plan order and diff notation.
+	assert.Equal(t, []PlanChange{
+		{Action: "+", Address: "module.network.google_compute_network.vpc"},
+		{Action: "+", Address: "module.gke.google_container_cluster.primary"},
+		{Action: "~", Address: "module.gke.google_container_node_pool.pools"},
+		{Action: "-", Address: "google_project_service.required"},
+		{Action: "-/+", Address: "module.gke.random_string.suffix"},
+	}, summary.Changes)
 	assert.Contains(t, f.calls, "show")
 }
 
