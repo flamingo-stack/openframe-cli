@@ -34,13 +34,14 @@ By default, shows a selection menu where you can choose:
 1. Quick start with defaults (press Enter) - creates cluster with default settings
 2. Interactive configuration wizard - step-by-step cluster customization
 
-Creates a local k3d cluster or a cloud EKS cluster for OpenFrame. If a cluster
+Creates a local k3d cluster or a cloud GKE cluster for OpenFrame. If a cluster
 with the same name already exists it is left untouched and reused — delete it
 first to start from scratch. Use the bootstrap command to install OpenFrame
-components after creation.
+components after creation. EKS cluster creation is temporarily disabled and
+will be available soon.
 
-EKS clusters are provisioned with Terraform (installed automatically) and
-create AWS resources that incur costs; the workspace and state live under
+GKE clusters are provisioned with Terraform (installed automatically) and
+create GCP resources that incur costs; the workspace and state live under
 ~/.openframe/clusters/<name>. A failed create can be re-run to resume, or
 torn down with 'openframe cluster delete'.
 
@@ -49,7 +50,7 @@ Examples:
   openframe cluster create my-cluster        # Show selection with custom name
   openframe cluster create --skip-wizard     # Direct creation with defaults
   openframe cluster create --nodes 3 --type k3d --skip-wizard
-  openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard`,
+  openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard`,
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			utils.SyncGlobalFlags()
@@ -300,7 +301,7 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 	// creates are gated.
 	if config.Type == models.ClusterTypeEKS {
 		showEKSComingSoonBanner()
-		return nil
+		return fmt.Errorf("EKS cluster creation is not yet available")
 	}
 
 	// Show configuration summary for dry-run or skip-wizard modes

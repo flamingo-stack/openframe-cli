@@ -280,7 +280,9 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	for _, cloud := range s.cloudProviders() {
 		cloudClusters, err := cloud.ListAllClusters(ctx)
 		if err != nil {
-			return nil, err
+			// Skip errors from individual cloud providers to preserve local
+			// clusters and results from other providers
+			continue
 		}
 		clusters = append(clusters, cloudClusters...)
 	}

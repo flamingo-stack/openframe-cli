@@ -71,9 +71,7 @@ func (a *AwsInstaller) installLinux() error {
 	}
 	managers := []pm{
 		{"apt", []string{"apt", "install", "-y", "awscli"}},
-		{"dnf", []string{"dnf", "install", "-y", "awscli"}},
-		{"yum", []string{"yum", "install", "-y", "awscli"}},
-		{"pacman", []string{"pacman", "-S", "--noconfirm", "aws-cli"}},
+		{"pacman", []string{"pacman", "-S", "--noconfirm", "aws-cli-v2"}},
 	}
 	for _, m := range managers {
 		if !commandExists(m.name) {

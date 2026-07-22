@@ -25,7 +25,8 @@ func ConfirmApplyInteractive(summary PlanSummary) bool {
 	}
 	pterm.DefaultBasicText.Printf("\nPlan: %d to add, %d to change, %d to destroy\n\n", summary.Add, summary.Change, summary.Destroy)
 
+	total := summary.Add + summary.Change + summary.Destroy
 	confirmed, err := sharedUI.ConfirmActionInteractive(
-		fmt.Sprintf("Apply this plan (%d resources to add)?", summary.Add), true)
+		fmt.Sprintf("Apply this plan (%d resources)?", total), true)
 	return err == nil && confirmed
 }

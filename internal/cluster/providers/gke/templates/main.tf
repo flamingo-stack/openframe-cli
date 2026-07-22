@@ -162,6 +162,8 @@ module "gke" {
       disk_size_gb       = 100
     }
   ]
+
+  depends_on = [google_compute_router_nat.nat]
 }
 
 output "cluster_name" {

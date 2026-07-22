@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	sharedexec "github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
@@ -49,7 +50,11 @@ func EstimateMonthlyCost(ctx context.Context, execer sharedexec.CommandExecutor,
 		return "", err
 	}
 
-	result, err := execer.Execute(ctx, "infracost", "breakdown",
+	// Bound the infracost execution with a 30-second timeout to prevent hangs
+	costCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := execer.Execute(costCtx, "infracost", "breakdown",
 		"--path", planPath, "--format", "json", "--no-color")
 	if err != nil {
 		return "", fmt.Errorf("infracost breakdown failed: %w", err)

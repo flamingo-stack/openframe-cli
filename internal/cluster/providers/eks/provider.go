@@ -67,6 +67,25 @@ func (p *Provider) preflightCredentials(ctx context.Context, profile string) err
 	return nil
 }
 
+// preflightNameCollision refuses to create a cluster whose name already
+// exists in the target region but has no openframe workspace: terraform would
+// fail mid-apply on the duplicate cluster, leaving partial billed
+// infrastructure. External clusters are strictly not ours to touch — the user
+// must pick another name.
+func (p *Provider) preflightNameCollision(ctx context.Context, region, profile, name string) error {
+	args := []string{"eks", "describe-cluster", "--name", name, "--region", region, "--output", "json"}
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	result, err := p.executor.Execute(ctx, "aws", args...)
+	if err != nil || result == nil {
+		return nil // cluster does not exist or call failed — proceed
+	}
+	// If describe-cluster succeeds, the cluster exists
+	return fmt.Errorf("cluster '%s' already exists in region '%s' but is not managed by openframe — refusing to touch it; pick another cluster name",
+		name, region)
+}
+
 // backendTF renders the s3 backend block for an EKS workspace.
 func backendTF(cfg tfengine.BackendConfig, region string) []byte {
 	key := "terraform.tfstate"
@@ -148,6 +167,9 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	if freshWorkspace {
 		vars, err := tfvarsFor(config)
 		if err != nil {
+			return nil, err
+		}
+		if err := p.preflightNameCollision(ctx, config.Cloud.Region, config.Cloud.Profile, config.Name); err != nil {
 			return nil, err
 		}
 		record := tfengine.Record{

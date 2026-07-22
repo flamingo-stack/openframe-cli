@@ -316,6 +316,9 @@ func TestInfracost_Pins(t *testing.T) {
 	if !strings.HasPrefix(Infracost.Version, "v") {
 		t.Fatalf("Infracost.Version must be a v-prefixed tag, got %q", Infracost.Version)
 	}
+	if !Infracost.Tarball {
+		t.Errorf("Infracost.Tarball must be true (assets are .tar.gz)")
+	}
 	for _, p := range []struct{ os, arch string }{
 		{"linux", "amd64"}, {"linux", "arm64"},
 		{"darwin", "amd64"}, {"darwin", "arm64"},

@@ -147,6 +147,7 @@ const (
 var Infracost = PinnedTool{
 	Name:    "infracost",
 	Version: infracostVersion,
+	Tarball: true,
 	Assets: map[string]PinnedAsset{
 		"linux/amd64":   {URL: infracostBaseURL + "linux-amd64.tar.gz", SHA256: infracostSHA256LinuxAMD64},
 		"linux/arm64":   {URL: infracostBaseURL + "linux-arm64.tar.gz", SHA256: infracostSHA256LinuxARM64},
