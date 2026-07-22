@@ -14,7 +14,7 @@ infrastructure code for you — no Terraform knowledge required.
 > plane, VM nodes, and NAT/networking. The CLI shows a warning with the
 > provider's pricing page before creating — and, in an interactive
 > `--dry-run` it offers to install [infracost](https://www.infracost.io)
-> (verified pinned download; one-time free `infracost auth login`) and shows
+> (verified pinned download; the one-time free `infracost auth login` is also offered in-CLI) and shows
 > a monthly estimate — and requires you to re-type the cluster name
 > before deleting. Pricing: [GKE](https://cloud.google.com/kubernetes-engine/pricing)
 > · [EKS](https://aws.amazon.com/eks/pricing/).

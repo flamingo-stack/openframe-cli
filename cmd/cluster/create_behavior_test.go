@@ -234,10 +234,14 @@ func TestShowCostEstimate(t *testing.T) {
 		}
 	})
 
-	t.Run("available but estimate fails: no offer, graceful hint", func(t *testing.T) {
+	t.Run("available but estimate fails: login offered, declined -> hint", func(t *testing.T) {
 		utils.InitGlobalFlags()
 		t.Cleanup(utils.ResetGlobalFlags)
 		offered := override(t, true, false)
+		loginOffered := false
+		origLogin := infracostLoginFn
+		infracostLoginFn = func() bool { loginOffered = true; return false }
+		t.Cleanup(func() { infracostLoginFn = origLogin })
 		mock := executor.NewMockCommandExecutor()
 		mock.SetShouldFail(true, "No INFRACOST_API_KEY environment variable is set")
 
@@ -245,6 +249,33 @@ func TestShowCostEstimate(t *testing.T) {
 
 		if *offered {
 			t.Fatal("no install offer when infracost is already available")
+		}
+		if !loginOffered {
+			t.Fatal("a failed estimate must offer the in-CLI 'infracost auth login'")
+		}
+	})
+
+	t.Run("failed estimate + accepted login: estimate retried", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		override(t, true, false)
+		mock := executor.NewMockCommandExecutor()
+		// First breakdown fails (no key); the accepted login flips the mock to
+		// success, mimicking a real auth login taking effect.
+		mock.SetShouldFail(true, "No INFRACOST_API_KEY environment variable is set")
+		origLogin := infracostLoginFn
+		infracostLoginFn = func() bool {
+			mock.SetShouldFail(false, "")
+			mock.SetResponse("infracost breakdown", &executor.CommandResult{
+				ExitCode: 0, Stdout: `{"totalMonthlyCost":"120.00","currency":"USD"}`})
+			return true
+		}
+		t.Cleanup(func() { infracostLoginFn = origLogin })
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if mock.GetCommandCount() < 2 {
+			t.Fatalf("estimate must be retried after a successful login, got %d invocations", mock.GetCommandCount())
 		}
 	})
 }
@@ -255,5 +286,14 @@ func TestOfferInfracostInstall_NonInteractiveNeverPrompts(t *testing.T) {
 	t.Setenv("CI", "true")
 	if offerInfracostInstall() {
 		t.Fatal("non-interactive sessions must not offer/install infracost")
+	}
+}
+
+// TestOfferInfracostLogin_NonInteractiveNeverPrompts: CI sessions must not
+// hit the confirm prompt (nor a browser).
+func TestOfferInfracostLogin_NonInteractiveNeverPrompts(t *testing.T) {
+	t.Setenv("CI", "true")
+	if offerInfracostLogin() {
+		t.Fatal("non-interactive sessions must not run infracost auth login")
 	}
 }
