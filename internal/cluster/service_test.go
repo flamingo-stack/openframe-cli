@@ -32,6 +32,7 @@ func TestNewClusterService(t *testing.T) {
 
 	if service == nil {
 		t.Fatal("NewClusterService should not return nil")
+		return
 	}
 
 	if service.executor != exec {

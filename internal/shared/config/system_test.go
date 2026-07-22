@@ -11,6 +11,7 @@ func TestNewSystemService(t *testing.T) {
 
 	if service == nil {
 		t.Fatal("NewSystemService should not return nil")
+		return
 	}
 
 	// Should have default log directory set
