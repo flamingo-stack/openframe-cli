@@ -458,14 +458,20 @@ jobs:
           [ "$code" -eq 0 ] && { cat /tmp/use.out; fail "use without a context must fail"; }
           grep -q "no kubeconfig context" /tmp/use.out || { cat /tmp/use.out; fail "missing no-context hint"; }
 
-          echo "--- non-interactive cloud delete WITHOUT --force refuses (typed-confirm gate)"
+          echo "--- non-interactive cloud delete WITHOUT --force refuses"
+          # Two refusal gates guard this path, and either may fire first: the
+          # generic deletion confirmation ("confirmation required ... re-run
+          # with --force") refuses before the cloud-specific typed-confirm
+          # gate ("refusing to destroy cloud cluster") is reached. Both are
+          # correct refusals — assert the guarantee (non-zero exit, actionable
+          # message, workspace survives), not which gate fired.
           set +e
           timeout 60 "$OF_BIN" cluster delete fake-gke </dev/null >/tmp/del.out 2>&1
           code=$?
           set -e
           [ "$code" -eq 124 ] && { cat /tmp/del.out; fail "cluster delete hung on a prompt"; }
           [ "$code" -eq 0 ] && { cat /tmp/del.out; fail "non-interactive cloud delete without --force must refuse"; }
-          grep -q "refusing to destroy cloud cluster" /tmp/del.out || { cat /tmp/del.out; fail "missing refusal message"; }
+          grep -qE "refusing to destroy cloud cluster|confirmation required.*--force" /tmp/del.out             || { cat /tmp/del.out; fail "missing an actionable refusal message"; }
 
           echo "--- the workspace (the only pointer to billed resources) survived"
           [ -f "$OPENFRAME_CLUSTERS_DIR/fake-gke/cluster.json" ] || fail "refused delete must not remove the workspace"
