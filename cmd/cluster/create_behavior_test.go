@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
@@ -182,5 +183,77 @@ func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
 	}
 	if called {
 		t.Fatal("eks must not reach the plan preview while gated")
+	}
+}
+
+// TestShowCostEstimate drives the infracost offer/estimate flow on seams —
+// no real PATH probe, download, or infracost invocation ever happens.
+func TestShowCostEstimate(t *testing.T) {
+	summary := terraform.PlanSummary{Add: 1, PlanJSON: []byte(`{"format_version":"1.2"}`)}
+	config := models.ClusterConfig{Name: "x", Type: models.ClusterTypeGKE, NodeCount: 1,
+		Cloud: &models.CloudConfig{Region: "us-central1", Project: "p"}}
+
+	override := func(t *testing.T, available bool, offer bool) (offered *bool) {
+		t.Helper()
+		offered = new(bool)
+		origAvail, origOffer := infracostAvailableFn, infracostOfferFn
+		infracostAvailableFn = func() bool { return available }
+		infracostOfferFn = func() bool { *offered = true; return offer }
+		t.Cleanup(func() { infracostAvailableFn, infracostOfferFn = origAvail, origOffer })
+		return offered
+	}
+
+	t.Run("unavailable and declined: no infracost invocation", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		offered := override(t, false, false)
+		mock := executor.NewMockCommandExecutor()
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if !*offered {
+			t.Fatal("the install offer must be made when infracost is unavailable")
+		}
+		if mock.WasCommandExecuted("infracost") {
+			t.Fatal("infracost must not run when unavailable and declined")
+		}
+	})
+
+	t.Run("offer accepted: estimate runs", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		override(t, false, true)
+		mock := executor.NewMockCommandExecutor()
+		mock.SetResponse("infracost breakdown", &executor.CommandResult{
+			ExitCode: 0, Stdout: `{"totalMonthlyCost":"120.00","currency":"USD"}`})
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if !mock.WasCommandExecuted("infracost breakdown") {
+			t.Fatal("estimate must run after an accepted install offer")
+		}
+	})
+
+	t.Run("available but estimate fails: no offer, graceful hint", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		offered := override(t, true, false)
+		mock := executor.NewMockCommandExecutor()
+		mock.SetShouldFail(true, "No INFRACOST_API_KEY environment variable is set")
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if *offered {
+			t.Fatal("no install offer when infracost is already available")
+		}
+	})
+}
+
+// TestOfferInfracostInstall_NonInteractiveNeverPrompts: CI sessions must not
+// hit the confirm prompt (nor a download).
+func TestOfferInfracostInstall_NonInteractiveNeverPrompts(t *testing.T) {
+	t.Setenv("CI", "true")
+	if offerInfracostInstall() {
+		t.Fatal("non-interactive sessions must not offer/install infracost")
 	}
 }

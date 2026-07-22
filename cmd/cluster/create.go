@@ -8,11 +8,13 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
+	infracostinstall "github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/infracost"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
@@ -118,18 +120,56 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 	return nil
 }
 
-// showCostEstimate prints a monthly estimate when infracost is installed and
-// working; otherwise it prints NO figures — only the abstract cost warning
-// with the provider's pricing page. Best-effort either way: cost information
-// never fails the preview.
+// Seams for hermetic tests: availability probes the real PATH and the offer
+// runs a real verified download — neither may happen in unit tests.
+var (
+	infracostAvailableFn = terraform.InfracostAvailable
+	infracostOfferFn     = offerInfracostInstall
+)
+
+// offerInfracostInstall proposes the verified pinned infracost install in an
+// interactive session. It returns whether infracost is available afterwards.
+// The API key stays the user's one manual step: `infracost auth login`.
+func offerInfracostInstall() bool {
+	if sharedUI.IsNonInteractive() {
+		return false
+	}
+	confirmed, err := sharedUI.ConfirmActionInteractive(
+		"Install infracost (verified download) to see a monthly cost estimate?", true)
+	if err != nil || !confirmed {
+		return false
+	}
+	if err := infracostinstall.NewInstaller().Install(); err != nil {
+		pterm.Warning.Printf("infracost install failed: %v\n", err)
+		return false
+	}
+	return infracostAvailableFn()
+}
+
+// showCostEstimate prints a monthly estimate when infracost is available and
+// working — offering to install it first in interactive sessions. Otherwise
+// it prints NO figures, only the abstract cost warning with the provider's
+// pricing page. Best-effort either way: cost information never fails the
+// preview.
 func showCostEstimate(ctx context.Context, exec executor.CommandExecutor, config models.ClusterConfig, summary terraform.PlanSummary) {
-	if terraform.InfracostAvailable() {
-		if cost, err := terraform.EstimateMonthlyCost(ctx, exec, summary.PlanJSON); err == nil {
+	available := infracostAvailableFn()
+	if !available {
+		available = infracostOfferFn()
+	}
+	if available {
+		cost, err := terraform.EstimateMonthlyCost(ctx, exec, summary.PlanJSON)
+		if err == nil {
 			pterm.Info.Printf("Estimated monthly cost (infracost): %s\n", cost)
 			return
-		} else if utils.GetGlobalFlags().Global.Verbose {
-			pterm.Debug.Printf("infracost estimate unavailable: %v\n", err)
 		}
+		// infracost is installed but could not estimate — the usual cause is
+		// the missing (free) API key, the user's single manual step.
+		pterm.Info.Println("Cost estimate unavailable — if you haven't set up infracost yet, run 'infracost auth login' (free) and re-run")
+		if utils.GetGlobalFlags().Global.Verbose {
+			pterm.Debug.Printf("infracost estimate error: %v\n", err)
+		}
+		pterm.Info.Println(ui.CostHint(config.Type))
+		return
 	}
 	pterm.Info.Println(ui.CostHint(config.Type))
 	pterm.Info.Println("Tip: install infracost (https://www.infracost.io/docs/) to see a monthly cost estimate here")
