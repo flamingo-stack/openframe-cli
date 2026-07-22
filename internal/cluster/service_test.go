@@ -240,3 +240,28 @@ func TestClusterService_WithRealExecutor(t *testing.T) {
 	// Dry-run might still error if k3d is not available, which is acceptable in tests
 	_ = err
 }
+
+// TestShouldResumeCloudCreate locks the resume decision (audit П1): a cloud
+// registry record with a non-Ready status must RESUME through the provider,
+// not short-circuit into the "already exists" reuse path — that made the
+// documented "re-run create to resume" unreachable from the CLI.
+func TestShouldResumeCloudCreate(t *testing.T) {
+	cases := []struct {
+		clusterType models.ClusterType
+		status      string
+		want        bool
+	}{
+		{models.ClusterTypeGKE, "Failed", true},
+		{models.ClusterTypeGKE, "Creating", true},
+		{models.ClusterTypeGKE, "Ready", false},
+		{models.ClusterTypeEKS, "Failed", true},
+		{models.ClusterTypeEKS, "Ready", false},
+		{models.ClusterTypeK3d, "1/1", false},
+		{models.ClusterTypeK3d, "0/1", false},
+	}
+	for _, tc := range cases {
+		if got := shouldResumeCloudCreate(tc.clusterType, tc.status); got != tc.want {
+			t.Errorf("shouldResumeCloudCreate(%s, %q) = %v, want %v", tc.clusterType, tc.status, got, tc.want)
+		}
+	}
+}

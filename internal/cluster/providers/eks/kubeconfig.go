@@ -104,18 +104,24 @@ func mergeIntoDefaultKubeconfig(rec tfengine.Record) error {
 	return nil
 }
 
-// removeFromDefaultKubeconfig drops the cluster's context after a destroy.
+// removeFromDefaultKubeconfig drops the cluster's context after a destroy —
+// but ONLY when the entry still points at OUR endpoint (see the GKE twin).
 // Best-effort: a missing entry is not an error.
-func removeFromDefaultKubeconfig(name string) error {
+func removeFromDefaultKubeconfig(rec tfengine.Record) error {
 	pathOpts := clientcmd.NewDefaultPathOptions()
 	existing, err := pathOpts.GetStartingConfig()
 	if err != nil {
 		return err
 	}
-	delete(existing.Clusters, name)
-	delete(existing.AuthInfos, name)
-	delete(existing.Contexts, name)
-	if existing.CurrentContext == name {
+	if prior, ok := existing.Contexts[rec.Name]; ok {
+		if cluster, ok := existing.Clusters[prior.Cluster]; ok && cluster.Server != rec.Endpoint {
+			return nil // same name, different server — not ours anymore
+		}
+	}
+	delete(existing.Clusters, rec.Name)
+	delete(existing.AuthInfos, rec.Name)
+	delete(existing.Contexts, rec.Name)
+	if existing.CurrentContext == rec.Name {
 		existing.CurrentContext = ""
 	}
 	return clientcmd.ModifyConfig(pathOpts, *existing, true)

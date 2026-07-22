@@ -64,18 +64,24 @@ func (p *Provider) preflightCredentials(ctx context.Context, project string) err
 // leaving partial billed infrastructure. External clusters are strictly not
 // ours to touch — the user must pick another name.
 //
-// Existence criterion: describe exits 0 AND prints exactly the cluster name
-// (--format=value(name) yields just that). Anything else — non-zero exit,
-// empty or unrelated output — is treated as "does not exist"; a genuinely
-// broken API call fails later with a clearer terraform error anyway.
+// Existence criterion: the project-wide listing (deliberately NOT scoped to a
+// location — a ZONAL cluster with the same name must also count) prints a
+// line equal to the cluster name. Anything else — non-zero exit, empty or
+// unrelated output — is treated as "does not exist"; a genuinely broken API
+// call fails later with a clearer terraform error anyway.
 func (p *Provider) preflightNameCollision(ctx context.Context, config models.ClusterConfig) error {
-	result, err := p.executor.Execute(ctx, "gcloud", "container", "clusters", "describe", config.Name,
-		"--project", config.Cloud.Project, "--region", config.Cloud.Region, "--format=value(name)")
-	if err != nil || result == nil || strings.TrimSpace(result.Stdout) != config.Name {
-		return nil // not found (or indeterminate) — proceed
+	result, err := p.executor.Execute(ctx, "gcloud", "container", "clusters", "list",
+		"--project", config.Cloud.Project, "--filter=name="+config.Name, "--format=value(name)")
+	if err != nil || result == nil {
+		return nil // indeterminate — proceed
 	}
-	return fmt.Errorf("cluster '%s' already exists in project '%s' (region %s) but is not managed by openframe — refusing to touch it; pick another cluster name",
-		config.Name, config.Cloud.Project, config.Cloud.Region)
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if strings.TrimSpace(line) == config.Name {
+			return fmt.Errorf("cluster '%s' already exists in project '%s' but is not managed by openframe — refusing to touch it; pick another cluster name",
+				config.Name, config.Cloud.Project)
+		}
+	}
+	return nil
 }
 
 // backendTF renders the gcs backend block for a GKE workspace.
@@ -235,11 +241,16 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 	if !ws.Exists() {
 		return models.NewClusterNotFoundError(name)
 	}
+	// Read the record BEFORE destroy: the endpoint in it is what proves the
+	// kubeconfig entry is ours to remove afterwards.
+	rec, recErr := ws.ReadRecord()
 	if err := p.engine.Destroy(ctx, ws.TerraformDir()); err != nil {
 		return models.NewClusterOperationError("delete", name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run delete to retry", err, ws.Dir()))
 	}
-	_ = removeFromDefaultKubeconfig(name)
+	if recErr == nil {
+		_ = removeFromDefaultKubeconfig(rec)
+	}
 	return ws.Remove()
 }
 

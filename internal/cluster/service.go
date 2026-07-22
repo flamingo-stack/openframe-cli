@@ -106,6 +106,55 @@ func (s *ClusterService) providerFor(clusterType models.ClusterType) (provider.P
 	return provider.New(clusterType, s.executor)
 }
 
+// shouldResumeCloudCreate decides whether an existing registry entry means
+// "reuse the cluster" or "resume an interrupted create". Cloud records exist
+// from the moment a workspace is scaffolded, so a non-Ready status marks a
+// create that failed or was interrupted — terraform apply resumes it
+// idempotently. Local k3d clusters only ever surface here when they actually
+// run, so they always reuse.
+func shouldResumeCloudCreate(clusterType models.ClusterType, status string) bool {
+	isCloud := clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE
+	return isCloud && status != "Ready"
+}
+
+// showExistingClusterReuse prints the "already exists" summary with the
+// cluster's REAL status and only k3d-specific rows for k3d clusters — this
+// box used to hardcode a green "Running" and a "k3d-<name>" network line for
+// every type, which was wrong for cloud clusters.
+func (s *ClusterService) showExistingClusterReuse(name string, info models.ClusterInfo) {
+	pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(name))
+	pterm.DefaultBasicText.Println()
+
+	statusColor := ui.GetStatusColor(info.Status)
+	boxContent := fmt.Sprintf(
+		"NAME:     %s\n"+
+			"TYPE:     %s\n"+
+			"STATUS:   %s\n"+
+			"NODES:    %d",
+		pterm.Bold.Sprint(info.Name),
+		strings.ToUpper(string(info.Type)),
+		statusColor(info.Status),
+		info.NodeCount,
+	)
+	if info.Type == models.ClusterTypeK3d {
+		boxContent += fmt.Sprintf("\nNETWORK:  k3d-%s", info.Name)
+	}
+
+	pterm.DefaultBox.
+		WithTitle(" ⚠️  Cluster Already Exists  ⚠️ ").
+		WithTitleTopCenter().
+		Println(boxContent)
+
+	// Show what user can do (suppress for automation)
+	if !s.suppressUI {
+		pterm.DefaultBasicText.Println()
+		pterm.Info.Printf("What would you like to do?\n")
+		pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", name)
+		pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", name)
+		pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
+	}
+}
+
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
@@ -118,45 +167,22 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 
 	// Check if cluster already exists
 	if existingInfo, err := mgr.GetClusterStatus(ctx, config.Name); err == nil {
-		// Cluster already exists - show friendly message
-
-		// Show warning for existing cluster
-		pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(config.Name))
-		pterm.DefaultBasicText.Println()
-
-		boxContent := fmt.Sprintf(
-			"NAME:     %s\n"+
-				"TYPE:     %s\n"+
-				"STATUS:   %s\n"+
-				"NODES:    %d\n"+
-				"NETWORK:  k3d-%s",
-			pterm.Bold.Sprint(existingInfo.Name),
-			strings.ToUpper(string(existingInfo.Type)),
-			pterm.Green("Running"),
-			existingInfo.NodeCount,
-			existingInfo.Name,
-		)
-
-		pterm.DefaultBox.
-			WithTitle(" ⚠️  Cluster Already Running  ⚠️ ").
-			WithTitleTopCenter().
-			Println(boxContent)
-
-		// Show what user can do (suppress for automation)
-		if !s.suppressUI {
-			pterm.DefaultBasicText.Println()
-			pterm.Info.Printf("What would you like to do?\n")
-			pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", config.Name)
-			pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", config.Name)
-			pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
+		if shouldResumeCloudCreate(config.Type, existingInfo.Status) {
+			// A cloud workspace whose create failed or was interrupted: fall
+			// through to the provider, whose terraform apply resumes from the
+			// recorded state. The registry record must NOT short-circuit here —
+			// that made the documented "re-run create to resume" unreachable.
+			pterm.Info.Printf("Cluster '%s' has an interrupted creation (status: %s) — resuming\n",
+				config.Name, existingInfo.Status)
+		} else {
+			// Cluster already exists and is usable — reuse it.
+			s.showExistingClusterReuse(config.Name, existingInfo)
+			restConfig, err := mgr.GetRestConfig(ctx, config.Name)
+			if err != nil {
+				return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
+			}
+			return restConfig, nil // Exit gracefully without error
 		}
-
-		// Return the rest.Config for the existing cluster
-		restConfig, err := mgr.GetRestConfig(ctx, config.Name)
-		if err != nil {
-			return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
-		}
-		return restConfig, nil // Exit gracefully without error
 	}
 
 	// Cluster doesn't exist, proceed with creation. Cloud creates stream
