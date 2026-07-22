@@ -13,7 +13,10 @@ import (
 func TestStatusCommandHasOutputFlag(t *testing.T) {
 	f := getStatusCmd().Flags().Lookup("output")
 	if f == nil {
+		// The explicit return keeps SA5011 happy on linters that lose the
+		// noreturn fact for t.Fatal.
 		t.Fatal("cluster status is missing the --output flag")
+		return
 	}
 	if f.Shorthand != "o" {
 		t.Fatalf("--output shorthand = %q, want %q", f.Shorthand, "o")

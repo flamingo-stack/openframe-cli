@@ -9,6 +9,7 @@ func TestNewInstaller(t *testing.T) {
 
 	if installer == nil {
 		t.Fatal("Expected installer to be created")
+		return
 	}
 
 	if installer.checker == nil {

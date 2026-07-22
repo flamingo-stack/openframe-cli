@@ -110,6 +110,7 @@ func TestCheckerForClusterType(t *testing.T) {
 		checker := checkerForClusterType(tc.clusterType)
 		if checker == nil {
 			t.Fatalf("checkerForClusterType(%q) = nil, want a requirement set", tc.clusterType)
+			continue
 		}
 		got := names(checker)
 		if len(got) != len(tc.want) {
