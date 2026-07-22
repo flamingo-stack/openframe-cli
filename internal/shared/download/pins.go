@@ -126,6 +126,36 @@ var Terraform = PinnedTool{
 	},
 }
 
+// Infracost is the pinned infracost CLI, used by the OPTIONAL cost estimate
+// in the cloud dry-run preview. Upstream:
+// https://github.com/infracost/infracost/releases — .tar.gz per platform with
+// per-asset .sha256 files. The archive member layout is irregular
+// ("infracost-<os>-<arch>" on unix, "infracost.exe" on windows), so the
+// infracost installer extracts it itself via InstallVerifiedTarGz instead of
+// the InstallPinnedTool tarball convention.
+const (
+	infracostVersion = "v0.10.45"
+	infracostBaseURL = "https://github.com/infracost/infracost/releases/download/" + infracostVersion + "/infracost-"
+
+	infracostSHA256LinuxAMD64   = "e2f527d8391a87ac00bfc55237ff875107861715e234bbbeb9b6015aba576c77"
+	infracostSHA256LinuxARM64   = "b9946cf42b9ed58184bd646484f63e0ecf430caca5978e0611302a1545c36262"
+	infracostSHA256DarwinAMD64  = "b2202262267b704b95e786acfeb09c1f86e384e896ea42edb4de3f91a338a637"
+	infracostSHA256DarwinARM64  = "98b134ca825d292a34a410cdbfa0cfa0d3c9ec2b576710de0d051be6d9002771"
+	infracostSHA256WindowsAMD64 = "7f627fac5cad9b7260e1123c1378d2fb4f308cdc64f78e99d6e69727d9549d06"
+)
+
+var Infracost = PinnedTool{
+	Name:    "infracost",
+	Version: infracostVersion,
+	Assets: map[string]PinnedAsset{
+		"linux/amd64":   {URL: infracostBaseURL + "linux-amd64.tar.gz", SHA256: infracostSHA256LinuxAMD64},
+		"linux/arm64":   {URL: infracostBaseURL + "linux-arm64.tar.gz", SHA256: infracostSHA256LinuxARM64},
+		"darwin/amd64":  {URL: infracostBaseURL + "darwin-amd64.tar.gz", SHA256: infracostSHA256DarwinAMD64},
+		"darwin/arm64":  {URL: infracostBaseURL + "darwin-arm64.tar.gz", SHA256: infracostSHA256DarwinARM64},
+		"windows/amd64": {URL: infracostBaseURL + "windows-amd64.tar.gz", SHA256: infracostSHA256WindowsAMD64},
+	},
+}
+
 // UserBinDir returns the CLI-managed bin directory (~/.openframe/bin) where
 // verified tool binaries are installed. It does not create the directory.
 func UserBinDir() (string, error) {

@@ -8,8 +8,10 @@ Terraform, gcloud, the auth plugin, credentials — the CLI sets up itself.
 > **Costs.** A GKE cluster bills real money: a cluster management fee, VM
 > nodes, and networking — see the
 > [GKE pricing page](https://cloud.google.com/kubernetes-engine/pricing).
-> With [infracost](https://www.infracost.io) installed, `--dry-run` shows a
-> monthly estimate. The CLI warns before creating and requires re-typing the
+> In an interactive `--dry-run`, the CLI offers to install
+> [infracost](https://www.infracost.io) (verified pinned download) and then
+> shows a monthly estimate — your only manual step is a one-time free
+> `infracost auth login`. The CLI warns before creating and requires re-typing the
 > cluster name before deleting.
 
 ## 0. (Optional) Preview what would be created

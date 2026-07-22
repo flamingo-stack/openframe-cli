@@ -102,6 +102,12 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin'",
 		Default: "gke-gcloud-auth-plugin: See https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl",
 	},
+	"infracost": {
+		Darwin:  "infracost: The CLI can install a verified pinned binary automatically, or run 'brew install infracost'; enable estimates with 'infracost auth login'",
+		Linux:   "infracost: The CLI can install a verified pinned binary automatically (see https://www.infracost.io/docs/); enable estimates with 'infracost auth login'",
+		Windows: "infracost: The CLI can install a verified pinned binary automatically (see https://www.infracost.io/docs/); enable estimates with 'infracost auth login'",
+		Default: "infracost: See https://www.infracost.io/docs/ — enable estimates with 'infracost auth login'",
+	},
 	"aws": {
 		Darwin:  "AWS CLI: Run 'brew install awscli' or download from https://aws.amazon.com/cli/",
 		Linux:   "AWS CLI: Install via your package manager or from https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
