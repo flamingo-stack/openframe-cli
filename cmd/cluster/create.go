@@ -114,7 +114,25 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 		pterm.DefaultBasicText.Printf("  %-3s %s\n", change.Action, change.Address)
 	}
 	pterm.Success.Printf("Plan: %d to add, %d to change, %d to destroy\n", summary.Add, summary.Change, summary.Destroy)
+	showCostEstimate(ctx, exec, config, summary)
 	return nil
+}
+
+// showCostEstimate prints a monthly estimate when infracost is installed and
+// working; otherwise it prints NO figures — only the abstract cost warning
+// with the provider's pricing page. Best-effort either way: cost information
+// never fails the preview.
+func showCostEstimate(ctx context.Context, exec executor.CommandExecutor, config models.ClusterConfig, summary terraform.PlanSummary) {
+	if terraform.InfracostAvailable() {
+		if cost, err := terraform.EstimateMonthlyCost(ctx, exec, summary.PlanJSON); err == nil {
+			pterm.Info.Printf("Estimated monthly cost (infracost): %s\n", cost)
+			return
+		} else if utils.GetGlobalFlags().Global.Verbose {
+			pterm.Debug.Printf("infracost estimate unavailable: %v\n", err)
+		}
+	}
+	pterm.Info.Println(ui.CostHint(config.Type))
+	pterm.Info.Println("Tip: install infracost (https://www.infracost.io/docs/) to see a monthly cost estimate here")
 }
 
 // showEKSComingSoonBanner is the temporary stub for AWS EKS creation.

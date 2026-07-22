@@ -11,9 +11,12 @@ the hood. The CLI installs its own verified Terraform binary and generates the
 infrastructure code for you — no Terraform knowledge required.
 
 > **Cost warning.** Cloud clusters create billed resources: a managed control
-> plane (~$73/month on both providers), VM nodes, and NAT/networking. The CLI
-> shows this warning before creating and requires you to re-type the cluster
-> name before deleting.
+> plane, VM nodes, and NAT/networking. The CLI shows a warning with the
+> provider's pricing page before creating — and, when
+> [infracost](https://www.infracost.io) is installed, a monthly estimate in
+> the `--dry-run` preview — and requires you to re-type the cluster name
+> before deleting. Pricing: [GKE](https://cloud.google.com/kubernetes-engine/pricing)
+> · [EKS](https://aws.amazon.com/eks/pricing/).
 
 ## Prerequisites
 

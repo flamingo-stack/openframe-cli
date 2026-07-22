@@ -187,3 +187,16 @@ func TestStringOutput_WrongType(t *testing.T) {
 	_, err := StringOutput(map[string]json.RawMessage{"n": json.RawMessage(`42`)}, "n")
 	assert.ErrorContains(t, err, "is not a string")
 }
+
+func TestEngine_PlanCarriesPlanJSON(t *testing.T) {
+	f := &fakeRunner{
+		planChanges: true,
+		plan: &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
+			action("module.gke.google_container_cluster.primary", tfjson.ActionCreate),
+		}},
+	}
+	summary, err := engineWith(f).Plan(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	// The machine-readable plan feeds the optional infracost estimate.
+	assert.Contains(t, string(summary.PlanJSON), "google_container_cluster.primary")
+}

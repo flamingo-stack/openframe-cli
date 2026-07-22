@@ -54,14 +54,16 @@ func selectFromList(prompt string, items []string) (int, string, error) {
 	return sharedUI.SelectFromList(prompt, items)
 }
 
-// CostHint is the running-cost warning shown for cloud cluster types. The
-// figures are deliberately rough baselines, not quotes.
+// CostHint is the running-cost warning shown for cloud cluster types. It
+// deliberately carries NO figures — real numbers come only from the optional
+// infracost estimate in the dry-run preview; otherwise the user gets the
+// provider's pricing page, never a stale hardcoded price.
 func CostHint(clusterType models.ClusterType) string {
 	switch clusterType {
 	case models.ClusterTypeEKS:
-		return "This creates billed AWS resources: EKS control plane (~$73/mo), EC2 nodes, and a NAT gateway (~$33/mo + traffic)"
+		return "This creates billed AWS resources (managed control plane, EC2 nodes, networking) — pricing: https://aws.amazon.com/eks/pricing/"
 	case models.ClusterTypeGKE:
-		return "This creates billed GCP resources: GKE cluster management fee (~$73/mo), VM nodes, and networking"
+		return "This creates billed GCP resources (managed control plane, VM nodes, networking) — pricing: https://cloud.google.com/kubernetes-engine/pricing"
 	default:
 		return "Cloud clusters create resources that incur costs"
 	}

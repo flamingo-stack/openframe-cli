@@ -5,9 +5,12 @@ the OpenFrame CLI. You need: the `openframe` binary, a Google account with
 access to a GCP project, and a browser for the login. Everything else —
 Terraform, gcloud, the auth plugin, credentials — the CLI sets up itself.
 
-> **Costs.** A GKE cluster bills real money (~$73/month cluster management
-> fee + VM nodes + networking). The CLI warns before creating and requires
-> re-typing the cluster name before deleting.
+> **Costs.** A GKE cluster bills real money: a cluster management fee, VM
+> nodes, and networking — see the
+> [GKE pricing page](https://cloud.google.com/kubernetes-engine/pricing).
+> With [infracost](https://www.infracost.io) installed, `--dry-run` shows a
+> monthly estimate. The CLI warns before creating and requires re-typing the
+> cluster name before deleting.
 
 ## 0. (Optional) Preview what would be created
 
