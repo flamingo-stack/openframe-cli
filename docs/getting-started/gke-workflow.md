@@ -17,6 +17,11 @@ without registering the cluster:
 ```bash
 openframe cluster create my-gke --type gke \
   --project my-project --region us-central1 --skip-wizard --dry-run
+#   +   google_project_service.required["container.googleapis.com"]
+#   +   module.network.module.vpc.google_compute_network.network
+#   +   module.gke.google_container_cluster.primary
+#   +   module.gke.google_container_node_pool.pools["default"]
+#   ...
 # Plan: 27 to add, 0 to change, 0 to destroy
 ```
 

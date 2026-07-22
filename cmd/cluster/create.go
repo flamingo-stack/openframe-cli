@@ -110,6 +110,9 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 		pterm.Success.Println("Plan: no changes — the cluster already matches this configuration")
 		return nil
 	}
+	for _, change := range summary.Changes {
+		pterm.DefaultBasicText.Printf("  %-3s %s\n", change.Action, change.Address)
+	}
 	pterm.Success.Printf("Plan: %d to add, %d to change, %d to destroy\n", summary.Add, summary.Change, summary.Destroy)
 	return nil
 }
