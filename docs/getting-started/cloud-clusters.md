@@ -61,7 +61,12 @@ Useful flags: `--machine-type`, `--min-nodes` / `--max-nodes`, `--spot`,
 `--profile` (AWS), `--nodes` (initial size), `--version` (`<major>.<minor>`,
 e.g. `1.33`).
 
-Provisioning takes ~10–20 minutes; the CLI streams per-resource progress.
+In interactive sessions the CLI first shows the full Terraform plan and asks
+for approval (the `terraform apply` shape; what you approve is exactly what
+runs — non-interactive sessions auto-approve). Provisioning then takes ~10–20
+minutes; the CLI streams per-resource progress. GKE nodes are private (no
+external IPs, egress via Cloud NAT) with a public control-plane endpoint, so
+the flow works in organizations enforcing `restrict_vm_external_ips`.
 When it finishes, your kubeconfig gets a context named after the cluster and
 it becomes the current context — `kubectl get nodes` just works
 (authentication runs through short-lived tokens via `aws eks get-token` /

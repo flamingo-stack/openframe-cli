@@ -106,7 +106,8 @@ func TestCreateCluster_HappyPath(t *testing.T) {
 
 	restConfig, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"init", "apply", "output"}, *calls)
+	assert.Equal(t, []string{"init", "plan", "show", "apply", "output"}, *calls,
+		"create follows the terraform-apply shape: plan+show before the (auto-approved) apply")
 	assert.Equal(t, "https://34.10.20.30", restConfig.Host, "bare module endpoint must be prefixed")
 	assert.Equal(t, []byte("fake-ca-pem"), restConfig.CAData)
 	require.NotNil(t, restConfig.ExecProvider)
@@ -241,11 +242,36 @@ func TestTfvarsFor_VersionMapping(t *testing.T) {
 
 func TestTemplateEmbedsModulePins(t *testing.T) {
 	tf := string(mainTF)
-	assert.Contains(t, tf, `source  = "terraform-google-modules/kubernetes-engine/google"`)
+	assert.Contains(t, tf, `source  = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"`)
 	assert.Contains(t, tf, `version = "~> 44.0"`)
 	assert.Contains(t, tf, `source  = "terraform-google-modules/network/google"`)
 	assert.Contains(t, tf, `version = "~> 18.0"`)
 	assert.Contains(t, tf, "deletion_protection = false")
+	// Org-policy compatibility (restrict_vm_external_ips): private nodes with
+	// NAT egress and a public control-plane endpoint.
+	assert.Contains(t, tf, "enable_private_nodes    = true")
+	assert.Contains(t, tf, "enable_private_endpoint = false")
+	assert.Contains(t, tf, `resource "google_compute_router_nat" "nat"`)
+}
+
+// TestCreateCluster_ResumeRefreshesTemplate: a retry after a failed create
+// must regenerate main.tf from the CURRENT embedded template so template
+// bugfixes reach existing workspaces.
+func TestCreateCluster_ResumeRefreshesTemplate(t *testing.T) {
+	p, _, registry := newTestProvider(t, nil)
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	// Simulate a stale workspace from an older CLI version.
+	stalePath := filepath.Join(registry.Workspace("demo").TerraformDir(), "main.tf")
+	require.NoError(t, os.WriteFile(stalePath, []byte("# stale broken template"), 0o600))
+
+	_, err = p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	refreshed, err := os.ReadFile(stalePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(refreshed), "enable_private_nodes", "resume must rewrite main.tf from the current template")
 }
 
 func TestPlanCluster_NewClusterDoesNotRegister(t *testing.T) {
@@ -400,4 +426,37 @@ func TestPreflightNameCollision_FindsZonalClusters(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not managed by openframe")
 	assert.Empty(t, *calls)
+}
+
+// TestCreateCluster_DeclinedPlanAppliesNothing: the interactive plan gate —
+// a declined plan must apply nothing, and a declined BRAND-NEW create must
+// leave no workspace behind (nothing exists to resume or bill).
+func TestCreateCluster_DeclinedPlanAppliesNothing(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+	p.confirmApply = func(summary tfengine.PlanSummary) bool { return false }
+
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+	assert.NotContains(t, *calls, "apply", "a declined plan must not apply")
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound, "declined brand-new create must remove the fresh workspace")
+}
+
+// TestCreateCluster_DeclinedResumeKeepsWorkspace: declining a RESUME keeps
+// the workspace — its state still points at real (billed) resources.
+func TestCreateCluster_DeclinedResumeKeepsWorkspace(t *testing.T) {
+	p, _, registry := newTestProvider(t, errors.New("first apply fails"))
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err) // failed create leaves a resumable workspace
+
+	p.confirmApply = func(summary tfengine.PlanSummary) bool { return false }
+	_, err = p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+
+	_, err = registry.Get("demo")
+	require.NoError(t, err, "declined resume must keep the workspace and its state")
 }

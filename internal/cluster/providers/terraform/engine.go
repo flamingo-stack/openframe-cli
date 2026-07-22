@@ -144,23 +144,34 @@ func (s PlanSummary) HasChanges() bool { return s.Add+s.Change+s.Destroy > 0 }
 // Plan runs terraform plan in dir and summarizes the pending changes by
 // resource action (create/update/delete).
 func (e *Engine) Plan(ctx context.Context, dir string) (PlanSummary, error) {
+	summary, planFile, err := e.PlanForApply(ctx, dir)
+	if planFile != "" {
+		_ = os.Remove(planFile)
+	}
+	return summary, err
+}
+
+// PlanForApply plans dir and KEEPS the plan file for a subsequent ApplyPlan —
+// the interactive `terraform apply` shape: what was shown to the user is
+// EXACTLY what gets applied, with no re-plan drift in between. The caller
+// owns removing the returned plan file.
+func (e *Engine) PlanForApply(ctx context.Context, dir string) (PlanSummary, string, error) {
 	tf, err := e.newRunner(dir)
 	if err != nil {
-		return PlanSummary{}, err
+		return PlanSummary{}, "", err
 	}
 	planFile := filepath.Join(dir, "tfplan")
-	defer func() { _ = os.Remove(planFile) }()
 
 	changes, err := tf.Plan(ctx, tfexec.Out(planFile))
 	if err != nil {
-		return PlanSummary{}, fmt.Errorf("terraform plan failed: %w", err)
+		return PlanSummary{}, "", fmt.Errorf("terraform plan failed: %w", err)
 	}
 	if !changes {
-		return PlanSummary{}, nil
+		return PlanSummary{}, planFile, nil
 	}
 	plan, err := tf.ShowPlanFile(ctx, planFile)
 	if err != nil {
-		return PlanSummary{}, fmt.Errorf("terraform show failed: %w", err)
+		return PlanSummary{}, planFile, fmt.Errorf("terraform show failed: %w", err)
 	}
 	var summary PlanSummary
 	// Best-effort: the JSON only feeds the optional cost estimate.
@@ -184,7 +195,20 @@ func (e *Engine) Plan(ctx context.Context, dir string) (PlanSummary, error) {
 			summary.Changes = append(summary.Changes, PlanChange{Action: "-/+", Address: rc.Address})
 		}
 	}
-	return summary, nil
+	return summary, planFile, nil
+}
+
+// ApplyPlan applies a SAVED plan file produced by PlanForApply, streaming
+// per-resource progress like Apply.
+func (e *Engine) ApplyPlan(ctx context.Context, dir, planFile string) error {
+	tf, err := e.newRunner(dir)
+	if err != nil {
+		return err
+	}
+	if err := tf.ApplyJSON(ctx, newProgressWriter(e.verbose), tfexec.DirOrPlan(planFile)); err != nil {
+		return fmt.Errorf("terraform apply failed: %w", err)
+	}
+	return nil
 }
 
 // Outputs returns the root-module outputs of dir as raw JSON values.

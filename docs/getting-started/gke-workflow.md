@@ -66,10 +66,19 @@ What happens, in order — no manual steps in between:
 3. **Preflight**: project access is verified, and the CLI refuses to proceed
    if a cluster with this name already exists in the project but was not
    created by openframe (it will never touch clusters it does not own).
-4. **Provision** (~10–15 min): a dedicated VPC with pod/service ranges and a
-   regional GKE cluster with an autoscaling node pool, streamed as
-   per-resource progress lines. Add `--verbose` for raw Terraform output.
-5. **Kubeconfig**: a context named exactly `my-gke` is merged into your
+4. **Plan & confirm** (interactive sessions): the full Terraform plan is
+   shown — every resource to be created and the summary line — and you are
+   asked to approve it before anything is applied, exactly like
+   `terraform apply`. What you approve is what runs (the saved plan is
+   applied, not a re-plan). Declining a brand-new create leaves no trace.
+   Non-interactive sessions auto-approve, as before.
+5. **Provision** (~10–15 min): required project APIs, a dedicated VPC with
+   pod/service ranges, a Cloud NAT for egress, and a regional GKE cluster
+   with **private nodes** (no external IPs — compatible with orgs enforcing
+   `restrict_vm_external_ips`) behind a public control-plane endpoint,
+   streamed as per-resource progress lines. Add `--verbose` for raw
+   Terraform output.
+6. **Kubeconfig**: a context named exactly `my-gke` is merged into your
    kubeconfig (existing contexts are never overwritten) and made current.
 
 ## 2. Verify
