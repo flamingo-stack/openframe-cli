@@ -21,12 +21,13 @@ func GetClusterCmd() *cobra.Command {
 
 This command group provides cluster lifecycle management functionality:
   • create - Create a new cluster with interactive configuration
-  • delete - Remove a cluster and clean up resources  
+  • delete - Remove a cluster and clean up resources
   • list - Show all managed clusters
   • status - Display detailed cluster information
+  • use - Switch the kubectl context to a cluster
   • cleanup - Remove unused images and resources
 
-Supports K3d clusters for local development.
+Supports K3d clusters for local development and Google GKE for cloud deployments (AWS EKS coming soon).
 
 Examples:
   openframe cluster create
@@ -46,6 +47,13 @@ Examples:
 			if cmd.Use != "cluster" {
 				ui.ShowLogoWithContext(cmd.Context())
 			}
+			// create runs its own type-aware gate after the cluster type is known
+			// (a cloud cluster must not demand Docker/k3d); use only flips local
+			// kubeconfig/gcloud state and needs no tools at all. The other
+			// subcommands are k3d-scoped, so the k3d gate stays here.
+			if cmd.Name() == "create" || cmd.Name() == "use" {
+				return nil
+			}
 			return prerequisites.CheckPrerequisites()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,6 +69,7 @@ Examples:
 		getDeleteCmd(),
 		getListCmd(),
 		getStatusCmd(),
+		getUseCmd(),
 		getCleanupCmd(),
 	)
 

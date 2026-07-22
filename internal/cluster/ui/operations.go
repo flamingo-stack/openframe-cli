@@ -336,6 +336,16 @@ func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dr
 	if config.K8sVersion != "" {
 		pterm.DefaultBasicText.Printf("Version: %s\n", config.K8sVersion)
 	}
+	if config.Cloud != nil {
+		if config.Cloud.Project != "" {
+			pterm.DefaultBasicText.Printf("Project: %s\n", config.Cloud.Project)
+		}
+		pterm.DefaultBasicText.Printf(" Region: %s\n", config.Cloud.Region)
+		if config.Cloud.MachineType != "" {
+			pterm.DefaultBasicText.Printf("Instance: %s\n", config.Cloud.MachineType)
+		}
+		pterm.Warning.Println(CostHint(config.Type))
+	}
 
 	pterm.DefaultBasicText.Println()
 

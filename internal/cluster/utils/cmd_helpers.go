@@ -43,6 +43,18 @@ func GetCommandService() *cluster.ClusterService {
 	return cluster.NewClusterService(exec)
 }
 
+// CommandExecutor returns the executor commands should shell through: the
+// injected test executor when present (hermetic cmd-layer tests), otherwise a
+// real one honoring the global --dry-run/--verbose flags.
+func CommandExecutor() executor.CommandExecutor {
+	if globalFlags != nil && globalFlags.Executor != nil {
+		return globalFlags.Executor
+	}
+	dryRun := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.DryRun
+	verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
+	return executor.NewRealCommandExecutor(dryRun, verbose)
+}
+
 // WrapCommandWithCommonSetup wraps a command function with common CLI setup and error handling
 func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) error) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {

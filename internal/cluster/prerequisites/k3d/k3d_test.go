@@ -39,37 +39,29 @@ func TestK3dInstaller_GetInstallHelp(t *testing.T) {
 	}
 }
 
+// TestK3dInstaller_Install only exercises the fail-fast error paths. It must
+// NEVER call Install() where the real install could proceed: on CI runners
+// this test used to run a real `brew install k3d` (darwin) or download the
+// pinned binary into the runner's ~/.openframe/bin (linux).
 func TestK3dInstaller_Install(t *testing.T) {
-	installer := NewK3dInstaller()
-
-	// We can't actually test installation in CI, but we can test error handling
-	err := installer.Install()
-
-	// On unsupported platforms, should return specific error
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
-		expectedPrefix := "automatic k3d installation not supported on"
-		if err == nil || !containsSubstring(err.Error(), expectedPrefix) {
-			t.Errorf("Expected error containing '%s', got: %v", expectedPrefix, err)
-		}
-		return
+	if runtime.GOOS == "darwin" && commandExists("brew") {
+		t.Skip("would run a real 'brew install k3d'")
+	}
+	if runtime.GOOS == "linux" {
+		t.Skip("would run a real package-manager install or verified download")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("k3d installs via WSL on windows")
 	}
 
-	// On macOS without brew, should suggest installing brew
-	if runtime.GOOS == "darwin" && !commandExists("brew") {
-		if err == nil {
-			t.Error("Expected error when Homebrew is not installed")
-		} else {
-			expectedSubstring := "Homebrew is required"
-			if !containsSubstring(err.Error(), expectedSubstring) {
-				t.Errorf("Expected error containing '%s', got: %v", expectedSubstring, err)
-			}
-		}
-		return
+	// Only the guaranteed-error path remains: darwin without Homebrew.
+	err := NewK3dInstaller().Install()
+	if err == nil {
+		t.Fatal("expected an error when no install tooling is available")
 	}
-
-	// On Linux and Windows, the installation will likely fail in test environments
-	// We just verify the function runs without panicking
-	_ = err
+	if !containsSubstring(err.Error(), "Homebrew") {
+		t.Errorf("expected a Homebrew hint, got: %v", err)
+	}
 }
 
 func TestCommandExists(t *testing.T) {

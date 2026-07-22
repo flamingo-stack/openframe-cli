@@ -14,6 +14,29 @@ type ClusterConfig struct {
 	Type       models.ClusterType
 	NodeCount  int
 	K8sVersion string
+	// Cloud-only answers (EKS/GKE)
+	Region      string
+	Project     string
+	MachineType string
+}
+
+// ToDomain converts the wizard answers into the domain config, attaching the
+// cloud block only for cloud types.
+func (c ClusterConfig) ToDomain() models.ClusterConfig {
+	domain := models.ClusterConfig{
+		Name:       c.Name,
+		Type:       c.Type,
+		NodeCount:  c.NodeCount,
+		K8sVersion: c.K8sVersion,
+	}
+	if c.Type == models.ClusterTypeEKS || c.Type == models.ClusterTypeGKE {
+		domain.Cloud = &models.CloudConfig{
+			Region:      c.Region,
+			Project:     c.Project,
+			MachineType: c.MachineType,
+		}
+	}
+	return domain
 }
 
 // ConfigWizard provides interactive configuration for cluster creation
@@ -63,27 +86,53 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	}
 	w.config.Type = clusterType
 
-	// Step 3: Node count
+	// Step 3 (cloud only): project/region + instance type. The k3s version
+	// list below is meaningless for cloud clusters, whose version comes from
+	// the module default.
+	if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
+		regionLabel, defaultRegion, defaultMachine := "AWS Region", "us-east-1", "m6i.large"
+		if clusterType == models.ClusterTypeGKE {
+			regionLabel, defaultRegion, defaultMachine = "GCP Region", "us-central1", "e2-standard-4"
+
+			project, err := steps.PromptProject()
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.Project = project
+		}
+
+		region, err := steps.PromptRegion(regionLabel, defaultRegion)
+		if err != nil {
+			return ClusterConfig{}, err
+		}
+		w.config.Region = region
+
+		machineType, err := steps.PromptMachineType(defaultMachine)
+		if err != nil {
+			return ClusterConfig{}, err
+		}
+		w.config.MachineType = machineType
+		w.config.K8sVersion = ""
+	}
+
+	// Step 4: Node count
 	nodeCount, err := steps.PromptNodeCount(w.config.NodeCount)
 	if err != nil {
 		return ClusterConfig{}, err
 	}
 	w.config.NodeCount = nodeCount
 
-	// Step 4: Kubernetes version
-	k8sVersion, err := steps.PromptK8sVersion()
-	if err != nil {
-		return ClusterConfig{}, err
+	// Step 5 (k3d only): Kubernetes version
+	if clusterType == models.ClusterTypeK3d {
+		k8sVersion, err := steps.PromptK8sVersion()
+		if err != nil {
+			return ClusterConfig{}, err
+		}
+		w.config.K8sVersion = k8sVersion
 	}
-	w.config.K8sVersion = k8sVersion
 
-	// Step 5: Confirmation
-	domainConfig := models.ClusterConfig{
-		Name:       w.config.Name,
-		Type:       w.config.Type,
-		NodeCount:  w.config.NodeCount,
-		K8sVersion: w.config.K8sVersion,
-	}
+	// Step 6: Confirmation
+	domainConfig := w.config.ToDomain()
 	confirmed, err := steps.ConfirmConfiguration(domainConfig)
 	if err != nil {
 		return ClusterConfig{}, err
@@ -178,11 +227,5 @@ func (h *ConfigurationHandler) getWizardConfig(clusterName string) (models.Clust
 		return models.ClusterConfig{}, err
 	}
 
-	// Convert wizard config to domain config
-	return models.ClusterConfig{
-		Name:       wizardConfig.Name,
-		Type:       wizardConfig.Type,
-		K8sVersion: wizardConfig.K8sVersion,
-		NodeCount:  wizardConfig.NodeCount,
-	}, nil
+	return wizardConfig.ToDomain(), nil
 }

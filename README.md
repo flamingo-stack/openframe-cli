@@ -162,7 +162,7 @@ The bootstrap process creates:
 | Command | Description | Example |
 |---------|-------------|---------|
 | `openframe bootstrap` | Create a cluster and deploy OpenFrame | `openframe bootstrap my-cluster` |
-| `openframe cluster create` | Create a Kubernetes cluster | `openframe cluster create dev --nodes 1` |
+| `openframe cluster create` | Create a k3d or cloud (EKS/GKE) cluster | `openframe cluster create dev --nodes 1` |
 | `openframe cluster list` | List clusters | `openframe cluster list -o json` |
 | `openframe cluster status` | Show cluster status | `openframe cluster status dev` |
 | `openframe cluster delete` | Delete a cluster | `openframe cluster delete dev --force` |
@@ -180,6 +180,8 @@ Cluster lifecycle:
 
 ```bash
 openframe cluster create dev --type k3d --nodes 1 --skip-wizard
+openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard  # cloud (billed!)
+openframe cluster create my-eks --type eks --skip-wizard    # EKS is gated: shows a coming-soon banner, creates nothing
 openframe cluster list                          # add -o json|yaml for scripts
 openframe cluster status dev
 openframe cluster delete dev --force

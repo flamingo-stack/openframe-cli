@@ -94,6 +94,68 @@ var Helm = PinnedTool{
 	},
 }
 
+// Terraform is the pinned Terraform CLI, used by the cloud cluster providers
+// (EKS/GKE). Upstream: https://releases.hashicorp.com/terraform/ — assets are
+// .zip archives with the bare terraform binary (terraform.exe on Windows)
+// inside; SHA256 from the release's SHA256SUMS file. Unlike k3d/helm (which
+// run inside WSL on Windows), terraform is pinned for Windows too: the
+// provisioning engine runs it natively.
+const (
+	terraformVersion = "1.15.8"
+	terraformBaseURL = "https://releases.hashicorp.com/terraform/" + terraformVersion + "/terraform_" + terraformVersion + "_"
+
+	terraformSHA256LinuxAMD64   = "d25ce7b6902013ad905db3d2eab0be4cd905887fe88b81a6171b8d5503c31f3d"
+	terraformSHA256LinuxARM64   = "8891e9dcedc9e3b8950bc6af9d4d8af1f4cfade3062f53b9dc403a89f6ce8c9c"
+	terraformSHA256DarwinAMD64  = "e2e812e783771159bf758fd4e55d6dc9bb08f63e2af2c63d212721807a02c5dc"
+	terraformSHA256DarwinARM64  = "f210110c5698b94d803a7a63cdb0251b5455c150841478808e2bbb343f95ed68"
+	terraformSHA256WindowsAMD64 = "2ff41d2129afb1982733c132c61a8d6ef038f879f3aeede7fc28b8b8b24acf02"
+	terraformSHA256WindowsARM64 = "ffd9399a37ee8123263d84ec5c00d09d7704f9997cb345d7c9cac56c3fc1348e"
+)
+
+var Terraform = PinnedTool{
+	Name:    "terraform",
+	Version: terraformVersion,
+	Zip:     true,
+	Assets: map[string]PinnedAsset{
+		"linux/amd64":   {URL: terraformBaseURL + "linux_amd64.zip", SHA256: terraformSHA256LinuxAMD64},
+		"linux/arm64":   {URL: terraformBaseURL + "linux_arm64.zip", SHA256: terraformSHA256LinuxARM64},
+		"darwin/amd64":  {URL: terraformBaseURL + "darwin_amd64.zip", SHA256: terraformSHA256DarwinAMD64},
+		"darwin/arm64":  {URL: terraformBaseURL + "darwin_arm64.zip", SHA256: terraformSHA256DarwinARM64},
+		"windows/amd64": {URL: terraformBaseURL + "windows_amd64.zip", SHA256: terraformSHA256WindowsAMD64},
+		"windows/arm64": {URL: terraformBaseURL + "windows_arm64.zip", SHA256: terraformSHA256WindowsARM64},
+	},
+}
+
+// Infracost is the pinned infracost CLI, used by the OPTIONAL cost estimate
+// in the cloud dry-run preview. Upstream:
+// https://github.com/infracost/infracost/releases — .tar.gz per platform with
+// per-asset .sha256 files. The archive member layout is irregular
+// ("infracost-<os>-<arch>" on unix, "infracost.exe" on windows), so the
+// infracost installer extracts it itself via InstallVerifiedTarGz instead of
+// the InstallPinnedTool tarball convention.
+const (
+	infracostVersion = "v0.10.45"
+	infracostBaseURL = "https://github.com/infracost/infracost/releases/download/" + infracostVersion + "/infracost-"
+
+	infracostSHA256LinuxAMD64   = "e2f527d8391a87ac00bfc55237ff875107861715e234bbbeb9b6015aba576c77"
+	infracostSHA256LinuxARM64   = "b9946cf42b9ed58184bd646484f63e0ecf430caca5978e0611302a1545c36262"
+	infracostSHA256DarwinAMD64  = "b2202262267b704b95e786acfeb09c1f86e384e896ea42edb4de3f91a338a637"
+	infracostSHA256DarwinARM64  = "98b134ca825d292a34a410cdbfa0cfa0d3c9ec2b576710de0d051be6d9002771"
+	infracostSHA256WindowsAMD64 = "7f627fac5cad9b7260e1123c1378d2fb4f308cdc64f78e99d6e69727d9549d06"
+)
+
+var Infracost = PinnedTool{
+	Name:    "infracost",
+	Version: infracostVersion,
+	Assets: map[string]PinnedAsset{
+		"linux/amd64":   {URL: infracostBaseURL + "linux-amd64.tar.gz", SHA256: infracostSHA256LinuxAMD64},
+		"linux/arm64":   {URL: infracostBaseURL + "linux-arm64.tar.gz", SHA256: infracostSHA256LinuxARM64},
+		"darwin/amd64":  {URL: infracostBaseURL + "darwin-amd64.tar.gz", SHA256: infracostSHA256DarwinAMD64},
+		"darwin/arm64":  {URL: infracostBaseURL + "darwin-arm64.tar.gz", SHA256: infracostSHA256DarwinARM64},
+		"windows/amd64": {URL: infracostBaseURL + "windows-amd64.tar.gz", SHA256: infracostSHA256WindowsAMD64},
+	},
+}
+
 // UserBinDir returns the CLI-managed bin directory (~/.openframe/bin) where
 // verified tool binaries are installed. It does not create the directory.
 func UserBinDir() (string, error) {
@@ -116,10 +178,16 @@ func (d Downloader) InstallPinnedTool(ctx context.Context, tool PinnedTool, binD
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		return "", fmt.Errorf("creating %s: %w", binDir, err)
 	}
-	dest := filepath.Join(binDir, tool.Name)
+	dest := filepath.Join(binDir, exeName(tool.Name))
 	if tool.Tarball {
 		member := fmt.Sprintf("%s-%s/%s", runtime.GOOS, runtime.GOARCH, tool.Name)
 		if err := d.InstallVerifiedTarGz(ctx, asset, member, dest, 0o750); err != nil {
+			return "", err
+		}
+		return dest, nil
+	}
+	if tool.Zip {
+		if err := d.InstallVerifiedZipMember(ctx, asset, exeName(tool.Name), dest, 0o750); err != nil {
 			return "", err
 		}
 		return dest, nil
@@ -128,6 +196,16 @@ func (d Downloader) InstallPinnedTool(ctx context.Context, tool PinnedTool, binD
 		return "", err
 	}
 	return dest, nil
+}
+
+// exeName appends the Windows executable suffix where the OS requires it —
+// archive members and installed binaries are named tool.exe on Windows
+// (e.g. terraform.exe inside HashiCorp's windows zips).
+func exeName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 // PrependToPath puts dir at the front of the current process PATH when it is

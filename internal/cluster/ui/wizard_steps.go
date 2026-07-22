@@ -41,11 +41,17 @@ func (ws *WizardSteps) PromptClusterName(defaultName string) (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-// PromptClusterType prompts for cluster type selection
+// PromptClusterType prompts for cluster type selection. AWS EKS is listed but
+// gated: choosing it shows the coming-soon banner and re-prompts, so the
+// wizard never produces an EKS config while creation is stubbed.
 func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 	prompt := promptui.Select{
 		Label: "Cluster Type",
-		Items: []string{"k3d (Recommended for local development)", "gke (Google Kubernetes Engine - Coming Soon)"},
+		Items: []string{
+			"k3d (Recommended for local development)",
+			"gke (Google Kubernetes Engine — provisions cloud resources that cost money)",
+			"eks (AWS Elastic Kubernetes Service — coming soon)",
+		},
 		Templates: &promptui.SelectTemplates{
 			Label:    "{{ . }}:",
 			Active:   "→ {{ . | cyan }}",
@@ -54,19 +60,63 @@ func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 		},
 	}
 
-	idx, _, err := prompt.Run()
+	for {
+		idx, _, err := prompt.Run()
+		if err != nil {
+			return "", err
+		}
+		switch idx {
+		case 1:
+			return models.ClusterTypeGKE, nil
+		case 2:
+			pterm.Info.Println("AWS EKS support is coming soon — pick k3d or gke for now")
+			continue
+		default:
+			return models.ClusterTypeK3d, nil
+		}
+	}
+}
+
+// PromptProject prompts for the GCP project a GKE cluster lands in.
+func (ws *WizardSteps) PromptProject() (string, error) {
+	prompt := promptui.Prompt{
+		Label:    "GCP Project",
+		Validate: sharedUI.ValidateNonEmpty("project"),
+	}
+	result, err := prompt.Run()
 	if err != nil {
 		return "", err
 	}
+	return strings.TrimSpace(result), nil
+}
 
-	switch idx {
-	case 0:
-		return models.ClusterTypeK3d, nil
-	case 1:
-		return models.ClusterTypeGKE, nil
-	default:
-		return models.ClusterTypeK3d, nil
+// PromptRegion prompts for the cloud region a cluster lands in; the label is
+// provider-specific ("GCP Region" / "AWS Region").
+func (ws *WizardSteps) PromptRegion(label, defaultRegion string) (string, error) {
+	prompt := promptui.Prompt{
+		Label:    label,
+		Default:  defaultRegion,
+		Validate: sharedUI.ValidateNonEmpty("region"),
 	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
+// PromptMachineType prompts for the node instance type of a cloud cluster.
+func (ws *WizardSteps) PromptMachineType(defaultType string) (string, error) {
+	prompt := promptui.Prompt{
+		Label:    "Node Instance Type",
+		Default:  defaultType,
+		Validate: sharedUI.ValidateNonEmpty("instance type"),
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
 }
 
 // PromptNodeCount prompts for number of worker nodes
@@ -122,6 +172,19 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		{"Cluster Type", string(config.Type)},
 		{"Node Count", strconv.Itoa(config.NodeCount)},
 		{"Kubernetes Version", config.K8sVersion},
+	}
+	if config.Cloud != nil {
+		if config.Cloud.Project != "" {
+			data = append(data, []string{"Project", config.Cloud.Project})
+		}
+		data = append(data, []string{"Region", config.Cloud.Region})
+		if config.Cloud.MachineType != "" {
+			data = append(data, []string{"Instance Type", config.Cloud.MachineType})
+		}
+	}
+
+	if config.Cloud != nil {
+		pterm.Warning.Println(CostHint(config.Type))
 	}
 
 	// Use pterm for consistent styling

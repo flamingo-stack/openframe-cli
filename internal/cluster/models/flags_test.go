@@ -286,6 +286,23 @@ func TestFlagValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "node count must be at least 1")
 	})
 
+	t.Run("accepts empty and recognized cluster types", func(t *testing.T) {
+		for _, clusterType := range []string{"", "k3d", "gke", "eks"} {
+			flags := &CreateFlags{ClusterType: clusterType, NodeCount: 3}
+
+			err := ValidateCreateFlags(flags)
+			assert.NoError(t, err, "type %q should pass flag validation", clusterType)
+		}
+	})
+
+	t.Run("rejects unknown cluster type", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "minikube", NodeCount: 3}
+
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown cluster type 'minikube'")
+	})
+
 	t.Run("validates list flags", func(t *testing.T) {
 		flags := &ListFlags{Quiet: true}
 
@@ -313,5 +330,19 @@ func TestFlagValidation(t *testing.T) {
 
 		err := ValidateCleanupFlags(flags)
 		assert.NoError(t, err)
+	})
+}
+
+func TestValidateCreateFlags_BackendConfig(t *testing.T) {
+	t.Run("accepted for cloud types", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", NodeCount: 3, BackendConfig: "s3://bucket/prefix"}
+		assert.NoError(t, ValidateCreateFlags(flags))
+	})
+
+	t.Run("rejected for k3d", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "k3d", NodeCount: 3, BackendConfig: "s3://bucket/prefix"}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only applies to cloud cluster types")
 	})
 }

@@ -182,10 +182,13 @@ the ArgoCD install. Without an `argocd:` section the baseline is used unchanged.
 
 ## Cross-platform Builds
 
+`make build` puts the current-platform binary into `build/`; `make build-all`
+cross-compiles every release platform there. By hand:
+
 ```bash
-GOOS=linux   GOARCH=amd64 go build -o openframe-linux-amd64 .
-GOOS=darwin  GOARCH=arm64 go build -o openframe-darwin-arm64 .
-GOOS=windows GOARCH=amd64 go build -o openframe-windows-amd64.exe .
+GOOS=linux   GOARCH=amd64 go build -o build/openframe-linux-amd64 .
+GOOS=darwin  GOARCH=arm64 go build -o build/openframe-darwin-arm64 .
+GOOS=windows GOARCH=amd64 go build -o build/openframe-windows-amd64.exe .
 ```
 
 On Windows the CLI forwards into WSL2 and runs the Linux binary; that launch is handled by `internal/shared/wsllauncher`.

@@ -1,8 +1,12 @@
 package cluster
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
@@ -72,6 +76,61 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
+// While EKS creation is gated behind the coming-soon banner, the plan preview
+// is a GKE-only path (see TestRunCreateCluster_EKSShowsComingSoonBanner).
+func TestRunCreateCluster_CloudDryRunRunsPlanPreview(t *testing.T) {
+	setupCreate(t)
+	// Stub the preview: the real one shells out to terraform.
+	var previewed *models.ClusterConfig
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		previewed = &config
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
+
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+	gf.Create.ClusterType = "gke"
+	gf.Create.Region = "us-central1"
+	gf.Create.Project = "my-project"
+
+	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+		t.Fatalf("gke dry-run should return nil, got %v", err)
+	}
+	if previewed == nil {
+		t.Fatal("gke dry-run must invoke the terraform plan preview")
+	}
+	if previewed.Cloud == nil || previewed.Cloud.Region != "us-central1" {
+		t.Fatalf("preview received wrong config: %+v", previewed)
+	}
+}
+
+func TestRunCreateCluster_K3dDryRunSkipsPlanPreview(t *testing.T) {
+	setupCreate(t)
+	called := false
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
+
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+
+	if err := runCreateCluster(cmd, []string{"local-cluster"}); err != nil {
+		t.Fatalf("k3d dry-run should return nil, got %v", err)
+	}
+	if called {
+		t.Fatal("k3d dry-run must not invoke the terraform plan preview")
+	}
+}
+
 // setupWithExecutor wires a specific mock executor into the command service.
 func setupWithExecutor(t *testing.T, exec *executor.MockCommandExecutor) {
 	t.Helper()
@@ -99,5 +158,147 @@ func TestRunClusterStatus_ListFailureSurfacesError(t *testing.T) {
 
 	if err := runClusterStatus(getStatusCmd(), []string{"c1"}); err == nil {
 		t.Fatal("expected an error when cluster listing fails")
+	}
+}
+
+// TestRunCreateCluster_EKSShowsComingSoonBanner: while EKS creation is gated,
+// --type eks must show the banner and exit cleanly — no prerequisite gate, no
+// provider calls, no validation errors about missing --region.
+func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
+	setupCreate(t)
+	called := false
+	orig := planPreviewFn
+	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { planPreviewFn = orig })
+
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.ClusterType = "eks"
+
+	err := runCreateCluster(cmd, []string{"cloud-cluster"})
+	if err == nil {
+		t.Fatal("gated eks create must exit non-zero — a script must not mistake the banner for success")
+	}
+	if !strings.Contains(err.Error(), "coming soon") {
+		t.Fatalf("expected an actionable coming-soon error, got: %v", err)
+	}
+	if called {
+		t.Fatal("eks must not reach the plan preview while gated")
+	}
+}
+
+// TestShowCostEstimate drives the infracost offer/estimate flow on seams —
+// no real PATH probe, download, or infracost invocation ever happens.
+func TestShowCostEstimate(t *testing.T) {
+	summary := terraform.PlanSummary{Add: 1, PlanJSON: []byte(`{"format_version":"1.2"}`)}
+	config := models.ClusterConfig{Name: "x", Type: models.ClusterTypeGKE, NodeCount: 1,
+		Cloud: &models.CloudConfig{Region: "us-central1", Project: "p"}}
+
+	override := func(t *testing.T, available bool, offer bool) (offered *bool) {
+		t.Helper()
+		offered = new(bool)
+		origAvail, origOffer := infracostAvailableFn, infracostOfferFn
+		infracostAvailableFn = func() bool { return available }
+		infracostOfferFn = func() bool { *offered = true; return offer }
+		t.Cleanup(func() { infracostAvailableFn, infracostOfferFn = origAvail, origOffer })
+		return offered
+	}
+
+	t.Run("unavailable and declined: no infracost invocation", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		offered := override(t, false, false)
+		mock := executor.NewMockCommandExecutor()
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if !*offered {
+			t.Fatal("the install offer must be made when infracost is unavailable")
+		}
+		if mock.WasCommandExecuted("infracost") {
+			t.Fatal("infracost must not run when unavailable and declined")
+		}
+	})
+
+	t.Run("offer accepted: estimate runs", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		override(t, false, true)
+		mock := executor.NewMockCommandExecutor()
+		mock.SetResponse("infracost breakdown", &executor.CommandResult{
+			ExitCode: 0, Stdout: `{"totalMonthlyCost":"120.00","currency":"USD"}`})
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if !mock.WasCommandExecuted("infracost breakdown") {
+			t.Fatal("estimate must run after an accepted install offer")
+		}
+	})
+
+	t.Run("available but estimate fails: login offered, declined -> hint", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		offered := override(t, true, false)
+		loginOffered := false
+		origLogin := infracostLoginFn
+		infracostLoginFn = func() bool { loginOffered = true; return false }
+		t.Cleanup(func() { infracostLoginFn = origLogin })
+		mock := executor.NewMockCommandExecutor()
+		mock.SetShouldFail(true, "No INFRACOST_API_KEY environment variable is set")
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if *offered {
+			t.Fatal("no install offer when infracost is already available")
+		}
+		if !loginOffered {
+			t.Fatal("a failed estimate must offer the in-CLI 'infracost auth login'")
+		}
+	})
+
+	t.Run("failed estimate + accepted login: estimate retried", func(t *testing.T) {
+		utils.InitGlobalFlags()
+		t.Cleanup(utils.ResetGlobalFlags)
+		override(t, true, false)
+		mock := executor.NewMockCommandExecutor()
+		// First breakdown fails (no key); the accepted login flips the mock to
+		// success, mimicking a real auth login taking effect.
+		mock.SetShouldFail(true, "No INFRACOST_API_KEY environment variable is set")
+		origLogin := infracostLoginFn
+		infracostLoginFn = func() bool {
+			mock.SetShouldFail(false, "")
+			mock.SetResponse("infracost breakdown", &executor.CommandResult{
+				ExitCode: 0, Stdout: `{"totalMonthlyCost":"120.00","currency":"USD"}`})
+			return true
+		}
+		t.Cleanup(func() { infracostLoginFn = origLogin })
+
+		showCostEstimate(context.Background(), mock, config, summary)
+
+		if mock.GetCommandCount() < 2 {
+			t.Fatalf("estimate must be retried after a successful login, got %d invocations", mock.GetCommandCount())
+		}
+	})
+}
+
+// TestOfferInfracostInstall_NonInteractiveNeverPrompts: CI sessions must not
+// hit the confirm prompt (nor a download).
+func TestOfferInfracostInstall_NonInteractiveNeverPrompts(t *testing.T) {
+	t.Setenv("CI", "true")
+	if offerInfracostInstall() {
+		t.Fatal("non-interactive sessions must not offer/install infracost")
+	}
+}
+
+// TestOfferInfracostLogin_NonInteractiveNeverPrompts: CI sessions must not
+// hit the confirm prompt (nor a browser).
+func TestOfferInfracostLogin_NonInteractiveNeverPrompts(t *testing.T) {
+	t.Setenv("CI", "true")
+	if offerInfracostLogin() {
+		t.Fatal("non-interactive sessions must not run infracost auth login")
 	}
 }

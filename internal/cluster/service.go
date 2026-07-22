@@ -11,11 +11,9 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
-	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/k3d"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
-	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
@@ -25,6 +23,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
+
+// bootstrapNodeCount is the k3d node count for `openframe bootstrap` — one
+// more than `cluster create`'s default of 3 because bootstrap immediately
+// installs the full platform. Kept as a named constant so the discrepancy is
+// a decision, not an accident (audit follow-up).
+const bootstrapNodeCount = 4
 
 // ApplicationCleaner removes the ArgoCD Application CRs that own the platform
 // workloads, and strips the resources-finalizer from any left in Terminating.
@@ -73,7 +77,7 @@ func isTerminalEnvironment() bool {
 
 // NewClusterService creates a new cluster service with default configuration
 func NewClusterService(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -83,7 +87,7 @@ func NewClusterService(exec executor.CommandExecutor) *ClusterService {
 
 // NewClusterServiceSuppressed creates a cluster service with UI suppression
 func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService {
-	manager := k3d.CreateClusterManagerWithExecutor(exec)
+	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -91,63 +95,108 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 	}
 }
 
+// providerFor resolves the backend for a cluster type. The k3d manager is the
+// service default (list/status/cleanup are k3d-scoped until cloud backends
+// land); anything else goes through the factory, which today yields
+// ErrProviderNotFound for the recognized cloud types.
+func (s *ClusterService) providerFor(clusterType models.ClusterType) (provider.Provider, error) {
+	if clusterType == models.ClusterTypeK3d || clusterType == "" {
+		return s.manager, nil
+	}
+	return provider.New(clusterType, s.executor)
+}
+
+// shouldResumeCloudCreate decides whether an existing registry entry means
+// "reuse the cluster" or "resume an interrupted create". Cloud records exist
+// from the moment a workspace is scaffolded, so a non-Ready status marks a
+// create that failed or was interrupted — terraform apply resumes it
+// idempotently. Local k3d clusters only ever surface here when they actually
+// run, so they always reuse.
+func shouldResumeCloudCreate(clusterType models.ClusterType, status string) bool {
+	isCloud := clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE
+	return isCloud && status != "Ready"
+}
+
+// showExistingClusterReuse prints the "already exists" summary with the
+// cluster's REAL status and only k3d-specific rows for k3d clusters — this
+// box used to hardcode a green "Running" and a "k3d-<name>" network line for
+// every type, which was wrong for cloud clusters.
+func (s *ClusterService) showExistingClusterReuse(name string, info models.ClusterInfo) {
+	pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(name))
+	pterm.DefaultBasicText.Println()
+
+	statusColor := ui.GetStatusColor(info.Status)
+	boxContent := fmt.Sprintf(
+		"NAME:     %s\n"+
+			"TYPE:     %s\n"+
+			"STATUS:   %s\n"+
+			"NODES:    %d",
+		pterm.Bold.Sprint(info.Name),
+		strings.ToUpper(string(info.Type)),
+		statusColor(info.Status),
+		info.NodeCount,
+	)
+	if info.Type == models.ClusterTypeK3d {
+		boxContent += fmt.Sprintf("\nNETWORK:  k3d-%s", info.Name)
+	}
+
+	pterm.DefaultBox.
+		WithTitle(" ⚠️  Cluster Already Exists  ⚠️ ").
+		WithTitleTopCenter().
+		Println(boxContent)
+
+	// Show what user can do (suppress for automation)
+	if !s.suppressUI {
+		pterm.DefaultBasicText.Println()
+		pterm.Info.Printf("What would you like to do?\n")
+		pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", name)
+		pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", name)
+		pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
+	}
+}
+
 // CreateCluster handles cluster creation operations
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (s *ClusterService) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
-	// Check if cluster already exists
-	if existingInfo, err := s.manager.GetClusterStatus(ctx, config.Name); err == nil {
-		// Cluster already exists - show friendly message
-
-		// Show warning for existing cluster
-		pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(config.Name))
-		pterm.DefaultBasicText.Println()
-
-		boxContent := fmt.Sprintf(
-			"NAME:     %s\n"+
-				"TYPE:     %s\n"+
-				"STATUS:   %s\n"+
-				"NODES:    %d\n"+
-				"NETWORK:  k3d-%s",
-			pterm.Bold.Sprint(existingInfo.Name),
-			strings.ToUpper(string(existingInfo.Type)),
-			pterm.Green("Running"),
-			existingInfo.NodeCount,
-			existingInfo.Name,
-		)
-
-		pterm.DefaultBox.
-			WithTitle(" ⚠️  Cluster Already Running  ⚠️ ").
-			WithTitleTopCenter().
-			Println(boxContent)
-
-		// Show what user can do (suppress for automation)
-		if !s.suppressUI {
-			pterm.DefaultBasicText.Println()
-			pterm.Info.Printf("What would you like to do?\n")
-			pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", config.Name)
-			pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", config.Name)
-			pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
-		}
-
-		// Return the rest.Config for the existing cluster
-		restConfig, err := s.manager.GetRestConfig(ctx, config.Name)
-		if err != nil {
-			return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
-		}
-		return restConfig, nil // Exit gracefully without error
+	// Resolve the backend first: an unsupported type must fail here, before any
+	// k3d-specific existence checks run.
+	mgr, err := s.providerFor(config.Type)
+	if err != nil {
+		return nil, err
 	}
 
-	// Cluster doesn't exist, proceed with creation
+	// Check if cluster already exists
+	if existingInfo, err := mgr.GetClusterStatus(ctx, config.Name); err == nil {
+		if shouldResumeCloudCreate(config.Type, existingInfo.Status) {
+			// A cloud workspace whose create failed or was interrupted: fall
+			// through to the provider, whose terraform apply resumes from the
+			// recorded state. The registry record must NOT short-circuit here —
+			// that made the documented "re-run create to resume" unreachable.
+			pterm.Info.Printf("Cluster '%s' has an interrupted creation (status: %s) — resuming\n",
+				config.Name, existingInfo.Status)
+		} else {
+			// Cluster already exists and is usable — reuse it.
+			s.showExistingClusterReuse(config.Name, existingInfo)
+			restConfig, err := mgr.GetRestConfig(ctx, config.Name)
+			if err != nil {
+				return nil, fmt.Errorf("cluster exists but failed to get REST config: %w", err)
+			}
+			return restConfig, nil // Exit gracefully without error
+		}
+	}
+
+	// Cluster doesn't exist, proceed with creation. Cloud creates stream
+	// per-resource progress lines from the terraform engine, which a spinner's
+	// redraws would garble — so the spinner is k3d-only.
 	var sp *spinner.Spinner
-	if !s.suppressUI {
+	if !s.suppressUI && config.Type == models.ClusterTypeK3d {
 		sp = spinner.New()
 		sp.Start(fmt.Sprintf("Creating %s cluster '%s'...", config.Type, config.Name))
 	} else {
-		// In non-interactive mode, just show a simple info message
 		pterm.Info.Printf("Creating %s cluster '%s'...\n", config.Type, config.Name)
 	}
 
-	restConfig, err := s.manager.CreateCluster(ctx, config)
+	restConfig, err := mgr.CreateCluster(ctx, config)
 	if err != nil {
 		if sp != nil {
 			sp.Fail(fmt.Sprintf("Failed to create cluster '%s'", config.Name))
@@ -162,7 +211,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 	}
 
 	// Get and display cluster status
-	if clusterInfo, statusErr := s.manager.GetClusterStatus(ctx, config.Name); statusErr == nil {
+	if clusterInfo, statusErr := mgr.GetClusterStatus(ctx, config.Name); statusErr == nil {
 		s.displayClusterCreationSummary(clusterInfo)
 	}
 
@@ -174,16 +223,22 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 
 // DeleteCluster handles cluster deletion business logic
 func (s *ClusterService) DeleteCluster(ctx context.Context, name string, clusterType models.ClusterType, force bool) error {
-	// Show deletion progress
+	mgr, err := s.providerFor(clusterType)
+	if err != nil {
+		return err
+	}
+
+	// Show deletion progress. Cloud destroys stream terraform progress lines,
+	// so the spinner is k3d-only (same reasoning as CreateCluster).
 	var sp *spinner.Spinner
-	if !s.suppressUI {
+	if !s.suppressUI && clusterType == models.ClusterTypeK3d {
 		sp = spinner.New()
 		sp.Start(fmt.Sprintf("Deleting %s cluster '%s'...", clusterType, name))
 	} else {
 		pterm.Info.Printf("Deleting %s cluster '%s'...\n", clusterType, name)
 	}
 
-	err := s.manager.DeleteCluster(ctx, name, clusterType, force)
+	err = mgr.DeleteCluster(ctx, name, clusterType, force)
 	if err != nil {
 		if sp != nil {
 			sp.Fail(fmt.Sprintf("Failed to delete cluster '%s'", name))
@@ -200,27 +255,72 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, name string, cluster
 	return nil
 }
 
-// ListClusters handles cluster listing business logic
+// cloudProviders returns the cloud backends (EKS, GKE). Their registries are
+// plain files under ~/.openframe, so construction practically never fails; a
+// failed one is skipped, degrading the CLI to reduced visibility rather than
+// blocking local operations.
+func (s *ClusterService) cloudProviders() []provider.Provider {
+	var providers []provider.Provider
+	for _, t := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {
+		if p, err := s.providerFor(t); err == nil {
+			providers = append(providers, p)
+		}
+	}
+	return providers
+}
+
+// ListClusters merges the local k3d clusters with the cloud clusters recorded
+// in the workspace registry.
 func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	ctx := context.Background()
-	return s.manager.ListAllClusters(ctx)
+	clusters, err := s.manager.ListAllClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, cloud := range s.cloudProviders() {
+		cloudClusters, err := cloud.ListAllClusters(ctx)
+		if err != nil {
+			// A broken cloud registry (local file damage) must not hide the
+			// local clusters or the other provider's results.
+			pterm.Debug.Printf("cloud cluster listing skipped: %v\n", err)
+			continue
+		}
+		clusters = append(clusters, cloudClusters...)
+	}
+	return clusters, nil
 }
 
 // GetClusterStatus handles cluster status business logic
 func (s *ClusterService) GetClusterStatus(name string) (models.ClusterInfo, error) {
 	ctx := context.Background()
+	for _, cloud := range s.cloudProviders() {
+		if info, err := cloud.GetClusterStatus(ctx, name); err == nil {
+			return info, nil
+		}
+	}
 	return s.manager.GetClusterStatus(ctx, name)
 }
 
 // GetRestConfig returns the rest.Config for an existing cluster
 func (s *ClusterService) GetRestConfig(name string) (*rest.Config, error) {
 	ctx := context.Background()
+	for _, cloud := range s.cloudProviders() {
+		if _, err := cloud.DetectClusterType(ctx, name); err == nil {
+			return cloud.GetRestConfig(ctx, name)
+		}
+	}
 	return s.manager.GetRestConfig(ctx, name)
 }
 
-// DetectClusterType handles cluster type detection business logic
+// DetectClusterType consults the cloud registry first (a cheap local file
+// read), then falls back to k3d discovery.
 func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, error) {
 	ctx := context.Background()
+	for _, cloud := range s.cloudProviders() {
+		if t, err := cloud.DetectClusterType(ctx, name); err == nil {
+			return t, nil
+		}
+	}
 	return s.manager.DetectClusterType(ctx, name)
 }
 
@@ -231,6 +331,8 @@ func (s *ClusterService) CleanupCluster(ctx context.Context, name string, cluste
 	switch clusterType {
 	case models.ClusterTypeK3d:
 		return s.cleanupK3dCluster(ctx, name, verbose, force)
+	case models.ClusterTypeEKS, models.ClusterTypeGKE:
+		return models.CleanupResult{}, fmt.Errorf("cleanup is not supported for cloud clusters; use 'openframe cluster delete %s' to tear the cluster down", name)
 	default:
 		return models.CleanupResult{}, fmt.Errorf("cleanup not supported for cluster type: %s", clusterType)
 	}
@@ -434,11 +536,14 @@ func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, cluster
 		return 0, err
 	}
 
+	// TLS policy is the provider's mint-time decision: k3d marks its local
+	// rest.Config insecure itself (verify.go), and a future cloud provider's
+	// config must NOT be downgraded here.
 	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get cluster config for cleanup: %w", err)
 	}
-	client, err := kubernetes.NewForConfig(sharedconfig.ApplyInsecureTLSConfig(restConfig))
+	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
@@ -843,12 +948,20 @@ func (s *ClusterService) DisplayClusterList(clusters []models.ClusterInfo, quiet
 		return nil
 	}
 
-	// Convert to UI display format
+	// Convert to UI display format. Local clusters have no explicit source —
+	// label them "local" so the SOURCE column is never ambiguous.
 	displayClusters := make([]uiCluster.ClusterDisplayInfo, len(clusters))
 	for i, cluster := range clusters {
+		source := string(cluster.Source)
+		if source == "" {
+			source = "local"
+		}
 		displayClusters[i] = uiCluster.ClusterDisplayInfo{
 			Name:      cluster.Name,
 			Type:      string(cluster.Type),
+			Source:    source,
+			Context:   cluster.Context,
+			Project:   cluster.Project,
 			Status:    cluster.Status,
 			NodeCount: cluster.NodeCount,
 			CreatedAt: cluster.CreatedAt,
@@ -893,12 +1006,15 @@ func CreateClusterWithPrerequisitesNonInteractive(ctx context.Context, clusterNa
 		service = NewClusterService(exec)
 	}
 
-	// Build cluster configuration
+	// Build cluster configuration. Bootstrap deliberately uses one node MORE
+	// than `cluster create`'s default of 3: it immediately installs the full
+	// platform (17 ArgoCD apps), which needs the extra headroom — a bare
+	// cluster does not.
 	config := models.ClusterConfig{
 		Name:       clusterName,
 		Type:       models.ClusterTypeK3d,
 		K8sVersion: "",
-		NodeCount:  4,
+		NodeCount:  bootstrapNodeCount,
 	}
 	if clusterName == "" {
 		config.Name = "openframe-dev" // default name

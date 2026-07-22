@@ -1,9 +1,13 @@
 package prerequisites
 
 import (
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/aws"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/docker"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/gcloud"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/helm"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/k3d"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 )
 
@@ -16,8 +20,10 @@ type Requirement struct {
 	Command     string
 	IsInstalled func() bool
 	InstallHelp func() string
+	Install     func() error
 }
 
+// NewPrerequisiteChecker returns the requirement set for local k3d clusters.
 func NewPrerequisiteChecker() *PrerequisiteChecker {
 	return &PrerequisiteChecker{
 		requirements: []Requirement{
@@ -31,18 +37,47 @@ func NewPrerequisiteChecker() *PrerequisiteChecker {
 					}
 					return "Docker is installed but not running. Please start Docker Desktop or the Docker daemon."
 				},
+				Install: func() error { return docker.NewDockerInstaller().Install() },
 			},
 			{
 				Name:        "k3d",
 				Command:     "k3d",
 				IsInstalled: func() bool { return k3d.NewK3dInstaller().IsInstalled() },
 				InstallHelp: func() string { return k3d.NewK3dInstaller().GetInstallHelp() },
+				Install:     func() error { return k3d.NewK3dInstaller().Install() },
 			},
 			{
 				Name:        "helm",
 				Command:     "helm",
 				IsInstalled: func() bool { return helm.NewHelmInstaller().IsInstalled() },
 				InstallHelp: func() string { return helm.NewHelmInstaller().GetInstallHelp() },
+				Install:     func() error { return helm.NewHelmInstaller().Install() },
+			},
+		},
+	}
+}
+
+// NewEKSPrerequisiteChecker returns the requirement set for EKS clusters:
+// terraform (provisioning engine) and the AWS CLI (kubeconfig exec auth).
+// Docker/k3d are deliberately absent — a cloud cluster needs no local runtime.
+// AWS credentials are preflighted by the EKS provider itself, where the error
+// can name the profile in use.
+func NewEKSPrerequisiteChecker() *PrerequisiteChecker {
+	return &PrerequisiteChecker{
+		requirements: []Requirement{
+			{
+				Name:        "terraform",
+				Command:     "terraform",
+				IsInstalled: func() bool { return terraform.NewTerraformInstaller().IsInstalled() },
+				InstallHelp: func() string { return terraform.NewTerraformInstaller().GetInstallHelp() },
+				Install:     func() error { return terraform.NewTerraformInstaller().Install() },
+			},
+			{
+				Name:        "AWS CLI",
+				Command:     "aws",
+				IsInstalled: func() bool { return aws.NewAwsInstaller().IsInstalled() },
+				InstallHelp: func() string { return aws.NewAwsInstaller().GetInstallHelp() },
+				Install:     func() error { return aws.NewAwsInstaller().Install() },
 			},
 		},
 	}
@@ -62,7 +97,68 @@ func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
 	return allPresent, missing
 }
 
+// NewGKEPrerequisiteChecker returns the requirement set for GKE clusters:
+// terraform (provisioning engine), the gcloud CLI, and gke-gcloud-auth-plugin
+// (kubeconfig exec auth). GCP credentials are preflighted by the GKE provider
+// itself, where the error can name the project in use.
+func NewGKEPrerequisiteChecker() *PrerequisiteChecker {
+	return &PrerequisiteChecker{
+		requirements: []Requirement{
+			{
+				Name:        "terraform",
+				Command:     "terraform",
+				IsInstalled: func() bool { return terraform.NewTerraformInstaller().IsInstalled() },
+				InstallHelp: func() string { return terraform.NewTerraformInstaller().GetInstallHelp() },
+				Install:     func() error { return terraform.NewTerraformInstaller().Install() },
+			},
+			{
+				Name:        "gcloud",
+				Command:     "gcloud",
+				IsInstalled: func() bool { return gcloud.NewGcloudInstaller().IsInstalled() },
+				InstallHelp: func() string { return gcloud.NewGcloudInstaller().GetInstallHelp() },
+				Install:     func() error { return gcloud.NewGcloudInstaller().Install() },
+			},
+			{
+				Name:        "gke-gcloud-auth-plugin",
+				Command:     "gke-gcloud-auth-plugin",
+				IsInstalled: func() bool { return gcloud.NewAuthPluginInstaller().IsInstalled() },
+				InstallHelp: func() string { return gcloud.NewAuthPluginInstaller().GetInstallHelp() },
+				Install:     func() error { return gcloud.NewAuthPluginInstaller().Install() },
+			},
+		},
+	}
+}
+
 func CheckPrerequisites() error {
 	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
 	return NewInstaller().CheckAndInstallNonInteractive(ui.IsNonInteractive())
+}
+
+// checkerForClusterType returns the requirement set for a cluster type:
+// Docker/k3d/helm for local k3d clusters, terraform + the cloud CLI for the
+// cloud types. Unknown types return nil — they pass the gate and fail at the
+// provider factory instead. Pure dispatch (no checks, no installs), so tests
+// can verify the mapping without touching the machine.
+func checkerForClusterType(clusterType models.ClusterType) *PrerequisiteChecker {
+	switch clusterType {
+	case models.ClusterTypeK3d, "":
+		return NewPrerequisiteChecker()
+	case models.ClusterTypeEKS:
+		return NewEKSPrerequisiteChecker()
+	case models.ClusterTypeGKE:
+		return NewGKEPrerequisiteChecker()
+	default:
+		return nil
+	}
+}
+
+// CheckForClusterType runs the prerequisite gate for the given cluster type,
+// installing missing tools (auto-approved when non-interactive).
+func CheckForClusterType(clusterType models.ClusterType) error {
+	checker := checkerForClusterType(clusterType)
+	if checker == nil {
+		return nil
+	}
+	// A CI environment or a non-terminal stdin must not hit an interactive prompt.
+	return NewInstallerWithChecker(checker).CheckAndInstallNonInteractive(ui.IsNonInteractive())
 }

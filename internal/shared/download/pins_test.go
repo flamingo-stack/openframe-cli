@@ -1,6 +1,8 @@
 package download
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -140,10 +142,13 @@ func TestPinnedAssets_RealDownload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test skipped under -short")
 	}
-	if runtime.GOOS == "windows" {
-		t.Skip("no windows pins: on Windows the CLI runs the linux binary inside WSL")
+	tools := []PinnedTool{Terraform, Infracost}
+	if runtime.GOOS != "windows" {
+		// k3d/mkcert/helm have no windows pins: on Windows they run inside WSL.
+		// Terraform and infracost are pinned for all supported platforms.
+		tools = append(tools, K3d, Mkcert, Helm)
 	}
-	for _, tool := range []PinnedTool{K3d, Mkcert, Helm} {
+	for _, tool := range tools {
 		asset, ok := tool.Asset(runtime.GOOS, runtime.GOARCH)
 		if !ok {
 			t.Errorf("%s: no asset for %s/%s", tool.Name, runtime.GOOS, runtime.GOARCH)
@@ -178,6 +183,82 @@ func TestHelm_Pins(t *testing.T) {
 		if !strings.Contains(asset.URL, Helm.Version) || !strings.HasSuffix(asset.URL, p.os+"-"+p.arch+".tar.gz") {
 			t.Errorf("%s/%s: URL %q must contain version and end with platform.tar.gz", p.os, p.arch, asset.URL)
 		}
+	}
+}
+
+// TestTerraform_Pins locks the terraform pin shape: a versioned .zip +
+// non-empty SHA256 for every supported platform — including Windows, where
+// terraform (unlike k3d/helm) runs natively rather than inside WSL.
+func TestTerraform_Pins(t *testing.T) {
+	if Terraform.Version == "" {
+		t.Fatal("Terraform.Version must be set")
+	}
+	if !Terraform.Zip {
+		t.Error("Terraform assets are .zip — Zip must be true")
+	}
+	for _, p := range []struct{ os, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"},
+	} {
+		asset, ok := Terraform.Asset(p.os, p.arch)
+		if !ok {
+			t.Errorf("no terraform asset for %s/%s", p.os, p.arch)
+			continue
+		}
+		if len(asset.SHA256) != 64 {
+			t.Errorf("%s/%s: SHA256 must be 64 hex chars, got %q", p.os, p.arch, asset.SHA256)
+		}
+		if !strings.Contains(asset.URL, Terraform.Version) || !strings.HasSuffix(asset.URL, p.os+"_"+p.arch+".zip") {
+			t.Errorf("%s/%s: URL %q must contain version and end with platform.zip", p.os, p.arch, asset.URL)
+		}
+	}
+}
+
+// TestInstallPinnedTool_ZipTool covers the .zip install path (terraform's
+// asset format): the binary is extracted from the archive root by name.
+func TestInstallPinnedTool_ZipTool(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes (0750) aren't honoured on Windows")
+	}
+	payload := []byte("#!/bin/sh\necho tf\n")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("faketool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archive := buf.Bytes()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+
+	tool := PinnedTool{
+		Name:    "faketool",
+		Version: "v1.2.3",
+		Zip:     true,
+		Assets:  map[string]PinnedAsset{platformKey(): {URL: srv.URL, SHA256: hexSum(archive)}},
+	}
+	binDir := t.TempDir()
+
+	path, err := (Downloader{Client: srv.Client()}).InstallPinnedTool(context.Background(), tool, binDir)
+	if err != nil {
+		t.Fatalf("InstallPinnedTool(zip): %v", err)
+	}
+	got, err := os.ReadFile(path) // #nosec G304 -- test reads a path it just created under t.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("installed content = %q, want %q", got, payload)
 	}
 }
 
@@ -225,5 +306,31 @@ func TestInstallPinnedTool_RealK3dExec(t *testing.T) {
 	}
 	if !strings.Contains(string(out), strings.TrimPrefix(K3d.Version, "v")) {
 		t.Fatalf("k3d version output %q does not contain %q", out, K3d.Version)
+	}
+}
+
+// TestInfracost_Pins locks the infracost pin shape: a versioned .tar.gz +
+// non-empty SHA256 for every supported platform (windows/arm64 has no
+// upstream asset).
+func TestInfracost_Pins(t *testing.T) {
+	if !strings.HasPrefix(Infracost.Version, "v") {
+		t.Fatalf("Infracost.Version must be a v-prefixed tag, got %q", Infracost.Version)
+	}
+	for _, p := range []struct{ os, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"windows", "amd64"},
+	} {
+		asset, ok := Infracost.Asset(p.os, p.arch)
+		if !ok {
+			t.Errorf("no infracost asset for %s/%s", p.os, p.arch)
+			continue
+		}
+		if len(asset.SHA256) != 64 {
+			t.Errorf("%s/%s: SHA256 must be 64 hex chars, got %q", p.os, p.arch, asset.SHA256)
+		}
+		if !strings.Contains(asset.URL, Infracost.Version) || !strings.HasSuffix(asset.URL, p.os+"-"+p.arch+".tar.gz") {
+			t.Errorf("%s/%s: URL %q must contain version and end with platform.tar.gz", p.os, p.arch, asset.URL)
+		}
 	}
 }

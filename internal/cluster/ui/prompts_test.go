@@ -101,6 +101,5 @@ func TestValidationLogic(t *testing.T) {
 func TestConstants(t *testing.T) {
 	t.Run("cluster type constants are correctly defined", func(t *testing.T) {
 		assert.Equal(t, string(ClusterTypeK3d), "k3d")
-		assert.Equal(t, string(ClusterTypeGKE), "gke")
 	})
 }

@@ -106,7 +106,7 @@ jobs:
     env:
       # Path to the built binary for this matrix leg. On Windows it forwards the
       # whole CLI into WSL; on Linux it runs natively. Used by every test step.
-      OF_BIN: ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+      OF_BIN: ./build/openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
       # Cluster used by the lifecycle steps; its k3d kube-context is k3d-<name>.
       OF_CLUSTER: openframe-test
       OF_CONTEXT: k3d-openframe-test
@@ -165,8 +165,8 @@ jobs:
             # published release to auto-download, so build the Linux binary and
             # stream it into the default WSL distro's ~/.openframe/bin via stdin —
             # no Windows→WSL path translation, which is where the launcher looks.
-            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
-            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o build/openframe-linux-amd64 .
+            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < build/openframe-linux-amd64
           fi
 
       # --- Simplest: no cluster, read-only (all platforms, incl. darwin) -----
@@ -345,6 +345,70 @@ jobs:
           echo "==================================================================="
           "$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"
 
+      # Cloud-cluster command SURFACE, with no cloud and no Docker: the EKS
+      # coming-soon banner, flag validation, the GKE dry-run's graceful
+      # degradation, and `cluster use` error paths. Everything here is either
+      # exit-0 by design or an expected, asserted failure — no resource is
+      # ever created. Pure, so it runs on every OS (on Windows via the WSL
+      # forward, exercising the Linux binary's paths).
+      - name: 'Cluster: cloud command surface (no cloud, no Docker)'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cloud cluster surface — banner, validation, dry-run, use"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          # Portable hang guard: macOS runners ship coreutils' gtimeout, not
+          # timeout. Fall back to no guard rather than failing with exit 127.
+          run_to() {
+            local t="$1"; shift
+            if command -v timeout >/dev/null 2>&1; then timeout "$t" "$@"
+            elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$t" "$@"
+            else "$@"; fi
+          }
+
+          echo "--- EKS create is gated: banner + non-zero exit (scripts must not see success)"
+          if "$OF_BIN" cluster create eks-smoke --type eks --skip-wizard >/tmp/eks.out 2>&1; then
+            cat /tmp/eks.out; fail "gated eks create must exit non-zero"
+          fi
+          grep -qi "coming soon" /tmp/eks.out || { cat /tmp/eks.out; fail "eks banner text missing"; }
+
+          echo "--- unknown --type is rejected"
+          if "$OF_BIN" cluster create x --type minikube --skip-wizard >/tmp/neg.out 2>&1; then
+            cat /tmp/neg.out; fail "unknown cluster type must be rejected"
+          fi
+          grep -q "unknown cluster type" /tmp/neg.out || { cat /tmp/neg.out; fail "missing unknown-type message"; }
+
+          echo "--- gke --skip-wizard demands --region and --project"
+          if "$OF_BIN" cluster create x --type gke --skip-wizard >/tmp/neg.out 2>&1; then
+            cat /tmp/neg.out; fail "gke without region/project must be rejected"
+          fi
+          grep -qE '\-\-(region|project) is required' /tmp/neg.out || { cat /tmp/neg.out; fail "missing required-flag message"; }
+
+          echo "--- gke dry-run degrades gracefully without terraform/credentials"
+          # Two legitimate outcomes on an unauthenticated runner: terraform absent
+          # -> soft skip (exit 0); terraform present -> the auth flow fails fast
+          # (non-interactive, exit non-zero). Both must be actionable, never a hang.
+          set +e
+          run_to 120 "$OF_BIN" cluster create gke-smoke --type gke \
+            --project no-such-project --region us-central1 --skip-wizard --dry-run </dev/null >/tmp/gke.out 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 124 ] && { cat /tmp/gke.out; fail "gke dry-run hung on a prompt"; }
+          grep -qiE "skipping the plan preview|not authenticated|not installed|application default|not accessible" /tmp/gke.out \
+            || { cat /tmp/gke.out; fail "gke dry-run produced neither a skip nor an auth hint (exit $code)"; }
+          echo "OK (exit $code)"
+
+          echo "--- cluster use of an unknown cluster is an actionable error"
+          set +e
+          run_to 60 "$OF_BIN" cluster use no-such-cluster </dev/null >/tmp/use.out 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 124 ] && { cat /tmp/use.out; fail "cluster use hung on a prompt"; }
+          [ "$code" -eq 0 ] && { cat /tmp/use.out; fail "cluster use of an unknown cluster must fail"; }
+          grep -qiE "not (known|found) locally|gcloud" /tmp/use.out || { cat /tmp/use.out; fail "missing actionable use error"; }
+          echo "cloud surface OK"
+
       # Everything below needs a Docker daemon + k3d. It runs on linux and on
       # windows (the Windows binary forwards into WSL, where Docker was started
       # above), exercising the real cluster lifecycle on both. darwin stays
@@ -359,6 +423,68 @@ jobs:
           "$OF_BIN" cluster list
           "$OF_BIN" cluster list -o json
           "$OF_BIN" cluster list -o yaml
+
+      # Managed-cloud OWNERSHIP GUARDS, exercised on the real binary against a
+      # fake GKE workspace (an isolated OPENFRAME_CLUSTERS_DIR with a
+      # hand-written cluster.json) — no cloud, no terraform, fully
+      # deterministic. Locks: registry-backed list/status, the typed-confirm
+      # refusal on non-interactive cloud delete, and use's missing-context
+      # error. Linux only: one leg suffices and the Windows binary would need
+      # the fake workspace inside WSL's home.
+      - name: 'Cluster: managed-cloud guards (fake workspace, no cloud)'
+        if: matrix.os == 'linux'
+        shell: bash
+        env:
+          OPENFRAME_CLUSTERS_DIR: ${{ runner.temp }}/of-fake-clusters
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: cloud ownership guards on a fake GKE workspace"
+          echo "==================================================================="
+          fail() { echo "::error::$1"; exit 1; }
+          export KUBECONFIG="$RUNNER_TEMP/of-fake-kubeconfig"
+
+          mkdir -p "$OPENFRAME_CLUSTERS_DIR/fake-gke"
+          cat > "$OPENFRAME_CLUSTERS_DIR/fake-gke/cluster.json" <<'EOF'
+          {"name":"fake-gke","type":"gke","status":"ready","region":"us-central1",
+           "project":"fake-project","node_count":3,"created_at":"2026-07-22T00:00:00Z",
+           "endpoint":"https://203.0.113.10","ca_cert":"ZmFrZS1jYQ=="}
+          EOF
+
+          echo "--- the registry cluster appears in list with source=openframe"
+          "$OF_BIN" cluster list -o json | jq -e \
+            '.[] | select(.name == "fake-gke")' >/dev/null \
+            || fail "fake-gke missing from cluster list -o json"
+
+          echo "--- status resolves through the registry (no cloud calls)"
+          "$OF_BIN" cluster status fake-gke -o json | jq -e \
+            '.type == "gke"' >/dev/null || fail "status -o json lacks type gke"
+
+          echo "--- use without a kubeconfig context fails with the exact hint"
+          set +e
+          "$OF_BIN" cluster use fake-gke </dev/null >/tmp/use.out 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 0 ] && { cat /tmp/use.out; fail "use without a context must fail"; }
+          grep -q "no kubeconfig context" /tmp/use.out || { cat /tmp/use.out; fail "missing no-context hint"; }
+
+          echo "--- non-interactive cloud delete WITHOUT --force refuses"
+          # Two refusal gates guard this path, and either may fire first: the
+          # generic deletion confirmation ("confirmation required ... re-run
+          # with --force") refuses before the cloud-specific typed-confirm
+          # gate ("refusing to destroy cloud cluster") is reached. Both are
+          # correct refusals — assert the guarantee (non-zero exit, actionable
+          # message, workspace survives), not which gate fired.
+          set +e
+          timeout 60 "$OF_BIN" cluster delete fake-gke </dev/null >/tmp/del.out 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 124 ] && { cat /tmp/del.out; fail "cluster delete hung on a prompt"; }
+          [ "$code" -eq 0 ] && { cat /tmp/del.out; fail "non-interactive cloud delete without --force must refuse"; }
+          grep -qE "refusing to destroy cloud cluster|confirmation required.*--force" /tmp/del.out             || { cat /tmp/del.out; fail "missing an actionable refusal message"; }
+
+          echo "--- the workspace (the only pointer to billed resources) survived"
+          [ -f "$OPENFRAME_CLUSTERS_DIR/fake-gke/cluster.json" ] || fail "refused delete must not remove the workspace"
+          echo "ownership guards OK"
 
       # --- Medium: dry-run, still no real changes ----------------------------
       - name: 'CLI: dry-run create & install'

@@ -37,48 +37,29 @@ func TestDockerInstaller_GetInstallHelp(t *testing.T) {
 	}
 }
 
+// TestDockerInstaller_Install only exercises the fail-fast error paths. It
+// must NEVER call Install() where the real install could proceed: on CI
+// runners with Homebrew this test used to run an actual
+// `brew install --cask docker-desktop` (~100s, mutating the runner and
+// failing on brew's own errors).
 func TestDockerInstaller_Install(t *testing.T) {
-	installer := NewDockerInstaller()
-
-	// We can't actually test installation in CI, but we can test error handling
-	err := installer.Install()
-
-	// On unsupported platforms, should return specific error
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
-		expectedPrefix := "automatic Docker installation not supported on"
-		if err == nil || !containsSubstring(err.Error(), expectedPrefix) {
-			t.Errorf("Expected error containing '%s', got: %v", expectedPrefix, err)
-		}
-		return
+	if runtime.GOOS == "darwin" && commandExists("brew") {
+		t.Skip("would run a real 'brew install --cask docker-desktop'")
 	}
-
-	// On macOS without brew, should suggest installing brew
-	if runtime.GOOS == "darwin" && !commandExists("brew") {
-		if err == nil {
-			t.Error("Expected error when Homebrew is not installed")
-		} else {
-			expectedSubstring := "Homebrew is required"
-			if !containsSubstring(err.Error(), expectedSubstring) {
-				t.Errorf("Expected error containing '%s', got: %v", expectedSubstring, err)
-			}
-		}
-		return
+	if runtime.GOOS == "linux" {
+		t.Skip("would run a real package-manager install")
 	}
-
-	// On Linux without sudo or package managers, should fail
-	if runtime.GOOS == "linux" && !commandExists("sudo") {
-		if err != nil {
-			// This is expected, installation needs sudo
-			return
-		}
-	}
-
-	// On Windows, may attempt WSL setup (will likely fail in test environment)
-	// Just verify it doesn't panic and returns some result
 	if runtime.GOOS == "windows" {
-		// Windows installation will likely fail due to WSL not being set up in tests
-		// We just verify the function runs without panicking
-		_ = err
+		t.Skip("would attempt a real WSL setup")
+	}
+
+	// Only the guaranteed-error path remains: darwin without Homebrew.
+	err := NewDockerInstaller().Install()
+	if err == nil {
+		t.Fatal("expected an error when no install tooling is available")
+	}
+	if !containsSubstring(err.Error(), "Homebrew is required") {
+		t.Errorf("expected a Homebrew hint, got: %v", err)
 	}
 }
 

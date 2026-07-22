@@ -84,6 +84,36 @@ var toolDocs = map[string]InstallDocs{
 		Windows: "Certificates: Please install mkcert manually from https://github.com/FiloSottile/mkcert and run 'mkcert localhost 127.0.0.1'",
 		Default: "Certificates: Please install mkcert from https://github.com/FiloSottile/mkcert",
 	},
+	"terraform": {
+		Darwin:  "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
+		Linux:   "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
+		Windows: "terraform: A verified pinned binary is installed automatically to ~/.openframe/bin, or download from https://developer.hashicorp.com/terraform/install",
+		Default: "terraform: Please install terraform from https://developer.hashicorp.com/terraform/install",
+	},
+	"gcloud": {
+		Darwin:  "gcloud: Run 'brew install --cask google-cloud-sdk' or download from https://cloud.google.com/sdk/docs/install",
+		Linux:   "gcloud: Install from https://cloud.google.com/sdk/docs/install (distribution packages: apt/dnf repos are documented there)",
+		Windows: "gcloud: Download from https://cloud.google.com/sdk/docs/install",
+		Default: "gcloud: Please install the Google Cloud SDK from https://cloud.google.com/sdk/docs/install",
+	},
+	"gke-gcloud-auth-plugin": {
+		Darwin:  "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin'",
+		Linux:   "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin' (or install the google-cloud-cli-gke-gcloud-auth-plugin OS package)",
+		Windows: "gke-gcloud-auth-plugin: Run 'gcloud components install gke-gcloud-auth-plugin'",
+		Default: "gke-gcloud-auth-plugin: See https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl",
+	},
+	"infracost": {
+		Darwin:  "infracost: The CLI can install a verified pinned binary automatically, or run 'brew install infracost'; enable estimates with 'infracost auth login'",
+		Linux:   "infracost: The CLI can install a verified pinned binary automatically (see https://www.infracost.io/docs/); enable estimates with 'infracost auth login'",
+		Windows: "infracost: The CLI can install a verified pinned binary automatically (see https://www.infracost.io/docs/); enable estimates with 'infracost auth login'",
+		Default: "infracost: See https://www.infracost.io/docs/ — enable estimates with 'infracost auth login'",
+	},
+	"aws": {
+		Darwin:  "AWS CLI: Run 'brew install awscli' or download from https://aws.amazon.com/cli/",
+		Linux:   "AWS CLI: Install via your package manager or from https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+		Windows: "AWS CLI: Download from https://aws.amazon.com/cli/",
+		Default: "AWS CLI: Please install the AWS CLI from https://aws.amazon.com/cli/",
+	},
 }
 
 // InstallHint returns installation guidance for the named tool on the current

@@ -18,7 +18,7 @@ func TestClusterContract_RootShape(t *testing.T) {
 	assert.Equal(t, "cluster", cluster.Name())
 	assert.ElementsMatch(t, []string{"k"}, cluster.Aliases, "k alias is part of the contract")
 
-	testutil.AssertSubcommands(t, cluster, "create", "list", "delete", "status", "cleanup")
+	testutil.AssertSubcommands(t, cluster, "create", "list", "delete", "status", "use", "cleanup")
 }
 
 func TestClusterContract_Flags(t *testing.T) {

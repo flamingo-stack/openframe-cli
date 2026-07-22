@@ -17,12 +17,48 @@ type ClusterConfig struct {
 	Type       ClusterType `json:"type"`
 	NodeCount  int         `json:"node_count"`
 	K8sVersion string      `json:"k8s_version"`
+	// Cloud carries the settings that only make sense for managed cloud
+	// clusters (GKE/EKS). Nil for local clusters; the k3d backend rejects a
+	// config that sets it.
+	Cloud *CloudConfig `json:"cloud,omitempty"`
 }
+
+// CloudConfig holds the provider-agnostic knobs for a managed cloud cluster.
+type CloudConfig struct {
+	Region      string `json:"region"`
+	Project     string `json:"project,omitempty"` // GCP project
+	Profile     string `json:"profile,omitempty"` // AWS profile
+	MachineType string `json:"machine_type,omitempty"`
+	MinNodes    int    `json:"min_nodes,omitempty"`
+	MaxNodes    int    `json:"max_nodes,omitempty"`
+	Spot        bool   `json:"spot,omitempty"`
+	// BackendConfig is an optional remote-state location
+	// (s3://bucket/prefix for EKS, gcs://bucket/prefix for GKE);
+	// empty means local state in the cluster workspace.
+	BackendConfig string `json:"backend_config,omitempty"`
+}
+
+// ClusterSource says who owns a cluster's lifecycle.
+type ClusterSource string
+
+const (
+	// SourceOpenframe: created by this CLI, has a workspace — full lifecycle.
+	SourceOpenframe ClusterSource = "openframe"
+	// SourceExternal: discovered in the cloud without a workspace — strictly
+	// read-only; every mutating command must refuse it.
+	SourceExternal ClusterSource = "external"
+)
 
 // ClusterInfo represents information about a cluster
 type ClusterInfo struct {
 	Name string      `json:"name"`
 	Type ClusterType `json:"type"`
+	// Source is empty for local (k3d) clusters, where ownership is implicit.
+	Source ClusterSource `json:"source,omitempty"`
+	// Context is the kubeconfig context that reaches this cluster, when known.
+	Context string `json:"context,omitempty"`
+	Project string `json:"project,omitempty"`
+	Region  string `json:"region,omitempty"`
 	// Status is a human-readable server fraction ("1/1"). Machine consumers
 	// should prefer ReadyServers/TotalServers (verification report: a string
 	// fraction forces JSON consumers to parse it).
@@ -40,22 +76,4 @@ type NodeInfo struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Role   string `json:"role"`
-}
-
-// ProviderOptions contains provider-specific options
-type ProviderOptions struct {
-	K3d     *K3dOptions `json:"k3d,omitempty"`
-	GKE     *GKEOptions `json:"gke,omitempty"`
-	Verbose bool        `json:"verbose,omitempty"`
-}
-
-// K3dOptions contains k3d-specific options
-type K3dOptions struct {
-	PortMappings []string `json:"port_mappings,omitempty"`
-}
-
-// GKEOptions contains GKE-specific options
-type GKEOptions struct {
-	Zone    string `json:"zone"`
-	Project string `json:"project"`
 }
