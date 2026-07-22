@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
+	osexec "os/exec"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
@@ -120,12 +122,38 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 	return nil
 }
 
-// Seams for hermetic tests: availability probes the real PATH and the offer
-// runs a real verified download — neither may happen in unit tests.
+// Seams for hermetic tests: availability probes the real PATH, the offer runs
+// a real verified download, and the login launches a real browser flow — none
+// of that may happen in unit tests.
 var (
 	infracostAvailableFn = terraform.InfracostAvailable
 	infracostOfferFn     = offerInfracostInstall
+	infracostLoginFn     = offerInfracostLogin
 )
+
+// offerInfracostLogin runs the one-time `infracost auth login` (browser flow)
+// right inside the CLI, so the user never needs a separate console. Attached
+// straight to the terminal — the flow prints a URL and reads stdin, which the
+// capturing executor would swallow. Returns whether a login was performed.
+func offerInfracostLogin() bool {
+	if sharedUI.IsNonInteractive() {
+		return false
+	}
+	confirmed, err := sharedUI.ConfirmActionInteractive(
+		"infracost needs a one-time free API key. Run 'infracost auth login' now (opens a browser)?", true)
+	if err != nil || !confirmed {
+		return false
+	}
+	login := osexec.Command("infracost", "auth", "login")
+	login.Stdin = os.Stdin
+	login.Stdout = os.Stdout
+	login.Stderr = os.Stderr
+	if err := login.Run(); err != nil {
+		pterm.Warning.Printf("infracost auth login failed: %v\n", err)
+		return false
+	}
+	return true
+}
 
 // offerInfracostInstall proposes the verified pinned infracost install in an
 // interactive session. It returns whether infracost is available afterwards.
@@ -158,13 +186,16 @@ func showCostEstimate(ctx context.Context, exec executor.CommandExecutor, config
 	}
 	if available {
 		cost, err := terraform.EstimateMonthlyCost(ctx, exec, summary.PlanJSON)
+		if err != nil && infracostLoginFn() {
+			// The usual failure is the missing (free) API key. The login just
+			// ran inside the CLI — retry once.
+			cost, err = terraform.EstimateMonthlyCost(ctx, exec, summary.PlanJSON)
+		}
 		if err == nil {
 			pterm.Info.Printf("Estimated monthly cost (infracost): %s\n", cost)
 			return
 		}
-		// infracost is installed but could not estimate — the usual cause is
-		// the missing (free) API key, the user's single manual step.
-		pterm.Info.Println("Cost estimate unavailable — if you haven't set up infracost yet, run 'infracost auth login' (free) and re-run")
+		pterm.Info.Println("Cost estimate unavailable — run 'infracost auth login' (free, one-time) and re-run")
 		if utils.GetGlobalFlags().Global.Verbose {
 			pterm.Debug.Printf("infracost estimate error: %v\n", err)
 		}
