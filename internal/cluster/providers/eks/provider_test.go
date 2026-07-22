@@ -101,7 +101,8 @@ func TestCreateCluster_HappyPath(t *testing.T) {
 
 	restConfig, err := p.CreateCluster(context.Background(), eksConfig("demo"))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"init", "apply", "output"}, *calls)
+	assert.Equal(t, []string{"init", "plan", "show", "apply", "output"}, *calls,
+		"create follows the terraform-apply shape: plan+show before the (auto-approved) apply")
 	assert.Equal(t, "https://demo.eks.example", restConfig.Host)
 	assert.Equal(t, []byte("fake-ca-pem"), restConfig.CAData)
 	require.NotNil(t, restConfig.ExecProvider)

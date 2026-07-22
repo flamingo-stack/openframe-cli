@@ -25,6 +25,10 @@ type Provider struct {
 	engine   *tfengine.Engine
 	registry *tfengine.Registry
 	executor executor.CommandExecutor
+	// confirmApply, when set, is asked before applying the create plan (the
+	// interactive `terraform apply` shape). Nil means auto-approve — the
+	// non-interactive/programmatic behavior and the test default.
+	confirmApply func(tfengine.PlanSummary) bool
 }
 
 // New builds the production provider. The registry defaults to
@@ -35,9 +39,10 @@ func New(exec executor.CommandExecutor, verbose bool) (*Provider, error) {
 		return nil, err
 	}
 	return &Provider{
-		engine:   tfengine.NewEngine(verbose),
-		registry: registry,
-		executor: exec,
+		engine:       tfengine.NewEngine(verbose),
+		registry:     registry,
+		executor:     exec,
+		confirmApply: tfengine.ConfirmApplyInteractive,
 	}, nil
 }
 
@@ -156,9 +161,10 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	}
 
 	ws := p.registry.Workspace(config.Name)
+	freshWorkspace := !ws.Exists()
 	// The collision check only guards NEW clusters: an existing workspace means
 	// the cloud cluster (partial or complete) is ours and create resumes it.
-	if !ws.Exists() {
+	if freshWorkspace {
 		if err := p.preflightNameCollision(ctx, config); err != nil {
 			return nil, err
 		}
@@ -204,7 +210,25 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 		_ = ws.SetStatus(tfengine.StatusFailed)
 		return nil, models.NewClusterOperationError("create", config.Name, err)
 	}
-	if err := p.engine.Apply(ctx, ws.TerraformDir()); err != nil {
+
+	// The `terraform apply` shape: plan, show, confirm, then apply the SAVED
+	// plan — what the user approved is exactly what runs.
+	summary, planFile, err := p.engine.PlanForApply(ctx, ws.TerraformDir())
+	if planFile != "" {
+		defer func() { _ = os.Remove(planFile) }()
+	}
+	if err != nil {
+		_ = ws.SetStatus(tfengine.StatusFailed)
+		return nil, models.NewClusterOperationError("create", config.Name, err)
+	}
+	if p.confirmApply != nil && !p.confirmApply(summary) {
+		if freshWorkspace {
+			// Nothing was applied — a declined brand-new create leaves no trace.
+			_ = ws.Remove()
+		}
+		return nil, fmt.Errorf("cluster creation cancelled — no changes were applied")
+	}
+	if err := p.engine.ApplyPlan(ctx, ws.TerraformDir(), planFile); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
 		return nil, models.NewClusterOperationError("create", config.Name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", err, ws.Dir(), config.Name))

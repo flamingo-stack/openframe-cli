@@ -106,7 +106,8 @@ func TestCreateCluster_HappyPath(t *testing.T) {
 
 	restConfig, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"init", "apply", "output"}, *calls)
+	assert.Equal(t, []string{"init", "plan", "show", "apply", "output"}, *calls,
+		"create follows the terraform-apply shape: plan+show before the (auto-approved) apply")
 	assert.Equal(t, "https://34.10.20.30", restConfig.Host, "bare module endpoint must be prefixed")
 	assert.Equal(t, []byte("fake-ca-pem"), restConfig.CAData)
 	require.NotNil(t, restConfig.ExecProvider)
@@ -425,4 +426,37 @@ func TestPreflightNameCollision_FindsZonalClusters(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not managed by openframe")
 	assert.Empty(t, *calls)
+}
+
+// TestCreateCluster_DeclinedPlanAppliesNothing: the interactive plan gate —
+// a declined plan must apply nothing, and a declined BRAND-NEW create must
+// leave no workspace behind (nothing exists to resume or bill).
+func TestCreateCluster_DeclinedPlanAppliesNothing(t *testing.T) {
+	p, calls, registry := newTestProvider(t, nil)
+	p.confirmApply = func(summary tfengine.PlanSummary) bool { return false }
+
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+	assert.NotContains(t, *calls, "apply", "a declined plan must not apply")
+
+	_, err = registry.Get("demo")
+	var notFound models.ErrClusterNotFound
+	assert.ErrorAs(t, err, &notFound, "declined brand-new create must remove the fresh workspace")
+}
+
+// TestCreateCluster_DeclinedResumeKeepsWorkspace: declining a RESUME keeps
+// the workspace — its state still points at real (billed) resources.
+func TestCreateCluster_DeclinedResumeKeepsWorkspace(t *testing.T) {
+	p, _, registry := newTestProvider(t, errors.New("first apply fails"))
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err) // failed create leaves a resumable workspace
+
+	p.confirmApply = func(summary tfengine.PlanSummary) bool { return false }
+	_, err = p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+
+	_, err = registry.Get("demo")
+	require.NoError(t, err, "declined resume must keep the workspace and its state")
 }
