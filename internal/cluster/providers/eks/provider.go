@@ -213,11 +213,16 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 	if !ws.Exists() {
 		return models.NewClusterNotFoundError(name)
 	}
+	// Read the record BEFORE destroy: the endpoint in it is what proves the
+	// kubeconfig entry is ours to remove afterwards.
+	rec, recErr := ws.ReadRecord()
 	if err := p.engine.Destroy(ctx, ws.TerraformDir()); err != nil {
 		return models.NewClusterOperationError("delete", name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run delete to retry", err, ws.Dir()))
 	}
-	_ = removeFromDefaultKubeconfig(name)
+	if recErr == nil {
+		_ = removeFromDefaultKubeconfig(rec)
+	}
 	return ws.Remove()
 }
 

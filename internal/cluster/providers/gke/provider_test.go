@@ -295,7 +295,7 @@ func TestCreateCluster_RejectsS3Backend(t *testing.T) {
 func TestCreateCluster_RefusesExternalNameCollision(t *testing.T) {
 	p, calls, registry := newTestProvider(t, nil)
 	mock := executor.NewMockCommandExecutor()
-	mock.SetResponse("gcloud container clusters describe demo", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	mock.SetResponse("clusters list --project my-project", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
 	p.executor = mock
 
 	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
@@ -317,7 +317,7 @@ func TestCreateCluster_ResumeSkipsCollisionCheck(t *testing.T) {
 	require.NoError(t, err)
 
 	mock := executor.NewMockCommandExecutor()
-	mock.SetResponse("gcloud container clusters describe demo", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	mock.SetResponse("clusters list --project my-project", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
 	p.executor = mock
 
 	*calls = nil
@@ -350,4 +350,54 @@ users:
 	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "refusing to overwrite")
+}
+
+// TestDeleteCluster_LeavesRepointedContextAlone (П4): if the user repointed a
+// same-named kubeconfig context at another server after the create, delete
+// must not remove it — the mirror of the create-side no-clobber guard.
+func TestDeleteCluster_LeavesRepointedContextAlone(t *testing.T) {
+	p, _, _ := newTestProvider(t, nil)
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.NoError(t, err)
+
+	// Repoint the "demo" context at somebody else's server.
+	repointed := `apiVersion: v1
+kind: Config
+current-context: demo
+clusters:
+- name: demo
+  cluster:
+    server: https://somebody-elses.example:6443
+contexts:
+- name: demo
+  context:
+    cluster: demo
+    user: demo
+users:
+- name: demo
+`
+	require.NoError(t, os.WriteFile(os.Getenv("KUBECONFIG"), []byte(repointed), 0o600))
+
+	require.NoError(t, p.DeleteCluster(context.Background(), "demo", models.ClusterTypeGKE, false))
+
+	kubeconfig, err := os.ReadFile(os.Getenv("KUBECONFIG"))
+	require.NoError(t, err)
+	assert.Contains(t, string(kubeconfig), "somebody-elses.example", "a repointed context must survive delete")
+	assert.Contains(t, string(kubeconfig), "current-context: demo")
+}
+
+// TestPreflightNameCollision_FindsZonalClusters (П3): the collision check uses
+// a project-wide listing, so a zonal cluster with the same name (which a
+// region-scoped describe would miss) also counts.
+func TestPreflightNameCollision_FindsZonalClusters(t *testing.T) {
+	p, calls, _ := newTestProvider(t, nil)
+	mock := executor.NewMockCommandExecutor()
+	// clusters list output for a zonal cluster: same name, any location.
+	mock.SetResponse("clusters list --project my-project", &executor.CommandResult{ExitCode: 0, Stdout: "demo\n"})
+	p.executor = mock
+
+	_, err := p.CreateCluster(context.Background(), gkeConfig("demo"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not managed by openframe")
+	assert.Empty(t, *calls)
 }
