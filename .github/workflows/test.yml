@@ -106,7 +106,7 @@ jobs:
     env:
       # Path to the built binary for this matrix leg. On Windows it forwards the
       # whole CLI into WSL; on Linux it runs natively. Used by every test step.
-      OF_BIN: ./openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+      OF_BIN: ./build/openframe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
       # Cluster used by the lifecycle steps; its k3d kube-context is k3d-<name>.
       OF_CLUSTER: openframe-test
       OF_CONTEXT: k3d-openframe-test
@@ -165,8 +165,8 @@ jobs:
             # published release to auto-download, so build the Linux binary and
             # stream it into the default WSL distro's ~/.openframe/bin via stdin —
             # no Windows→WSL path translation, which is where the launcher looks.
-            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o openframe-linux-amd64 .
-            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < openframe-linux-amd64
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o build/openframe-linux-amd64 .
+            wsl -- bash -c 'mkdir -p "$HOME/.openframe/bin" && cat > "$HOME/.openframe/bin/openframe" && chmod +x "$HOME/.openframe/bin/openframe"' < build/openframe-linux-amd64
           fi
 
       # --- Simplest: no cluster, read-only (all platforms, incl. darwin) -----

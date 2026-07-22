@@ -4,6 +4,7 @@
 
 # Variables
 BINARY_NAME := openframe
+BUILD_DIR := build
 # -trimpath drops absolute build paths from the binary (reproducibility), matching
 # the release build in .goreleaser.yml.
 GO_BUILD := CGO_ENABLED=0 go build -trimpath
@@ -22,18 +23,20 @@ UNIT_PKGS := . ./cmd/... ./internal/... ./tests/testutil/... ./tests/scripts/...
 # Default target
 all: build
 
-build: ## Build binary for the current platform
-	@echo "Building $(BINARY_NAME) for $(GOOS)/$(GOARCH)..."
-	@$(GO_BUILD) -o $(BINARY_NAME)-$(GOOS)-$(GOARCH)$(BINARY_SUFFIX) .
+build: ## Build binary into $(BUILD_DIR)/ for the current platform
+	@echo "Building $(BINARY_NAME) for $(GOOS)/$(GOARCH) into $(BUILD_DIR)/..."
+	@mkdir -p $(BUILD_DIR)
+	@$(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(BINARY_SUFFIX) .
 
-build-all: ## Cross-compile every release platform (matches .goreleaser.yml)
-	@echo "Building $(BINARY_NAME) for all release platforms..."
-	@GOOS=linux   GOARCH=amd64 $(GO_BUILD) -o $(BINARY_NAME)-linux-amd64 .
-	@GOOS=linux   GOARCH=arm64 $(GO_BUILD) -o $(BINARY_NAME)-linux-arm64 .
-	@GOOS=darwin  GOARCH=amd64 $(GO_BUILD) -o $(BINARY_NAME)-darwin-amd64 .
-	@GOOS=darwin  GOARCH=arm64 $(GO_BUILD) -o $(BINARY_NAME)-darwin-arm64 .
-	@GOOS=windows GOARCH=amd64 $(GO_BUILD) -o $(BINARY_NAME)-windows-amd64.exe .
-	@GOOS=windows GOARCH=arm64 $(GO_BUILD) -o $(BINARY_NAME)-windows-arm64.exe .
+build-all: ## Cross-compile every release platform into $(BUILD_DIR)/ (matches .goreleaser.yml)
+	@echo "Building $(BINARY_NAME) for all release platforms into $(BUILD_DIR)/..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=linux   GOARCH=amd64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 .
+	@GOOS=linux   GOARCH=arm64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 .
+	@GOOS=darwin  GOARCH=amd64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 .
+	@GOOS=darwin  GOARCH=arm64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 .
+	@GOOS=windows GOARCH=amd64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe .
+	@GOOS=windows GOARCH=arm64 $(GO_BUILD) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-arm64.exe .
 
 test-unit: ## Run unit tests (vet on; incl. root main_test.go + tests/testutil)
 	@echo "Running unit tests..."
@@ -81,7 +84,8 @@ tidy: ## Check go.mod/go.sum are tidy (fails if `go mod tidy` would change them)
 # and deleted them.
 clean: ## Remove build artifacts
 	@rm -f $(BINARY_NAME) \
-		$(BINARY_NAME)-linux-* $(BINARY_NAME)-darwin-* $(BINARY_NAME)-windows-*
+		$(BINARY_NAME)-linux-* $(BINARY_NAME)-darwin-* $(BINARY_NAME)-windows-* \
+		$(BUILD_DIR)/$(BINARY_NAME)-*
 	@echo "Cleaned build artifacts"
 
 help: ## Show this help
