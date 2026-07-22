@@ -115,9 +115,10 @@ func TestRunUseCluster_ExternalGKEFetchesCredentials(t *testing.T) {
 
 	err := runUseCluster(getUseCmd(), []string{"ext-1"})
 	// The mock cannot actually write the gke_* context, so the switch fails —
-	// but the credentials fetch must have been attempted first.
-	if !mock.WasCommandExecuted("gcloud container clusters get-credentials ext-1") {
-		t.Fatal("expected a get-credentials attempt for a context-less external cluster")
+	// but the credentials fetch must have been attempted first, with
+	// --location (which accepts both regions and zones).
+	if !mock.WasCommandExecuted("gcloud container clusters get-credentials ext-1 --project proj-x --location us-central1") {
+		t.Fatalf("expected a --location get-credentials attempt, got: %v", mock.GetExecutedCommands())
 	}
 	if err == nil || !strings.Contains(err.Error(), "no kubeconfig context") {
 		t.Fatalf("expected a missing-context error after mock fetch, got: %v", err)
@@ -133,5 +134,27 @@ func TestRunUseCluster_NotAuthenticatedIsActionable(t *testing.T) {
 	err := runUseCluster(getUseCmd(), []string{"ghost"})
 	if err == nil || !strings.Contains(err.Error(), "gcloud auth login") {
 		t.Fatalf("expected an auth hint, got: %v", err)
+	}
+}
+
+// TestRunUseCluster_ExternalZonalGKEFetchesByLocation: a ZONAL cluster's
+// location is a zone — get-credentials must receive it via --location, where
+// --region would fail.
+func TestRunUseCluster_ExternalZonalGKEFetchesByLocation(t *testing.T) {
+	mock := setupUse(t)
+	writeUseKubeconfig(t, "other", "other")
+	mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+	mock.SetResponse("gcloud config configurations list", &executor.CommandResult{ExitCode: 0,
+		Stdout: `[{"name":"dev-x","properties":{"core":{"project":"proj-x"}}}]`})
+	mock.SetResponse("clusters list --project proj-x", &executor.CommandResult{ExitCode: 0,
+		Stdout: `[{"name":"zonal-1","location":"us-central1-a","status":"RUNNING","currentNodeCount":1}]`})
+	mock.SetResponse("k3d cluster get zonal-1", &executor.CommandResult{ExitCode: 1, Stderr: "not found"})
+
+	err := runUseCluster(getUseCmd(), []string{"zonal-1"})
+	if !mock.WasCommandExecuted("gcloud container clusters get-credentials zonal-1 --project proj-x --location us-central1-a") {
+		t.Fatalf("expected a zone-valued --location fetch, got: %v", mock.GetExecutedCommands())
+	}
+	if err == nil || !strings.Contains(err.Error(), "no kubeconfig context") {
+		t.Fatalf("expected a missing-context error after mock fetch, got: %v", err)
 	}
 }

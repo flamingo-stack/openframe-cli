@@ -174,8 +174,14 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 			return fmt.Errorf("--project is required for --type gke with --skip-wizard")
 		}
 	}
-	if flags.BackendConfig != "" && !isCloud {
-		return fmt.Errorf("--backend-config only applies to cloud cluster types (eks, gke)")
+	if !isCloud {
+		switch {
+		case flags.BackendConfig != "":
+			return fmt.Errorf("--backend-config only applies to cloud cluster types (eks, gke)")
+		case flags.Region != "" || flags.Profile != "" || flags.Project != "" ||
+			flags.MachineType != "" || flags.MinNodes != 0 || flags.MaxNodes != 0 || flags.Spot:
+			return fmt.Errorf("--region/--profile/--project/--machine-type/--min-nodes/--max-nodes/--spot only apply to cloud cluster types (eks, gke)")
+		}
 	}
 	if flags.MinNodes < 0 || flags.MaxNodes < 0 {
 		return fmt.Errorf("node bounds must not be negative: min=%d max=%d", flags.MinNodes, flags.MaxNodes)

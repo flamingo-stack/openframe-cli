@@ -128,6 +128,25 @@ func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig)
 	return p.engine.Plan(ctx, dir)
 }
 
+// preflightNameCollision refuses to create a cluster whose name already
+// exists in the target account/region but has no openframe workspace —
+// terraform would build the VPC first and fail mid-apply on the duplicate
+// cluster, leaving partial billed infrastructure (the GKE twin's rationale).
+// Existence criterion: describe exits 0 AND prints exactly the name.
+func (p *Provider) preflightNameCollision(ctx context.Context, config models.ClusterConfig) error {
+	args := []string{"eks", "describe-cluster", "--name", config.Name,
+		"--region", config.Cloud.Region, "--query", "cluster.name", "--output", "text"}
+	if config.Cloud.Profile != "" {
+		args = append(args, "--profile", config.Cloud.Profile)
+	}
+	result, err := p.executor.Execute(ctx, "aws", args...)
+	if err != nil || result == nil || strings.TrimSpace(result.Stdout) != config.Name {
+		return nil // not found (or indeterminate) — proceed
+	}
+	return fmt.Errorf("cluster '%s' already exists in region '%s' but is not managed by openframe — refusing to touch it; pick another cluster name",
+		config.Name, config.Cloud.Region)
+}
+
 // CreateCluster provisions the cluster and returns a rest.Config for it.
 // Re-running after a failed apply resumes the same workspace: terraform apply
 // is idempotent over the recorded state.
@@ -146,6 +165,9 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	ws := p.registry.Workspace(config.Name)
 	freshWorkspace := !ws.Exists()
 	if freshWorkspace {
+		if err := p.preflightNameCollision(ctx, config); err != nil {
+			return nil, err
+		}
 		vars, err := tfvarsFor(config)
 		if err != nil {
 			return nil, err

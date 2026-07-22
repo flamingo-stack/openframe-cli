@@ -125,13 +125,37 @@ func (w *Workspace) ReadRecord() (Record, error) {
 	return r, nil
 }
 
-// WriteRecord persists cluster.json atomically enough for a single-user CLI.
+// WriteRecord persists cluster.json via temp-file + atomic rename, so a
+// crash mid-write can never leave a truncated record — the record is the
+// registry's only pointer to the cluster.
 func (w *Workspace) WriteRecord(r Record) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(w.dir, recordFile), data, 0o600)
+	tmp, err := os.CreateTemp(w.dir, ".record-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, filepath.Join(w.dir, recordFile)); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // SetStatus updates only the lifecycle status in the record.

@@ -64,7 +64,7 @@ for CLI design with wizard-style interactive prompts.
 
 Key Features:
   - Interactive Wizard - Step-by-step guided setup
-  - Cluster Management - local K3d clusters (cloud providers planned)
+  - Cluster Management - local K3d and cloud GKE clusters (AWS EKS coming soon)
   - Helm Integration - App-of-Apps pattern with ArgoCD
   - Prerequisite Checking - Validates tools before running
 

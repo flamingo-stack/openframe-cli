@@ -90,10 +90,11 @@ func (ws *WizardSteps) PromptProject() (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-// PromptRegion prompts for the AWS region an EKS cluster lands in.
-func (ws *WizardSteps) PromptRegion(defaultRegion string) (string, error) {
+// PromptRegion prompts for the cloud region a cluster lands in; the label is
+// provider-specific ("GCP Region" / "AWS Region").
+func (ws *WizardSteps) PromptRegion(label, defaultRegion string) (string, error) {
 	prompt := promptui.Prompt{
-		Label:    "AWS Region",
+		Label:    label,
 		Default:  defaultRegion,
 		Validate: sharedUI.ValidateNonEmpty("region"),
 	}
