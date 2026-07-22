@@ -358,6 +358,14 @@ jobs:
           echo "===  TEST: cloud cluster surface — banner, validation, dry-run, use"
           echo "==================================================================="
           fail() { echo "::error::$1"; exit 1; }
+          # Portable hang guard: macOS runners ship coreutils' gtimeout, not
+          # timeout. Fall back to no guard rather than failing with exit 127.
+          run_to() {
+            local t="$1"; shift
+            if command -v timeout >/dev/null 2>&1; then timeout "$t" "$@"
+            elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$t" "$@"
+            else "$@"; fi
+          }
 
           echo "--- EKS create is gated behind the coming-soon banner (exit 0)"
           "$OF_BIN" cluster create eks-smoke --type eks --skip-wizard >/tmp/eks.out 2>&1 \
@@ -381,7 +389,7 @@ jobs:
           # -> soft skip (exit 0); terraform present -> the auth flow fails fast
           # (non-interactive, exit non-zero). Both must be actionable, never a hang.
           set +e
-          timeout 120 "$OF_BIN" cluster create gke-smoke --type gke \
+          run_to 120 "$OF_BIN" cluster create gke-smoke --type gke \
             --project no-such-project --region us-central1 --skip-wizard --dry-run </dev/null >/tmp/gke.out 2>&1
           code=$?
           set -e
@@ -392,7 +400,7 @@ jobs:
 
           echo "--- cluster use of an unknown cluster is an actionable error"
           set +e
-          timeout 60 "$OF_BIN" cluster use no-such-cluster </dev/null >/tmp/use.out 2>&1
+          run_to 60 "$OF_BIN" cluster use no-such-cluster </dev/null >/tmp/use.out 2>&1
           code=$?
           set -e
           [ "$code" -eq 124 ] && { cat /tmp/use.out; fail "cluster use hung on a prompt"; }
