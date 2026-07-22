@@ -31,7 +31,9 @@ func progressLine(line []byte, verbose bool) (string, bool) {
 		return ev.Message, ev.Message != ""
 	}
 	switch ev.Type {
-	case "apply_start", "apply_complete", "apply_errored", "change_summary":
+	// planned_change lines ("...: Plan to create") show WHAT the apply is
+	// about to do — the plan detail, not just its change_summary count.
+	case "planned_change", "apply_start", "apply_complete", "apply_errored", "change_summary":
 		return ev.Message, ev.Message != ""
 	case "diagnostic":
 		// Errors surface through the returned error too, but printing them in

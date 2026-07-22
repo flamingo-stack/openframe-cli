@@ -135,6 +135,7 @@ func TestProgressLine(t *testing.T) {
 		want    string
 		ok      bool
 	}{
+		{"planned change shown", `{"@message":"module.gke.google_container_cluster.primary: Plan to create","type":"planned_change"}`, false, "module.gke.google_container_cluster.primary: Plan to create", true},
 		{"apply start shown", `{"@message":"aws_eks_cluster.this: Creating...","type":"apply_start"}`, false, "aws_eks_cluster.this: Creating...", true},
 		{"apply complete shown", `{"@message":"aws_eks_cluster.this: Creation complete after 9m2s","type":"apply_complete"}`, false, "aws_eks_cluster.this: Creation complete after 9m2s", true},
 		{"change summary shown", `{"@message":"Apply complete! Resources: 47 added.","type":"change_summary"}`, false, "Apply complete! Resources: 47 added.", true},
