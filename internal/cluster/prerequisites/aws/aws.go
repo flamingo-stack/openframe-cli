@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
@@ -64,6 +65,9 @@ func (a *AwsInstaller) installMacOS() error {
 	return nil
 }
 
+// installLinux installs the AWS CLI v2 via the platform package manager. The
+// v2 package name differs per distro: Debian 12+/Ubuntu 24.04+ ship v2 as
+// "awscli", Fedora/RHEL as "awscli2", Arch as "aws-cli-v2".
 func (a *AwsInstaller) installLinux() error {
 	type pm struct {
 		name string
@@ -71,9 +75,9 @@ func (a *AwsInstaller) installLinux() error {
 	}
 	managers := []pm{
 		{"apt", []string{"apt", "install", "-y", "awscli"}},
-		{"dnf", []string{"dnf", "install", "-y", "awscli"}},
-		{"yum", []string{"yum", "install", "-y", "awscli"}},
-		{"pacman", []string{"pacman", "-S", "--noconfirm", "aws-cli"}},
+		{"dnf", []string{"dnf", "install", "-y", "awscli2"}},
+		{"yum", []string{"yum", "install", "-y", "awscli2"}},
+		{"pacman", []string{"pacman", "-S", "--noconfirm", "aws-cli-v2"}},
 	}
 	for _, m := range managers {
 		if !commandExists(m.name) {
@@ -82,10 +86,24 @@ func (a *AwsInstaller) installLinux() error {
 		// Package installs need root; sudo -n keeps this non-interactive (the
 		// prerequisite flow already runs under a user confirmation).
 		if err := runCommand("sudo", append([]string{"-n"}, m.args...)...); err == nil {
-			return nil
+			if installedIsV2() {
+				return nil
+			}
+			// Older repos (e.g. Ubuntu 22.04) ship legacy v1, whose
+			// `aws eks get-token` emits an auth API kubectl no longer accepts.
+			return fmt.Errorf("the distro package installed AWS CLI v1, but the EKS flow needs v2. %s", a.GetInstallHelp())
 		}
 	}
 	return fmt.Errorf("could not install the AWS CLI automatically. %s", a.GetInstallHelp())
+}
+
+// installedIsV2 reports whether the aws binary on PATH is the v2 CLI. v1
+// prints its version to stderr, v2 to stdout — check both.
+func installedIsV2() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "aws", "--version").CombinedOutput()
+	return err == nil && strings.HasPrefix(string(out), "aws-cli/2.")
 }
 
 func runCommand(name string, args ...string) error {
