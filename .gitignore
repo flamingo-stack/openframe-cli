@@ -32,6 +32,17 @@ coverage.html
 .DS_Store
 Thumbs.db
 
-# Generated per-file doc stubs (external doc-orchestrator bot). All documentation
-# lives in docs/; these hidden .md files next to source must not be committed.
-.*.md
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ DO NOT ignore hidden `.*.md` files. NEVER re-add a `.*.md` rule here.     │
+# └──────────────────────────────────────────────────────────────────────────┘
+# The per-file inline doc stubs written next to source by the Flamingo AI
+# Technical Writer ARE first-class source. They are meant to be committed,
+# reviewed in the PR, and kept in sync with the code they sit beside.
+#
+# A `.*.md` rule was added in #212 and had to be reverted: besides discarding
+# the docs, it also matched the orchestrator's own run status file
+# (`.flamingo-ai-technical-writer-status.md`) and hard-failed every workflow
+# run at branch creation before any documentation was generated.
+#
+# If these files ever feel like noise, fix it upstream in the generator — do
+# not silence them here.
