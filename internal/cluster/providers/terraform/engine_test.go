@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -12,6 +14,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// workspaceDir creates a throwaway directory holding a generated main.tf — the
+// minimum that makes it a valid destroy target for the workspace guardrail.
+func workspaceDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("# generated"), 0o600))
+	return dir
+}
 
 // fakeRunner records calls and returns canned results.
 type fakeRunner struct {
@@ -83,7 +94,7 @@ func TestEngine_LifecycleCalls(t *testing.T) {
 	changes, err := e.Plan(ctx, t.TempDir())
 	require.NoError(t, err)
 	assert.False(t, changes.HasChanges(), "planChanges=false must summarize to no changes")
-	require.NoError(t, e.Destroy(ctx, "dir"))
+	require.NoError(t, e.Destroy(ctx, workspaceDir(t)))
 
 	outputs, err := e.Outputs(ctx, "dir")
 	require.NoError(t, err)
@@ -92,6 +103,24 @@ func TestEngine_LifecycleCalls(t *testing.T) {
 	assert.Equal(t, "https://example.eks", endpoint)
 
 	assert.Equal(t, []string{"init", "apply", "plan", "destroy", "output"}, f.calls)
+}
+
+// A destroy pointed at anything but a generated cluster workspace must be
+// refused BEFORE terraform runs — this is what confines a destroy to one
+// cluster's own state and keeps it from ever touching an unexpected directory.
+func TestEngine_DestroyRefusesNonWorkspaceDir(t *testing.T) {
+	f := &fakeRunner{}
+	// An empty temp dir has no generated main.tf, so it is not a workspace.
+	err := engineWith(f).Destroy(context.Background(), t.TempDir())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not a cluster workspace")
+	assert.NotContains(t, f.calls, "destroy", "terraform destroy must not run against a non-workspace dir")
+}
+
+func TestEngine_DestroyRunsInWorkspaceDir(t *testing.T) {
+	f := &fakeRunner{}
+	require.NoError(t, engineWith(f).Destroy(context.Background(), workspaceDir(t)))
+	assert.Equal(t, []string{"destroy"}, f.calls)
 }
 
 // action builds a tfjson resource change with the given address and actions.
