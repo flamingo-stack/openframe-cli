@@ -106,13 +106,38 @@ func (e *Engine) Apply(ctx context.Context, dir string) error {
 }
 
 // Destroy runs terraform destroy in dir, streaming progress like Apply.
+//
+// Guardrail: terraform destroy tears down exactly what the state in `dir`
+// tracks, so `dir` must be a materialized cluster workspace — one holding the
+// CLI-generated main.tf root module. Refusing an empty, wrong, or parent path
+// keeps a destroy strictly inside one cluster's own workspace and never lets
+// terraform be pointed at a directory whose state we did not generate.
 func (e *Engine) Destroy(ctx context.Context, dir string) error {
+	if err := assertClusterWorkspace(dir); err != nil {
+		return err
+	}
 	tf, err := e.newRunner(dir)
 	if err != nil {
 		return err
 	}
 	if err := tf.DestroyJSON(ctx, newProgressWriter(e.verbose)); err != nil {
 		return fmt.Errorf("terraform destroy failed: %w", err)
+	}
+	return nil
+}
+
+// assertClusterWorkspace verifies dir is a generated cluster workspace before
+// a destructive terraform run: it must hold a main.tf root module. This is the
+// scoping check behind Destroy — terraform acts on the state in whatever
+// directory it is handed, so a directory that is not one of our generated
+// workspaces must fail loudly instead of running a destroy.
+func assertClusterWorkspace(dir string) error {
+	info, err := os.Stat(filepath.Join(dir, "main.tf"))
+	if err != nil {
+		return fmt.Errorf("refusing to run terraform destroy in %q: not a cluster workspace (no generated main.tf): %w", dir, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("refusing to run terraform destroy in %q: main.tf is not a regular file", dir)
 	}
 	return nil
 }
