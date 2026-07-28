@@ -163,6 +163,24 @@ func (h *HelmManager) ensureArgoCDNamespace(ctx context.Context, clusterName str
 	})
 }
 
+// apiDialAddress turns a rest.Config Host into a dialable host:port. It strips
+// the scheme and, when the endpoint carries no explicit port, defaults to the
+// HTTPS port. Managed control planes (GKE/EKS) expose a bare host with no port
+// (e.g. https://34.9.1.2); a TCP dial requires host:port, so without this the
+// dial fails with "missing port in address" on every poll and the wait always
+// times out even though the API is up. k3d endpoints already include :6550 and
+// pass through unchanged. Returns "" when no address can be determined.
+func apiDialAddress(host string) string {
+	addr := strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	if addr == "" {
+		return ""
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		addr = net.JoinHostPort(addr, "443")
+	}
+	return addr
+}
+
 // waitForAPIPort waits for the Kubernetes API port to be open before making API calls
 // This prevents flooding a dead port with requests on Windows/WSL2 where the port
 // might not be immediately available after k3d reports success
@@ -172,7 +190,7 @@ func (h *HelmManager) waitForAPIPort(ctx context.Context, timeout time.Duration)
 	}
 
 	// Extract host:port from kubeConfig.Host
-	apiAddress := strings.TrimPrefix(strings.TrimPrefix(h.kubeConfig.Host, "https://"), "http://")
+	apiAddress := apiDialAddress(h.kubeConfig.Host)
 	if apiAddress == "" {
 		return nil // Skip if we can't determine the address
 	}
