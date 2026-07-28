@@ -1,127 +1,204 @@
-# Quick Start
+# Quick Start Guide
 
-Install `openframe` and bootstrap a local OpenFrame environment.
+Get OpenFrame up and running in under 5 minutes. This guide covers the fastest path to a working OpenFrame environment.
 
-[![OpenFrame 5-Minute Walkthrough](https://img.youtube.com/vi/er-z6IUnAps/maxresdefault.jpg)](https://www.youtube.com/watch?v=er-z6IUnAps)
+---
 
-## TL;DR
+## TL;DR — 5-Minute Setup
 
 ```bash
-# Install (Linux/macOS example below)
-curl -fsSL https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar -xz
-sudo mv openframe /usr/local/bin/
+# 1. Download the CLI for your platform (see below)
+# 2. Check prerequisites
+openframe prerequisites check
 
-openframe --version
+# 3. Bootstrap a full OpenFrame environment
 openframe bootstrap
-openframe cluster status
 ```
 
-## Step 1: Install the CLI
+That's it. The `bootstrap` command creates a local K3D cluster, installs ArgoCD, deploys the full OpenFrame platform, and waits for everything to become healthy.
 
-### Option A: Pre-built binary (recommended)
+---
 
-Download the release for your platform, then move it onto your `PATH`:
+## Step 1: Download the OpenFrame CLI
+
+Choose your platform:
+
+### macOS (Apple Silicon / Intel)
 
 ```bash
-# Linux amd64  (swap linux_amd64 for linux_arm64, darwin_amd64, or darwin_arm64)
-curl -fsSL https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar -xz
+# Apple Silicon (M1/M2/M3)
+curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64.tar.gz | tar xz
+sudo mv openframe /usr/local/bin/
+
+# Intel
+curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_amd64.tar.gz | tar xz
 sudo mv openframe /usr/local/bin/
 ```
 
-On **Windows**, download `openframe-cli_windows_amd64.zip` from the [releases page](https://github.com/flamingo-stack/openframe-cli/releases/latest), extract it, and put `openframe.exe` on your `PATH`. The CLI re-execs itself inside WSL2, so run `openframe ...` normally.
-
-Once installed, the CLI can update itself — see [Step 5](#step-5-keep-the-cli-up-to-date).
-
-### Option B: Build from source
-
-Requires Go 1.24+:
+### Linux (amd64)
 
 ```bash
-git clone https://github.com/flamingo-stack/openframe-cli.git
-cd openframe-cli
-go build -o openframe .
+curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar xz
 sudo mv openframe /usr/local/bin/
 ```
+
+### Windows (amd64)
+
+Download: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
+
+Extract the ZIP archive and run the `openframe.exe` — it will automatically forward commands into WSL2.
+
+### Browse All Releases
+
+Visit [https://github.com/flamingo-stack/openframe-cli/releases](https://github.com/flamingo-stack/openframe-cli/releases) for all available platform binaries.
+
+---
 
 ## Step 2: Verify Installation
 
 ```bash
 openframe --version
-openframe --help
 ```
 
-## Step 3: Bootstrap Your Environment
+Expected output:
 
-`openframe bootstrap` checks prerequisites, installs any missing tools, creates a k3d cluster, and installs the OpenFrame platform via the ArgoCD app-of-apps:
+```text
+openframe version v1.x.x (abc1234) built on 2024-xx-xx
+```
+
+---
+
+## Step 3: Check Prerequisites
+
+```bash
+openframe prerequisites check
+```
+
+The CLI will inspect your environment and report the status of required tools:
+
+```text
+✓ Docker    - running
+✓ k3d       - v5.x.x
+✓ Helm      - v3.x.x
+```
+
+If any prerequisites are missing, install them automatically:
+
+```bash
+openframe prerequisites install
+```
+
+> **Windows users:** Auto-install is not supported on native Windows. The CLI will display documentation links for each missing tool instead.
+
+---
+
+## Step 4: Bootstrap OpenFrame
+
+Run the interactive bootstrap wizard:
 
 ```bash
 openframe bootstrap
 ```
 
-The interactive wizard prompts for configuration options. For CI or scripting, run non-interactively — `--non-interactive` reuses the existing `openframe-helm-values.yaml`:
+The wizard will guide you through:
+
+1. **Cluster name** — the name for your local K3D cluster (default: `openframe-dev`)
+2. **Configuration mode** — default settings or interactive customization
+3. **Branch/version** — which OpenFrame release to deploy
+
+To use all defaults without prompts (e.g. in CI):
 
 ```bash
 openframe bootstrap --non-interactive
 ```
 
-## Step 4: Verify Your Environment
+### Expected Output
 
-Check cluster health:
+```text
+  ___                  ___
+ / _ \ _ __   ___ _ __|  _|_ __ __ _ _ __ ___   ___
+| | | | '_ \ / _ \ '_ \ |_| '__/ _` | '_ ` _ \ / _ \
+| |_| | |_) |  __/ | | |  _| | | (_| | | | | | |  __/
+ \___/| .__/ \___|_| |_|_| |_|  \__,_|_| |_| |_|\___|
+      |_|
 
-```bash
-openframe cluster status
+✓ Prerequisites validated
+✓ Creating cluster: openframe-dev
+✓ Cluster ready
+✓ Installing ArgoCD
+✓ ArgoCD ready
+✓ Deploying OpenFrame platform
+✓ Waiting for applications...
+✓ All applications Healthy + Synced
+
+Bootstrap complete! 🎉
 ```
 
-Check the platform deployment:
+---
+
+## Step 5: Check Status
+
+After bootstrapping, verify everything is running:
 
 ```bash
 openframe app status
 ```
 
-Get the ArgoCD URL, admin credentials, and port-forward command:
+```bash
+openframe cluster status
+```
+
+---
+
+## What Was Installed?
+
+After a successful `openframe bootstrap`, you have:
+
+| Component | Description |
+|---|---|
+| **K3D cluster** | A local lightweight Kubernetes cluster named `openframe-dev` |
+| **ArgoCD** | GitOps continuous delivery engine managing your platform |
+| **OpenFrame platform** | The full OSS tenant chart from [openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant) |
+
+---
+
+## Common Next Actions
+
+After bootstrap completes, you may want to:
 
 ```bash
+# View all available commands
+openframe --help
+
+# Check cluster list
+openframe cluster list
+
+# Get access information
 openframe app access
+
+# Upgrade to a new OpenFrame version
+openframe app upgrade
+
+# Keep the CLI itself up to date
+openframe update
 ```
 
-This prints the `kubectl port-forward svc/argocd-server` command and the admin login. Run it, then open the printed URL.
+---
 
-## Step 5: Keep the CLI Up to Date
+## Troubleshooting Quick Fixes
 
-```bash
-openframe update check      # see if a newer release is available
-openframe update            # download a verified release and replace the binary
-```
+| Problem | Solution |
+|---|---|
+| `docker: command not found` | Install Docker: `openframe prerequisites install` |
+| `connection refused` | Check `openframe cluster status` — the cluster may not be running |
+| `context deadline exceeded` | Network/resource issue; wait and retry, or check system resources |
+| Missing `openframe-helm-values.yaml` | The bootstrap wizard will create it for you in non-interactive mode |
+| Permission denied on binary | `chmod +x /usr/local/bin/openframe` |
 
-See [First Steps](first-steps.md#self-update) for rollback and auto-update.
-
-## Troubleshooting
-
-### Docker not running
-
-```bash
-docker ps        # must succeed
-docker info
-```
-
-Start Docker Desktop (macOS/Windows) or `sudo systemctl restart docker` (Linux).
-
-### kubectl can't connect
-
-```bash
-kubectl config current-context   # should be k3d-<cluster-name>
-kubectl config get-contexts
-```
-
-### ArgoCD not reachable
-
-```bash
-openframe app access             # re-print URL, credentials, and port-forward
-kubectl get pods -n argocd
-```
+---
 
 ## Next Steps
 
-- **[First Steps](first-steps.md)** — Core commands and workflows
-
-Need help? [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- Read the [First Steps Guide](first-steps.md) for what to explore after your first bootstrap
+- Review the [Prerequisites Guide](prerequisites.md) if you encounter environment issues
+- Visit the [OpenMSP community](https://www.openmsp.ai/) for help and discussion

@@ -1,323 +1,424 @@
 # Contributing to OpenFrame CLI
 
-We're excited that you're interested in contributing to OpenFrame CLI! This guide will help you get started with contributing to the project.
+Thank you for your interest in contributing to OpenFrame CLI! This document covers everything you need to know to submit high-quality contributions.
 
-## Getting Started
+---
+
+## 📋 Before You Start
+
+- Join the [OpenMSP Slack community](https://www.openmsp.ai/) to discuss your ideas before starting large features
+- Read the [Architecture Overview](./docs/development/architecture/README.md) to understand the codebase
+- Set up your [development environment](./docs/development/setup/environment.md) and verify you can [build and run locally](./docs/development/setup/local-development.md)
+
+> **Note:** All contribution discussions happen in the [OpenMSP Slack](https://www.openmsp.ai/). There are no GitHub Issues or Discussions for this project — bring your questions, feature ideas, and bug reports to Slack.
+>
+> **Slack invite:** [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+
+---
+
+## 🛠️ Development Setup
 
 ### Prerequisites
 
-Before you begin, ensure you have:
+| Tool | Version | Purpose |
+|---|---|---|
+| **Go** | 1.21+ | Primary language runtime |
+| **Git** | 2.30+ | Version control |
+| **Docker** | 24.x+ | Container runtime (integration tests) |
+| **k3d** | 5.x+ | Local Kubernetes clusters (integration tests) |
+| **Helm** | 3.x+ | Kubernetes package manager (integration tests) |
 
-- Go 1.24.6 or higher
-- Docker 20.10+ (with daemon running)
-- kubectl 1.25+
-- Helm 3.10+
-- K3D 5.0+
-- Git
+### Clone and Build
 
-### Development Environment Setup
-
-1. **Fork and Clone the Repository**
 ```bash
-# Fork the repo on GitHub, then clone your fork
-git clone https://github.com/YOUR_USERNAME/openframe-cli.git
+# Clone the repository
+git clone https://github.com/flamingo-stack/openframe-cli.git
 cd openframe-cli
 
-# Add upstream remote
-git remote add upstream https://github.com/flamingo-stack/openframe-cli.git
+# Download dependencies
+go mod download
+
+# Build the binary
+go build -o openframe .
+
+# Verify
+./openframe --version
 ```
 
-2. **Set Up Your Development Environment**
+### Code Quality Tools
 
-Follow the [Development Environment Setup](./docs/development/setup/environment.md) guide for detailed IDE configuration, tools, and environment variables.
-
-3. **Install Go Tools**
 ```bash
-# Install essential Go development tools
+# Install goimports (formatting + import management)
 go install golang.org/x/tools/cmd/goimports@latest
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-go install github.com/rakyll/gotest@latest
-```
 
-4. **Build and Test**
-```bash
-# Build the project
-go build -o openframe main.go
+# Install golangci-lint
+curl -sSfL https://raw.githubusercontent.com/golangci-lint/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
 
-# Run tests
-go test ./...
+# Format code
+goimports -w .
+
+# Run vet
+go vet ./...
 
 # Run linter
 golangci-lint run
 ```
 
-## Development Workflow
+---
 
-### Branch Management
+## 📐 Code Style and Conventions
 
-1. **Create a Feature Branch**
-```bash
-git checkout -b feature/your-feature-name
-```
+### Go Style
 
-2. **Keep Your Branch Up to Date**
-```bash
-git fetch upstream
-git rebase upstream/main
-```
+OpenFrame CLI follows standard Go conventions:
 
-### Code Standards
+- **`gofmt` / `goimports`** formatting is required — no unformatted code will be merged
+- **`go vet`** must pass with no warnings
+- Follow [Effective Go](https://go.dev/doc/effective_go) and the [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
 
-#### Go Code Style
-- Follow standard Go conventions and idioms
-- Use `gofmt` and `goimports` for formatting
-- Write clear, self-documenting code with meaningful names
-- Include comments for exported functions and complex logic
+### Naming Conventions
 
-#### Project Structure
-```text
-openframe-cli/
-├── cmd/                    # CLI command definitions
-├── internal/
-│   ├── cluster/           # Cluster management logic
-│   ├── chart/            # Chart and ArgoCD management
-│   ├── dev/              # Development tools
-│   ├── bootstrap/        # Environment bootstrapping
-│   └── shared/           # Common utilities
-├── docs/                 # Documentation
-├── scripts/              # Build and utility scripts
-└── main.go               # Application entry point
-```
+| Element | Convention | Example |
+|---|---|---|
+| Package names | Lowercase, single word | `cluster`, `executor`, `redact` |
+| Exported types | PascalCase | `ClusterService`, `CommandExecutor` |
+| Unexported types | camelCase | `clusterManager`, `mockExecutor` |
+| Constants | PascalCase (exported), camelCase (unexported) | `DefaultClusterName`, `maxRetries` |
+| Test files | `_test.go` suffix | `service_test.go` |
+| Test functions | `Test` prefix + PascalCase | `TestCreateClusterSuccess` |
 
-#### Testing Guidelines
-- Write unit tests for all business logic
-- Include integration tests for external tool interactions
-- Use table-driven tests where appropriate
-- Mock external dependencies using interfaces
+### Error Handling
 
-Example test structure:
+Wrap errors with context and use structured types from `shared/errors`:
+
 ```go
-func TestClusterCreate(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    ClusterConfig
-        expected error
-    }{
-        {
-            name: "valid cluster creation",
-            input: ClusterConfig{
-                Name:  "test-cluster",
-                Nodes: 3,
-            },
-            expected: nil,
-        },
-        // Add more test cases...
-    }
+// GOOD: Wrap with context
+if err := mgr.CreateCluster(ctx, cfg); err != nil {
+    return fmt.Errorf("creating cluster %q: %w", cfg.Name, err)
+}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            err := CreateCluster(tt.input)
-            assert.Equal(t, tt.expected, err)
-        })
-    }
+// BAD: Lost context
+if err := mgr.CreateCluster(ctx, cfg); err != nil {
+    return err
 }
 ```
 
-### Commit Guidelines
+### Command Structure
 
-Follow conventional commit format:
+When adding a new Cobra command, follow the established pattern:
+
+```go
+func getMyCmd() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "mycommand [name]",
+        Short: "One-line description",
+        Long: `Multi-line detailed description.
+
+The long description should explain what the command does,
+when to use it, and any important caveats.`,
+        Args: cobra.MaximumNArgs(1),
+        RunE: func(cmd *cobra.Command, args []string) error {
+            // Validate input
+            // Delegate to service layer
+            // Handle errors via sharedErrors.HandleGlobalError
+            return nil
+        },
+    }
+    cmd.Flags().StringVar(&flagVar, "flag-name", "default", "Flag description")
+    return cmd
+}
+```
+
+### Service Layer Conventions
+
+- Services must accept interfaces (not concrete types) for all dependencies
+- Always accept `context.Context` as the first argument for cancellable operations
+- Return descriptive errors, not boolean success flags
+- Use the `CommandExecutor` interface for all external binary invocations — **never** `os/exec` directly
+
+---
+
+## 🔐 Security Guidelines
+
+### Secret Redaction
+
+Any credential read from environment variables, config files, or user prompts **must** be registered with the redact package before use:
+
+```go
+import "github.com/flamingo-stack/openframe-cli/internal/shared/redact"
+
+redact.RegisterSecret(githubToken)
+redact.RegisterSecret(registryPassword)
+```
+
+### Command Injection Prevention
+
+Always use argv arrays via `CommandExecutor`, never shell string concatenation:
+
+```go
+// SAFE: argv array
+result, err := exec.Execute(ctx, "k3d", "cluster", "list", "--output", "json")
+
+// NEVER: shell injection risk
+// exec.Execute(ctx, "sh", "-c", "k3d cluster list --output " + userInput)
+```
+
+### Security Checklist for New Commands
+
+- [ ] User-supplied cluster names are validated via `ValidateClusterName`
+- [ ] Any new credential/token is registered with `redact.RegisterSecret()`
+- [ ] External commands use argv arrays, not shell strings
+- [ ] New YAML/JSON input is validated via structured types before use
+- [ ] Sensitive flags are not printed in error messages
+
+---
+
+## 🌿 Branch Naming
+
+| Type | Pattern | Example |
+|---|---|---|
+| Feature | `feature/<short-description>` | `feature/add-kind-provider` |
+| Bug fix | `fix/<short-description>` | `fix/cluster-delete-timeout` |
+| Documentation | `docs/<short-description>` | `docs/update-contributing-guide` |
+| Refactor | `refactor/<short-description>` | `refactor/extract-helm-manager` |
+| Test | `test/<short-description>` | `test/add-bootstrap-integration` |
+| Chore | `chore/<short-description>` | `chore/update-go-dependencies` |
+
+**Rules:** Lowercase and hyphens only. Branch from `main` unless working on a specific release branch.
+
+---
+
+## 💬 Commit Message Format
+
+OpenFrame CLI uses [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text
-<type>[optional scope]: <description>
+<type>(<scope>): <short description>
 
 [optional body]
 
 [optional footer(s)]
 ```
 
-**Types:**
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting, etc.)
-- `refactor:` Code refactoring
-- `test:` Adding or updating tests
-- `chore:` Build process or auxiliary tool changes
+### Types
 
-**Examples:**
-```bash
-git commit -m "feat(cluster): add support for custom node configurations"
-git commit -m "fix(bootstrap): resolve ArgoCD installation timeout"
-git commit -m "docs: update prerequisites and installation guide"
+| Type | When to Use |
+|---|---|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `docs` | Documentation changes only |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `test` | Adding or modifying tests |
+| `chore` | Build process, dependency updates, tooling |
+| `perf` | Performance improvements |
+| `ci` | CI/CD configuration changes |
+
+### Examples
+
+```text
+feat(cluster): add --wait flag to cluster create command
+
+fix(argocd): handle stalled sync after ref change
+
+docs(contributing): add commit message guidelines
+
+test(bootstrap): add integration test for non-interactive mode
+
+chore: upgrade go-git to v5.12.0
 ```
-
-### Pull Request Process
-
-1. **Prepare Your PR**
-```bash
-# Ensure your branch is up to date
-git fetch upstream
-git rebase upstream/main
-
-# Run all checks
-go fmt ./...
-goimports -w .
-golangci-lint run
-go test ./...
-```
-
-2. **Submit Your Pull Request**
-- Use a clear, descriptive title
-- Include a detailed description of changes
-- Reference any related issues
-- Add screenshots/logs for UI or behavioral changes
-- Ensure all CI checks pass
-
-3. **PR Template**
-```markdown
-## Description
-Brief description of the changes and their purpose.
-
-## Type of Change
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-
-## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Manual testing completed
-
-## Checklist
-- [ ] My code follows the project's style guidelines
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-```
-
-## Code Review Process
-
-### For Contributors
-- Respond promptly to review feedback
-- Address all comments and suggestions
-- Ask questions if feedback is unclear
-- Update documentation if your changes affect user-facing behavior
-
-### For Reviewers
-- Provide constructive, actionable feedback
-- Focus on code quality, maintainability, and correctness
-- Check that tests adequately cover new functionality
-- Verify documentation updates are included
-
-## Testing
-
-### Running Tests
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -race -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-
-# Run specific package tests
-go test ./internal/cluster/...
-
-# Run integration tests (requires Docker)
-go test -tags=integration ./...
-```
-
-### Test Categories
-- **Unit Tests**: Test individual functions and components
-- **Integration Tests**: Test interactions with external tools (Docker, kubectl, etc.)
-- **End-to-End Tests**: Test complete workflows from CLI to cluster
-
-### Writing Good Tests
-- Test both happy path and error conditions
-- Use descriptive test names that explain what is being tested
-- Keep tests focused and atomic
-- Use test fixtures and helpers to reduce duplication
-
-## Documentation
-
-### Types of Documentation
-- **Code Comments**: Explain complex logic and public APIs
-- **README Updates**: Keep installation and usage instructions current
-- **Developer Docs**: Architecture, design decisions, and development guides
-- **User Guides**: Step-by-step tutorials and reference material
-
-### Documentation Guidelines
-- Write clear, concise instructions
-- Include code examples where helpful
-- Update docs when making user-facing changes
-- Use proper Markdown formatting
-
-## Release Process
-
-### Version Management
-We use semantic versioning (SemVer):
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes (backward compatible)
-
-### Creating a Release
-1. Update version in `main.go`
-2. Update `CHANGELOG.md`
-3. Create and push version tag
-4. GitHub Actions handles the build and release
-
-## Issue Management
-
-### Reporting Issues
-When reporting bugs or requesting features:
-- Check existing issues first
-- Use issue templates when available
-- Provide detailed reproduction steps for bugs
-- Include system information and versions
-
-### Working on Issues
-- Comment on issues before starting work
-- Ask for clarification if requirements are unclear
-- Link your PR to the issue when ready
-
-## Community Guidelines
-
-### Communication Channels
-- **Primary Support**: [OpenMSP Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-- **Development Discussion**: GitHub PR comments and code reviews
-- **Feature Requests**: GitHub Issues
-
-### Code of Conduct
-- Be respectful and inclusive in all interactions
-- Focus on constructive feedback and solutions
-- Help newcomers get started
-- Follow the project's technical standards and conventions
-
-## Getting Help
-
-Need assistance? Here's how to get help:
-
-1. **Development Questions**: Ask in OpenMSP Slack #dev channel
-2. **Documentation Issues**: Create a GitHub issue with the "documentation" label
-3. **Bug Reports**: File a GitHub issue with reproduction steps
-4. **Feature Ideas**: Discuss in Slack first, then create GitHub issue
-
-## External Dependencies
-
-### CLI Tools Integration
-This repository contains OpenFrame CLI code. The main OpenFrame application code is maintained separately:
-
-- **OpenFrame Main Repository**: [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
-- **CLI Documentation**: [CLI Documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
-
-When contributing CLI-related changes, coordinate with the main repository team through Slack.
-
-## Acknowledgments
-
-Thank you for contributing to OpenFrame CLI! Your efforts help make IT operations more accessible and cost-effective for MSPs worldwide.
 
 ---
 
-**Questions?** Join our [OpenMSP Slack community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) - we're here to help!
+## 🧪 Testing
+
+### Running Tests
+
+```bash
+# Run all unit tests with race detector (recommended)
+go test -race ./...
+
+# Run tests with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Run integration tests (requires Docker, k3d, Helm, and 24GB+ RAM)
+go test ./tests/integration/... -v -timeout 30m
+```
+
+### Writing Unit Tests
+
+Use the `MockCommandExecutor` for isolated unit tests — never invoke real subprocesses:
+
+```go
+func TestCreateCluster(t *testing.T) {
+    testutil.InitializeTestMode()
+
+    mock := testutil.NewTestMockExecutor()
+    mock.SetResponse("k3d cluster create", &executor.CommandResult{
+        ExitCode: 0,
+        Stdout:   `{"name": "test-cluster"}`,
+    })
+
+    svc := cluster.NewClusterService(mock)
+    err := svc.CreateCluster(context.Background(), "test-cluster")
+    assert.NoError(t, err)
+}
+```
+
+### Coverage Targets
+
+| Package Type | Target |
+|---|---|
+| Core services (`internal/`) | ≥ 80% |
+| Command layer (`cmd/`) | ≥ 70% |
+| Provider implementations | ≥ 75% |
+| Shared utilities | ≥ 85% |
+
+---
+
+## 📤 Pull Request Process
+
+### Before Opening a PR
+
+```bash
+# 1. Run all tests
+go test -race ./...
+
+# 2. Format code
+goimports -w .
+
+# 3. Run vet
+go vet ./...
+
+# 4. Build successfully
+go build -o openframe .
+```
+
+### PR Description Template
+
+```text
+## Summary
+<!-- What does this PR do? -->
+
+## Changes
+<!-- List the key changes made -->
+-
+-
+
+## Testing
+<!-- How was this tested? -->
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated (if applicable)
+- [ ] Manual testing performed
+
+## Checklist
+- [ ] Code follows the style guidelines
+- [ ] Self-review completed
+- [ ] Tests pass (go test -race ./...)
+- [ ] go vet ./... passes
+- [ ] goimports formatting applied
+- [ ] No secrets or credentials in code
+- [ ] Security guidelines followed
+```
+
+### PR Size Guidelines
+
+| Size | Lines Changed | Guidance |
+|---|---|---|
+| Small | < 100 lines | Preferred — fast review |
+| Medium | 100–500 lines | Include detailed description |
+| Large | 500+ lines | Split into smaller PRs if possible |
+
+---
+
+## ➕ Adding a New Command
+
+Follow these steps when adding a new CLI command:
+
+1. **Create the command file** in `cmd/<group>/<command>.go`
+2. **Define a `get<Name>Cmd()` function** returning `*cobra.Command`
+3. **Register it** in the parent command group (e.g., `cmd/cluster/cluster.go`)
+4. **Create a service** in `internal/<group>/` with injected dependencies
+5. **Write unit tests** using `testutil.TestClusterCommand`
+6. **Add integration tests** if the command interacts with external systems
+7. **Verify `--help` output** is accurate and descriptive
+
+---
+
+## ➕ Adding a New Provider
+
+To add a new cluster provider (e.g., Kind):
+
+1. **Implement the `Provider` interface** in `internal/cluster/providers/<name>/manager.go`
+2. **Add prerequisite definitions** in `internal/cluster/prerequisites/`
+3. **Register the provider** in the cluster service provider resolution
+4. **Add the cluster type** to `internal/cluster/models/cluster.go`
+5. **Write unit and integration tests**
+
+---
+
+## 🔍 Review Checklist
+
+When reviewing a PR, check:
+
+**Correctness:**
+- [ ] Logic is correct and handles edge cases
+- [ ] Error paths are handled and tested
+- [ ] Context cancellation is propagated correctly
+
+**Security:**
+- [ ] No secrets hardcoded or logged
+- [ ] New credentials registered with `redact.RegisterSecret()`
+- [ ] User input validated before reaching shell-outs
+- [ ] External commands use argv arrays, not shell strings
+
+**Architecture:**
+- [ ] Business logic is in the service layer, not command layer
+- [ ] Dependencies are injected via interfaces (testable)
+- [ ] New command follows the established Cobra pattern
+
+**Tests:**
+- [ ] Unit tests cover new code paths
+- [ ] Error cases are tested
+- [ ] Mock executor used instead of real subprocess calls in unit tests
+
+**Documentation:**
+- [ ] Public API has Go doc comments
+- [ ] Complex logic has inline comments
+- [ ] `--help` text is accurate and helpful
+
+---
+
+## 📦 Release Signing
+
+Release binaries are code-signed automatically during the release workflow:
+
+| Platform | Mechanism |
+|---|---|
+| macOS | `codesign` (Developer ID Application, hardened runtime) + `notarytool` notarization |
+| Windows | Authenticode via Azure Trusted Signing |
+| Linux | Integrity via `checksums.txt` + cosign bundle |
+
+All release binaries can be verified using cosign:
+
+```bash
+cosign verify-blob --bundle checksums.txt.bundle \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/flamingo-stack/openframe-cli/\.github/workflows/release\.yml@.*$' \
+  checksums.txt
+```
+
+---
+
+## 💬 Community
+
+- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/)
+- **Slack invite:** [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **OpenFrame platform repo:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
+- **Releases:** [https://github.com/flamingo-stack/openframe-cli/releases](https://github.com/flamingo-stack/openframe-cli/releases)
+
+---
+
+<div align="center">
+  Built with 💛 by the <a href="https://www.flamingo.run/about"><b>Flamingo</b></a> team
+</div>

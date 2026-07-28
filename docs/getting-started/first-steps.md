@@ -1,110 +1,224 @@
-# First Steps with OpenFrame CLI
+# First Steps
 
-With the CLI installed and an environment bootstrapped, here are the core commands and workflows.
+You've successfully bootstrapped an OpenFrame environment. Here are the first 5 things to explore and configure to get the most out of your installation.
 
-## Explore the CLI
+---
 
-```bash
-openframe --help
-openframe cluster --help
-openframe app --help
-openframe update --help
-```
+## 1. Verify Your Environment
 
-Command groups:
-
-- **bootstrap** — create a cluster and install the platform in one step
-- **cluster** — k3d cluster lifecycle
-- **app** — install, upgrade, inspect, and remove the OpenFrame app-of-apps deployment
-- **prerequisites** — check and install required tools
-- **update** — self-update the CLI
-- **completion** — generate shell completion scripts
-
-## Cluster Management
+Start by confirming the state of your cluster and platform:
 
 ```bash
-openframe cluster create              # create a k3d cluster (interactive wizard)
-openframe cluster create dev -n 3     # named cluster with 3 nodes
-openframe cluster list                # list clusters (add -o json|yaml)
-openframe cluster status              # cluster health
-openframe cluster delete dev -f       # delete without confirmation
-openframe cluster cleanup             # remove leftover resources
+# Check cluster status
+openframe cluster status
+
+# Check application status
+openframe app status
 ```
 
-`cluster create` flags: `--type/-t` (`k3d` only; cloud is coming soon), `--nodes/-n` (default 3), `--version`, `--skip-wizard`, `--dry-run`.
+### Cluster Status Output
 
-## Platform Deployment
+```text
+NAME             STATUS    NODES    VERSION
+openframe-dev    running   3        v1.29.x
+```
 
-`openframe app` manages the OpenFrame deployment. `app install` clones the `openframe-oss-tenant` repo and helm-installs the `app-of-apps` chart (helm release `app-of-apps`), which creates an ArgoCD root Application named `argocd-apps` that fans out to all child applications.
+### App Status Output
+
+The app status command aggregates both Kubernetes cluster health and ArgoCD application sync state into a single unified report. You'll see each deployed application with its sync and health status.
 
 ```bash
-openframe app install                        # install into the current cluster
-openframe app install --non-interactive      # reuse the existing openframe-helm-values.yaml
-openframe app install --dry-run              # preview without applying
-
-openframe app status                         # deployment status (add -o text|json|yaml)
-openframe app upgrade --sync                 # force an ArgoCD re-sync
-openframe app upgrade --prune                # re-sync and prune removed resources
-openframe app access                         # print ArgoCD URL, admin creds, port-forward cmd
-openframe app uninstall -y                   # remove the deployment
+# For machine-readable output (e.g., in scripts)
+openframe cluster list --output json
+openframe cluster status --output yaml
 ```
 
-Key `app install` flags: `--github-repo`, `--ref/-r`, `--context/-c`, `--cert-dir`, `--non-interactive`, `--dry-run`, `--force/-f`.
+---
 
-`app install` deploys the OpenFrame platform app-of-apps — it does not install arbitrary charts.
+## 2. Access the OpenFrame Platform
 
-> **Ref pinning caveat:** `--ref` pins the git ref for the app-of-apps clone
-> and every child Application's `targetRevision`. The root `argocd-apps`
-> Application itself, however, keeps the ref it was installed from — changes
-> to the app-of-apps chart *itself* on a feature ref are applied at install
-> time but are not self-tracked by ArgoCD afterwards. During an upgrade the
-> platform briefly passes through a mixed-ref window while children roll over;
-> applications with `autoSync` disabled are synced automatically by the CLI
-> when progress stalls (or run `openframe app upgrade --sync`).
-
-## Access ArgoCD
+Get access information for the deployed OpenFrame services:
 
 ```bash
 openframe app access
 ```
 
-This prints the ArgoCD URL, the admin username and password, and the `kubectl port-forward svc/argocd-server` command. Run the port-forward, then open the printed URL.
+This command displays the URLs and connection details for the OpenFrame platform running in your local cluster.
 
-## Self-Update
+> **Tip:** Bookmark the displayed URLs for quick access to the OpenFrame web interface and ArgoCD dashboard.
 
-The CLI updates itself from signed releases:
+---
 
-```bash
-openframe update check          # is a newer release available? (add -o json|yaml)
-openframe update                # download a checksum- and cosign-verified release, replace the binary (keeps a backup)
-openframe update 1.4.2          # switch to a specific version (up or down)
-openframe update rollback       # revert to the backed-up binary, offline
-```
+## 3. Explore the Cluster Commands
 
-Opt into a daily auto-update (same-major only; disabled in CI / non-interactive):
+The `cluster` command group (also aliased as `k`) manages your Kubernetes cluster lifecycle:
 
 ```bash
-export OPENFRAME_AUTO_UPDATE=1
+# List all managed clusters
+openframe cluster list
+
+# Get detailed status of a cluster
+openframe cluster status
+
+# Create an additional cluster with a custom name
+openframe cluster create my-second-cluster
+
+# Delete a cluster
+openframe cluster delete my-second-cluster
+
+# Clean up leftover resources from a failed cluster
+openframe cluster cleanup
 ```
 
-## Common Workflows
+> **Shorthand:** `openframe k list` is equivalent to `openframe cluster list`.
 
-### Recreate an environment
+---
+
+## 4. Explore the App Commands
+
+The `app` command group manages the OpenFrame platform deployment:
 
 ```bash
-openframe cluster delete <name> -f
-openframe bootstrap
+# Install OpenFrame on an existing cluster
+openframe app install
+
+# Check application status
+openframe app status
+
+# Upgrade to a different OpenFrame version/branch
+openframe app upgrade
+
+# Uninstall OpenFrame from a cluster
+openframe app uninstall
+
+# Show access details
+openframe app access
 ```
 
-### Inspect running workloads
+### Upgrading OpenFrame
+
+There are two upgrade modes:
 
 ```bash
-kubectl get pods --all-namespaces
-kubectl get applications -n argocd
+# Mode 1: Switch to a different git ref (branch, tag, or commit)
+openframe app upgrade --ref v2.0.0
+
+# Mode 2: Force re-sync of the current ref
+openframe app upgrade --force-sync
 ```
+
+---
+
+## 5. Keep the CLI Up to Date
+
+OpenFrame CLI includes a built-in self-update mechanism with cryptographic verification:
+
+```bash
+# Check if an update is available
+openframe update --check
+
+# Apply the latest update
+openframe update
+
+# Roll back to the previous version if needed
+openframe update --rollback
+```
+
+> **Security note:** All updates are verified using [Sigstore/cosign](https://docs.sigstore.dev/cosign/overview/) against the official GitHub Actions release workflow. Only binaries produced by the `flamingo-stack/openframe-cli` release pipeline are accepted.
+
+---
+
+## Initial Configuration: The Helm Values File
+
+When you ran `openframe bootstrap`, a configuration file called `openframe-helm-values.yaml` was created in your working directory. This file controls the OpenFrame platform deployment:
+
+```bash
+# View the generated configuration
+cat openframe-helm-values.yaml
+```
+
+Key configurable areas include:
+
+| Section | Description |
+|---|---|
+| `branch` | The OpenFrame git ref (branch, tag) to deploy |
+| `docker` | Container registry settings |
+| `ingress` | Ingress hostname and TLS configuration |
+| `argocd` | ArgoCD Helm value overrides |
+
+To apply changes to an existing deployment:
+
+```bash
+openframe app upgrade
+```
+
+---
+
+## Verbose and Silent Modes
+
+Control the CLI's output verbosity:
+
+```bash
+# Show detailed debug output (ArgoCD sync events, Helm operations, etc.)
+openframe bootstrap --verbose
+
+# Suppress all non-error output (perfect for scripts)
+openframe bootstrap --silent
+
+# Machine-readable output for cluster commands
+openframe cluster list --output json
+```
+
+---
+
+## Running in CI/CD
+
+For automated pipelines, use `--non-interactive` to skip all prompts:
+
+```bash
+# Full non-interactive bootstrap
+openframe bootstrap --non-interactive
+
+# With a specific cluster name
+openframe bootstrap --non-interactive my-ci-cluster
+```
+
+The CLI reads from an existing `openframe-helm-values.yaml` file in the current directory when running non-interactively.
+
+---
 
 ## Getting Help
 
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+Every command has built-in help:
 
-All support happens in Slack — we don't monitor GitHub Issues.
+```bash
+# General help
+openframe --help
+
+# Help for a specific command
+openframe bootstrap --help
+openframe cluster create --help
+openframe app install --help
+openframe update --help
+```
+
+---
+
+## Community & Support
+
+- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/) — Join for help, discussions, and announcements
+- **Slack invite:** [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- **OpenFrame platform repo:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
+- **CLI releases:** [https://github.com/flamingo-stack/openframe-cli/releases](https://github.com/flamingo-stack/openframe-cli/releases)
+
+---
+
+## Summary: First Steps Checklist
+
+- [ ] Verified cluster status with `openframe cluster status`
+- [ ] Checked app status with `openframe app status`
+- [ ] Accessed the platform with `openframe app access`
+- [ ] Explored `openframe cluster --help` and `openframe app --help`
+- [ ] Reviewed `openframe-helm-values.yaml` configuration file
+- [ ] Ran `openframe update --check` to see if a newer version is available
+- [ ] Joined the [OpenMSP Slack](https://www.openmsp.ai/) community

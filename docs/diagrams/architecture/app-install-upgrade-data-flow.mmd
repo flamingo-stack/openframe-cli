@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant User
+    participant AppCmd as "cmd/app/install"
+    participant Target as "app/target.Selector"
+    participant K8sPkg as "k8s package"
+    participant ChSvc as "chart/services"
+    participant ArgoProv as "argocd.Manager"
+    participant HelmProv as "helm.HelmManager"
+
+    User->>AppCmd: openframe app install [--context k3d-dev]
+    AppCmd->>Target: Select(ctx) [if no --context]
+    Target->>K8sPkg: LoadContexts(kubeconfigPath)
+    K8sPkg-->>Target: []ContextInfo
+    Target->>User: Prompt: select context
+    User-->>Target: k3d-openframe-dev
+    Target->>K8sPkg: CheckResources(ctx, requirements)
+    K8sPkg-->>Target: Resources, sufficient=true
+    Target-->>AppCmd: SelectResult{Config, Context}
+
+    AppCmd->>ChSvc: InstallChartsWithConfigContext(ctx, req)
+    ChSvc->>ArgoProv: Install(ctx, cfg)
+    ArgoProv-->>ChSvc: ArgoCD installed
+    ChSvc->>HelmProv: InstallAppOfAppsFromLocal(ctx, cfg)
+    HelmProv-->>ChSvc: app-of-apps installed
+    ChSvc->>ArgoProv: WaitForApplications(ctx, cfg)
+    ArgoProv-->>ChSvc: All apps Healthy+Synced
+    ChSvc-->>AppCmd: OK
+    AppCmd-->>User: SUCCESS
