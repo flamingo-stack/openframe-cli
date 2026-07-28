@@ -165,7 +165,14 @@ module "gke" {
 
   # Private nodes need the NAT for egress (image pulls) from the first boot —
   # nothing else creates an implicit ordering on it.
-  depends_on = [google_compute_router_nat.nat]
+  #
+  # module.network is listed explicitly because subnetwork/ip_range_pods/
+  # ip_range_services are passed as string literals (not module outputs), so
+  # terraform would otherwise build NO edge from the cluster to the subnet.
+  # Without it, destroy can remove the subnet in parallel with the still-running
+  # node pool and GCP rejects it ("subnetwork in use by instance"); the explicit
+  # dependency makes the whole cluster tear down before any network resource.
+  depends_on = [google_compute_router_nat.nat, module.network]
 }
 
 output "cluster_name" {
