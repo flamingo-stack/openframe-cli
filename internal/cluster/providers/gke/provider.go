@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,42 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// gcpResourcePathRE pulls the GCP resource path (projects/.../<kind>/<name>)
+// out of a terraform 409 error so an orphan can be named concretely.
+var gcpResourcePathRE = regexp.MustCompile(`projects/[^'"\s]+`)
+
+// orphanFromInterruptedCreate detects the specific failure where terraform
+// tries to create a resource that already exists in GCP (HTTP 409 /
+// alreadyExists). This is the signature of a create interrupted (SIGINT) after
+// the cloud API created a resource but before terraform saved it to state: the
+// resource is real but state-invisible, so every resume collides with it (409)
+// and 'cluster delete' — which only knows state-tracked resources — cannot
+// remove it. Returns human-readable remediation and true when this is that
+// case, so the caller can replace the generic "re-run to resume" hint (which
+// would loop forever here) with something actionable.
+func orphanFromInterruptedCreate(err error, terraformDir string) (string, bool) {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	if !strings.Contains(low, "alreadyexists") && !strings.Contains(low, "409") {
+		return "", false
+	}
+	resource := "the resource named in the error above"
+	if m := gcpResourcePathRE.FindString(msg); m != "" {
+		resource = m
+	}
+	return fmt.Sprintf(
+		"a resource already exists in GCP that terraform is not tracking:\n"+
+			"  %s\n"+
+			"This is the signature of a create that was interrupted after the resource was\n"+
+			"created but before its state was saved — so resume keeps colliding with it and\n"+
+			"'cluster delete' cannot remove it (delete only knows state-tracked resources).\n"+
+			"Resolve it one of two ways, then re-run create:\n"+
+			"  • delete the orphan in GCP (Cloud Console or the matching 'gcloud ... delete'), or\n"+
+			"  • import it into this cluster's state, e.g.:\n"+
+			"      terraform -chdir=%s import <resource.address> %s",
+		resource, terraformDir, resource), true
+}
 
 // Provider provisions and manages GKE clusters.
 type Provider struct {
@@ -230,6 +267,10 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	}
 	if err := p.engine.ApplyPlan(ctx, ws.TerraformDir(), planFile); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
+		if hint, ok := orphanFromInterruptedCreate(err, ws.TerraformDir()); ok {
+			return nil, models.NewClusterOperationError("create", config.Name,
+				fmt.Errorf("%w\n\n%s", err, hint))
+		}
 		return nil, models.NewClusterOperationError("create", config.Name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", err, ws.Dir(), config.Name))
 	}
