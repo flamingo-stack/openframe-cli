@@ -240,6 +240,53 @@ func TestTfvarsFor_VersionMapping(t *testing.T) {
 	}
 }
 
+// The default cluster is zonal so --nodes N is the exact node count; --ha
+// (HA=true) makes it regional. Zone is passed through to the module.
+func TestTfvarsFor_TopologyMapping(t *testing.T) {
+	zonal := gkeConfig("demo")
+	zonal.Cloud.Zone = "us-central1-a"
+	vars, err := tfvarsFor(zonal)
+	require.NoError(t, err)
+	assert.False(t, vars.Regional, "default must be zonal (exact node count)")
+	assert.Equal(t, "us-central1-a", vars.Zone)
+
+	ha := gkeConfig("demo")
+	ha.Cloud.HA = true
+	vars, err = tfvarsFor(ha)
+	require.NoError(t, err)
+	assert.True(t, vars.Regional, "--ha must produce a regional cluster")
+}
+
+// A zonal cluster resolves a concrete zone from the region via gcloud; the
+// alphabetically-first is chosen deterministically.
+func TestEnsureZone_ResolvesFirstZoneForZonal(t *testing.T) {
+	p, _, _ := newTestProvider(t, nil)
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("gcloud compute zones list", &executor.CommandResult{
+		ExitCode: 0,
+		Stdout:   "us-central1-a\n",
+	})
+	p.executor = mock
+
+	config := gkeConfig("demo")
+	require.NoError(t, p.ensureZone(context.Background(), &config))
+	assert.Equal(t, "us-central1-a", config.Cloud.Zone)
+}
+
+// An HA (regional) cluster needs no single zone; ensureZone must not even query.
+func TestEnsureZone_SkipsForHA(t *testing.T) {
+	p, _, _ := newTestProvider(t, nil)
+	mock := executor.NewMockCommandExecutor()
+	p.executor = mock
+
+	config := gkeConfig("demo")
+	config.Cloud.HA = true
+	require.NoError(t, p.ensureZone(context.Background(), &config))
+	assert.Empty(t, config.Cloud.Zone)
+	assert.False(t, mock.WasCommandExecuted("gcloud compute zones list"),
+		"a regional cluster must not resolve a single zone")
+}
+
 func TestTemplateEmbedsModulePins(t *testing.T) {
 	tf := string(mainTF)
 	assert.Contains(t, tf, `source  = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"`)

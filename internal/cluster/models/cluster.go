@@ -32,6 +32,13 @@ type CloudConfig struct {
 	MinNodes    int    `json:"min_nodes,omitempty"`
 	MaxNodes    int    `json:"max_nodes,omitempty"`
 	Spot        bool   `json:"spot,omitempty"`
+	// HA requests a regional (multi-zone) control plane and node pool. Default
+	// (false) is a single-zone cluster, so the node count is exact — N means N,
+	// not N-per-zone. GKE only.
+	HA bool `json:"ha,omitempty"`
+	// Zone is the single zone a zonal (non-HA) GKE cluster lives in, e.g.
+	// "us-central1-a". Derived from Region by the provider; empty for HA.
+	Zone string `json:"zone,omitempty"`
 	// BackendConfig is an optional remote-state location
 	// (s3://bucket/prefix for EKS, gcs://bucket/prefix for GKE);
 	// empty means local state in the cluster workspace.

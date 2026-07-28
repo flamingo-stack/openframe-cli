@@ -49,9 +49,12 @@ Examples:
 			}
 			// create runs its own type-aware gate after the cluster type is known
 			// (a cloud cluster must not demand Docker/k3d); use only flips local
-			// kubeconfig/gcloud state and needs no tools at all. The other
-			// subcommands are k3d-scoped, so the k3d gate stays here.
-			if cmd.Name() == "create" || cmd.Name() == "use" {
+			// kubeconfig/gcloud state and needs no tools at all. status and list
+			// are cross-provider read-only views: they must work against a cloud
+			// cluster with Docker stopped, so they skip the k3d gate and degrade
+			// gracefully instead (k3d enumeration is best-effort in the service).
+			switch cmd.Name() {
+			case "create", "use", "status", "list":
 				return nil
 			}
 			return prerequisites.CheckPrerequisites()

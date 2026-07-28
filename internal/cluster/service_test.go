@@ -84,6 +84,25 @@ func TestClusterService_CreateCluster_CloudWithoutRegionFailsBeforeAnyCommand(t 
 	}
 }
 
+// ListClusters must not hard-fail when local k3d enumeration fails (e.g. the
+// Docker daemon is stopped): a cloud-only user must still be able to list and
+// see status of their GKE/EKS clusters. The k3d error degrades to best-effort.
+func TestClusterService_ListClusters_K3dFailureIsBestEffort(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	mock := executor.NewMockCommandExecutor()
+	// Simulate Docker down: every k3d shell-out fails.
+	mock.SetShouldFail(true, "Cannot connect to the Docker daemon")
+	service := NewClusterServiceSuppressed(mock)
+
+	clusters, err := service.ListClusters()
+	if err != nil {
+		t.Fatalf("ListClusters must degrade gracefully when k3d fails, got error: %v", err)
+	}
+	if len(clusters) != 0 {
+		t.Fatalf("expected no clusters (k3d down, empty cloud registry), got %d", len(clusters))
+	}
+}
+
 func TestClusterService_DeleteCluster_UnknownCloudClusterIsNotFound(t *testing.T) {
 	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
 	for _, clusterType := range []models.ClusterType{models.ClusterTypeEKS, models.ClusterTypeGKE} {

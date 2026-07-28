@@ -20,6 +20,10 @@ type tfvars struct {
 	ClusterName       string `json:"cluster_name"`
 	Project           string `json:"project"`
 	Region            string `json:"region"`
+	// Regional is always emitted (not omitempty): the template default is zonal,
+	// and dropping a false here would be correct-by-accident — keep it explicit.
+	Regional          bool   `json:"regional"`
+	Zone              string `json:"zone,omitempty"`
 	KubernetesVersion string `json:"kubernetes_version,omitempty"`
 	InstanceType      string `json:"instance_type,omitempty"`
 	MinNodes          int    `json:"min_nodes,omitempty"`
@@ -48,6 +52,8 @@ func tfvarsFor(config models.ClusterConfig) (tfvars, error) {
 		ClusterName:       config.Name,
 		Project:           cloud.Project,
 		Region:            cloud.Region,
+		Regional:          cloud.HA,
+		Zone:              cloud.Zone,
 		KubernetesVersion: version,
 		InstanceType:      cloud.MachineType,
 		MinNodes:          cloud.MinNodes,

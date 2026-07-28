@@ -2,6 +2,7 @@ package gke
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,4 +51,30 @@ func TestTemplate_NeverManagesTheProject(t *testing.T) {
 func TestTemplate_ProjectIsAnInputVariable(t *testing.T) {
 	require.Contains(t, string(mainTF), `variable "project"`,
 		"the project must be a declared input variable, not a resource the template creates")
+}
+
+// The GKE cluster's subnet/secondary ranges are passed to module.gke as string
+// literals, not module.network outputs, so terraform builds no implicit edge
+// from the cluster to the subnet. module.gke must therefore depend_on
+// module.network explicitly — otherwise destroy can delete the subnet in
+// parallel with the still-running node pool and GCP rejects it. This asserts
+// the ordering edge stays in place.
+func TestTemplate_GKEDependsOnNetworkForDestroyOrdering(t *testing.T) {
+	src := string(mainTF)
+
+	// The literal wiring that removes the implicit edge (the reason the explicit
+	// depends_on is required). If these ever become module.network references,
+	// this guard can be revisited.
+	require.Contains(t, src, `subnetwork        = "${var.cluster_name}-subnet"`,
+		"subnetwork is expected to be a string literal — the premise of the explicit dependency")
+
+	depRE := regexp.MustCompile(`depends_on\s*=\s*\[([^\]]*)\]`)
+	var gkeDep string
+	for _, m := range depRE.FindAllStringSubmatch(src, -1) {
+		if strings.Contains(m[1], "module.network") {
+			gkeDep = m[1]
+		}
+	}
+	require.NotEmpty(t, gkeDep,
+		"module.gke must depend_on module.network so destroy tears the cluster down before the subnet")
 }

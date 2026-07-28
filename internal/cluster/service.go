@@ -273,9 +273,14 @@ func (s *ClusterService) cloudProviders() []provider.Provider {
 // in the workspace registry.
 func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	ctx := context.Background()
+	// k3d enumeration shells out to `k3d cluster list`, which needs a running
+	// Docker daemon. Treat its failure as best-effort (like the cloud loop
+	// below): a stopped Docker must not hide the cloud clusters. The warning
+	// goes to stderr so json/yaml output on stdout stays machine-clean.
 	clusters, err := s.manager.ListAllClusters(ctx)
 	if err != nil {
-		return nil, err
+		pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
+		clusters = nil
 	}
 	for _, cloud := range s.cloudProviders() {
 		cloudClusters, err := cloud.ListAllClusters(ctx)

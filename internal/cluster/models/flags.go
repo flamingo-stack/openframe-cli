@@ -28,6 +28,7 @@ type CreateFlags struct {
 	MinNodes      int
 	MaxNodes      int
 	Spot          bool
+	HA            bool
 	BackendConfig string
 }
 
@@ -80,6 +81,7 @@ func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
 	cmd.Flags().IntVar(&flags.MinNodes, "min-nodes", 0, "Node group minimum size (cloud only)")
 	cmd.Flags().IntVar(&flags.MaxNodes, "max-nodes", 0, "Node group maximum size (cloud only)")
 	cmd.Flags().BoolVar(&flags.Spot, "spot", false, "Use spot capacity for nodes (cloud only)")
+	cmd.Flags().BoolVar(&flags.HA, "ha", false, "Regional (multi-zone) control plane and nodes for HA (gke only); default is a single-zone cluster where --nodes is the exact node count")
 	cmd.Flags().StringVar(&flags.BackendConfig, "backend-config", "", "Remote terraform state: s3://bucket/prefix (eks) or gcs://bucket/prefix (gke); default is local state")
 }
 
@@ -179,8 +181,8 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 		case flags.BackendConfig != "":
 			return fmt.Errorf("--backend-config only applies to cloud cluster types (eks, gke)")
 		case flags.Region != "" || flags.Profile != "" || flags.Project != "" ||
-			flags.MachineType != "" || flags.MinNodes != 0 || flags.MaxNodes != 0 || flags.Spot:
-			return fmt.Errorf("--region/--profile/--project/--machine-type/--min-nodes/--max-nodes/--spot only apply to cloud cluster types (eks, gke)")
+			flags.MachineType != "" || flags.MinNodes != 0 || flags.MaxNodes != 0 || flags.Spot || flags.HA:
+			return fmt.Errorf("--region/--profile/--project/--machine-type/--min-nodes/--max-nodes/--spot/--ha only apply to cloud cluster types (eks, gke)")
 		}
 	}
 	if flags.MinNodes < 0 || flags.MaxNodes < 0 {

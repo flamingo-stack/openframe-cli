@@ -19,6 +19,22 @@ variable "cluster_name" { type = string }
 variable "project" { type = string }
 variable "region" { type = string }
 
+# regional=false (the default) builds a single-zone cluster in `zone`, so the
+# node pool's counts are the real totals: desired_nodes nodes, not
+# desired_nodes-per-zone. regional=true spreads the control plane and nodes
+# across the region's zones for HA, at ~zones× the node count.
+variable "regional" {
+  type    = bool
+  default = false
+}
+
+# The zone for a zonal (regional=false) cluster, e.g. "us-central1-a". Ignored
+# when regional=true. The CLI fills this from the region.
+variable "zone" {
+  type    = string
+  default = ""
+}
+
 # Kubernetes <major>.<minor> (e.g. "1.33"); empty means the GKE default.
 variable "kubernetes_version" {
   type    = string
@@ -129,7 +145,11 @@ module "gke" {
   project_id = var.project
   name       = var.cluster_name
   region     = var.region
-  regional   = true
+  regional   = var.regional
+  # Zonal clusters need their zone; a regional cluster ignores this and uses the
+  # region's default zone set. zones[0] is also the control-plane zone when
+  # zonal.
+  zones = var.regional ? [] : [var.zone]
 
   network           = module.network.network_name
   subnetwork        = "${var.cluster_name}-subnet"
@@ -165,7 +185,14 @@ module "gke" {
 
   # Private nodes need the NAT for egress (image pulls) from the first boot —
   # nothing else creates an implicit ordering on it.
-  depends_on = [google_compute_router_nat.nat]
+  #
+  # module.network is listed explicitly because subnetwork/ip_range_pods/
+  # ip_range_services are passed as string literals (not module outputs), so
+  # terraform would otherwise build NO edge from the cluster to the subnet.
+  # Without it, destroy can remove the subnet in parallel with the still-running
+  # node pool and GCP rejects it ("subnetwork in use by instance"); the explicit
+  # dependency makes the whole cluster tear down before any network resource.
+  depends_on = [google_compute_router_nat.nat, module.network]
 }
 
 output "cluster_name" {

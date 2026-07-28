@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,42 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// gcpResourcePathRE pulls the GCP resource path (projects/.../<kind>/<name>)
+// out of a terraform 409 error so an orphan can be named concretely.
+var gcpResourcePathRE = regexp.MustCompile(`projects/[^'"\s]+`)
+
+// orphanFromInterruptedCreate detects the specific failure where terraform
+// tries to create a resource that already exists in GCP (HTTP 409 /
+// alreadyExists). This is the signature of a create interrupted (SIGINT) after
+// the cloud API created a resource but before terraform saved it to state: the
+// resource is real but state-invisible, so every resume collides with it (409)
+// and 'cluster delete' — which only knows state-tracked resources — cannot
+// remove it. Returns human-readable remediation and true when this is that
+// case, so the caller can replace the generic "re-run to resume" hint (which
+// would loop forever here) with something actionable.
+func orphanFromInterruptedCreate(err error, terraformDir string) (string, bool) {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	if !strings.Contains(low, "alreadyexists") && !strings.Contains(low, "409") {
+		return "", false
+	}
+	resource := "the resource named in the error above"
+	if m := gcpResourcePathRE.FindString(msg); m != "" {
+		resource = m
+	}
+	return fmt.Sprintf(
+		"a resource already exists in GCP that terraform is not tracking:\n"+
+			"  %s\n"+
+			"This is the signature of a create that was interrupted after the resource was\n"+
+			"created but before its state was saved — so resume keeps colliding with it and\n"+
+			"'cluster delete' cannot remove it (delete only knows state-tracked resources).\n"+
+			"Resolve it one of two ways, then re-run create:\n"+
+			"  • delete the orphan in GCP (Cloud Console or the matching 'gcloud ... delete'), or\n"+
+			"  • import it into this cluster's state, e.g.:\n"+
+			"      terraform -chdir=%s import <resource.address> %s",
+		resource, terraformDir, resource), true
+}
 
 // Provider provisions and manages GKE clusters.
 type Provider struct {
@@ -89,6 +126,44 @@ func (p *Provider) preflightNameCollision(ctx context.Context, config models.Clu
 	return nil
 }
 
+// firstZoneInRegion returns the alphabetically-first zone of a region (e.g.
+// "us-central1-a"), used as the single location for a zonal cluster. Sorting
+// makes the choice deterministic across runs — a resume must not pick a
+// different zone and try to move the cluster. gcloud is already a hard GKE
+// prerequisite, so this adds no new dependency.
+func (p *Provider) firstZoneInRegion(ctx context.Context, project, region string) (string, error) {
+	res, err := p.executor.Execute(ctx, "gcloud", "compute", "zones", "list",
+		"--project", project,
+		"--filter", "name~^"+region+"-",
+		"--format=value(name)", "--sort-by=name", "--limit=1")
+	if err != nil {
+		return "", fmt.Errorf("listing zones for region %s: %w", region, err)
+	}
+	var zone string
+	if res != nil {
+		zone = strings.TrimSpace(strings.SplitN(strings.TrimSpace(res.Stdout), "\n", 2)[0])
+	}
+	if zone == "" {
+		return "", fmt.Errorf("no zones found for region %q in project %q", region, project)
+	}
+	return zone, nil
+}
+
+// ensureZone fills config.Cloud.Zone for a zonal (non-HA) cluster so the module
+// has a concrete location and the node count is exact. No-op for HA (regional)
+// clusters and when a zone is already set.
+func (p *Provider) ensureZone(ctx context.Context, config *models.ClusterConfig) error {
+	if config.Cloud == nil || config.Cloud.HA || config.Cloud.Zone != "" {
+		return nil
+	}
+	zone, err := p.firstZoneInRegion(ctx, config.Cloud.Project, config.Cloud.Region)
+	if err != nil {
+		return err
+	}
+	config.Cloud.Zone = zone
+	return nil
+}
+
 // backendTF renders the gcs backend block for a GKE workspace.
 func backendTF(cfg tfengine.BackendConfig) []byte {
 	return []byte(fmt.Sprintf(
@@ -120,6 +195,9 @@ func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig)
 		return tfengine.PlanSummary{}, err
 	}
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	if err := p.ensureZone(ctx, &config); err != nil {
 		return tfengine.PlanSummary{}, err
 	}
 
@@ -157,6 +235,9 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 		return nil, err
 	}
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
+		return nil, err
+	}
+	if err := p.ensureZone(ctx, &config); err != nil {
 		return nil, err
 	}
 
@@ -230,6 +311,10 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	}
 	if err := p.engine.ApplyPlan(ctx, ws.TerraformDir(), planFile); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
+		if hint, ok := orphanFromInterruptedCreate(err, ws.TerraformDir()); ok {
+			return nil, models.NewClusterOperationError("create", config.Name,
+				fmt.Errorf("%w\n\n%s", err, hint))
+		}
 		return nil, models.NewClusterOperationError("create", config.Name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", err, ws.Dir(), config.Name))
 	}
@@ -278,14 +363,24 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 		return models.NewClusterNotFoundError(name)
 	}
 	// Read the record BEFORE destroy: the endpoint in it is what proves the
-	// kubeconfig entry is ours to remove afterwards.
+	// kubeconfig entry is ours to remove afterwards, and the project is needed
+	// for the post-destroy orphan-disk sweep.
 	rec, recErr := ws.ReadRecord()
+	if recErr == nil {
+		// Tear down app workloads first so the CSI driver deletes PVC-backed
+		// Persistent Disks before the node pool dies — otherwise they orphan as
+		// billable leftovers. Best-effort; never blocks the destroy.
+		releaseWorkloadDisks(ctx, rec)
+	}
 	if err := p.engine.Destroy(ctx, ws.TerraformDir()); err != nil {
 		return models.NewClusterOperationError("delete", name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run delete to retry", err, ws.Dir()))
 	}
 	if recErr == nil {
 		_ = removeFromDefaultKubeconfig(rec)
+		// Surface any PVC-provisioned disks that outlived the destroy so a
+		// "cleaned up" delete never silently leaves billable orphans.
+		p.reportOrphanedDisks(ctx, rec.Project, name)
 	}
 	return ws.Remove()
 }
