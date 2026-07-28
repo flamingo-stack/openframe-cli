@@ -319,14 +319,24 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 		return models.NewClusterNotFoundError(name)
 	}
 	// Read the record BEFORE destroy: the endpoint in it is what proves the
-	// kubeconfig entry is ours to remove afterwards.
+	// kubeconfig entry is ours to remove afterwards, and the project is needed
+	// for the post-destroy orphan-disk sweep.
 	rec, recErr := ws.ReadRecord()
+	if recErr == nil {
+		// Tear down app workloads first so the CSI driver deletes PVC-backed
+		// Persistent Disks before the node pool dies — otherwise they orphan as
+		// billable leftovers. Best-effort; never blocks the destroy.
+		releaseWorkloadDisks(ctx, rec)
+	}
 	if err := p.engine.Destroy(ctx, ws.TerraformDir()); err != nil {
 		return models.NewClusterOperationError("delete", name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run delete to retry", err, ws.Dir()))
 	}
 	if recErr == nil {
 		_ = removeFromDefaultKubeconfig(rec)
+		// Surface any PVC-provisioned disks that outlived the destroy so a
+		// "cleaned up" delete never silently leaves billable orphans.
+		p.reportOrphanedDisks(ctx, rec.Project, name)
 	}
 	return ws.Remove()
 }
