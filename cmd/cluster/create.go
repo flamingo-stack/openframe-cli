@@ -290,6 +290,7 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 				MinNodes:      cf.MinNodes,
 				MaxNodes:      cf.MaxNodes,
 				Spot:          cf.Spot,
+				HA:            cf.HA,
 				BackendConfig: cf.BackendConfig,
 			}
 		}

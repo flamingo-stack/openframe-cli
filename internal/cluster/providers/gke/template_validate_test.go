@@ -22,11 +22,13 @@ func TestTerraformValidate(t *testing.T) {
 		t.Fatalf("the tfvalidate tag requires a terraform binary: %v", err)
 	}
 
+	// A zonal config with a concrete zone — the default topology the provider
+	// produces (ensureZone fills Zone before scaffolding).
 	vars, err := tfvarsFor(models.ClusterConfig{
 		Name:      "validate-only",
 		Type:      models.ClusterTypeGKE,
 		NodeCount: 3,
-		Cloud:     &models.CloudConfig{Region: "us-central1", Project: "validate-only"},
+		Cloud:     &models.CloudConfig{Region: "us-central1", Project: "validate-only", Zone: "us-central1-a"},
 	})
 	if err != nil {
 		t.Fatal(err)

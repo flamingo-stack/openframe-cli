@@ -126,6 +126,44 @@ func (p *Provider) preflightNameCollision(ctx context.Context, config models.Clu
 	return nil
 }
 
+// firstZoneInRegion returns the alphabetically-first zone of a region (e.g.
+// "us-central1-a"), used as the single location for a zonal cluster. Sorting
+// makes the choice deterministic across runs — a resume must not pick a
+// different zone and try to move the cluster. gcloud is already a hard GKE
+// prerequisite, so this adds no new dependency.
+func (p *Provider) firstZoneInRegion(ctx context.Context, project, region string) (string, error) {
+	res, err := p.executor.Execute(ctx, "gcloud", "compute", "zones", "list",
+		"--project", project,
+		"--filter", "name~^"+region+"-",
+		"--format=value(name)", "--sort-by=name", "--limit=1")
+	if err != nil {
+		return "", fmt.Errorf("listing zones for region %s: %w", region, err)
+	}
+	var zone string
+	if res != nil {
+		zone = strings.TrimSpace(strings.SplitN(strings.TrimSpace(res.Stdout), "\n", 2)[0])
+	}
+	if zone == "" {
+		return "", fmt.Errorf("no zones found for region %q in project %q", region, project)
+	}
+	return zone, nil
+}
+
+// ensureZone fills config.Cloud.Zone for a zonal (non-HA) cluster so the module
+// has a concrete location and the node count is exact. No-op for HA (regional)
+// clusters and when a zone is already set.
+func (p *Provider) ensureZone(ctx context.Context, config *models.ClusterConfig) error {
+	if config.Cloud == nil || config.Cloud.HA || config.Cloud.Zone != "" {
+		return nil
+	}
+	zone, err := p.firstZoneInRegion(ctx, config.Cloud.Project, config.Cloud.Region)
+	if err != nil {
+		return err
+	}
+	config.Cloud.Zone = zone
+	return nil
+}
+
 // backendTF renders the gcs backend block for a GKE workspace.
 func backendTF(cfg tfengine.BackendConfig) []byte {
 	return []byte(fmt.Sprintf(
@@ -157,6 +195,9 @@ func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig)
 		return tfengine.PlanSummary{}, err
 	}
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	if err := p.ensureZone(ctx, &config); err != nil {
 		return tfengine.PlanSummary{}, err
 	}
 
@@ -194,6 +235,9 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 		return nil, err
 	}
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
+		return nil, err
+	}
+	if err := p.ensureZone(ctx, &config); err != nil {
 		return nil, err
 	}
 
