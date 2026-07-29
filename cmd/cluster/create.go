@@ -170,6 +170,7 @@ func offerInfracostInstall() bool {
 	}
 	if err := infracostinstall.NewInstaller().Install(); err != nil {
 		pterm.Warning.Printf("infracost install failed: %v\n", err)
+		pterm.Info.Println("This is usually a transient network/DNS issue — re-running create will retry the download")
 		return false
 	}
 	return infracostAvailableFn()

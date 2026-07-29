@@ -219,6 +219,36 @@ func TestErrorHandler_HandleError_GenericError(t *testing.T) {
 	}
 }
 
+// resumeHintStub carries a resume hint the way the gke provider's error does.
+type resumeHintStub struct {
+	err  error
+	hint string
+}
+
+func (s resumeHintStub) Error() string     { return s.err.Error() }
+func (s resumeHintStub) Unwrap() error      { return s.err }
+func (s resumeHintStub) ResumeHint() string { return s.hint }
+
+// An interrupted operation carrying a resume hint must be classified as an
+// interruption AND run the hint-surfacing path without panicking (M2 wiring).
+func TestPrintInterruption_SurfacesResumeHint(t *testing.T) {
+	err := resumeHintStub{err: fmt.Errorf("apply: %w", context.Canceled), hint: "re-run create to resume"}
+
+	assert.True(t, NewErrorHandler(false).isUserInterruption(err),
+		"a context.Canceled chain must be treated as an interruption")
+
+	var rh interface{ ResumeHint() string }
+	assert.True(t, errors.As(err, &rh), "the hint must be discoverable the way printInterruption looks it up")
+
+	// pterm output isn't captured here (house convention); lock that the
+	// hint-carrying interruption path runs without panicking.
+	devNull, _ := os.Open(os.DevNull)
+	old := os.Stdout
+	os.Stdout = devNull
+	defer func() { os.Stdout = old }()
+	assert.NotPanics(t, func() { printInterruption(err) })
+}
+
 func TestErrorHandler_TypeAssertion(t *testing.T) {
 	handler := NewErrorHandler(true)
 

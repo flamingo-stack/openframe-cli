@@ -127,8 +127,7 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	// the caller's deferred cleanup run and the process exit via the normal
 	// error-return path.
 	if eh.isUserInterruption(err) {
-		fmt.Println()
-		pterm.Info.Println("Operation cancelled by user.")
+		printInterruption(err)
 		return
 	}
 
@@ -227,10 +226,25 @@ func HandleGlobalError(err error, verbose bool) error {
 	// cleanup (signal.Stop, cancel, temp-file restore) still runs. main.go
 	// recognises the sentinel and does not re-print the message.
 	if handler.isUserInterruption(err) {
-		fmt.Println()
-		pterm.Info.Println("Operation cancelled by user.")
+		printInterruption(err)
 	} else {
 		handler.HandleError(err)
 	}
 	return &AlreadyHandledError{OriginalError: err}
+}
+
+// printInterruption prints the "cancelled" notice, plus any resume hint an
+// error in the chain carries structurally. On an interruption the plain
+// err.Error() text is deliberately not shown, so a hint wrapped only as text
+// (e.g. "re-run create to resume") would be lost — a value implementing
+// ResumeHint() carries it through the swallow.
+func printInterruption(err error) {
+	fmt.Println()
+	pterm.Info.Println("Operation cancelled by user.")
+	var rh interface{ ResumeHint() string }
+	if stderrors.As(err, &rh) {
+		if hint := rh.ResumeHint(); hint != "" {
+			pterm.Info.Println(hint)
+		}
+	}
 }
