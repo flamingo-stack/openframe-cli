@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Pinned tool definitions replace the unverified "curl | bash" / "curl -o
@@ -192,10 +193,30 @@ func (d Downloader) InstallPinnedTool(ctx context.Context, tool PinnedTool, binD
 		}
 		return dest, nil
 	}
+	// Guard the raw-binary path: an asset that is actually an archive
+	// (.tar.gz/.tgz/.zip) but has neither Tarball nor Zip set would otherwise be
+	// written verbatim — installing the compressed archive bytes AS the
+	// executable. Fail loudly so a misconfigured pin is caught here, not as a
+	// corrupt binary later. (Infracost is a tar.gz but is installed via
+	// InstallVerifiedTarGz directly, bypassing this function — see its pin.)
+	if isArchiveAsset(asset.URL) {
+		return "", fmt.Errorf("pinned tool %q asset %s is an archive but sets neither Tarball nor Zip; refusing to install archive bytes as a binary", tool.Name, asset.URL)
+	}
 	if err := d.InstallVerified(ctx, asset, dest, 0o750); err != nil {
 		return "", err
 	}
 	return dest, nil
+}
+
+// isArchiveAsset reports whether a pinned asset URL points at a compressed
+// archive that must be extracted (Tarball/Zip), not installed as a raw binary.
+func isArchiveAsset(url string) bool {
+	for _, ext := range []string{".tar.gz", ".tgz", ".zip"} {
+		if strings.HasSuffix(url, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // exeName appends the Windows executable suffix where the OS requires it —
