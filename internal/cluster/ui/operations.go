@@ -271,8 +271,10 @@ func (ui *OperationsUI) ShowCleanupSummary(clusterName string, result models.Cle
 	}
 }
 
-// ShowOperationSuccess displays a friendly success message
-func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
+// ShowOperationSuccess displays a friendly success message. clusterType lets
+// the box tell the truth per backend — a GKE delete must not claim "TYPE: k3d"
+// or "Docker containers cleaned up".
+func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string, clusterType models.ClusterType) {
 	switch strings.ToLower(operation) {
 	case "delete":
 		pterm.Success.Printf("Cluster '%s' deleted successfully\n", pterm.Cyan(clusterName))
@@ -283,12 +285,10 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 			"NAME:         %s\n"+
 				"TYPE:         %s\n"+
 				"STATUS:       %s\n"+
-				"NETWORK:      %s\n"+
 				"RESOURCES:    %s",
 			pterm.Bold.Sprint(clusterName),
-			"k3d",
+			strings.ToUpper(string(clusterType)),
 			pterm.Red("Deleted"),
-			pterm.Gray("Removed"),
 			pterm.Gray("Cleaned up"),
 		)
 
@@ -297,13 +297,18 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string) {
 			WithTitleTopCenter().
 			Println(boxContent)
 
-		// Show deletion summary
+		// Show deletion summary — the mechanics differ per backend.
 		pterm.DefaultBasicText.Println()
 		pterm.Info.Printf("Deletion Summary:\n")
-		pterm.DefaultBasicText.Printf("  Cluster and nodes removed\n")
-		pterm.DefaultBasicText.Printf("  Docker containers cleaned up\n")
-		pterm.DefaultBasicText.Printf("  Network configuration removed\n")
-		pterm.DefaultBasicText.Printf("  Kubeconfig entries cleaned\n")
+		if clusterType == models.ClusterTypeK3d {
+			pterm.DefaultBasicText.Printf("  Cluster and nodes removed\n")
+			pterm.DefaultBasicText.Printf("  Docker containers cleaned up\n")
+			pterm.DefaultBasicText.Printf("  Network configuration removed\n")
+			pterm.DefaultBasicText.Printf("  Kubeconfig entries cleaned\n")
+		} else {
+			pterm.DefaultBasicText.Printf("  Cloud infrastructure destroyed (terraform)\n")
+			pterm.DefaultBasicText.Printf("  Kubeconfig entries cleaned\n")
+		}
 
 	default:
 		pterm.Success.Printf("Operation '%s' completed for cluster '%s'\n", operation, pterm.Cyan(clusterName))

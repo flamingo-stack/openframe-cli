@@ -216,7 +216,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 	}
 
 	// Show next steps
-	s.showNextSteps(config.Name)
+	s.showNextSteps(config.Name, config.Type)
 
 	return restConfig, nil
 }
@@ -728,8 +728,11 @@ func (s *ClusterService) isK3dWorkerNode(nodeName, clusterName string) bool {
 // when the port is taken (see providers/k3d/ports.go). So on any machine with
 // a second cluster the box pointed the user at a different cluster's API
 // server. The kubeconfig records the port that was actually bound.
-func (s *ClusterService) apiServerEndpoint(ctx context.Context, name string) string {
-	cfg, err := s.manager.GetRestConfig(ctx, name)
+func (s *ClusterService) apiServerEndpoint(name string) string {
+	// Resolve via the cluster-type-aware path (cloud registry first, then k3d),
+	// not the k3d manager directly — otherwise a GKE cluster's endpoint always
+	// read back empty and the box printed "(unknown — kubeconfig not readable)".
+	cfg, err := s.GetRestConfig(name)
 	if err != nil || cfg == nil {
 		return ""
 	}
@@ -754,16 +757,20 @@ func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) 
 		"NAME:     %s\n"+
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
-			"NODES:    %d\n"+
-			"NETWORK:  k3d-%s\n"+
-			"%s",
+			"NODES:    %d",
 		pterm.Bold.Sprint(info.Name),
 		strings.ToUpper(string(info.Type)),
 		pterm.Green("Ready"),
 		info.NodeCount,
-		info.Name,
-		apiServerLine(s.apiServerEndpoint(context.Background(), info.Name)),
 	)
+	// The k3d-<name> Docker network is k3d-specific; a cloud cluster shows its
+	// region instead so the box never invents a k3d network for GKE/EKS.
+	if info.Type == models.ClusterTypeK3d {
+		boxContent += fmt.Sprintf("\nNETWORK:  k3d-%s", info.Name)
+	} else if info.Region != "" {
+		boxContent += fmt.Sprintf("\nREGION:   %s", info.Region)
+	}
+	boxContent += "\n" + apiServerLine(s.apiServerEndpoint(info.Name))
 
 	pterm.DefaultBox.
 		WithTitle(" ✅ Cluster Created ").
@@ -772,7 +779,7 @@ func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) 
 }
 
 // showNextSteps displays clean next steps after cluster creation
-func (s *ClusterService) showNextSteps(clusterName string) {
+func (s *ClusterService) showNextSteps(clusterName string, clusterType models.ClusterType) {
 	// Skip showing next steps if UI is suppressed (e.g., during bootstrap)
 	if s.suppressUI {
 		return
@@ -780,7 +787,14 @@ func (s *ClusterService) showNextSteps(clusterName string) {
 
 	pterm.DefaultBasicText.Println()
 	pterm.Info.Printf("🚀 Next Steps:\n")
-	pterm.DefaultBasicText.Printf("  1. Bootstrap platform:   openframe bootstrap\n")
+	// k3d bootstraps the whole platform in one shot; a cloud cluster already
+	// exists, so the next step is installing the platform onto it (per the GKE
+	// guide) — 'openframe bootstrap' would try to build a local cluster.
+	if clusterType == models.ClusterTypeK3d {
+		pterm.DefaultBasicText.Printf("  1. Bootstrap platform:   openframe bootstrap\n")
+	} else {
+		pterm.DefaultBasicText.Printf("  1. Install the platform: openframe app install\n")
+	}
 	pterm.DefaultBasicText.Printf("  2. Check cluster nodes:  kubectl get nodes\n")
 	pterm.DefaultBasicText.Printf("  3. View cluster status:  openframe cluster status %s\n", clusterName)
 	pterm.DefaultBasicText.Printf("  4. View running pods:    kubectl get pods -A\n")
@@ -869,23 +883,23 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 		}
 	}
 
-	endpoint := s.apiServerEndpoint(context.Background(), status.Name)
+	endpoint := s.apiServerEndpoint(status.Name)
 	boxContent := fmt.Sprintf(
 		"NAME:     %s\n"+
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
-			"NODES:    %d\n"+
-			"NETWORK:  k3d-%s\n"+
-			"%s\n"+
-			"AGE:      %s",
+			"NODES:    %d",
 		pterm.Bold.Sprint(status.Name),
 		strings.ToUpper(string(status.Type)),
 		statusDisplay,
 		status.NodeCount,
-		status.Name,
-		apiServerLine(endpoint),
-		ageStr,
 	)
+	if status.Type == models.ClusterTypeK3d {
+		boxContent += fmt.Sprintf("\nNETWORK:  k3d-%s", status.Name)
+	} else if status.Region != "" {
+		boxContent += fmt.Sprintf("\nREGION:   %s", status.Region)
+	}
+	boxContent += fmt.Sprintf("\n%s\nAGE:      %s", apiServerLine(endpoint), ageStr)
 
 	pterm.DefaultBox.
 		WithTitle(" 📊 Cluster Status ").
@@ -895,7 +909,11 @@ func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo,
 	// Network information
 	pterm.DefaultBasicText.Println()
 	pterm.Info.Printf("🌐 Network Information:\n")
-	pterm.DefaultBasicText.Printf("  Network:    k3d-%s\n", status.Name)
+	if status.Type == models.ClusterTypeK3d {
+		pterm.DefaultBasicText.Printf("  Network:    k3d-%s\n", status.Name)
+	} else if status.Region != "" {
+		pterm.DefaultBasicText.Printf("  Region:     %s\n", status.Region)
+	}
 	if endpoint != "" {
 		pterm.DefaultBasicText.Printf("  API Server: %s\n", endpoint)
 	}

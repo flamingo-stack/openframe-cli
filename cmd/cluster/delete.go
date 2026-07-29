@@ -121,6 +121,6 @@ func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show friendly success message
-	operationsUI.ShowOperationSuccess("delete", clusterName)
+	operationsUI.ShowOperationSuccess("delete", clusterName, clusterType)
 	return nil
 }
