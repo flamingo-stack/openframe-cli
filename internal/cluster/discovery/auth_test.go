@@ -37,7 +37,10 @@ func newAuthHarness(t *testing.T, interactive bool) *authFlowHarness {
 			if strings.Contains(joined, "application-default") {
 				h.mock.SetResponse("application-default print-access-token", &executor.CommandResult{ExitCode: 0, Stdout: "ya29.token\n"})
 			} else {
+				// A fresh `auth login` makes the account listed AND able to mint a
+				// token (the freshness probe).
 				h.mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+				h.mock.SetResponse("gcloud auth print-access-token", &executor.CommandResult{ExitCode: 0, Stdout: "ya29.token\n"})
 			}
 			return nil
 		})
@@ -46,16 +49,27 @@ func newAuthHarness(t *testing.T, interactive bool) *authFlowHarness {
 
 func (h *authFlowHarness) loggedOut() {
 	h.mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: ""})
+	h.mock.SetResponse("gcloud auth print-access-token", &executor.CommandResult{ExitCode: 1, Stderr: "reauth required"})
 	h.mock.SetResponse("application-default print-access-token", &executor.CommandResult{ExitCode: 1, Stderr: "no credentials"})
 }
 
 func (h *authFlowHarness) loggedIn(withADC bool) {
 	h.mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+	h.mock.SetResponse("gcloud auth print-access-token", &executor.CommandResult{ExitCode: 0, Stdout: "ya29.token\n"})
 	if withADC {
 		h.mock.SetResponse("application-default print-access-token", &executor.CommandResult{ExitCode: 0, Stdout: "ya29.token\n"})
 	} else {
 		h.mock.SetResponse("application-default print-access-token", &executor.CommandResult{ExitCode: 1, Stderr: "no credentials"})
 	}
+}
+
+// primaryExpired models the M6 case: the account is listed ACTIVE but its token
+// is expired, so `gcloud auth list` still shows it while `print-access-token`
+// fails.
+func (h *authFlowHarness) primaryExpired() {
+	h.mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+	h.mock.SetResponse("gcloud auth print-access-token", &executor.CommandResult{ExitCode: 1, Stderr: "reauth required"})
+	h.mock.SetResponse("application-default print-access-token", &executor.CommandResult{ExitCode: 0, Stdout: "ya29.token\n"})
 }
 
 func TestAuthFlow_AlreadyAuthenticatedIsSilent(t *testing.T) {
@@ -89,6 +103,28 @@ func TestAuthFlow_ADCOnlyWhenCLICredsPresent(t *testing.T) {
 
 	require.NoError(t, h.flow.Ensure(context.Background(), true))
 	assert.Equal(t, []string{"auth application-default login"}, h.logins)
+}
+
+// M6: an expired primary login (listed ACTIVE but no mintable token) must be
+// caught and re-logged-in BEFORE the ADC step, not surface later as a raw error.
+func TestAuthFlow_ExpiredPrimaryLoginReLogsIn(t *testing.T) {
+	h := newAuthHarness(t, true)
+	h.primaryExpired()
+
+	require.NoError(t, h.flow.Ensure(context.Background(), true))
+	assert.Equal(t, []string{"auth login"}, h.logins,
+		"expired primary login must trigger re-login, and before any ADC step")
+}
+
+func TestAuthFlow_ExpiredPrimaryNonInteractiveErrors(t *testing.T) {
+	h := newAuthHarness(t, false)
+	h.primaryExpired()
+
+	err := h.flow.Ensure(context.Background(), true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expired", "the error must name the expired login, with the gcloud auth login hint")
+	assert.Contains(t, err.Error(), "gcloud auth login")
+	assert.Empty(t, h.logins)
 }
 
 func TestAuthFlow_NonInteractiveNeverPrompts(t *testing.T) {

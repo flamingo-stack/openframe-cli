@@ -66,8 +66,21 @@ func (f *AuthFlow) Ensure(ctx context.Context, requireADC bool) error {
 	case NotAuthenticated:
 		if err := f.login(ctx, "Google Cloud login required. Log in now (opens a browser)?",
 			[]string{"auth", "login"},
-			func() bool { return d.AuthStatus(ctx) == Authenticated },
+			func() bool { return f.hasFreshLogin(ctx) },
 			"gcloud is not authenticated — run 'gcloud auth login'"); err != nil {
+			return err
+		}
+	}
+
+	// A listed ACTIVE account can still have an EXPIRED token — `gcloud auth
+	// list` reports it as active regardless. Force a refresh here so an expired
+	// primary login is caught up front with a clear hint, instead of surfacing
+	// later as a raw gcloud error (after the ADC step, or mid-terraform).
+	if !f.hasFreshLogin(ctx) {
+		if err := f.login(ctx, "Google Cloud login has expired. Log in again now (opens a browser)?",
+			[]string{"auth", "login"},
+			func() bool { return f.hasFreshLogin(ctx) },
+			"gcloud login has expired — run 'gcloud auth login'"); err != nil {
 			return err
 		}
 	}
@@ -87,6 +100,15 @@ func (f *AuthFlow) Ensure(ctx context.Context, requireADC bool) error {
 // hasADC probes Application Default Credentials without prompting.
 func (f *AuthFlow) hasADC(ctx context.Context) bool {
 	result, err := f.exec.Execute(ctx, "gcloud", "auth", "application-default", "print-access-token")
+	return err == nil && result != nil && strings.TrimSpace(result.Stdout) != ""
+}
+
+// hasFreshLogin reports whether the primary gcloud login can actually mint a
+// token — present AND not expired. `gcloud auth print-access-token` forces a
+// refresh and fails on an expired login, unlike `gcloud auth list` (which
+// reports an expired account as still ACTIVE).
+func (f *AuthFlow) hasFreshLogin(ctx context.Context) bool {
+	result, err := f.exec.Execute(ctx, "gcloud", "auth", "print-access-token", "--quiet")
 	return err == nil && result != nil && strings.TrimSpace(result.Stdout) != ""
 }
 
