@@ -197,6 +197,11 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// instead of riding the full timeout.
 	fatalManifest := newFatalManifestTracker()
 
+	// Terminally-Degraded app tracking (see degraded.go): an app that stays
+	// Degraded+Synced with a genuinely-stuck pod (CrashLoop / ImagePull) fails
+	// fast with that pod's crash logs, instead of hanging to the timeout.
+	degraded := newDegradedTracker()
+
 	// Repo-server issue tracking for recovery logic
 	repoServerRecoveryAttempts := 0
 	maxRepoServerRecoveryAttempts := 3 // Increased from 2 for CI resilience
@@ -402,6 +407,23 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					requestedRef = config.AppOfApps.GitHubBranch
 				}
 				return fatalManifestError(requestedRef, fatal)
+			}
+
+			// Terminally-Degraded fail-fast: an app that has stayed Degraded+Synced
+			// long enough is only aborted once we confirm a genuinely-stuck pod
+			// (CrashLoop / ImagePull / repeated crashes) — so a slow-but-recovering
+			// workload is never cut off. The error carries the pod's crash logs and
+			// events, so it says WHY, not just that it hung.
+			if cand := degraded.observe(apps, now); len(cand) > 0 {
+				if diag, terminal := m.diagnoseFailingApps(localCtx, cand); terminal {
+					spinnerMutex.Lock()
+					if !spinnerStopped && spinner != nil {
+						spinner.Fail("An application is Degraded with a workload that will not recover")
+						spinnerStopped = true
+					}
+					spinnerMutex.Unlock()
+					return degradedAppError(cand, diag)
+				}
 			}
 
 			// Stall handling (finding N3, per-application): an app that has sat

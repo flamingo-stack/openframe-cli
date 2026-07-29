@@ -238,6 +238,7 @@ type Application struct {
 	Path             string // Path in repository
 	TargetRevision   string // Target revision (branch/tag)
 	ReconciledAt     string // Last reconciliation time
+	Namespace        string // spec.destination.namespace — where this app's workloads run
 }
 
 // argoApp represents the minimal ArgoCD application structure for JSON parsing.
@@ -334,6 +335,7 @@ func applicationFromArgoApp(item argoApp) Application {
 		Path:             item.Spec.Source.Path,
 		TargetRevision:   item.Spec.Source.TargetRevision,
 		ReconciledAt:     item.Status.ReconciledAt,
+		Namespace:        item.Spec.Destination.Namespace,
 	}
 }
 
