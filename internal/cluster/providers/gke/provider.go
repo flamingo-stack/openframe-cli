@@ -137,14 +137,14 @@ func (p *Provider) firstZoneInRegion(ctx context.Context, project, region string
 		"--filter", "name~^"+region+"-",
 		"--format=value(name)", "--sort-by=name", "--limit=1")
 	if err != nil {
-		return "", fmt.Errorf("listing zones for region %s: %w", region, err)
+		return "", fmt.Errorf("could not list zones for region %s (enable the Compute Engine API for project %q and check your gcloud access): %w", region, project, err)
 	}
 	var zone string
 	if res != nil {
 		zone = strings.TrimSpace(strings.SplitN(strings.TrimSpace(res.Stdout), "\n", 2)[0])
 	}
 	if zone == "" {
-		return "", fmt.Errorf("no zones found for region %q in project %q", region, project)
+		return "", fmt.Errorf("no zones found for region %q in project %q — is %q a valid GCP region?", region, project, region)
 	}
 	return zone, nil
 }
