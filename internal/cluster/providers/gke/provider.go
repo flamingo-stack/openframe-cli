@@ -378,9 +378,10 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 	}
 	if recErr == nil {
 		_ = removeFromDefaultKubeconfig(rec)
-		// Surface any PVC-provisioned disks that outlived the destroy so a
-		// "cleaned up" delete never silently leaves billable orphans.
-		p.reportOrphanedDisks(ctx, rec.Project, name)
+		// Sweep any PVC-provisioned disks that outlived the destroy: delete them
+		// when the caller consented to an unattended teardown (--force), else
+		// report them — a "cleaned up" delete must never silently leave orphans.
+		p.sweepOrphanedDisks(ctx, rec.Project, name, force)
 	}
 	return ws.Remove()
 }
