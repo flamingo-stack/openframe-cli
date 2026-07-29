@@ -119,14 +119,24 @@ func TestOperationsUI_ShowOperationSuccess(t *testing.T) {
 	// "cleanup" is deliberately absent: cleanup reports through
 	// ShowCleanupSummary, which prints the counts the run actually produced
 	// rather than a fixed list of accomplishments.
-	t.Run("shows delete success without panicking", func(t *testing.T) {
+	t.Run("shows k3d delete success without panicking", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("ShowOperationSuccess panicked: %v", r)
 			}
 		}()
 
-		ui.ShowOperationSuccess("delete", "test-cluster")
+		ui.ShowOperationSuccess("delete", "test-cluster", models.ClusterTypeK3d)
+	})
+
+	t.Run("shows gke delete success without panicking", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("ShowOperationSuccess panicked: %v", r)
+			}
+		}()
+
+		ui.ShowOperationSuccess("delete", "test-cluster", models.ClusterTypeGKE)
 	})
 
 	t.Run("shows generic success without panicking", func(t *testing.T) {
@@ -136,7 +146,7 @@ func TestOperationsUI_ShowOperationSuccess(t *testing.T) {
 			}
 		}()
 
-		ui.ShowOperationSuccess("unknown", "test-cluster")
+		ui.ShowOperationSuccess("unknown", "test-cluster", models.ClusterTypeK3d)
 	})
 }
 
