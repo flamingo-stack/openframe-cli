@@ -2,10 +2,12 @@ package gke
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
+	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -165,10 +167,10 @@ type disk struct {
 
 // sweepOrphanedDisks finds Persistent Disks still labeled for this cluster after
 // the destroy. Post-destroy they are unambiguous orphans of a cluster that no
-// longer exists. When the caller consented to an unattended teardown (force),
-// it deletes them so the cluster leaves zero billable leftovers; otherwise it
-// reports them with the exact cleanup command and never deletes cloud data
-// without consent. Best-effort throughout.
+// longer exists. It deletes them when the operator consents — standing consent
+// via --force, or an interactive yes to the prompt — so the cluster leaves zero
+// billable leftovers; otherwise it reports them with the exact cleanup command
+// and never deletes cloud data without consent. Best-effort throughout.
 func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name string, force bool) {
 	if project == "" {
 		return
@@ -185,14 +187,21 @@ func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name string,
 		return
 	}
 
+	// --force is standing consent; otherwise, in an interactive session, ask.
+	// The disks are unambiguous orphans of a cluster that no longer exists, but
+	// they hold data, so deletion always requires consent.
+	del := force
+	interactive := !force && !sharedUI.IsNonInteractive()
 	if !force {
-		pterm.Warning.Printf("%d Persistent Disk(s) labeled for cluster %q survived the destroy (PVC-provisioned, outside terraform state):\n", len(disks), name)
-		for _, d := range disks {
-			pterm.Warning.Printf("  - %s\n", d.name)
-		}
-		pterm.Warning.Printf("They are orphans of the now-deleted cluster. Remove them with:\n"+
-			"  gcloud compute disks list --project %s --filter=\"labels.goog-k8s-cluster-name=%s\"\n"+
-			"  (or re-run delete with --force to have them cleaned up automatically)\n", project, name)
+		printOrphanList(disks, name)
+	}
+	if interactive {
+		confirmed, cErr := sharedUI.ConfirmActionInteractive(
+			fmt.Sprintf("Delete these %d orphaned disk(s) now?", len(disks)), false)
+		del = cErr == nil && confirmed
+	}
+	if !del {
+		printOrphanCleanupHint(project, name)
 		return
 	}
 
@@ -214,6 +223,21 @@ func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name string,
 		return
 	}
 	pterm.Success.Printf("Removed %d orphaned Persistent Disk(s)\n", len(disks))
+}
+
+// printOrphanList shows the surviving disks (what a delete/report decision is about).
+func printOrphanList(disks []disk, name string) {
+	pterm.Warning.Printf("%d Persistent Disk(s) labeled for cluster %q survived the destroy (PVC-provisioned, outside terraform state):\n", len(disks), name)
+	for _, d := range disks {
+		pterm.Warning.Printf("  - %s\n", d.name)
+	}
+}
+
+// printOrphanCleanupHint prints the manual cleanup command for the no-consent path.
+func printOrphanCleanupHint(project, name string) {
+	pterm.Warning.Printf("Left in place. Remove them with:\n"+
+		"  gcloud compute disks list --project %s --filter=\"labels.goog-k8s-cluster-name=%s\"\n"+
+		"  (or re-run delete with --force to have them cleaned up automatically)\n", project, name)
 }
 
 // parseDisks turns `gcloud compute disks list

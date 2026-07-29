@@ -88,6 +88,27 @@ func TestAllProjects_ErrorsWhenGcloudFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "listing GCP projects")
 }
 
+func TestRegions_SortsDedupesAndSkipsEmpty(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("gcloud compute regions list", &executor.CommandResult{
+		ExitCode: 0,
+		Stdout:   "us-central1\neurope-west1\nus-central1\n\n  us-east1  \n",
+	})
+
+	regions, err := NewGKEDiscoverer(mock).Regions(context.Background(), "tenant-y0")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"europe-west1", "us-central1", "us-east1"}, regions)
+}
+
+func TestRegions_ErrorsWhenGcloudFails(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	mock.SetShouldFail(true, "project not accessible")
+
+	_, err := NewGKEDiscoverer(mock).Regions(context.Background(), "bad-proj")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "listing GCP regions")
+}
+
 func TestDiscover_ListsClustersAcrossProjects(t *testing.T) {
 	kubeconfigWith(t, map[string]string{
 		"connectgateway_tenant-runners-db9z_us-central1_tenant-cluster-1": "",
