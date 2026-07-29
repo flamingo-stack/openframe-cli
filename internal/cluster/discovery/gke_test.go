@@ -65,6 +65,29 @@ func TestProjects_DedupesAndSkipsEmpty(t *testing.T) {
 	assert.Equal(t, []string{"shared-4t5d", "shared-j62b", "tenant-runners-db9z"}, projects)
 }
 
+func TestAllProjects_SortsDedupesAndSkipsEmpty(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	// gcloud projects list --format=value(projectId): one id per line, unsorted,
+	// with a duplicate and blank lines.
+	mock.SetResponse("gcloud projects list", &executor.CommandResult{
+		ExitCode: 0,
+		Stdout:   "tenant-y0\nshared-abc\ntenant-y0\n\n  prod-42  \n",
+	})
+
+	projects, err := NewGKEDiscoverer(mock).AllProjects(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"prod-42", "shared-abc", "tenant-y0"}, projects)
+}
+
+func TestAllProjects_ErrorsWhenGcloudFails(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	mock.SetShouldFail(true, "not logged in")
+
+	_, err := NewGKEDiscoverer(mock).AllProjects(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "listing GCP projects")
+}
+
 func TestDiscover_ListsClustersAcrossProjects(t *testing.T) {
 	kubeconfigWith(t, map[string]string{
 		"connectgateway_tenant-runners-db9z_us-central1_tenant-cluster-1": "",

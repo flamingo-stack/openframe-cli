@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/manifoldco/promptui"
 	"github.com/pterm/pterm"
@@ -77,8 +80,39 @@ func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 	}
 }
 
-// PromptProject prompts for the GCP project a GKE cluster lands in.
+// listSelectableProjects fetches the account's GCP projects for the wizard
+// picker. It is a package var so tests can inject a fake list without a real
+// gcloud; it returns nil on any error, which makes PromptProject fall back to
+// free-text entry.
+var listSelectableProjects = func(ctx context.Context) []string {
+	projects, err := discovery.NewGKEDiscoverer(executor.NewRealCommandExecutor(false, false)).AllProjects(ctx)
+	if err != nil {
+		return nil
+	}
+	return projects
+}
+
+// manualProjectChoice is the picker's escape hatch to type a project ID that
+// the list didn't include (e.g. a project the identity can use but not list).
+const manualProjectChoice = "↳ enter a project ID manually…"
+
+// PromptProject asks for the GCP project a GKE cluster lands in. Interactively,
+// when gcloud can enumerate the account's projects, it offers a picker (with a
+// manual-entry escape hatch) so the user selects rather than retypes a project
+// ID. It falls back to free-text entry when non-interactive, when no projects
+// are listed, or when gcloud errors.
 func (ws *WizardSteps) PromptProject() (string, error) {
+	if !sharedUI.IsNonInteractive() {
+		if projects := listSelectableProjects(context.Background()); len(projects) > 0 {
+			_, choice, err := sharedUI.SelectFromList("GCP Project", append(projects, manualProjectChoice))
+			if err != nil {
+				return "", err
+			}
+			if choice != manualProjectChoice {
+				return strings.TrimSpace(choice), nil
+			}
+		}
+	}
 	prompt := promptui.Prompt{
 		Label:    "GCP Project",
 		Validate: sharedUI.ValidateNonEmpty("project"),
