@@ -338,10 +338,39 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 		if err := discovery.NewAuthFlow(utils.CommandExecutor()).Ensure(cmd.Context(), true); err != nil {
 			return err
 		}
+		// In flag mode the project came from --project, not the wizard's
+		// validated picker, so check it against the accessible projects and fail
+		// fast with the valid options — before terraform runs.
+		if globalFlags.Create.SkipWizard {
+			if err := validateGKEProjectFlag(cmd.Context(), utils.CommandExecutor(), config.Cloud.Project); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Execute cluster creation through service layer
 	// We ignore the returned rest.Config as it's not needed for standalone cluster creation
 	_, err := service.CreateCluster(cmd.Context(), config)
 	return err
+}
+
+// validateGKEProjectFlag checks a --project against the gcloud identity's
+// accessible projects and returns an actionable error (listing the valid
+// options) when it is not among them. Best-effort: if the projects cannot be
+// listed (permissions, network), it returns nil and defers to the provider
+// preflight's 'gcloud projects describe' accessibility check.
+func validateGKEProjectFlag(ctx context.Context, exec executor.CommandExecutor, project string) error {
+	projects, err := discovery.NewGKEDiscoverer(exec).AllProjects(ctx)
+	if err != nil || len(projects) == 0 {
+		return nil // can't enumerate — the provider preflight still validates access
+	}
+	for _, p := range projects {
+		if p == project {
+			return nil
+		}
+	}
+	if len(projects) > 15 {
+		return fmt.Errorf("GCP project %q is not among your %d accessible projects — run 'gcloud projects list' to see them", project, len(projects))
+	}
+	return fmt.Errorf("GCP project %q is not among your accessible projects: %s", project, strings.Join(projects, ", "))
 }
