@@ -124,9 +124,37 @@ func (ws *WizardSteps) PromptProject() (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-// PromptRegion prompts for the cloud region a cluster lands in; the label is
-// provider-specific ("GCP Region" / "AWS Region").
-func (ws *WizardSteps) PromptRegion(label, defaultRegion string) (string, error) {
+// listSelectableRegions fetches a GCP project's Compute regions for the wizard
+// picker. Package var so tests can inject a fake list; nil on any error → the
+// caller falls back to free-text entry.
+var listSelectableRegions = func(ctx context.Context, project string) []string {
+	regions, err := discovery.NewGKEDiscoverer(executor.NewRealCommandExecutor(false, false)).Regions(ctx, project)
+	if err != nil {
+		return nil
+	}
+	return regions
+}
+
+// manualRegionChoice is the region picker's escape hatch to type a region the
+// list didn't include.
+const manualRegionChoice = "↳ enter a region manually…"
+
+// PromptRegion asks for the cloud region. For GKE (project != ""), interactively
+// it offers a picker of the project's Compute regions (with a manual-entry
+// escape hatch); it falls back to free-text when non-interactive, when no
+// project is known (EKS), when regions can't be listed, or when gcloud errors.
+func (ws *WizardSteps) PromptRegion(label, defaultRegion, project string) (string, error) {
+	if project != "" && !sharedUI.IsNonInteractive() {
+		if regions := listSelectableRegions(context.Background(), project); len(regions) > 0 {
+			_, choice, err := sharedUI.SelectFromList(label, append(regions, manualRegionChoice))
+			if err != nil {
+				return "", err
+			}
+			if choice != manualRegionChoice {
+				return strings.TrimSpace(choice), nil
+			}
+		}
+	}
 	prompt := promptui.Prompt{
 		Label:    label,
 		Default:  defaultRegion,

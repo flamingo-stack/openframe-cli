@@ -130,6 +130,32 @@ func (d *GKEDiscoverer) AllProjects(ctx context.Context) ([]string, error) {
 	return projects, nil
 }
 
+// Regions returns the Compute Engine regions available in a project (gcloud
+// compute regions list), sorted. Used to populate the create wizard's region
+// picker so a GKE user selects a valid region instead of typing one.
+func (d *GKEDiscoverer) Regions(ctx context.Context, project string) ([]string, error) {
+	result, err := d.exec.Execute(ctx, "gcloud", "compute", "regions", "list",
+		"--project", project, "--format=value(name)")
+	if err != nil {
+		return nil, fmt.Errorf("listing GCP regions for project %q: %w", project, err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var regions []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		r := strings.TrimSpace(line)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		regions = append(regions, r)
+	}
+	sort.Strings(regions)
+	return regions, nil
+}
+
 // ConfigurationForProject returns the name of the first gcloud configuration
 // pointing at the given project, or "" when none does.
 func (d *GKEDiscoverer) ConfigurationForProject(ctx context.Context, project string) (string, error) {

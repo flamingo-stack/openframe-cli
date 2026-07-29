@@ -101,7 +101,9 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 			w.config.Project = project
 		}
 
-		region, err := steps.PromptRegion(regionLabel, defaultRegion)
+		// w.config.Project is set for GKE (the project step ran above) and ""
+		// for EKS; PromptRegion uses it to offer a GCP region picker, else free-text.
+		region, err := steps.PromptRegion(regionLabel, defaultRegion, w.config.Project)
 		if err != nil {
 			return ClusterConfig{}, err
 		}
