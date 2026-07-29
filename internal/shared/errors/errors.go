@@ -155,8 +155,10 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 		// Generic error handling
 		pterm.Error.Printf("❌ Operation failed\n")
 		if eh.verbose {
+			// %v already carries the full error chain; the Go type (e.g.
+			// *errors.errorString) is internal noise that only leaked implementation
+			// detail to the user.
 			pterm.Printf("  Details: %v\n", err)
-			pterm.Printf("  Type: %T\n", err)
 		} else {
 			// Show only the essential error message
 			pterm.Printf("  Error: %s\n", errorMsg)
