@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -157,7 +158,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	startTime := time.Now()
 	timeout := m.waitTimeout
 	if timeout <= 0 {
-		timeout = 60 * time.Minute // default, sized for a fresh install
+		timeout = defaultAppWaitTimeout()
 	}
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
@@ -218,8 +219,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// that never became ready. The loop had this all along and threw it away:
 	// "timeout waiting for ArgoCD applications after 1h0m0s" told the user
 	// nothing about which of the apps was stuck, or what to run next.
-	var lastNotReadyApps []string  // decorated "name (Health: X)" labels, for the list
-	var lastNotReadyNames []string // bare names, for the kubectl example
+	var lastNotReadyApps []string    // decorated "name (Health: X)" labels, for the list
+	var lastNotReadyNames []string   // bare names, for the kubectl example
+	var lastNotReadyDetails []string // per-app health messages, for the timeout diagnostic
 	lastReadyCount, lastTotalApps := 0, 0
 	// The spinner already animates for interactive users, so the textual line is
 	// mainly a heartbeat for logs and CI; verbose users want it more often.
@@ -242,7 +244,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()
-				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps, lastNotReadyNames)
+				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps, lastNotReadyNames, lastNotReadyDetails)
 			}
 
 			// Periodic cluster health check
@@ -377,6 +379,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			notReadyApps := assess.notReady
 			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
 			lastNotReadyNames = assess.notReadyNames
+			lastNotReadyDetails = notReadyDiagnostics(apps)
 
 			// Fail fast on deterministic manifest errors (see fatalmanifest.go):
 			// once an app has shown the same "content missing at this revision"
@@ -858,7 +861,7 @@ const maxAppsInTimeoutError = 10
 // must be kept separate: feeding a decorated label into `kubectl describe
 // application` produced `kubectl describe application argocd-apps (Health:
 // Progressing) -n argocd`, which is not a runnable command.
-func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notReadyNames []string) error {
+func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notReadyNames, notReadyDetails []string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "timeout after %s waiting for ArgoCD applications", timeout)
 	if total > 0 {
@@ -875,9 +878,57 @@ func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notRe
 		fmt.Fprintf(&b, "; still not ready: %s%s", strings.Join(shown, ", "), suffix)
 	}
 
+	// Per-app health messages say WHY (e.g. a CrashLoopBackOff pod for a
+	// Degraded+Synced app), so the timeout is actionable rather than opaque.
+	if len(notReadyDetails) > 0 {
+		b.WriteString("\nWhy they are not ready:")
+		for _, d := range notReadyDetails {
+			b.WriteString("\n" + d)
+		}
+	}
+
 	b.WriteString("\nInspect them with: kubectl get applications -n argocd")
 	if len(notReadyNames) > 0 {
 		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReadyNames[0])
 	}
 	return fmt.Errorf("%s", b.String())
+}
+
+// defaultAppWaitTimeout is the install/bootstrap application-wait budget: 60m,
+// overridable via OPENFRAME_APP_WAIT_TIMEOUT (a Go duration, e.g. "35m"). A CI
+// job with a shorter step cap sets it so the CLI hits its OWN timeout — and
+// prints its diagnostic — before the job is killed opaquely. The upgrade path
+// is unaffected: it sets an explicit WithWaitTimeout (>0), so this default
+// branch never runs there.
+func defaultAppWaitTimeout() time.Duration {
+	const fallback = 60 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("OPENFRAME_APP_WAIT_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return fallback
+}
+
+// notReadyDiagnostics returns one diagnostic line per not-ready application,
+// carrying ArgoCD's health message — which for a Degraded workload names the
+// failing resource/pod — so a timeout explains WHY, not just which app. The
+// message is trimmed to keep the error readable.
+func notReadyDiagnostics(apps []Application) []string {
+	const maxMsg = 300
+	var out []string
+	for _, app := range apps {
+		if app.Health == ArgoCDHealthHealthy && app.Sync == ArgoCDSyncSynced {
+			continue
+		}
+		line := fmt.Sprintf("  - %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
+		if msg := strings.TrimSpace(app.HealthMessage); msg != "" {
+			if len(msg) > maxMsg {
+				msg = msg[:maxMsg] + "…"
+			}
+			line += "\n      " + strings.ReplaceAll(msg, "\n", "\n      ")
+		}
+		out = append(out, line)
+	}
+	return out
 }
