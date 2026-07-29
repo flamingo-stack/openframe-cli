@@ -315,8 +315,13 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 			return nil, models.NewClusterOperationError("create", config.Name,
 				fmt.Errorf("%w\n\n%s", err, hint))
 		}
+		// Carry the resume hint structurally as well as in the text: on Ctrl+C the
+		// interruption handler prints only "Operation cancelled by user." and drops
+		// the message, so a text-only hint would never reach the user even though
+		// the workspace state is preserved and the create IS resumable.
+		resumeHint := fmt.Sprintf("The terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", ws.Dir(), config.Name)
 		return nil, models.NewClusterOperationError("create", config.Name,
-			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", err, ws.Dir(), config.Name))
+			withResumeHint(fmt.Errorf("%w\n%s", err, resumeHint), resumeHint))
 	}
 
 	outputs, err := p.engine.Outputs(ctx, ws.TerraformDir())
