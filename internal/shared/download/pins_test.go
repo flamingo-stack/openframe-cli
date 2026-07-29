@@ -333,4 +333,47 @@ func TestInfracost_Pins(t *testing.T) {
 			t.Errorf("%s/%s: URL %q must contain version and end with platform.tar.gz", p.os, p.arch, asset.URL)
 		}
 	}
+	// Infracost is a .tar.gz but INTENTIONALLY does not set Tarball: its archive
+	// member layout is irregular, so it is installed via InstallVerifiedTarGz
+	// directly (see the pin comment), never through InstallPinnedTool's tarball
+	// convention. This asserts the intent so a "helpful" Tarball: true — which
+	// would look for the wrong member and break the install — is caught.
+	if Infracost.Tarball || Infracost.Zip {
+		t.Error("Infracost must not set Tarball/Zip: it is installed via InstallVerifiedTarGz, not InstallPinnedTool")
+	}
+}
+
+func TestIsArchiveAsset(t *testing.T) {
+	for _, u := range []string{"https://x/tool-linux-amd64.tar.gz", "https://x/tool.tgz", "https://x/tool_amd64.zip"} {
+		if !isArchiveAsset(u) {
+			t.Errorf("%q must be detected as an archive", u)
+		}
+	}
+	for _, u := range []string{"https://x/tool-linux-amd64", "https://x/tool.exe", "https://x/k3d-darwin-arm64"} {
+		if isArchiveAsset(u) {
+			t.Errorf("%q is a raw binary, not an archive", u)
+		}
+	}
+}
+
+// A pinned archive that forgets Tarball/Zip must fail loudly at install time,
+// not silently write the compressed bytes as the executable.
+func TestInstallPinnedTool_RefusesUnflaggedArchive(t *testing.T) {
+	tool := PinnedTool{
+		Name:    "bogus",
+		Version: "v1.0.0",
+		Assets: map[string]PinnedAsset{
+			runtime.GOOS + "/" + runtime.GOARCH: {
+				URL:    "https://example.invalid/bogus-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz",
+				SHA256: strings.Repeat("a", 64),
+			},
+		},
+	}
+	_, err := (Downloader{}).InstallPinnedTool(context.Background(), tool, t.TempDir())
+	if err == nil {
+		t.Fatal("expected an error for a .tar.gz asset with neither Tarball nor Zip set")
+	}
+	if !strings.Contains(err.Error(), "archive") {
+		t.Fatalf("error should explain the archive misconfiguration, got: %v", err)
+	}
 }
