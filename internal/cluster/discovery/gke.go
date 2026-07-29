@@ -103,6 +103,33 @@ func (d *GKEDiscoverer) Projects(ctx context.Context) ([]string, error) {
 	return projects, nil
 }
 
+// AllProjects returns every GCP project the active gcloud identity can list
+// (gcloud projects list), sorted and de-duplicated. Unlike Projects — which is
+// scoped to the projects named by the user's gcloud CONFIGURATIONS — this is
+// the full account-wide set, used to populate the create wizard's project
+// picker and to validate a --project flag against the accessible projects.
+func (d *GKEDiscoverer) AllProjects(ctx context.Context) ([]string, error) {
+	result, err := d.exec.Execute(ctx, "gcloud", "projects", "list", "--format=value(projectId)")
+	if err != nil {
+		return nil, fmt.Errorf("listing GCP projects: %w", err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var projects []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		p := strings.TrimSpace(line)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		projects = append(projects, p)
+	}
+	sort.Strings(projects)
+	return projects, nil
+}
+
 // ConfigurationForProject returns the name of the first gcloud configuration
 // pointing at the given project, or "" when none does.
 func (d *GKEDiscoverer) ConfigurationForProject(ctx context.Context, project string) (string, error) {
