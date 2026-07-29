@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/flamingo-stack/openframe-cli/cmd/app"
@@ -40,10 +41,54 @@ var (
 
 // DefaultVersionInfo provides default version information, populated from the
 // build-time vars above (overridden via -ldflags -X at release time).
-var DefaultVersionInfo = VersionInfo{
-	Version: version,
-	Commit:  commit,
-	Date:    date,
+var DefaultVersionInfo = resolveVersionInfo(version, commit, date)
+
+// resolveVersionInfo returns the build-time version metadata. On a dev build —
+// where the release-time -ldflags were not applied, so commit is "none" and
+// date "unknown" — it backfills them from the VCS stamp Go embeds in every
+// `go build`/`go install`/`make build` binary, so the build is identifiable
+// ("dev (85c7c15f11b9) built on <time>") instead of "dev (none) built on
+// unknown". The version string stays "dev", which is what keeps self-update
+// disabled for non-release builds.
+func resolveVersionInfo(version, commit, date string) VersionInfo {
+	info := VersionInfo{Version: version, Commit: commit, Date: date}
+	if commit != "none" && date != "unknown" {
+		return info // release build — ldflags were applied
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		info = backfillFromVCS(info, bi.Settings)
+	}
+	return info
+}
+
+// backfillFromVCS fills commit/date from Go's embedded VCS settings, but only
+// where they are still at their dev defaults.
+func backfillFromVCS(info VersionInfo, settings []debug.BuildSetting) VersionInfo {
+	var rev, vcsTime string
+	var modified bool
+	for _, s := range settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			vcsTime = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if info.Commit == "none" && rev != "" {
+		if len(rev) > 12 {
+			rev = rev[:12]
+		}
+		if modified {
+			rev += "-dirty"
+		}
+		info.Commit = rev
+	}
+	if info.Date == "unknown" && vcsTime != "" {
+		info.Date = vcsTime
+	}
+	return info
 }
 
 // GetRootCmd returns the root command following cluster command pattern

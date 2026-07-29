@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -47,9 +48,50 @@ func TestRootCommandHelp(t *testing.T) {
 }
 
 func TestRootCommandVersion(t *testing.T) {
-	// Test version flag using testutil
+	// Test version flag using testutil. Only "dev" is asserted: commit and date
+	// are backfilled from the VCS stamp on any build inside a git checkout, so
+	// "none"/"unknown" only appear when no VCS info is embedded.
 	cmd := GetRootCmd(DefaultVersionInfo)
-	testutil.TestCLICommand(t, cmd, []string{"--version"}, false, "dev", "none", "unknown")
+	testutil.TestCLICommand(t, cmd, []string{"--version"}, false, "dev")
+}
+
+func TestBackfillFromVCS(t *testing.T) {
+	dev := VersionInfo{Version: "dev", Commit: "none", Date: "unknown"}
+
+	t.Run("fills commit and date from VCS, truncating the sha", func(t *testing.T) {
+		got := backfillFromVCS(dev, []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "85c7c15f11b9cf079785edace4882b196008d6ee"},
+			{Key: "vcs.time", Value: "2026-07-29T09:21:35Z"},
+			{Key: "vcs.modified", Value: "false"},
+		})
+		if got.Commit != "85c7c15f11b9" {
+			t.Errorf("commit = %q, want truncated sha 85c7c15f11b9", got.Commit)
+		}
+		if got.Date != "2026-07-29T09:21:35Z" {
+			t.Errorf("date = %q, want the vcs.time", got.Date)
+		}
+	})
+
+	t.Run("marks a dirty working tree", func(t *testing.T) {
+		got := backfillFromVCS(dev, []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abcdef1234567890"},
+			{Key: "vcs.modified", Value: "true"},
+		})
+		if got.Commit != "abcdef123456-dirty" {
+			t.Errorf("commit = %q, want abcdef123456-dirty", got.Commit)
+		}
+	})
+
+	t.Run("release values are never overwritten", func(t *testing.T) {
+		release := VersionInfo{Version: "1.2.3", Commit: "realsha", Date: "2026-01-01"}
+		got := backfillFromVCS(release, []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "shouldNotWin"},
+			{Key: "vcs.time", Value: "9999-01-01"},
+		})
+		if got.Commit != "realsha" || got.Date != "2026-01-01" {
+			t.Errorf("release metadata must not be overwritten, got %+v", got)
+		}
+	})
 }
 
 func TestGetRootCmd(t *testing.T) {
