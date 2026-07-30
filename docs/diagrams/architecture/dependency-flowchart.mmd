@@ -1,0 +1,62 @@
+graph LR
+    subgraph Commands["cmd/"]
+        bootstrap["bootstrap"]
+        cluster_cmd["cluster/*"]
+        app_cmd["app/*"]
+        prereq_cmd["prerequisites"]
+        update_cmd["update"]
+    end
+
+    subgraph Services["internal/"]
+        bsvc["bootstrap.Service"]
+        csvc["cluster.ClusterService"]
+        chsvc["chart/services.ChartService"]
+        appsvc["app/status + uninstall"]
+        prefw["prerequisites.Runner"]
+        supdater["selfupdate.Updater"]
+    end
+
+    subgraph Providers["Providers"]
+        k3dp["cluster/providers/k3d"]
+        argop["chart/providers/argocd.Manager"]
+        helmp["chart/providers/helm.HelmManager"]
+        gitp["chart/providers/git.Repository"]
+    end
+
+    subgraph Infra["Shared Infrastructure"]
+        exec["executor.CommandExecutor"]
+        k8spkg["k8s (rest.Config, Accessor)"]
+        dlpkg["download.Downloader"]
+        uipkg["shared/ui"]
+        errpkg["shared/errors"]
+        redactpkg["shared/redact"]
+    end
+
+    bootstrap --> bsvc
+    cluster_cmd --> csvc
+    app_cmd --> chsvc
+    app_cmd --> appsvc
+    prereq_cmd --> prefw
+    update_cmd --> supdater
+
+    bsvc --> csvc
+    bsvc --> chsvc
+
+    csvc --> k3dp
+    chsvc --> argop
+    chsvc --> helmp
+    chsvc --> gitp
+    appsvc --> argop
+
+    k3dp --> exec
+    helmp --> exec
+    argop --> k8spkg
+    helmp --> k8spkg
+
+    prefw --> dlpkg
+    supdater --> dlpkg
+
+    exec --> redactpkg
+    errpkg --> uipkg
+    chsvc --> errpkg
+    csvc --> errpkg

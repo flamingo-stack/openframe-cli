@@ -1,54 +1,73 @@
 graph TB
-    subgraph "CLI (cmd/)"
-        Root[root]
-        Bootstrap[bootstrap]
-        Cluster[cluster]
-        App[app]
-        Prereq[prerequisites]
-        Update[update]
+    subgraph CLI["CLI Entry Point"]
+        main["main.go"]
+        root["cmd/root.go"]
     end
 
-    subgraph "Domain (internal/)"
-        ClusterSvc[cluster service]
-        ChartSvc[chart service]
-        K8sAccess[k8s access API]
-        PrereqSvc[prerequisites]
+    subgraph Commands["Command Layer"]
+        bootstrap["cmd/bootstrap"]
+        cluster_cmd["cmd/cluster"]
+        app_cmd["cmd/app"]
+        prereq_cmd["cmd/prerequisites"]
+        update_cmd["cmd/update"]
     end
 
-    subgraph "Providers / Integrations"
-        K3D[k3d]
-        Helm[helm]
-        Git[git clone]
-        ArgoCD[ArgoCD dynamic client]
+    subgraph Core["Core Services"]
+        bootstrap_svc["internal/bootstrap"]
+        cluster_svc["internal/cluster"]
+        chart_svc["internal/chart/services"]
+        prereq_fw["internal/prerequisites"]
+        selfupdate["internal/shared/selfupdate"]
     end
 
-    subgraph "External Systems"
-        Docker[Docker]
-        K8s[Kubernetes API]
-        Repo[openframe-oss-tenant repo]
+    subgraph Providers["Providers"]
+        k3d_prov["cluster/providers/k3d"]
+        argocd_prov["chart/providers/argocd"]
+        helm_prov["chart/providers/helm"]
+        git_prov["chart/providers/git"]
     end
 
-    Root --> Bootstrap
-    Root --> Cluster
-    Root --> App
-    Root --> Prereq
-    Root --> Update
+    subgraph Shared["Shared Infrastructure"]
+        executor["internal/shared/executor"]
+        k8s["internal/k8s"]
+        download["internal/shared/download"]
+        ui["internal/shared/ui"]
+        redact["internal/shared/redact"]
+        errors["internal/shared/errors"]
+    end
 
-    Bootstrap --> PrereqSvc
-    Bootstrap --> ClusterSvc
-    Bootstrap --> ChartSvc
-    Cluster --> ClusterSvc
-    App --> ChartSvc
-    App --> K8sAccess
-    Prereq --> PrereqSvc
+    subgraph External["External Tools & APIs"]
+        k3d_tool["K3D CLI"]
+        helm_tool["Helm CLI"]
+        argocd_cr["ArgoCD CRDs"]
+        github["GitHub API"]
+        git_repo["Git Repositories"]
+    end
 
-    ClusterSvc --> K3D
-    ChartSvc --> Git
-    ChartSvc --> Helm
-    ChartSvc --> ArgoCD
-    K8sAccess --> K8s
+    main --> root
+    root --> Commands
+    bootstrap_cmd --> bootstrap_svc
+    cluster_cmd --> cluster_svc
+    app_cmd --> chart_svc
+    prereq_cmd --> prereq_fw
+    update_cmd --> selfupdate
 
-    K3D --> Docker
-    Git --> Repo
-    Helm --> K8s
-    ArgoCD --> K8s
+    bootstrap_svc --> cluster_svc
+    bootstrap_svc --> chart_svc
+
+    cluster_svc --> k3d_prov
+    chart_svc --> argocd_prov
+    chart_svc --> helm_prov
+    chart_svc --> git_prov
+
+    k3d_prov --> executor
+    helm_prov --> executor
+    argocd_prov --> k8s
+    helm_prov --> k8s
+
+    executor --> k3d_tool
+    executor --> helm_tool
+    argocd_prov --> argocd_cr
+    git_prov --> git_repo
+    selfupdate --> github
+    download --> github

@@ -1,86 +1,104 @@
 # Development Documentation
 
-Guides for building, running, and contributing to OpenFrame CLI.
+Welcome to the OpenFrame CLI development documentation. This section covers everything you need to contribute to, extend, and understand the internals of the `openframe` CLI.
 
-## Contents
+OpenFrame CLI is written in **Go** and uses [Cobra](https://github.com/spf13/cobra) for command-line parsing. It orchestrates K3D clusters, ArgoCD GitOps deployments, and Helm chart management through a layered service/provider architecture.
 
-- **[Architecture Overview](architecture/README.md)** - High-level design, components, and data flows
-- **[Environment Setup](setup/environment.md)** - IDE, tools, and development dependencies
-- **[Local Development](setup/local-development.md)** - Clone, build, run, test, and debug locally
-- **[Release Signing](release-signing.md)** - How release binaries are signed and notarized (macOS/Windows)
+---
 
-## Key Technologies
+## Documentation Index
 
-| Technology | Purpose | Version |
-|------------|---------|---------|
-| **Go** | Primary language | 1.26 |
-| **Cobra** | CLI framework | v1.10 |
-| **client-go** | Kubernetes API client | v0.36 |
-| **k3d** | Local Kubernetes clusters | v5+ |
-| **Helm** | Chart installation | v3+ |
-| **ArgoCD** | GitOps deployments (consumed via the Kubernetes dynamic client) | — |
+| Document | Description |
+|---|---|
+| [Environment Setup](setup/environment.md) | IDE configuration, Go toolchain, editor extensions |
+| [Local Development](setup/local-development.md) | Clone, build, run, and debug the CLI locally |
+| [Architecture Overview](architecture/README.md) | High-level design, component breakdown, data flows |
+| [Security Guidelines](security/README.md) | Auth patterns, secret handling, vulnerability mitigations |
+| [Testing Guide](testing/README.md) | Unit tests, integration tests, test utilities |
+| [Contributing Guidelines](contributing/guidelines.md) | Code style, PR process, commit messages |
 
-## Project Structure
+---
+
+## Quick Navigation
+
+### I want to...
+
+**Build and run the CLI locally**
+→ See [Local Development](setup/local-development.md)
+
+**Understand how the codebase is structured**
+→ See [Architecture Overview](architecture/README.md)
+
+**Add a new command or feature**
+→ Start with [Architecture Overview](architecture/README.md), then [Contributing Guidelines](contributing/guidelines.md)
+
+**Write or run tests**
+→ See [Testing Guide](testing/README.md)
+
+**Handle secrets or security concerns**
+→ See [Security Guidelines](security/README.md)
+
+**Set up my development environment**
+→ See [Environment Setup](setup/environment.md)
+
+---
+
+## Repository Structure
 
 ```text
 openframe-cli/
-├── main.go                 # Application entry point
-├── go.mod / go.sum         # Go module definition and checksums
-├── Makefile                # build / test / lint targets
-├── cmd/                    # CLI command definitions
-│   ├── root.go            # Root command and version info
-│   ├── bootstrap/         # Full environment bootstrap
-│   ├── cluster/           # Cluster management (create/delete/list/status/cleanup)
-│   ├── app/               # App-of-apps install/upgrade/status/access/uninstall
-│   ├── prerequisites/     # Prerequisite check/install
-│   └── update/            # Self-update (check/rollback)
-├── internal/              # Private application code
-│   ├── bootstrap/         # Bootstrap orchestration
-│   ├── cluster/           # Cluster lifecycle management
-│   ├── chart/             # Helm/ArgoCD integration
-│   ├── app/               # App install/upgrade logic
-│   ├── k8s/               # Kubernetes client helpers
-│   ├── platform/          # OS/platform detection
-│   ├── prerequisites/     # Prerequisite detection and install
-│   └── shared/            # Common utilities (incl. wsllauncher for Windows/WSL2)
-├── tests/                 # Cross-package tests
-│   ├── integration/       # Integration tests
-│   └── testutil/          # Test helpers
-└── docs/                  # Documentation
+├── cmd/                    # Cobra command definitions (entry points)
+│   ├── root.go             # Root command, wires all subcommands
+│   ├── bootstrap/          # openframe bootstrap
+│   ├── cluster/            # openframe cluster (create/delete/list/status/cleanup)
+│   ├── app/                # openframe app (install/upgrade/status/access/uninstall)
+│   ├── prerequisites/      # openframe prerequisites (check/install)
+│   └── update/             # openframe update (self-update/rollback)
+├── internal/               # All internal business logic
+│   ├── bootstrap/          # Bootstrap service (cluster + chart orchestration)
+│   ├── cluster/            # Cluster service + K3D provider
+│   ├── chart/              # Chart services, ArgoCD/Helm/Git providers
+│   ├── app/                # App status and uninstall services
+│   ├── k8s/                # Kubernetes client utilities
+│   ├── platform/           # OS detection and platform hints
+│   ├── prerequisites/      # Prerequisite framework
+│   └── shared/             # Cross-cutting: executor, UI, errors, config, selfupdate
+├── tests/
+│   ├── integration/        # Integration tests (requires running cluster)
+│   └── testutil/           # Shared test utilities and patterns
+├── scripts/
+│   └── sign-binary.sh      # Binary signing helper
+└── main.go                 # Entry point
 ```
 
-Unit tests are colocated as `*_test.go` files inside each package under `cmd/` and `internal/`.
+---
 
-## Development Workflow
+## Tech Stack
 
-```mermaid
-flowchart TD
-    A[Fork Repository] --> B[Setup Dev Environment]
-    B --> C[Create Feature Branch]
-    C --> D[Write Code & Tests]
-    D --> E[make test]
-    E --> F{Tests Pass?}
-    F -->|No| D
-    F -->|Yes| G[make lint]
-    G --> H[Commit & Push]
-    H --> I[Open Pull Request]
-```
+| Technology | Role |
+|---|---|
+| **Go** | Primary language |
+| **Cobra** | CLI framework (command/flag parsing) |
+| **K3D** | Local Kubernetes cluster provider |
+| **ArgoCD** | GitOps deployment engine (via client-go dynamic client) |
+| **Helm** | Kubernetes package manager (CLI wrapper) |
+| **go-git** | Git operations (no `git` binary dependency) |
+| **client-go** | Kubernetes API client |
+| **pterm** | Terminal UI rendering (spinners, prompts, colors) |
+| **Sigstore/cosign** | Binary signature verification for self-updates |
 
-## Getting Started
+---
 
-### Prerequisites
-- Go 1.26 or later
-- Docker plus Kubernetes tooling (kubectl, helm, k3d)
-- Git and a code editor
+## External Dependencies
 
-On Windows the CLI forwards into WSL2 and runs as a Linux binary; the WSL launch is handled by `internal/shared/wsllauncher`.
+The OpenFrame platform chart lives in a separate repository:
 
-### Quick Start
-1. Read the [Architecture Overview](architecture/README.md).
-2. Follow [Environment Setup](setup/environment.md).
-3. Complete [Local Development](setup/local-development.md).
+- **openframe-oss-tenant:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
+- Documentation: [https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
+
+---
 
 ## Getting Help
 
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-- Browse the guides in this directory and existing pull requests.
+- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/)
+- **CLI Source:** [https://github.com/flamingo-stack/openframe-cli](https://github.com/flamingo-stack/openframe-cli)

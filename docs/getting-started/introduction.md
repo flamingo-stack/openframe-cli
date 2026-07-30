@@ -1,79 +1,141 @@
 # Introduction to OpenFrame CLI
 
-`openframe` is an interactive command-line tool for creating and managing OpenFrame Kubernetes environments. It provisions local k3d clusters and deploys the OpenFrame platform through an ArgoCD GitOps workflow.
+**OpenFrame CLI** is a modern, interactive command-line tool written in Go that bootstraps and manages OpenFrame Kubernetes environments. With a single `openframe` binary, you can provision local K3D clusters, install the full OpenFrame platform stack via ArgoCD GitOps, and manage the entire lifecycle of your deployment — all through both guided interactive wizards and fully scriptable non-interactive modes.
 
-[![OpenFrame Product Walkthrough](https://img.youtube.com/vi/awc-yAnkhIo/maxresdefault.jpg)](https://www.youtube.com/watch?v=awc-yAnkhIo)
+> **OpenFrame** is the unified platform from [Flamingo](https://flamingo.run) that integrates multiple MSP tools into a single AI-driven interface, automating IT support operations across the stack. Learn more at [openframe.ai](https://openframe.ai).
+
+---
 
 ## What is OpenFrame CLI?
 
-OpenFrame is an open-source MSP platform that replaces expensive proprietary software with open-source alternatives — integrating tools such as Tactical RMM, MeshCentral, Fleet MDM, and Authentik. The CLI is how you stand up and manage an OpenFrame environment.
+OpenFrame CLI is your single entry point for:
 
-This repository (`flamingo-stack/openframe-cli`) is the CLI itself. The platform and application manifests it deploys live in [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant).
+- **Bootstrapping** a fully functional OpenFrame environment from scratch in minutes
+- **Managing Kubernetes clusters** (K3D) — create, delete, list, inspect, and clean up
+- **Deploying and upgrading** the OpenFrame platform chart via ArgoCD GitOps
+- **Checking and installing prerequisites** automatically (Docker, k3d, Helm)
+- **Self-updating** to the latest version with cryptographic signature verification
+
+It replaces manual shell scripts and disparate tooling with a cohesive, type-safe Go binary that provides real-time progress feedback, friendly error messages, and deep automation support.
+
+---
 
 ## Key Features
 
-### Environment bootstrapping
+| Feature | Description |
+|---|---|
+| **One-command bootstrap** | `openframe bootstrap` provisions a cluster and deploys the full platform in one step |
+| **Interactive wizards** | Step-by-step guided prompts for new users — no YAML editing required |
+| **Non-interactive / CI mode** | `--non-interactive` flag makes every command scriptable for pipelines |
+| **ArgoCD GitOps integration** | Platform deployment is fully GitOps-driven using the `openframe-oss-tenant` chart |
+| **Auto-prerequisite management** | Detects and installs Docker, k3d, and Helm automatically on macOS/Linux |
+| **Cosign signature verification** | All self-updates are cryptographically verified against the official release workflow |
+| **WSL2 support on Windows** | Transparently re-executes inside WSL2 — no manual Linux setup needed |
+| **Secret redaction** | Credentials and tokens are automatically scrubbed from all debug output |
+| **Machine-readable output** | `--output json/yaml` for clean scripted consumption |
 
-- `openframe bootstrap` creates a cluster and installs the platform in one step
-- Deployment: `oss-tenant` (self-hosted, public chart repository)
+---
 
-### Cluster management
+## Target Audience
 
-- Create, delete, list, and inspect local k3d clusters
-- `openframe cluster status` reports cluster health
+OpenFrame CLI is designed for:
 
-### Platform deployment
+- **MSP technicians and operators** setting up OpenFrame environments
+- **DevOps engineers** automating OpenFrame deployment in CI/CD pipelines
+- **Developers** contributing to or extending the OpenFrame platform
+- **System administrators** managing the lifecycle of OpenFrame Kubernetes clusters
 
-- `openframe app install` clones `openframe-oss-tenant` and helm-installs the `app-of-apps` chart
-- The chart creates an ArgoCD root Application (`argocd-apps`) that fans out to all child applications
-- Upgrade, inspect, access, and uninstall the deployment with `openframe app`
+---
 
-### Self-updating
-
-- `openframe update` replaces the running binary with a checksum- and cosign-verified release, keeping a backup for rollback
-
-## How It Works
-
-1. **Bootstrap** — `openframe bootstrap` creates a k3d cluster and installs the platform
-2. **Deploy / manage** — `openframe app` installs and manages the app-of-apps deployment
-3. **Monitor** — `openframe cluster status` and `openframe app status` report health
-
-The CLI handles cluster creation, tool installation, and GitOps wiring so you can focus on running the platform.
-
-## Architecture Overview
+## High-Level Architecture
 
 ```mermaid
 graph TB
-    subgraph "CLI Commands"
-        Bootstrap[openframe bootstrap]
-        Cluster[openframe cluster]
-        App[openframe app]
+    subgraph User["User Interface"]
+        cli["openframe binary"]
+        wizard["Interactive Wizard"]
+        flags["--flag automation"]
     end
 
-    subgraph "External Tools"
-        K3D[k3d cluster]
-        Helm[Helm]
-        ArgoCD[ArgoCD]
+    subgraph Commands["Command Layer"]
+        bootstrap["bootstrap"]
+        cluster["cluster (create/delete/list/status)"]
+        app["app (install/upgrade/status/uninstall)"]
+        prereq["prerequisites (check/install)"]
+        update["update (self-update/rollback)"]
     end
 
-    Bootstrap --> K3D
-    Bootstrap --> Helm
-    Cluster --> K3D
-    App --> Helm
-    Helm --> ArgoCD
-    ArgoCD --> Apps[Child Applications]
+    subgraph Platform["OpenFrame Platform"]
+        k3d["K3D Kubernetes Cluster"]
+        argocd["ArgoCD GitOps Engine"]
+        openframe["OpenFrame OSS Tenant Chart"]
+    end
+
+    cli --> Commands
+    wizard --> Commands
+    flags --> Commands
+    bootstrap --> k3d
+    bootstrap --> argocd
+    argocd --> openframe
+    cluster --> k3d
+    app --> argocd
 ```
+
+---
+
+## How It Works
+
+The CLI follows a layered architecture:
+
+1. **Command Layer** (`cmd/`) — Cobra-based subcommands with flag parsing and interactive wizards
+2. **Service Layer** (`internal/*/service.go`) — Business logic orchestration
+3. **Provider Layer** (`internal/*/providers/`) — K3D, ArgoCD, Helm, and Git integrations
+4. **Shared Infrastructure** — Executor, k8s client, UI rendering, error handling, and secret redaction
+
+The **bootstrap** workflow ties it all together:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as "openframe bootstrap"
+    participant K3D as "K3D Cluster"
+    participant ArgoCD as "ArgoCD"
+    participant OpenFrame as "OpenFrame Platform"
+
+    User->>CLI: openframe bootstrap
+    CLI->>CLI: Validate prerequisites
+    CLI->>K3D: Create local cluster
+    K3D-->>CLI: Cluster ready
+    CLI->>ArgoCD: Install via Helm
+    ArgoCD-->>CLI: ArgoCD ready
+    CLI->>OpenFrame: Deploy app-of-apps chart
+    OpenFrame-->>CLI: All apps Healthy + Synced
+    CLI-->>User: Bootstrap complete!
+```
+
+---
+
+## External Repository
+
+The OpenFrame platform configuration (Helm charts, values) lives in a separate repository:
+
+- **openframe-oss-tenant**: [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
+- Documentation: [https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
+
+---
+
+## Community & Support
+
+Join the OpenMSP Slack community for questions, discussions, and support:
+
+https://www.openmsp.ai/
+
+[![OpenMSP Slack](https://img.shields.io/badge/Slack-OpenMSP-blue)](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+
+---
 
 ## Next Steps
 
-- **[Prerequisites](prerequisites.md)** — Check system requirements and dependencies
-- **[Quick Start](quick-start.md)** — Install and bootstrap your first environment
-- **[First Steps](first-steps.md)** — Explore core commands and workflows
-
-## Community and Support
-
-- **OpenMSP Slack**: [Join the community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-- **Website**: [https://flamingo.run](https://flamingo.run)
-- **Platform**: [https://openframe.ai](https://openframe.ai)
-
-All support happens in Slack — we don't monitor GitHub Issues.
+- Follow the [Prerequisites Guide](prerequisites.md) to prepare your environment
+- Jump straight to the [Quick Start Guide](quick-start.md) for a 5-minute setup
+- Read the [First Steps Guide](first-steps.md) to explore key features after installation
