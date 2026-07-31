@@ -65,12 +65,20 @@ var selectTemplates = &promptui.SelectTemplates{
 	Selected: "✓ {{ . | green }}",
 }
 
-// SelectFromList prompts the user to select from a list of options.
+// SelectFromList prompts the user to select from a list of options. Typing
+// filters the list (case-insensitive substring over the whole row), so a
+// 30-cluster list is two keystrokes away from the right entry; arrow keys
+// still navigate as before.
 func SelectFromList(label string, items []string) (int, string, error) {
 	prompt := promptui.Select{
 		Label:     label,
 		Items:     items,
 		Templates: selectTemplates,
+		Size:      10,
+		Searcher: func(input string, index int) bool {
+			return strings.Contains(strings.ToLower(items[index]), strings.ToLower(input))
+		},
+		StartInSearchMode: true,
 	}
 	return prompt.Run()
 }

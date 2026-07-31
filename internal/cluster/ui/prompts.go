@@ -30,22 +30,37 @@ func SelectClusterByName(clusters []ClusterInfo, prompt string) (string, error) 
 		return "", nil
 	}
 
-	clusterNames := make([]string, 0, len(clusters))
-	for _, cl := range clusters {
-		clusterNames = append(clusterNames, cl.Name)
-	}
-
-	if len(clusterNames) == 0 {
-		pterm.Warning.Println("No clusters available")
-		return "", nil
-	}
-
-	selectedIndex, _, err := selectFromList(prompt, clusterNames)
+	selectedIndex, _, err := selectFromList(prompt, clusterPickerRows(clusters))
 	if err != nil {
 		return "", err
 	}
 
-	return clusterNames[selectedIndex], nil
+	return clusters[selectedIndex].Name, nil
+}
+
+// clusterPickerRows renders one aligned multi-column row per cluster —
+// name, type, where it lives, status — so picking between a local k3d and
+// two same-named cloud clusters is not a guess. Row order mirrors clusters.
+func clusterPickerRows(clusters []ClusterInfo) []string {
+	nameW, typeW := 0, 0
+	for _, cl := range clusters {
+		nameW = max(nameW, len(cl.Name))
+		typeW = max(typeW, len(string(cl.Type)))
+	}
+	g := sharedUI.Glyphs()
+	rows := make([]string, 0, len(clusters))
+	for _, cl := range clusters {
+		where := cl.Region
+		if where == "" {
+			where = "local"
+		}
+		if cl.NodeCount > 0 {
+			where = fmt.Sprintf("%s %s %d node(s)", where, g.Bullet, cl.NodeCount)
+		}
+		rows = append(rows, fmt.Sprintf("%-*s  %-*s %s %s %s %s",
+			nameW, cl.Name, typeW, strings.ToUpper(string(cl.Type)), g.Bullet, where, g.Bullet, cl.Status))
+	}
+	return rows
 }
 
 // selectFromList shows a selection prompt for a list of items
