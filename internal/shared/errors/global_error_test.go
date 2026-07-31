@@ -58,7 +58,14 @@ func TestHandleGlobalError_DoesNotReprintAlreadyHandled(t *testing.T) {
 	orig := &AlreadyHandledError{OriginalError: fmt.Errorf("boom")}
 	wrapped := fmt.Errorf("failed to install charts: %w", orig)
 	got := HandleGlobalError(wrapped, false)
-	if got != wrapped {
-		t.Fatalf("an already-handled error must be returned as-is, not re-rendered or re-wrapped; got %T %v", got, got)
+
+	// The ORIGINAL sentinel must still be the one in the chain — a fresh
+	// sentinel would mean the error was rendered a second time.
+	var handled *AlreadyHandledError
+	if !stderrors.As(got, &handled) || handled != orig {
+		t.Fatalf("an already-handled error must be returned as-is, not re-rendered under a new sentinel; got %T %v", got, got)
+	}
+	if !stderrors.Is(got, wrapped) {
+		t.Fatal("the caller's wrapper chain must be preserved")
 	}
 }
