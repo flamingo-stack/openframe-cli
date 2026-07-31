@@ -223,3 +223,45 @@ func TestInstallationRetryPolicy_DropsDeadHelm2Pattern(t *testing.T) {
 	assert.False(t, p.ShouldRetry(errors.New("network timeout"), 0),
 		"the phantom phrase must no longer be a retry trigger")
 }
+
+// wrapperErr mimics ChartError: a wrapper implementing RecoverableError whose
+// Recoverable defaults to false (i.e. "unclassified", not "forbidden").
+type wrapperErr struct {
+	msg         string
+	recoverable bool
+}
+
+func (w *wrapperErr) Error() string              { return w.msg }
+func (w *wrapperErr) IsRecoverable() bool        { return w.recoverable }
+func (w *wrapperErr) GetRetryAfter() time.Duration { return 0 }
+
+type nonRetryableErr struct{ msg string }
+
+func (n *nonRetryableErr) Error() string        { return n.msg }
+func (n *nonRetryableErr) IsNonRetryable() bool { return true }
+
+// An unmarked wrapper (Recoverable=false by default) must not veto the
+// transient classification: every install failure arrives wrapped in a
+// ChartError, so the early return made the policy's own retryable table
+// unreachable and MaxAttempts=3 a fiction.
+func TestShouldRetry_UnmarkedWrapperFallsThroughToClassification(t *testing.T) {
+	p := InstallationRetryPolicy().(*ExponentialBackoffPolicy)
+	err := &wrapperErr{msg: "installation failed for ArgoCD: connection refused"}
+	assert.True(t, p.ShouldRetry(err, 1),
+		"a transient cause behind an unmarked wrapper must be retried")
+}
+
+func TestShouldRetry_ExplicitlyRecoverableWins(t *testing.T) {
+	p := InstallationRetryPolicy().(*ExponentialBackoffPolicy)
+	err := &wrapperErr{msg: "some opaque failure", recoverable: true}
+	assert.True(t, p.ShouldRetry(err, 1))
+}
+
+// An explicit non-retryable marker beats even transient-looking text: the
+// app-wait failure embeds pod logs whose content routinely contains phrases
+// like "connection refused" — retrying it would reinstall ArgoCD.
+func TestShouldRetry_NonRetryableMarkerBeatsTransientText(t *testing.T) {
+	p := InstallationRetryPolicy().(*ExponentialBackoffPolicy)
+	err := &nonRetryableErr{msg: "waiting failed: pod log: connect: connection refused; i/o timeout"}
+	assert.False(t, p.ShouldRetry(err, 1))
+}

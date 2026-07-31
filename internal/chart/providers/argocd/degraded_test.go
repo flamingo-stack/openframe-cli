@@ -165,3 +165,33 @@ func TestDiagnosticErrors_AreSelfDiagnosed(t *testing.T) {
 }
 
 func errorsAs(err error, target any) bool { return stderrors.As(err, target) }
+
+// Once past its thresholds, a candidate must be re-reported at the recheck
+// interval, not on every 2s tick: each report triggers a full pod diagnosis
+// (pod list + log streams + events), ~1800 rounds an hour otherwise.
+func TestDegradedTracker_ThrottlesRecheck(t *testing.T) {
+	tr := &degradedTracker{entries: map[string]degradedEntry{}, after: time.Minute}
+	base := time.Unix(5000, 0)
+	app := []Application{degApp("x", ArgoCDHealthDegraded, ArgoCDSyncSynced)}
+
+	// Drive past both thresholds at a 2s cadence and count the reports.
+	fired := 0
+	var lastFire time.Time
+	var prevFire time.Time
+	for i := 0; i < 400; i++ { // ~13 minutes of ticks
+		now := base.Add(time.Duration(i) * 2 * time.Second)
+		if out := tr.observe(app, now); len(out) > 0 {
+			fired++
+			prevFire, lastFire = lastFire, now
+		}
+	}
+	if fired == 0 {
+		t.Fatal("a persistently Degraded app must still be reported")
+	}
+	if fired > 15 {
+		t.Fatalf("reports must be throttled to ~1/min, got %d in ~13m", fired)
+	}
+	if !prevFire.IsZero() && lastFire.Sub(prevFire) < degradedRecheckInterval {
+		t.Fatalf("consecutive reports %v apart, want >= %v", lastFire.Sub(prevFire), degradedRecheckInterval)
+	}
+}

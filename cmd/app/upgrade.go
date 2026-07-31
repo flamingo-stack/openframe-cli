@@ -147,6 +147,12 @@ func runUpgradeForceSync(cmd *cobra.Command, args []string, flags *InstallFlags,
 		ClusterName:    clusterName,
 		Verbose:        verbose,
 		NonInteractive: flags.NonInteractive,
+		// This IS the force-sync path: on a stall the wait must sync the
+		// stragglers itself. Without this flag it printed the no-sync-mode hint
+		// — advising the user to run `app upgrade --sync`, the very command
+		// they were already running — and rode a straggler (e.g. a child whose
+		// sync patch failed) out to the full 15m timeout.
+		SyncStragglersOnStall: true,
 	}
 	if err := manager.WaitForApplications(cmd.Context(), waitCfg); err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)

@@ -252,6 +252,10 @@ func TestInstaller_InstallCharts_RecoverableError(t *testing.T) {
 	ok := stderrors.As(err, &chartErr)
 	assert.True(t, ok, "Expected ChartError")
 	assert.False(t, chartErr.IsRecoverable(), "Expected non-recoverable error - waiting failures should not trigger reinstallation")
+	// And EXPLICITLY non-retryable, not just unmarked: the wait diagnostics
+	// embed pod logs whose text ("connection refused") would otherwise
+	// pattern-match the retry policy's transient table and reinstall ArgoCD.
+	assert.True(t, chartErr.IsNonRetryable(), "wait failures must carry the explicit never-retry marker")
 }
 
 func TestInstaller_InstallCharts_NoWaitWithoutAppOfApps(t *testing.T) {

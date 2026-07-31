@@ -47,7 +47,10 @@ func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.
 			if stderrors.As(err, &ce) && ce.Operation == "waiting" && ce.Component == "ArgoCD applications" {
 				cause = ce.Cause
 			}
-			return errors.NewChartError("waiting", "ArgoCD applications", cause).WithCluster(config.ClusterName)
+			// WithNonRetryable, not just default-false: the wait diagnostics
+			// embed pod logs whose text ("connection refused", "i/o timeout")
+			// would otherwise pattern-match the retry policy's transient table.
+			return errors.NewChartError("waiting", "ArgoCD applications", cause).WithCluster(config.ClusterName).WithNonRetryable()
 		}
 	}
 

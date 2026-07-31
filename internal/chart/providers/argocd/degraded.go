@@ -35,6 +35,14 @@ func degradedFailAfter() time.Duration {
 // isolated sightings around a long gap (mirrors fatalManifestMinChecks).
 const degradedMinChecks = 10
 
+// degradedRecheckInterval throttles how often a candidate that keeps failing
+// the caller's terminal check is re-reported. Each report triggers a full pod
+// diagnosis (pod list + a log stream per failing container + an events list);
+// at the 2s poll cadence an app that stays Degraded-but-recovering would
+// otherwise be re-diagnosed ~1800 times over the remaining hour, degrading the
+// wait loop's own cadence.
+const degradedRecheckInterval = time.Minute
+
 // degradedTracker records, per application, how long it has stayed Degraded+
 // Synced. Reset on change, forget on disappearance — an app that recovers or
 // goes back to Progressing starts its clock fresh.
@@ -44,8 +52,9 @@ type degradedTracker struct {
 }
 
 type degradedEntry struct {
-	since  time.Time
-	checks int
+	since        time.Time
+	checks       int
+	lastReported time.Time // when the app was last returned as a candidate
 }
 
 func newDegradedTracker() *degradedTracker {
@@ -68,10 +77,12 @@ func (t *degradedTracker) observe(apps []Application, now time.Time) []Applicati
 			e = degradedEntry{since: now}
 		}
 		e.checks++
-		t.entries[app.Name] = e
-		if e.checks >= degradedMinChecks && now.Sub(e.since) >= t.after {
+		if e.checks >= degradedMinChecks && now.Sub(e.since) >= t.after &&
+			(e.lastReported.IsZero() || now.Sub(e.lastReported) >= degradedRecheckInterval) {
+			e.lastReported = now
 			out = append(out, app)
 		}
+		t.entries[app.Name] = e
 	}
 	for name := range t.entries {
 		if !seen[name] {

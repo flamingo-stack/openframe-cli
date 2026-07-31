@@ -384,21 +384,28 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 		cmd.Stdin = bytes.NewReader(options.Stdin)
 	}
 
-	// Execute the command
-	stdout, err := cmd.Output()
+	// Execute the command with explicit stdout/stderr buffers. cmd.Output()
+	// only surfaces stderr through *exec.ExitError, i.e. exclusively on
+	// failure — a successful run's stderr (helm deprecation/ownership
+	// warnings, gcloud notices) was silently dropped, leaving the callers'
+	// "show stderr in verbose mode" branches dead.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	err := cmd.Run()
 	result.Duration = time.Since(start)
-	result.Stdout = string(stdout)
+	result.Stdout = stdoutBuf.String()
+	// Redact at the population chokepoint: callers embed Stderr in
+	// user-facing errors even in non-verbose mode (e.g. the helm
+	// manager's "Helm output: %s"), and a child process can echo a
+	// token back. Control-flow substring checks downstream match
+	// generic phrases, never secret values, so redaction is safe here.
+	result.Stderr = redact.Redact(stderrBuf.String())
 
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) {
 			result.ExitCode = exitError.ExitCode()
-			// Redact at the population chokepoint: callers embed Stderr in
-			// user-facing errors even in non-verbose mode (e.g. the helm
-			// manager's "Helm output: %s"), and a child process can echo a
-			// token back. Control-flow substring checks downstream match
-			// generic phrases, never secret values, so redaction is safe here.
-			result.Stderr = redact.Redact(string(exitError.Stderr))
 		} else {
 			result.ExitCode = -1
 		}

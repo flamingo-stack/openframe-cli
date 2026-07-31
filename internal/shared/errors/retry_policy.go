@@ -27,6 +27,15 @@ type RecoverableError interface {
 	GetRetryAfter() time.Duration
 }
 
+// NonRetryableError marks errors that must NEVER be retried, no matter what
+// their text looks like. Needed because the substring fallback below scans the
+// whole message: an app-wait failure embeds pod logs and events, whose content
+// routinely contains transient-looking phrases ("connection refused", "i/o
+// timeout") — retrying it would reinstall an already-installed ArgoCD.
+type NonRetryableError interface {
+	IsNonRetryable() bool
+}
+
 // ExponentialBackoffPolicy implements exponential backoff retry policy
 type ExponentialBackoffPolicy struct {
 	MaxAttempts   int
@@ -73,11 +82,22 @@ func (p *ExponentialBackoffPolicy) ShouldRetry(err error, attempt int) bool {
 		return false
 	}
 
-	// Check if it's a recoverable error. errors.As unwraps %w chains, so a
-	// recoverable error stays recognized after being wrapped.
+	// An explicit "never retry" marker wins over everything below, including
+	// the substring fallback (see NonRetryableError).
+	var nonRetryable NonRetryableError
+	if stderrors.As(err, &nonRetryable) && nonRetryable.IsNonRetryable() {
+		return false
+	}
+
+	// Check if it's an explicitly recoverable error. errors.As unwraps %w
+	// chains, so a recoverable error stays recognized after being wrapped.
+	// Only a positive marking short-circuits: Recoverable defaults to false on
+	// every wrapper (e.g. ChartError), so treating that default as a veto made
+	// the transient classification below unreachable for install failures —
+	// the retry policy's own table never ran.
 	var recoverableErr RecoverableError
-	if stderrors.As(err, &recoverableErr) {
-		return recoverableErr.IsRecoverable()
+	if stderrors.As(err, &recoverableErr) && recoverableErr.IsRecoverable() {
+		return true
 	}
 
 	// Structural classification first — it does not depend on the wording of

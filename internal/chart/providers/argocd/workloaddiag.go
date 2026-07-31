@@ -88,15 +88,41 @@ func failingContainers(p corev1.Pod) []containerIssue {
 	return issues
 }
 
+// appPods lists the pods belonging to an ArgoCD application: first by ArgoCD's
+// default tracking label, then by its configurable alternative. owned reports
+// whether the returned pods are attributable to the app; when neither selector
+// matches anything, it falls back to the whole namespace — still useful for
+// the human diagnostic, but NOT safe to base a fail-fast decision on: an
+// app-of-apps platform routinely shares destination namespaces, so a leftover
+// CrashLooping pod of a neighbouring app must not abort THIS app's install.
+func (m *Manager) appPods(ctx context.Context, ns, appName string) (pods []corev1.Pod, owned bool) {
+	for _, sel := range []string{"app.kubernetes.io/instance=" + appName, "argocd.argoproj.io/instance=" + appName} {
+		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		list, err := m.kubeClient.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{LabelSelector: sel})
+		cancel()
+		if err == nil && len(list.Items) > 0 {
+			return list.Items, true
+		}
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	list, err := m.kubeClient.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, false
+	}
+	return list.Items, false
+}
+
 // diagnoseFailingApps inspects the workloads of the given apps and returns a
 // human diagnostic — the failing pod/container, why (waiting reason or crash), a
 // registry-auth hint for image-pull failures, the crashed container's last log
-// lines, and recent warning events. terminal is true when any workload is in a
-// won't-recover state (CrashLoop / ImagePull / repeated crashes), letting the
-// caller fail fast instead of waiting out the timeout. Best-effort throughout.
-func (m *Manager) diagnoseFailingApps(ctx context.Context, apps []Application) (diag string, terminal bool) {
+// lines, and recent warning events. stuck lists the apps whose OWN workloads
+// are in a won't-recover state (CrashLoop / ImagePull / repeated crashes),
+// letting the caller fail fast instead of waiting out the timeout — and only
+// for those apps, not every candidate sharing the namespace. Best-effort.
+func (m *Manager) diagnoseFailingApps(ctx context.Context, apps []Application) (diag string, stuck []Application) {
 	if m.kubeClient == nil {
-		return "", false
+		return "", nil
 	}
 	var b strings.Builder
 	for _, app := range apps {
@@ -104,12 +130,7 @@ func (m *Manager) diagnoseFailingApps(ctx context.Context, apps []Application) (
 		if ns == "" {
 			continue
 		}
-		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		pods, err := m.kubeClient.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{})
-		cancel()
-		if err != nil {
-			continue
-		}
+		pods, owned := m.appPods(ctx, ns, app.Name)
 		header := false
 		writeHeader := func() {
 			if !header {
@@ -117,10 +138,11 @@ func (m *Manager) diagnoseFailingApps(ctx context.Context, apps []Application) (
 				header = true
 			}
 		}
-		for i := range pods.Items {
-			for _, ci := range failingContainers(pods.Items[i]) {
+		appTerminal := false
+		for i := range pods {
+			for _, ci := range failingContainers(pods[i]) {
 				if ci.terminal {
-					terminal = true
+					appTerminal = true
 				}
 				writeHeader()
 				fmt.Fprintf(&b, "\n  pod %s / %s: %s (restarts=%d)", ci.pod, ci.container, ci.reason, ci.restarts)
@@ -143,8 +165,13 @@ func (m *Manager) diagnoseFailingApps(ctx context.Context, apps []Application) (
 			writeHeader()
 			fmt.Fprintf(&b, "\n  recent warning events:\n%s", indentLines(ev, "    "))
 		}
+		// Only attributable failures may abort: a terminal pod found via the
+		// namespace fallback could belong to any app (or to nothing at all).
+		if appTerminal && owned {
+			stuck = append(stuck, app)
+		}
 	}
-	return b.String(), terminal
+	return b.String(), stuck
 }
 
 // lastPodLogs returns the last few log lines of a container — the PREVIOUS
