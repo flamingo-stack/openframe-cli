@@ -139,6 +139,9 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	}
 
 	headline, cause := splitCause(err)
+	// In GitHub Actions the failure also becomes a job/PR annotation, so the
+	// cause is visible without opening the 40-minute log.
+	ui.ErrorAnnotation(headline, firstLine(cause))
 	pterm.Error.Printf("%s %s\n", ui.Glyphs().Fail, headline)
 	if cause != "" {
 		panelRow("cause", cause)
@@ -203,6 +206,15 @@ func splitCause(err error) (headline, cause string) {
 		return lines[0], lines[1]
 	}
 	return full, ""
+}
+
+// firstLine trims a possibly multi-line cause (pod logs, terraform output)
+// down to its first line for the one-line annotation surface.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // panelRow prints one aligned "key value" row of the failure panel; multi-line

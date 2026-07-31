@@ -55,6 +55,9 @@ func (t *Tracker) Begin(i int, detail string) {
 		line += " " + pterm.FgGray.Sprint(detail)
 	}
 	pterm.DefaultBasicText.Println(line)
+	// In GitHub Actions the stage's own output folds into a log group titled
+	// after the stage; the ✔/✖ closing line stays outside the fold.
+	ui.GroupStart(fmt.Sprintf("[%d/%d] %s", i+1, len(t.titles), t.titles[i]))
 }
 
 // Done closes stage i successfully, printing its duration.
@@ -69,6 +72,7 @@ func (t *Tracker) finish(i int, failed bool) {
 	}
 	d := time.Since(t.started[i]).Round(100 * time.Millisecond)
 	t.timings = append(t.timings, Timing{Title: t.titles[i], Duration: d, Failed: failed})
+	ui.GroupEnd()
 	g := ui.Glyphs()
 	if failed {
 		pterm.DefaultBasicText.Printf("%s %s %s %s %s\n",

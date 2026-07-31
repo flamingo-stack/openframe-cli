@@ -246,6 +246,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	var lastNotReadyNames []string   // bare names, for the kubectl example
 	var lastNotReadyDetails []string // per-app health messages, for the timeout diagnostic
 	lastReadyCount, lastTotalApps := 0, 0
+	heartbeatLastReady := 0
 	// The spinner already animates for interactive users, so the textual line is
 	// mainly a heartbeat for logs and CI; verbose users want it more often.
 	progressPrintInterval := 30 * time.Second
@@ -257,6 +258,16 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	for {
 		select {
 		case <-localCtx.Done():
+			// Last-known-state line for the sequential modes: a Ctrl+C or a
+			// cancelled CI job records where the install stood instead of
+			// ending on a bare "operation cancelled".
+			if dash == nil && lastTotalApps > 0 {
+				line := fmt.Sprintf("interrupted at %d/%d applications ready", lastReadyCount, lastTotalApps)
+				if len(lastNotReadyNames) > 0 {
+					line += fmt.Sprintf(" · pending: %s", strings.Join(lastNotReadyNames, ", "))
+				}
+				pterm.DefaultBasicText.Println(line)
+			}
 			return fmt.Errorf("operation cancelled: %w", localCtx.Err())
 		case <-ticker.C:
 			// Check timeout
@@ -607,21 +618,20 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 			}
 
-			// Textual progress heartbeat. The spinner covers interactive users; this
-			// line is what a CI log or a piped session sees, where the spinner is
-			// suppressed entirely and the previous code printed nothing at all.
+			// Textual progress heartbeat — what a log, a piped session, --plain,
+			// or a --verbose run sees instead of the dashboard. Each line is
+			// self-sufficient for scrollback reading: wall clock (correlate
+			// with cluster events), the delta since the previous beat (a zero
+			// delta screams "stalled" without diffing counts by eye), and the
+			// pending apps WITH their health, not just names.
 			if totalApps > 0 && time.Since(lastProgressPrint) >= progressPrintInterval {
 				lastProgressPrint = time.Now()
-				pterm.Info.Printf("ArgoCD sync progress: %d/%d applications ready (%s elapsed)\n",
-					currentlyReady, totalApps, elapsed.Round(time.Second))
-
-				if len(notReadyApps) > 0 {
-					if len(notReadyApps) <= 8 {
-						pterm.Info.Printf("  Still waiting for: %v\n", notReadyApps)
-					} else {
-						pterm.Info.Printf("  Still waiting for %d applications (showing first 5): %v...\n",
-							len(notReadyApps), notReadyApps[:5])
-					}
+				delta := currentlyReady - heartbeatLastReady
+				heartbeatLastReady = currentlyReady
+				pterm.Info.Printf("[%s] apps %d/%d ready (%+d since last check) · elapsed %s\n",
+					time.Now().Format("15:04:05"), currentlyReady, totalApps, delta, elapsed.Round(time.Second))
+				if p := pendingSummary(apps, 6); p != "" {
+					pterm.Info.Printf("  pending: %s\n", p)
 				}
 				if config.Verbose && len(healthyApps) > 0 && len(healthyApps) <= 5 {
 					pterm.Debug.Printf("  Recently completed: %v\n", healthyApps)

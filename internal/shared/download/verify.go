@@ -108,10 +108,15 @@ func (d Downloader) FetchVerified(ctx context.Context, asset PinnedAsset) ([]byt
 	// pinned assets (tool binaries / archives) are tens of MB; 512 MiB is a
 	// generous ceiling. Read one byte past to detect an over-cap body.
 	src := io.LimitReader(resp.Body, maxAssetBytes+1)
+	label := assetLabel(asset.URL)
 	if progressEnabled() {
-		pr := newProgressReader(src, assetLabel(asset.URL), resp.ContentLength)
+		pr := newProgressReader(src, label, resp.ContentLength)
 		defer pr.done()
 		src = pr
+	} else if announceEnabled() {
+		announceStart(label, resp.ContentLength)
+		start := time.Now()
+		defer func() { announceDone(label, time.Since(start)) }()
 	}
 	body, err := io.ReadAll(src)
 	if err != nil {

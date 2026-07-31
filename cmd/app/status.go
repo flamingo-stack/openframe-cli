@@ -50,8 +50,8 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 	if (watch || interactive) && format != "text" {
 		return fmt.Errorf("--watch/--interactive are live terminal views and cannot combine with --output %s", format)
 	}
-	if (watch || interactive) && !ui.IsTerminal() {
-		return fmt.Errorf("--watch/--interactive need an interactive terminal")
+	if (watch || interactive) && (!ui.IsTerminal() || ui.IsPlain()) {
+		return fmt.Errorf("--watch/--interactive need an interactive terminal (and cannot combine with --plain)")
 	}
 
 	cfg, err := resolveRestConfig(contextName)

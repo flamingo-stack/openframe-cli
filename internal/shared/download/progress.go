@@ -10,6 +10,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
+	"github.com/pterm/pterm"
 )
 
 // Download progress: a single self-rewriting line on stderr —
@@ -24,7 +25,15 @@ const progressRenderInterval = 120 * time.Millisecond
 
 // progressEnabled gates the bar to safe contexts (see package comment above).
 func progressEnabled() bool {
-	return ui.IsTerminal() && !ui.IsSilent() && !spinner.AnyActive()
+	return ui.Animated() && !spinner.AnyActive()
+}
+
+// announceEnabled gates the sequential begin/done lines used where the live
+// bar cannot run (non-TTY, --plain): a 50 MB download used to be complete
+// silence there. When a spinner is animating, its own text already covers
+// the story; --silent stays silent.
+func announceEnabled() bool {
+	return !ui.IsSilent() && !spinner.AnyActive() && !progressEnabled()
 }
 
 // progressReader wraps a download body and renders the progress line as the
@@ -73,6 +82,21 @@ func (p *progressReader) done() {
 	if p.rendered {
 		fmt.Fprint(p.out, "\r\033[K")
 	}
+}
+
+// announceStart/announceDone are the sequential begin/done pair for contexts
+// without the live bar. Duration-only on done — the byte count already ran in
+// the start line when the server sent a length.
+func announceStart(label string, total int64) {
+	if total > 0 {
+		pterm.Info.Printf("Downloading %s (%s)...\n", label, humanBytes(total))
+		return
+	}
+	pterm.Info.Printf("Downloading %s...\n", label)
+}
+
+func announceDone(label string, took time.Duration) {
+	pterm.Info.Printf("Downloaded %s in %s\n", label, took.Round(100*time.Millisecond))
 }
 
 // humanBytes renders a byte count for humans: 512 B, 3.4 MB, 1.2 GB.

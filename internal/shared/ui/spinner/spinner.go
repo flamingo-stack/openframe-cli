@@ -88,6 +88,11 @@ func New() *Spinner {
 	if f, ok := any(os.Stdout).(*os.File); ok {
 		s.isTTY = term.IsTerminal(int(f.Fd()))
 	}
+	// --plain promises sequential output: keep the styled final lines but
+	// never animate over the cursor line.
+	if ui.IsPlain() {
+		s.isTTY = false
+	}
 	return s
 }
 

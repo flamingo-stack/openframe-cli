@@ -40,7 +40,7 @@ type appDashboard struct {
 const dashboardMaxApps = 8
 
 func newAppDashboard() *appDashboard {
-	if !ui.IsTerminal() || ui.IsSilent() {
+	if !ui.Animated() {
 		return nil
 	}
 	area, err := pterm.DefaultArea.Start()
@@ -128,6 +128,36 @@ func notReadyLines(apps []Application) string {
 		fmt.Fprintf(&b, "    %-*s  %s\n", nameW, a.Name, state)
 	}
 	return b.String()
+}
+
+// pendingSummary renders the not-ready apps with their health for one-line
+// log output — "tenant(Progressing), gateway(Degraded), +3 more" — so a
+// scrollback reader sees WHO is pending and HOW BAD without a table.
+func pendingSummary(apps []Application, limit int) string {
+	var pending []Application
+	for _, a := range apps {
+		if a.Health == ArgoCDHealthHealthy && a.Sync == ArgoCDSyncSynced {
+			continue
+		}
+		pending = append(pending, a)
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+	sort.Slice(pending, func(i, j int) bool { return pending[i].Name < pending[j].Name })
+	parts := make([]string, 0, limit+1)
+	for i, a := range pending {
+		if i >= limit {
+			parts = append(parts, fmt.Sprintf("+%d more", len(pending)-limit))
+			break
+		}
+		state := a.Health
+		if state == "" {
+			state = a.Sync
+		}
+		parts = append(parts, fmt.Sprintf("%s(%s)", a.Name, state))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Note pins a one-off event line (stall hint, recovery notice) under the
