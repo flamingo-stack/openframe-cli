@@ -32,9 +32,12 @@ type Heartbeat struct {
 
 // StartHeartbeat begins emitting "<label> (<elapsed>)" to stderr every interval
 // until Stop is called. interval <= 0 uses defaultHeartbeatInterval. Under
-// --silent it is a no-op (Stop is still safe to call).
+// --silent it is a no-op (Stop is still safe to call), and in an animated
+// session (interactive terminal, no --plain) too: the spinner already shows
+// liveness there, and a periodic stderr line would print straight over the
+// spinner's cursor line.
 func StartHeartbeat(label string, interval time.Duration) *Heartbeat {
-	if ui.IsSilent() {
+	if ui.IsSilent() || ui.Animated() {
 		return &Heartbeat{} // no-op; Stop() tolerates nil channels
 	}
 	return startHeartbeat(os.Stderr, label, interval)

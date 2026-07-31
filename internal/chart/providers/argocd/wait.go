@@ -111,6 +111,17 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	var spinnerMutex sync.Mutex
 	spinnerStopped := false
 
+	// waitNote routes one-off in-wait announcements: pinned under the live
+	// dashboard when it is active (a plain print would be visually swallowed
+	// by the area redraw within 2s), ordinary silence-aware prints otherwise.
+	waitNote := func(styled string) {
+		if dash != nil {
+			dash.Note(styled)
+			return
+		}
+		pterm.DefaultBasicText.Println(styled)
+	}
+
 	// Function to stop spinner safely
 	stopSpinner := func() {
 		dash.Stop()
@@ -390,7 +401,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 			// Reset consecutive failures on successful query
 			if consecutiveFailures > 0 {
-				pterm.Success.Println("Application queries restored")
+				waitNote(pterm.Success.Sprint("Application queries restored"))
 				consecutiveFailures = 0
 			}
 
@@ -474,17 +485,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				// which is exactly the path they are already on. Gating the hint on
 				// !stragglerSyncTriggered instead would print that contradictory
 				// advice on every stall tick after the one-shot sync.
-				// When the dashboard is live these lines pin under it as
-				// notes — a plain print would be visually swallowed by the
-				// area redraw.
-				stallNote := func(styled string) {
-					if dash != nil {
-						dash.Note(styled)
-						return
-					}
-					// DefaultBasicText, not raw print: --silent redirects it.
-					pterm.DefaultBasicText.Println(styled)
-				}
+				stallNote := waitNote
 				if config.SyncStragglersOnStall {
 					if !stragglerSyncTriggered {
 						stragglerSyncTriggered = true
@@ -573,15 +574,15 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									// out to its timeout. triggerRepoServerRecovery already
 									// hard-refreshed app.Name; cover the rest.
 									if refreshed := m.hardRefreshApplications(localCtx, appNames(unknownApps)); refreshed > 0 {
-										pterm.Info.Printfln("Hard-refreshed %d application(s) stuck in Unknown.", refreshed)
+										waitNote(pterm.Info.Sprintf("Hard-refreshed %d application(s) stuck in Unknown.", refreshed))
 									}
 								} else {
-									pterm.Warning.Println("Could not restart the ArgoCD repo-server; continuing to wait.")
+									waitNote(pterm.Warning.Sprint("Could not restart the ArgoCD repo-server; continuing to wait."))
 								}
 							} else if repoServerRecoveryAttempts == maxRepoServerRecoveryAttempts {
 								repoServerRecoveryAttempts++ // prevent repeated attempts
-								pterm.Warning.Printfln("ArgoCD repo-server did not recover after %d restarts; continuing to wait for the timeout.",
-									maxRepoServerRecoveryAttempts)
+								waitNote(pterm.Warning.Sprintf("ArgoCD repo-server did not recover after %d restarts; continuing to wait for the timeout.",
+									maxRepoServerRecoveryAttempts))
 							}
 							break // Only recover one app at a time
 						}
@@ -593,18 +594,19 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				// (throttled); the per-application dump stays behind --verbose.
 				if len(unknownApps) > 0 && elapsed > 5*time.Minute && time.Since(lastUnknownWarn) >= 5*time.Minute {
 					lastUnknownWarn = time.Now()
-					pterm.Warning.Printfln("  %d application(s) have 'Unknown' status after %s. Possible causes: controller pod not ready, git repository unreachable, or resource constraints.",
-						len(unknownApps), elapsed.Round(time.Second))
+					waitNote(pterm.Warning.Sprintf("%d application(s) have 'Unknown' status after %s. Possible causes: controller pod not ready, git repository unreachable, or resource constraints.",
+						len(unknownApps), elapsed.Round(time.Second)))
 					if config.Verbose {
 						describeUnknownApps(unknownApps)
-					} else {
+					} else if dash == nil {
 						pterm.Info.Println("  Re-run with --verbose for per-application detail.")
 					}
 				}
 
 				// A concise summary of stuck applications, every 5 minutes after the
-				// 7-minute mark (in-memory status; no kubectl resource dump).
-				if elapsed > 7*time.Minute && time.Since(lastStuckSummary) >= 5*time.Minute {
+				// 7-minute mark (in-memory status; no kubectl resource dump). The
+				// dashboard already shows exactly this, live — sequential modes only.
+				if dash == nil && elapsed > 7*time.Minute && time.Since(lastStuckSummary) >= 5*time.Minute {
 					lastStuckSummary = time.Now()
 					for _, app := range apps {
 						if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
@@ -623,8 +625,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// self-sufficient for scrollback reading: wall clock (correlate
 			// with cluster events), the delta since the previous beat (a zero
 			// delta screams "stalled" without diffing counts by eye), and the
-			// pending apps WITH their health, not just names.
-			if totalApps > 0 && time.Since(lastProgressPrint) >= progressPrintInterval {
+			// pending apps WITH their health, not just names. Never alongside
+			// the live dashboard — a foreign print every 30s would garble the
+			// area redraw, and the dashboard already shows all of it.
+			if dash == nil && totalApps > 0 && time.Since(lastProgressPrint) >= progressPrintInterval {
 				lastProgressPrint = time.Now()
 				delta := currentlyReady - heartbeatLastReady
 				heartbeatLastReady = currentlyReady
