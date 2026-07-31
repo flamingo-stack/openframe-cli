@@ -1,12 +1,14 @@
 package bootstrap
 
 import (
+	"path/filepath"
 	"testing"
 
 	appCmd "github.com/flamingo-stack/openframe-cli/cmd/app"
 	clusterCmd "github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/rest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -144,3 +146,21 @@ func TestServiceVerboseFlagHandling(t *testing.T) {
 // testing. The service coordinates existing cluster and chart commands, so
 // testing focuses on structure and method availability rather than end-to-end
 // execution which would require complex mocking of the underlying commands.
+
+// KubeContext must ride alongside KubeConfig: the chart workflow ignores Args
+// once a rest.Config is provided, so without it the confirmation prompt read
+// "install OpenFrame chart on ''?" and helm ran without --kube-context,
+// targeting whatever context was current instead of the created cluster.
+func TestBootstrapInstallRequest_SetsKubeContext(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "config")) // no entries → k3d- fallback
+	req := bootstrapInstallRequest("demo", true, false, &rest.Config{})
+	if req.KubeContext != "k3d-demo" {
+		t.Fatalf("KubeContext = %q, want k3d-demo", req.KubeContext)
+	}
+	if len(req.Args) != 1 || req.Args[0] != "demo" {
+		t.Fatalf("Args = %v", req.Args)
+	}
+	if req.KubeConfig == nil {
+		t.Fatal("KubeConfig must be passed through")
+	}
+}

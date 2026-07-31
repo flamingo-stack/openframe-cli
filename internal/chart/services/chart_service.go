@@ -277,7 +277,11 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		}
 		if !w.confirmInstallationOnCluster(target) {
 			pterm.Info.Println("Installation cancelled.")
-			return fmt.Errorf("installation cancelled by user")
+			// The decline is already announced above; the sentinel keeps the
+			// non-zero exit without the cmd layer re-rendering it as a scary
+			// "❌ Operation failed" (bootstrap even wrapped it as "failed to
+			// install charts: installation cancelled by user").
+			return &sharedErrors.AlreadyHandledError{OriginalError: fmt.Errorf("installation cancelled by user")}
 		}
 	}
 

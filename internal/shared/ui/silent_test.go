@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/pterm/pterm"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,4 +47,37 @@ func TestShowLogoConditional_SilentSkips(t *testing.T) {
 	// guard path (no panic, no output).
 	ShowLogoConditional(false)
 	assert.True(t, silent)
+}
+
+// The section printer is non-error output too: `app access --silent` used to
+// print its header — and the admin password via raw pterm.Printf — to stdout.
+func TestSetSilent_DiscardsSectionPrinter(t *testing.T) {
+	savedSilent := silent
+	t.Cleanup(func() { silent = savedSilent })
+
+	SetSilent()
+	assert.Equal(t, io.Discard, pterm.DefaultSection.Writer, "DefaultSection must be discarded under --silent")
+}
+
+// Command groups that shadow the root's PersistentPreRunE call this helper;
+// it must apply BOTH halves of the global output contract.
+func TestApplyGlobalOutputFlags(t *testing.T) {
+	t.Run("verbose enables debug output", func(t *testing.T) {
+		t.Cleanup(pterm.DisableDebugMessages)
+		cmd := &cobra.Command{Use: "x"}
+		cmd.Flags().Bool("silent", false, "")
+		cmd.Flags().Bool("verbose", true, "")
+		ApplyGlobalOutputFlags(cmd)
+		assert.True(t, pterm.PrintDebugMessages, "--verbose must enable pterm debug output")
+	})
+
+	t.Run("silent wins over verbose", func(t *testing.T) {
+		savedSilent := silent
+		t.Cleanup(func() { silent = savedSilent; pterm.DisableDebugMessages() })
+		cmd := &cobra.Command{Use: "x"}
+		cmd.Flags().Bool("silent", true, "")
+		cmd.Flags().Bool("verbose", true, "")
+		ApplyGlobalOutputFlags(cmd)
+		assert.False(t, pterm.PrintDebugMessages, "--silent must suppress debug output even with --verbose")
+	})
 }

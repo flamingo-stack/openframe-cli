@@ -122,18 +122,13 @@ operation for automation and power users.`,
 		// Apply --silent before any command runs so it honors its contract
 		// ("suppress all output except errors") across every subcommand.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			silent, _ := cmd.Flags().GetBool("silent")
-			if silent {
-				ui.SetSilent()
-			}
-			// --verbose enables pterm's Debug printer. Without this the ~35
+			// --verbose enables pterm's Debug printer. Without this the ~40
 			// pterm.Debug call sites across the codebase (executed helm/k3d
 			// command lines, ArgoCD wait internals, prerequisite decisions)
-			// print NOTHING, ever — the diagnostics were written but never
-			// reachable. --silent wins when both are given.
-			if v, _ := cmd.Flags().GetBool("verbose"); v && !silent {
-				pterm.EnableDebugMessages()
-			}
+			// print NOTHING, ever. NOTE: cobra runs only the CLOSEST parent's
+			// PersistentPreRunE — command groups with their own hook (app,
+			// cluster) shadow this one and must call the same helper.
+			ui.ApplyGlobalOutputFlags(cmd)
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

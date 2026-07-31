@@ -50,3 +50,15 @@ func TestHandleError_InterruptionDoesNotExit(t *testing.T) {
 	NewErrorHandler(false).HandleError(fmt.Errorf("interrupt"))
 	// Reaching here proves no os.Exit happened.
 }
+
+// An error already displayed by an inner layer (sentinel anywhere in the
+// chain) must pass through untouched — the chart workflow calls the handler
+// itself, and the cmd layer's second call used to print the same failure twice.
+func TestHandleGlobalError_DoesNotReprintAlreadyHandled(t *testing.T) {
+	orig := &AlreadyHandledError{OriginalError: fmt.Errorf("boom")}
+	wrapped := fmt.Errorf("failed to install charts: %w", orig)
+	got := HandleGlobalError(wrapped, false)
+	if got != wrapped {
+		t.Fatalf("an already-handled error must be returned as-is, not re-rendered or re-wrapped; got %T %v", got, got)
+	}
+}

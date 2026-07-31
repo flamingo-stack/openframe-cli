@@ -218,6 +218,16 @@ func HandleGlobalError(err error, verbose bool) error {
 		return nil
 	}
 
+	// A sentinel anywhere in the chain means an inner layer already displayed
+	// this error (the chart workflow calls this handler itself before its
+	// result travels back through the cmd layer, which calls it again) —
+	// re-rendering printed the same failure twice. Return the error as-is so
+	// the sentinel still maps to a non-zero exit without a second print.
+	var handled *AlreadyHandledError
+	if stderrors.As(err, &handled) {
+		return err
+	}
+
 	handler := NewErrorHandler(verbose)
 
 	// Display the error (interruptions get a friendly "cancelled" message). We

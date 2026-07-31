@@ -9,6 +9,7 @@ import (
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/pterm/pterm"
@@ -111,7 +112,18 @@ func (s *Service) createClusterSuppressed(ctx context.Context, clusterName strin
 
 // installChart installs charts on the created cluster
 func (s *Service) installChart(ctx context.Context, clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
-	return chartServices.InstallChartsWithConfigContext(ctx, utilTypes.InstallationRequest{
+	return chartServices.InstallChartsWithConfigContext(ctx, bootstrapInstallRequest(clusterName, nonInteractive, verbose, kubeConfig))
+}
+
+// bootstrapInstallRequest builds the chart-install request for the cluster the
+// bootstrap just created. KubeContext must be set alongside KubeConfig: the
+// workflow ignores Args entirely once a rest.Config is provided, so without it
+// the target name came through empty — the interactive confirmation asked
+// "install OpenFrame chart on ''?" and every helm call ran WITHOUT
+// --kube-context, silently targeting the kubeconfig's current context instead
+// of the cluster the native client was pointed at.
+func bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) utilTypes.InstallationRequest {
+	return utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
 		DryRun:         false,
@@ -121,8 +133,9 @@ func (s *Service) installChart(ctx context.Context, clusterName string, nonInter
 		CertDir:        "",                           // Auto-detected
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
+		KubeContext:    k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName),
 		// Inject cluster access from the orchestrator (composition root) so the
 		// app subsystem stays isolated from cluster-creation code (req 18/19).
 		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
-	})
+	}
 }

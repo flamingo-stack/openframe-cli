@@ -23,10 +23,11 @@ Examples:
   openframe app install my-cluster`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// This command group defines its own PersistentPreRunE, which shadows
-			// the root's, so honor --silent here too.
-			if s, _ := cmd.Flags().GetBool("silent"); s {
-				ui.SetSilent()
-			}
+			// the root's (cobra runs only the closest parent's hook), so apply
+			// the global --silent AND --verbose contract here too — replicating
+			// only the silent half left `app install --verbose` with zero debug
+			// output while `bootstrap --verbose` printed everything.
+			ui.ApplyGlobalOutputFlags(cmd)
 			// Machine output (json/yaml): no logo, clean stdout for scripts.
 			if isMachineOutput(cmd) {
 				return nil
