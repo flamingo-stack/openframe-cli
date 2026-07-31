@@ -52,11 +52,27 @@ func tfvarsFor(config models.ClusterConfig) (tfvars, error) {
 		KubernetesVersion: version,
 		InstanceType:      cloud.MachineType,
 		MinNodes:          cloud.MinNodes,
-		MaxNodes:          cloud.MaxNodes,
+		MaxNodes:          effectiveMaxNodes(cloud.MaxNodes, config.NodeCount),
 		DesiredNodes:      config.NodeCount,
 		Spot:              cloud.Spot,
 	}
 	return vars, nil
+}
+
+// templateDefaultMaxNodes mirrors the max_nodes default in templates/main.tf.
+const templateDefaultMaxNodes = 4
+
+// effectiveMaxNodes keeps `--nodes` authoritative when --max-nodes is not
+// given: with max omitted from tfvars the template default (4) applies, and a
+// `--nodes 6` create would ask for a node group whose desired size exceeds its
+// own maximum — rejected mid-apply, or silently scaled down, contradicting the
+// flag. An unset max grows to cover the requested count; an explicit max is
+// validated against it instead (validate).
+func effectiveMaxNodes(maxNodes, nodeCount int) int {
+	if maxNodes == 0 && nodeCount > templateDefaultMaxNodes {
+		return nodeCount
+	}
+	return maxNodes
 }
 
 // validate enforces the EKS-specific config invariants at the domain boundary.
@@ -79,6 +95,15 @@ func validate(config models.ClusterConfig) error {
 	}
 	if c.MinNodes > 0 && c.MaxNodes > 0 && c.MinNodes > c.MaxNodes {
 		return models.NewInvalidConfigError("nodes", fmt.Sprintf("min=%d max=%d", c.MinNodes, c.MaxNodes), "min nodes must not exceed max nodes")
+	}
+	// The desired count must sit inside the scaling bounds, or the node group
+	// is rejected mid-apply — after the VPC and control plane are already
+	// created and billed.
+	if c.MaxNodes > 0 && config.NodeCount > c.MaxNodes {
+		return models.NewInvalidConfigError("nodes", fmt.Sprintf("nodes=%d max=%d", config.NodeCount, c.MaxNodes), "node count must not exceed max nodes")
+	}
+	if c.MinNodes > 0 && config.NodeCount < c.MinNodes {
+		return models.NewInvalidConfigError("nodes", fmt.Sprintf("nodes=%d min=%d", config.NodeCount, c.MinNodes), "node count must not be below min nodes")
 	}
 	return nil
 }

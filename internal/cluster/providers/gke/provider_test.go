@@ -507,3 +507,28 @@ func TestCreateCluster_DeclinedResumeKeepsWorkspace(t *testing.T) {
 	_, err = registry.Get("demo")
 	require.NoError(t, err, "declined resume must keep the workspace and its state")
 }
+
+// Resuming an interrupted create with changed flags must leave the registry
+// record agreeing with what was actually applied — not the first attempt's
+// values, reported by list/status forever.
+func TestCreateCluster_ResumeRefreshesRecord(t *testing.T) {
+	p, _, registry := newTestProvider(t, errors.New("quota exceeded"))
+	cfg := gkeConfig("demo")
+	_, err := p.CreateCluster(context.Background(), cfg)
+	require.Error(t, err)
+
+	// Resume with a different node count on a working engine over the SAME registry.
+	calls := &[]string{}
+	engine := tfengine.NewEngineWithRunner(func(string) (tfengine.Runner, error) {
+		return &fakeRunner{calls: calls}, nil
+	})
+	p2 := NewWithDeps(engine, registry, executor.NewMockCommandExecutor())
+	cfg.NodeCount = 6
+	_, err = p2.CreateCluster(context.Background(), cfg)
+	require.NoError(t, err)
+
+	rec, err := registry.Get("demo")
+	require.NoError(t, err)
+	assert.Equal(t, 6, rec.NodeCount, "resume must refresh the record to the flags it actually applied")
+	assert.Equal(t, tfengine.StatusReady, rec.Status)
+}
