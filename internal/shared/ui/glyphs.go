@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/pterm/pterm"
 )
 
 // GlyphSet is the terminal symbol vocabulary used by the richer UI surfaces
@@ -64,6 +66,13 @@ func unicodeCapable() bool {
 
 // IsTerminal reports whether stdout is an interactive terminal.
 func IsTerminal() bool { return isTerminalEnvironment() }
+
+// SummaryRow prints one aligned dim-key row of a summary panel, e.g.
+//
+//	stages   validate 0.1s · cluster 42s · platform 17m20s
+func SummaryRow(key, value string) {
+	pterm.DefaultBasicText.Printf("  %s %s\n", pterm.FgGray.Sprintf("%-8s", key), value)
+}
 
 // ProgressBar renders a textual progress bar of the given cell width, e.g.
 // "██████░░░░" for 0.6×10. fraction is clamped to [0, 1].
