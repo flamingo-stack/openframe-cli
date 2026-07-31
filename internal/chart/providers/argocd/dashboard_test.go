@@ -66,3 +66,25 @@ func TestAppDashboard_SlowestLine(t *testing.T) {
 		t.Fatal("no ready apps → empty line")
 	}
 }
+
+func TestPendingSummary(t *testing.T) {
+	apps := []Application{
+		{Name: "ready", Health: ArgoCDHealthHealthy, Sync: ArgoCDSyncSynced},
+		{Name: "tenant", Health: ArgoCDHealthProgressing, Sync: ArgoCDSyncSynced},
+		{Name: "gateway", Health: ArgoCDHealthDegraded, Sync: ArgoCDSyncSynced},
+	}
+	got := pendingSummary(apps, 6)
+	if got != "gateway(Degraded), tenant(Progressing)" {
+		t.Fatalf("pendingSummary = %q", got)
+	}
+	if pendingSummary(apps[:1], 6) != "" {
+		t.Fatal("all-ready must render empty")
+	}
+	var many []Application
+	for _, n := range []string{"a", "b", "c", "d"} {
+		many = append(many, Application{Name: n, Health: ArgoCDHealthProgressing})
+	}
+	if got := pendingSummary(many, 2); got != "a(Progressing), b(Progressing), +2 more" {
+		t.Fatalf("capped summary = %q", got)
+	}
+}

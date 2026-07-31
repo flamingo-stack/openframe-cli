@@ -194,6 +194,8 @@ openframe app install                           # interactive: pick context
 openframe app install dev --non-interactive     # reuse existing openframe-helm-values.yaml
 openframe app install -c k3d-dev --ref v1.3.0   # deploy a specific release tag
 openframe app status  -c k3d-dev                # -o json|yaml supported
+openframe app status  -c k3d-dev --watch        # live view, refreshes in place (Ctrl+C to exit)
+openframe app status  -c k3d-dev --interactive  # k9s-style TUI: navigate apps, inspect, trigger syncs
 openframe app access  -c k3d-dev                # ArgoCD URL + admin credentials
 openframe app upgrade -c k3d-dev --sync         # force ArgoCD to re-sync current ref
 openframe app upgrade -c k3d-dev --ref v1.4.0   # move to a new release tag
@@ -210,9 +212,33 @@ openframe update v1.4.0     # switch to a specific release (up or down)
 openframe update rollback   # revert to the previous version, offline
 ```
 
+## Terminal Output
+
+On an interactive terminal the CLI renders live surfaces: a stage checklist
+with per-stage timings during `bootstrap`, an in-place dashboard during the
+application wait (progress bar, per-app health, slowest-apps timing), download
+progress bars, and a desktop notification when a long install finishes. Long
+operations under `--verbose`, `--plain`, or redirected output switch to
+timestamped sequential log lines that carry the same information (ready
+deltas, pending apps with their health).
+
+Output controls:
+
+- `--plain` — sequential output with colors but no spinners or in-place
+  redraws (for `watch`, `script`, tmux logging)
+- `--silent` — suppress everything except errors
+- `--verbose` — timestamped debug lines (helm/k3d command lines, wait internals)
+- `NO_COLOR` / `CLICOLOR_FORCE=1` — strip / force ANSI styling
+- `OPENFRAME_ASCII=1` — plain ASCII glyphs (also automatic under `TERM=dumb`
+  or a non-UTF-8 locale)
+
+In GitHub Actions, bootstrap stages fold into log groups, failures surface as
+job annotations, and the closing summary lands in the job's Step Summary.
+
 Non-interactive flags (`--non-interactive`, `--yes`, `--force`, `--skip-wizard`)
 make every command scriptable; prompts are also skipped automatically in CI or
-when stdin is not a terminal.
+when stdin is not a terminal. See [Terminal output reference](./docs/reference/terminal-output.md)
+for the full behavior matrix.
 
 ## Technology Stack
 

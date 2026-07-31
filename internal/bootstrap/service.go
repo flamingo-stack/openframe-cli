@@ -125,7 +125,8 @@ func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteract
 }
 
 // printBootstrapSummary is the closing card: what was built, how long each
-// stage took, and where to go next.
+// stage took, and where to go next. In GitHub Actions the same card lands in
+// the job's Step Summary panel as markdown.
 func printBootstrapSummary(clusterName string, tracker *steps.Tracker) {
 	g := ui.Glyphs()
 	pterm.DefaultBasicText.Println()
@@ -134,6 +135,24 @@ func printBootstrapSummary(clusterName string, tracker *steps.Tracker) {
 	ui.SummaryRow("stages", steps.TimingsLine(tracker.Timings()))
 	ui.SummaryRow("status", "openframe app status")
 	ui.SummaryRow("access", "openframe app access   (ArgoCD UI credentials)")
+	ui.AppendStepSummary(bootstrapSummaryMarkdown(clusterName, tracker))
+}
+
+// bootstrapSummaryMarkdown renders the closing card for the GitHub Actions
+// Step Summary panel.
+func bootstrapSummaryMarkdown(clusterName string, tracker *steps.Tracker) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "### OpenFrame ready · %s\n\n", steps.FormatDuration(tracker.Total()))
+	fmt.Fprintf(&b, "**Cluster:** `%s`\n\n", clusterName)
+	b.WriteString("| stage | duration |\n|---|---|\n")
+	for _, tm := range tracker.Timings() {
+		mark := ""
+		if tm.Failed {
+			mark = " ✖"
+		}
+		fmt.Fprintf(&b, "| %s%s | %s |\n", tm.Title, mark, steps.FormatDuration(tm.Duration))
+	}
+	return b.String()
 }
 
 // createClusterSuppressed creates a cluster with suppressed UI elements

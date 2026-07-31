@@ -2,6 +2,7 @@ package ui
 
 import (
 	"io"
+	"os"
 
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -14,12 +15,19 @@ import (
 // executor's failed-command diagnostics, among ~40 other pterm.Debug sites,
 // live behind it). --silent wins when both are given.
 func ApplyGlobalOutputFlags(cmd *cobra.Command) {
+	ApplyColorContract()
 	silentFlag, _ := cmd.Flags().GetBool("silent")
 	if silentFlag {
 		SetSilent()
 	}
+	if p, _ := cmd.Flags().GetBool("plain"); p {
+		SetPlain()
+	}
 	if v, _ := cmd.Flags().GetBool("verbose"); v && !silentFlag {
 		pterm.EnableDebugMessages()
+		// Timestamped debug lines: --verbose exists to correlate the CLI's
+		// actions with cluster events, which needs a clock on every line.
+		pterm.Debug = *pterm.Debug.WithWriter(NewTimestampWriter(os.Stdout))
 	}
 }
 

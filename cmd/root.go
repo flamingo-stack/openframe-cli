@@ -148,6 +148,7 @@ operation for automation and power users.`,
 	// Add global flags following cluster pattern
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().Bool("silent", false, "Suppress all output except errors")
+	rootCmd.PersistentFlags().Bool("plain", false, "Sequential output without spinners or in-place redraws (for scripts, tmux logging, watch)")
 
 	// Version template
 	rootCmd.SetVersionTemplate(`{{printf "%s\n" .Version}}`)
