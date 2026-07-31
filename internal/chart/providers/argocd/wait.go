@@ -88,12 +88,22 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		pterm.Debug.Println("  - Progress updates every 10 seconds in verbose mode")
 	}
 
-	// Start pterm spinner only if not in silent/non-interactive mode
+	// Display: the live dashboard (interactive terminal, non-verbose) shows
+	// the progress bar and per-app health in place; otherwise the spinner
+	// carries a one-line summary; --silent gets a single info line. Exactly
+	// one of dash/spinner is active — every site below guards on nil.
 	var spinner *uispinner.Spinner
-	if !config.Silent {
+	var dash *appDashboard
+	if !config.Silent && !config.Verbose {
+		dash = newAppDashboard()
+	}
+	switch {
+	case dash != nil:
+		dash.Update(0, 0, nil)
+	case !config.Silent:
 		spinner = uispinner.New().WithTimer()
 		spinner.Start("Installing ArgoCD applications...")
-	} else {
+	default:
 		// In non-interactive mode, just show a simple info message
 		pterm.Info.Println("Installing ArgoCD applications...")
 	}
@@ -103,6 +113,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Function to stop spinner safely
 	stopSpinner := func() {
+		dash.Stop()
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil {
@@ -250,6 +261,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		case <-ticker.C:
 			// Check timeout
 			if time.Since(startTime) > timeout {
+				dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
@@ -402,6 +414,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// staleness checks use the same tick.
 			now := time.Now()
 			if fatal := fatalManifest.observe(apps, now); len(fatal) > 0 {
+				dash.Fail("Applications cannot render manifests from the deployed revision")
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail("Applications cannot render manifests from the deployed revision")
@@ -423,6 +436,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// events, so it says WHY, not just that it hung.
 			if cand := degraded.observe(apps, now); len(cand) > 0 {
 				if diag, stuck := m.diagnoseFailingApps(localCtx, cand); len(stuck) > 0 {
+					dash.Fail("An application is Degraded with a workload that will not recover")
 					spinnerMutex.Lock()
 					if !spinnerStopped && spinner != nil {
 						spinner.Fail("An application is Degraded with a workload that will not recover")
@@ -449,21 +463,32 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				// which is exactly the path they are already on. Gating the hint on
 				// !stragglerSyncTriggered instead would print that contradictory
 				// advice on every stall tick after the one-shot sync.
+				// When the dashboard is live these lines pin under it as
+				// notes — a plain print would be visually swallowed by the
+				// area redraw.
+				stallNote := func(styled string) {
+					if dash != nil {
+						dash.Note(styled)
+						return
+					}
+					// DefaultBasicText, not raw print: --silent redirects it.
+					pterm.DefaultBasicText.Println(styled)
+				}
 				if config.SyncStragglersOnStall {
 					if !stragglerSyncTriggered {
 						stragglerSyncTriggered = true
-						pterm.Warning.Printf("No progress for %s; triggering sync of %d OutOfSync application(s): %v\n",
-							stallAfter.Round(time.Second), len(stragglers), stragglers)
+						stallNote(pterm.Warning.Sprintf("No progress for %s; triggering sync of %d OutOfSync application(s): %v",
+							stallAfter.Round(time.Second), len(stragglers), stragglers))
 						patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
 						if failedCount > 0 {
-							pterm.Warning.Printf("Straggler sync: %d triggered, %d failed (first error: %v)\n", patched, failedCount, syncErr)
+							stallNote(pterm.Warning.Sprintf("Straggler sync: %d triggered, %d failed (first error: %v)", patched, failedCount, syncErr))
 						}
 					}
 				} else if !stallHintShown {
 					stallHintShown = true
-					pterm.Warning.Printf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v\n",
-						stallAfter.Round(time.Second), len(stragglers), stragglers)
-					pterm.Info.Println("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out.")
+					stallNote(pterm.Warning.Sprintf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v",
+						stallAfter.Round(time.Second), len(stragglers), stragglers))
+					stallNote(pterm.Info.Sprint("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out."))
 				}
 			}
 
@@ -473,6 +498,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// this the default experience was a static "Installing ArgoCD
 			// applications..." for up to the full 60m timeout, with no way to tell
 			// a working install from a wedged one.
+			dash.Update(currentlyReady, totalApps, apps)
 			if totalApps > 0 {
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
@@ -654,10 +680,17 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerMutex.Unlock()
 
 					if len(mm) > 0 {
+						dash.Fail("Deployed ref does not match the requested ref")
 						return refMismatchError(config.AppOfApps.GitHubBranch, mm)
 					}
 
-					pterm.Success.Println("All ArgoCD applications installed")
+					if dash != nil {
+						// The dashboard's success line carries the slowest-apps
+						// timings it collected along the way.
+						dash.FinishSuccess("All ArgoCD applications installed")
+					} else {
+						pterm.Success.Println("All ArgoCD applications installed")
+					}
 					return nil
 				}
 			} else {
