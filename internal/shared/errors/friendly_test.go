@@ -44,3 +44,33 @@ func TestContainsAny(t *testing.T) {
 	assert.False(t, containsAny("hello world", "nope", "zzz"))
 	assert.False(t, containsAny("hello"))
 }
+
+// selfDiagStub mimics an error that carries its own diagnosis (like the ArgoCD
+// wait's stuck-app error embedding pod crash logs).
+type selfDiagStub struct{ msg string }
+
+func (s *selfDiagStub) Error() string       { return s.msg }
+func (s *selfDiagStub) SelfDiagnosed() bool { return true }
+
+// A self-diagnosed error must get NO generic hint: its embedded pod logs
+// ("connect: connection refused" from a probe failure) previously misfired the
+// "cluster isn't reachable" hint under a perfectly reachable cluster.
+func TestFriendlyHint_SilentForSelfDiagnosed(t *testing.T) {
+	err := &selfDiagStub{msg: "2 application(s) are Degraded...\n" +
+		"  Unhealthy Pod/x: Startup probe failed: dial tcp 10.0.0.1:8096: connect: connection refused"}
+	assert.Empty(t, friendlyHint(err), "self-diagnosed errors must suppress pattern-matched hints")
+
+	// And the marker must survive wrapping (the chart/service layers wrap it).
+	wrapped := &wrapErr{cause: err}
+	assert.Empty(t, friendlyHint(wrapped), "the marker must be found through Unwrap chains")
+
+	// A plain error with the same text still gets the hint — only the marker
+	// changes behavior.
+	plain := errors.New("dial tcp 10.0.0.1:8096: connect: connection refused")
+	assert.Contains(t, friendlyHint(plain), "isn't reachable")
+}
+
+type wrapErr struct{ cause error }
+
+func (w *wrapErr) Error() string { return "waiting failed: " + w.cause.Error() }
+func (w *wrapErr) Unwrap() error { return w.cause }

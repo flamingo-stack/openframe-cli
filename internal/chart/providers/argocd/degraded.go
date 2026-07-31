@@ -98,5 +98,7 @@ func degradedAppError(apps []Application, diag string) error {
 	b.WriteString("This is terminal — retrying or waiting cannot fix it.\n")
 	fmt.Fprintf(&b, "Inspect: kubectl get pods -n %s   (and: kubectl describe application %s -n argocd)",
 		apps[0].Namespace, apps[0].Name)
-	return fmt.Errorf("%s", b.String())
+	// selfDiagnosedError: the message embeds pod logs/events; the generic
+	// handler must not pattern-match them into a bogus "cluster unreachable" hint.
+	return selfDiagnosedError(b.String())
 }

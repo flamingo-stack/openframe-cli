@@ -913,6 +913,11 @@ func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notRe
 	if len(notReadyNames) > 0 {
 		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReadyNames[0])
 	}
+	if len(notReadyDetails) > 0 {
+		// The per-app health messages above ARE the diagnosis; suppress the
+		// generic handler's pattern-matched hint (it misfires on their content).
+		return selfDiagnosedError(b.String())
+	}
 	return fmt.Errorf("%s", b.String())
 }
 
