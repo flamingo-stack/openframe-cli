@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appstatus "github.com/flamingo-stack/openframe-cli/internal/app/status"
+	statustui "github.com/flamingo-stack/openframe-cli/internal/app/status/tui"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -32,6 +33,7 @@ Examples:
 	}
 	cmd.Flags().StringP("context", "c", "", "Kube-context to use (defaults to the current context)")
 	cmd.Flags().BoolP("watch", "w", false, "Keep the status on screen, refreshing every few seconds (Ctrl+C to exit)")
+	cmd.Flags().BoolP("interactive", "i", false, "Open the interactive view: navigate apps, inspect details, trigger syncs")
 	addOutputFlag(cmd)
 	return cmd
 }
@@ -40,15 +42,16 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 	verbose := getVerboseFlag(cmd)
 	contextName, _ := cmd.Flags().GetString("context")
 	watch, _ := cmd.Flags().GetBool("watch")
+	interactive, _ := cmd.Flags().GetBool("interactive")
 	format, err := outputFormat(cmd)
 	if err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
-	if watch && format != "text" {
-		return fmt.Errorf("--watch is a live terminal view and cannot combine with --output %s", format)
+	if (watch || interactive) && format != "text" {
+		return fmt.Errorf("--watch/--interactive are live terminal views and cannot combine with --output %s", format)
 	}
-	if watch && !ui.IsTerminal() {
-		return fmt.Errorf("--watch needs an interactive terminal")
+	if (watch || interactive) && !ui.IsTerminal() {
+		return fmt.Errorf("--watch/--interactive need an interactive terminal")
 	}
 
 	cfg, err := resolveRestConfig(contextName)
@@ -66,6 +69,9 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 	}
 	svc := appstatus.NewService(mgr, accessor, mgr)
 
+	if interactive {
+		return statustui.Run(cmd.Context(), svc, mgr.SyncApplications, verbose)
+	}
 	if watch {
 		return watchStatus(cmd.Context(), svc, verbose)
 	}

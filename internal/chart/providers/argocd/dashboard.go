@@ -30,10 +30,9 @@ type appDashboard struct {
 	area     *pterm.AreaPrinter
 	start    time.Time
 	stopped  bool
-	frame    int
-	readyAt  map[string]time.Duration
-	notes    []string
-	maxLines int
+	frame   int
+	readyAt map[string]time.Duration
+	notes   []string
 }
 
 // dashboardMaxApps caps the not-ready list so a 40-app install still fits on

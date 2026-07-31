@@ -180,14 +180,16 @@ func genericHint(err error) string {
 func splitCause(err error) (headline, cause string) {
 	full := err.Error()
 	deepest := err
+	unwrapped := false
 	for {
 		u := stderrors.Unwrap(deepest)
 		if u == nil {
 			break
 		}
 		deepest = u
+		unwrapped = true
 	}
-	if deepest != err {
+	if unwrapped {
 		causeText := deepest.Error()
 		if idx := strings.LastIndex(full, causeText); idx > 0 && causeText != "" {
 			head := strings.TrimRight(strings.TrimSuffix(full[:idx], ": "), ": \n")

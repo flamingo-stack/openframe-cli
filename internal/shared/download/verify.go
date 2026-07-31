@@ -107,7 +107,7 @@ func (d Downloader) FetchVerified(ctx context.Context, asset PinnedAsset) ([]byt
 	// Cap the read so a misbehaving/oversized response can't exhaust memory. The
 	// pinned assets (tool binaries / archives) are tens of MB; 512 MiB is a
 	// generous ceiling. Read one byte past to detect an over-cap body.
-	var src io.Reader = io.LimitReader(resp.Body, maxAssetBytes+1)
+	src := io.LimitReader(resp.Body, maxAssetBytes+1)
 	if progressEnabled() {
 		pr := newProgressReader(src, assetLabel(asset.URL), resp.ContentLength)
 		defer pr.done()
