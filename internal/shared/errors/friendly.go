@@ -1,6 +1,20 @@
 package errors
 
-import "strings"
+import (
+	stderrors "errors"
+	"strings"
+)
+
+// SelfDiagnosed marks an error that already carries its own root-cause
+// diagnosis (e.g. the ArgoCD wait's stuck-app error embedding the failing
+// pod's crash logs and events). friendlyHint must stay silent for these:
+// pattern-matching the WHOLE message would otherwise misfire on the embedded
+// diagnostics — a pod log line like "dial tcp ...: connect: connection
+// refused" made the handler claim "The cluster isn't reachable" under a
+// perfectly reachable cluster (observed live in CI).
+type SelfDiagnosed interface {
+	SelfDiagnosed() bool
+}
 
 // friendlyHint returns a plain-language, actionable hint for common low-level
 // failures, or "" when none applies. It exists so non-technical users get a
@@ -8,6 +22,12 @@ import "strings"
 // underlying error — it's shown as an extra "did you mean" line.
 func friendlyHint(err error) string {
 	if err == nil {
+		return ""
+	}
+	// An error that diagnosed itself needs no generic hint — and matching on
+	// its embedded logs/events would produce a WRONG one.
+	var sd SelfDiagnosed
+	if stderrors.As(err, &sd) && sd.SelfDiagnosed() {
 		return ""
 	}
 	msg := strings.ToLower(err.Error())

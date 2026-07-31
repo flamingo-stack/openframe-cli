@@ -57,19 +57,45 @@ func TestCountDeletablePVs(t *testing.T) {
 }
 
 func TestParseDisks(t *testing.T) {
-	out := "pvc-abc\tus-central1-a\npvc-def\tus-central1-b\nregional-disk\n\n"
+	// value() output is TAB-separated with empty columns kept: a regional disk
+	// has an empty zone column before its region.
+	out := "pvc-abc\tus-central1-a\t\npvc-def\tus-central1-b\t\nregional-disk\t\tus-central1\n\n"
 	got := parseDisks(out)
 	if len(got) != 3 {
 		t.Fatalf("parseDisks returned %d, want 3: %+v", len(got), got)
 	}
-	if got[0].name != "pvc-abc" || got[0].zone != "us-central1-a" {
+	if got[0].name != "pvc-abc" || got[0].zone != "us-central1-a" || got[0].region != "" {
 		t.Fatalf("first disk = %+v", got[0])
 	}
-	if got[2].name != "regional-disk" || got[2].zone != "" {
-		t.Fatalf("zoneless disk must parse with empty zone, got %+v", got[2])
+	if got[2].name != "regional-disk" || got[2].zone != "" || got[2].region != "us-central1" {
+		t.Fatalf("regional disk must parse with empty zone and its region, got %+v", got[2])
 	}
 	if len(parseDisks("")) != 0 {
 		t.Fatal("empty output must yield no disks")
+	}
+}
+
+// GKE cluster names are unique per LOCATION, not per project: the sweep must
+// never touch a same-named cluster's disks in another region.
+func TestDisksInLocation(t *testing.T) {
+	all := []disk{
+		{name: "mine-zonal", zone: "us-central1-a"},
+		{name: "other-zonal", zone: "europe-west1-b"},
+		{name: "mine-regional", region: "us-central1"},
+		{name: "other-regional", region: "europe-west1"},
+	}
+	got := disksInLocation(all, "us-central1")
+	if len(got) != 2 || got[0].name != "mine-zonal" || got[1].name != "mine-regional" {
+		t.Fatalf("expected only us-central1 disks, got %+v", got)
+	}
+	// A record without a location (predates the field) keeps everything.
+	if got := disksInLocation(all, ""); len(got) != 4 {
+		t.Fatalf("empty location must keep all disks, got %+v", got)
+	}
+	// A region name must not prefix-match a lookalike ("us-central12-a").
+	lookalike := []disk{{name: "x", zone: "us-central12-a"}}
+	if got := disksInLocation(lookalike, "us-central1"); len(got) != 0 {
+		t.Fatalf("us-central12-a must not match us-central1, got %+v", got)
 	}
 }
 
@@ -84,7 +110,7 @@ func TestSweepOrphanedDisks_ConsentGating(t *testing.T) {
 		mock.SetResponse("gcloud compute disks list", listResp)
 		p.executor = mock
 
-		p.sweepOrphanedDisks(context.Background(), "proj", "demo", false)
+		p.sweepOrphanedDisks(context.Background(), "proj", "demo", "us-central1", false)
 		if mock.WasCommandExecuted("gcloud compute disks delete") {
 			t.Fatal("without --force the sweep must NOT delete disks")
 		}
@@ -96,9 +122,27 @@ func TestSweepOrphanedDisks_ConsentGating(t *testing.T) {
 		mock.SetResponse("gcloud compute disks list", listResp)
 		p.executor = mock
 
-		p.sweepOrphanedDisks(context.Background(), "proj", "demo", true)
+		p.sweepOrphanedDisks(context.Background(), "proj", "demo", "us-central1", true)
 		if !mock.WasCommandExecuted("gcloud compute disks delete pvc-abc --zone us-central1-a") {
 			t.Fatalf("with --force the sweep must delete the orphan; ran: %v", mock.GetExecutedCommands())
+		}
+	})
+
+	t.Run("force: never deletes a same-named other-location cluster's disks", func(t *testing.T) {
+		p, _, _ := newTestProvider(t, nil)
+		mock := executor.NewMockCommandExecutor()
+		mock.SetResponse("gcloud compute disks list", &executor.CommandResult{
+			ExitCode: 0,
+			Stdout:   "pvc-mine\tus-central1-a\t\npvc-other\teurope-west1-b\t\n",
+		})
+		p.executor = mock
+
+		p.sweepOrphanedDisks(context.Background(), "proj", "demo", "us-central1", true)
+		if !mock.WasCommandExecuted("gcloud compute disks delete pvc-mine --zone us-central1-a") {
+			t.Fatalf("the deleted cluster's own disk must be swept; ran: %v", mock.GetExecutedCommands())
+		}
+		if mock.WasCommandExecuted("gcloud compute disks delete pvc-other") {
+			t.Fatal("a disk of the same-named cluster in another location must never be deleted")
 		}
 	})
 
@@ -106,7 +150,7 @@ func TestSweepOrphanedDisks_ConsentGating(t *testing.T) {
 		p, _, _ := newTestProvider(t, nil)
 		mock := executor.NewMockCommandExecutor()
 		p.executor = mock
-		p.sweepOrphanedDisks(context.Background(), "", "demo", true)
+		p.sweepOrphanedDisks(context.Background(), "", "demo", "us-central1", true)
 		if mock.GetCommandCount() != 0 {
 			t.Fatal("no project → no gcloud calls")
 		}

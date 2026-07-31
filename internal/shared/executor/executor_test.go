@@ -404,3 +404,16 @@ func TestResetWSLCache(t *testing.T) {
 	// Actual caching behavior depends on the OS
 	ResetWSLCache()
 }
+
+// A successful command's stderr must be captured too: helm/gcloud print
+// deprecation and ownership warnings there on exit code 0, and the callers'
+// "show stderr in verbose mode" branches were dead because cmd.Output() only
+// surfaces stderr through *exec.ExitError (i.e. on failure).
+func TestRealCommandExecutor_Execute_CapturesStderrOnSuccess(t *testing.T) {
+	e := NewRealCommandExecutor(false, false)
+	result, err := e.Execute(context.Background(), "sh", "-c", "echo out; echo warn 1>&2")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, result.ExitCode)
+	assert.Contains(t, result.Stdout, "out")
+	assert.Contains(t, result.Stderr, "warn")
+}

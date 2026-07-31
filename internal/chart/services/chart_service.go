@@ -104,8 +104,12 @@ func NewChartServiceDeferred(clusterAccess types.ClusterAccess, dryRun, verbose 
 // initializeHelmManager initializes the HelmManager with the given rest.Config
 // This is called after cluster selection in deferred mode
 func (cs *ChartService) initializeHelmManager(kubeConfig *rest.Config, verbose bool) error {
-	chartExec := executor.NewRealCommandExecutor(false, verbose)
-	helmManager, err := helm.NewHelmManager(chartExec, kubeConfig, verbose)
+	// Reuse the service's executor: it was constructed with the request's
+	// dry-run flag. Building a fresh executor with dryRun hardcoded to false
+	// made `app install --dry-run` (which always takes this deferred path)
+	// genuinely execute `helm repo add`/`helm repo update` — network calls and
+	// writes under HELM_*_HOME — and skip every "Would run:" line for them.
+	helmManager, err := helm.NewHelmManager(cs.executor, kubeConfig, verbose)
 	if err != nil {
 		return fmt.Errorf("failed to create HelmManager: %w", err)
 	}
@@ -273,7 +277,11 @@ func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req
 		}
 		if !w.confirmInstallationOnCluster(target) {
 			pterm.Info.Println("Installation cancelled.")
-			return fmt.Errorf("installation cancelled by user")
+			// The decline is already announced above; the sentinel keeps the
+			// non-zero exit without the cmd layer re-rendering it as a scary
+			// "❌ Operation failed" (bootstrap even wrapped it as "failed to
+			// install charts: installation cancelled by user").
+			return &sharedErrors.AlreadyHandledError{OriginalError: fmt.Errorf("installation cancelled by user")}
 		}
 	}
 

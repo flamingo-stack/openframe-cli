@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"testing"
 
+	appstatus "github.com/flamingo-stack/openframe-cli/internal/app/status"
 	"github.com/spf13/cobra"
 )
 
@@ -82,5 +84,18 @@ func TestAppCommand_RegistersStatusAndAccess(t *testing.T) {
 		if !found {
 			t.Errorf("app command does not register %q subcommand", name)
 		}
+	}
+}
+
+// reachable=false next to a populated applications array was self-contradictory
+// machine output; healthError now says why (e.g. an RBAC-denied node read).
+func TestStatusToJSON_CarriesHealthError(t *testing.T) {
+	rep := appstatus.Report{HealthErr: fmt.Errorf("nodes is forbidden")}
+	j := statusToJSON(rep)
+	if j.HealthError != "nodes is forbidden" {
+		t.Fatalf("HealthError = %q", j.HealthError)
+	}
+	if statusToJSON(appstatus.Report{}).HealthError != "" {
+		t.Fatal("no health error → field stays empty (omitted from JSON)")
 	}
 }

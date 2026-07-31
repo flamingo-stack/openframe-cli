@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -157,6 +158,27 @@ func TestInstaller_InstallCharts(t *testing.T) {
 			expectedError:    true,
 			expectedErrorMsg: "waiting failed for ArgoCD applications",
 		},
+		{
+			// The service layer already wraps the wait error with the same
+			// operation/component; the installer must rewrap the CAUSE, not the
+			// wrapper — otherwise the user sees the prefix twice:
+			// "waiting failed for ArgoCD applications on cluster X: waiting failed for ..."
+			name: "already-wrapped wait error is not double-prefixed",
+			config: config.ChartInstallConfig{
+				ClusterName: "test-cluster",
+				AppOfApps: &models.AppOfAppsConfig{
+					GitHubRepo: "owner/repo",
+				},
+			},
+			setupMocks: func(argoCD *MockArgoCDService, appOfApps *MockAppOfAppsService) {
+				argoCD.On("Install", mock.Anything, mock.Anything).Return(nil)
+				appOfApps.On("Install", mock.Anything, mock.Anything).Return(nil)
+				argoCD.On("WaitForApplications", mock.Anything, mock.Anything).
+					Return(errors.NewRecoverableChartError("waiting", "ArgoCD applications", assert.AnError, 0).WithCluster("test-cluster"))
+			},
+			expectedError:    true,
+			expectedErrorMsg: "waiting failed for ArgoCD applications",
+		},
 	}
 
 	for _, tt := range tests {
@@ -182,6 +204,10 @@ func TestInstaller_InstallCharts(t *testing.T) {
 				assert.Error(t, err)
 				if tt.expectedErrorMsg != "" {
 					assert.Contains(t, err.Error(), tt.expectedErrorMsg)
+					// Never twice — the double-prefix regression reads
+					// "waiting failed for X: waiting failed for X: ...".
+					assert.Equal(t, 1, strings.Count(err.Error(), tt.expectedErrorMsg),
+						"error prefix must appear exactly once: %s", err.Error())
 				}
 			} else {
 				assert.NoError(t, err)
@@ -226,6 +252,10 @@ func TestInstaller_InstallCharts_RecoverableError(t *testing.T) {
 	ok := stderrors.As(err, &chartErr)
 	assert.True(t, ok, "Expected ChartError")
 	assert.False(t, chartErr.IsRecoverable(), "Expected non-recoverable error - waiting failures should not trigger reinstallation")
+	// And EXPLICITLY non-retryable, not just unmarked: the wait diagnostics
+	// embed pod logs whose text ("connection refused") would otherwise
+	// pattern-match the retry policy's transient table and reinstall ArgoCD.
+	assert.True(t, chartErr.IsNonRetryable(), "wait failures must carry the explicit never-retry marker")
 }
 
 func TestInstaller_InstallCharts_NoWaitWithoutAppOfApps(t *testing.T) {

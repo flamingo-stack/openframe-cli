@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -32,6 +33,17 @@ const (
 	StatusReady    Status = "ready"
 	StatusFailed   Status = "failed"
 )
+
+// Title renders the status capitalized for display ("ready" → "Ready"). A
+// record with a missing status degrades to "Unknown": Registry.List accepts any
+// cluster.json that unmarshals, so one hand-edited or truncated file must not
+// crash `cluster list` for every other cluster with an index-out-of-range.
+func (s Status) Title() string {
+	if s == "" {
+		return "Unknown"
+	}
+	return strings.ToUpper(string(s[:1])) + string(s[1:])
+}
 
 // Record is the persisted registry entry for one cloud cluster. Endpoint and
 // CACert are captured from terraform outputs after a successful apply so that

@@ -14,7 +14,13 @@ type ChartError struct {
 	Cause       error
 	Timestamp   time.Time
 	Recoverable bool
-	RetryAfter  time.Duration
+	// NonRetryable is an explicit "never retry" marking — stronger than
+	// Recoverable=false (the default), which merely means "unclassified" and
+	// lets the retry policy classify the cause itself. Set it on errors whose
+	// message embeds diagnostics (pod logs, events) that could pattern-match
+	// as transient, or where a retry would redo already-completed work.
+	NonRetryable bool
+	RetryAfter   time.Duration
 }
 
 // Error reads as "<operation> failed for <component> [on cluster <name>]: <cause>",
@@ -79,6 +85,17 @@ func (e *ChartError) WithRecovery(retryAfter time.Duration) *ChartError {
 	e.Recoverable = true
 	e.RetryAfter = retryAfter
 	return e
+}
+
+// WithNonRetryable explicitly forbids retrying this error (see the field doc).
+func (e *ChartError) WithNonRetryable() *ChartError {
+	e.NonRetryable = true
+	return e
+}
+
+// IsNonRetryable implements the shared errors.NonRetryableError marker.
+func (e *ChartError) IsNonRetryable() bool {
+	return e.NonRetryable
 }
 
 // Chart Error Types

@@ -804,10 +804,11 @@ func (s *ClusterService) showNextSteps(clusterName string, clusterType models.Cl
 
 // ShowClusterStatus handles cluster status display logic
 func (s *ClusterService) ShowClusterStatus(name string, detailed bool, skipApps bool, verbose bool) error {
-	ctx := context.Background()
-
-	// Get cluster status
-	status, err := s.manager.GetClusterStatus(ctx, name)
+	// Resolve through the cluster-type-aware path (cloud registry first, then
+	// k3d), not the k3d manager directly — otherwise a recorded GKE/EKS cluster
+	// was reported "not found" here even though `--output json` (which goes
+	// through GetClusterStatus) rendered it fine.
+	status, err := s.GetClusterStatus(name)
 	if err != nil {
 		// Check if it's a "cluster not found" error and handle it friendly
 		if strings.Contains(err.Error(), "not found") {
@@ -815,8 +816,10 @@ func (s *ClusterService) ShowClusterStatus(name string, detailed bool, skipApps 
 			if isTerminalEnvironment() {
 				pterm.DefaultBasicText.Println()
 
-				// Get list of available clusters to show user their options
-				clusters, listErr := s.manager.ListClusters(ctx)
+				// Get list of available clusters to show user their options —
+				// the merged local+cloud list, so the box never claims a cloud
+				// cluster's name is unavailable while offering only k3d names.
+				clusters, listErr := s.ListClusters()
 
 				var boxContent string
 				if listErr == nil && len(clusters) > 0 {

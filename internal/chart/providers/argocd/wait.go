@@ -160,6 +160,13 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	if timeout <= 0 {
 		timeout = defaultAppWaitTimeout()
 	}
+	// Cap the budget to the caller's context deadline, with margin: the install
+	// path runs the WHOLE flow (ArgoCD install, clone, app-of-apps, this wait)
+	// under one 60m deadline, and this wait's own default is also 60m measured
+	// from a strictly later point — so the outer deadline always expired first
+	// and the diagnostic timeoutError below (not-ready apps, per-app health)
+	// was unreachable; users got a bare "context deadline exceeded".
+	timeout = capToDeadline(localCtx, timeout, startTime)
 	checkInterval := 2 * time.Second
 	lastCheck := time.Now()
 	clusterHealthCheckInterval := 10 * time.Second
@@ -415,14 +422,16 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// workload is never cut off. The error carries the pod's crash logs and
 			// events, so it says WHY, not just that it hung.
 			if cand := degraded.observe(apps, now); len(cand) > 0 {
-				if diag, terminal := m.diagnoseFailingApps(localCtx, cand); terminal {
+				if diag, stuck := m.diagnoseFailingApps(localCtx, cand); len(stuck) > 0 {
 					spinnerMutex.Lock()
 					if !spinnerStopped && spinner != nil {
 						spinner.Fail("An application is Degraded with a workload that will not recover")
 						spinnerStopped = true
 					}
 					spinnerMutex.Unlock()
-					return degradedAppError(cand, diag)
+					// Only the apps whose OWN pods are terminally stuck — not
+					// every candidate that happens to share their namespace.
+					return degradedAppError(stuck, diag)
 				}
 			}
 
@@ -913,7 +922,33 @@ func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notRe
 	if len(notReadyNames) > 0 {
 		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReadyNames[0])
 	}
+	if len(notReadyDetails) > 0 {
+		// The per-app health messages above ARE the diagnosis; suppress the
+		// generic handler's pattern-matched hint (it misfires on their content).
+		return selfDiagnosedError(b.String())
+	}
 	return fmt.Errorf("%s", b.String())
+}
+
+// capToDeadline shrinks a wait budget so it elapses BEFORE the context
+// deadline, leaving a margin to gather and render the timeout diagnostic.
+// Returns the configured budget unchanged when the context has no deadline or
+// the deadline is farther away. A (nearly) exhausted deadline yields 0 — the
+// wait times out on its first tick rather than riding into ctx.Err().
+func capToDeadline(ctx context.Context, configured time.Duration, from time.Time) time.Duration {
+	const margin = time.Minute
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return configured
+	}
+	remaining := dl.Sub(from) - margin
+	if remaining < 0 {
+		return 0
+	}
+	if remaining < configured {
+		return remaining
+	}
+	return configured
 }
 
 // defaultAppWaitTimeout is the install/bootstrap application-wait budget: 60m,

@@ -161,8 +161,39 @@ func releaseWorkloadDisks(ctx context.Context, rec tfengine.Record) {
 
 // disk is one labeled Persistent Disk found by the post-destroy sweep.
 type disk struct {
-	name string
-	zone string // basename, e.g. "us-central1-a"; empty for a regional disk
+	name   string
+	zone   string // basename, e.g. "us-central1-a"; empty for a regional disk
+	region string // basename, e.g. "us-central1"; set for regional disks only
+}
+
+// location returns where the disk lives: its zone, or its region for a
+// regional disk.
+func (d disk) location() string {
+	if d.zone != "" {
+		return d.zone
+	}
+	return d.region
+}
+
+// disksInLocation keeps only disks that can belong to the deleted cluster.
+// GKE cluster names are unique per LOCATION, not per project, so the
+// name-label filter alone would also match — and with --force delete — the
+// still-attached disks of a same-named, live cluster in another region. The
+// record stores the cluster's region; a zonal disk of that cluster lives in
+// "<region>-<suffix>". An empty location (a record predating this field)
+// keeps everything, degrading to the unscoped behavior.
+func disksInLocation(disks []disk, location string) []disk {
+	if location == "" {
+		return disks
+	}
+	var out []disk
+	for _, d := range disks {
+		loc := d.location()
+		if loc == location || strings.HasPrefix(loc, location+"-") {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // sweepOrphanedDisks finds Persistent Disks still labeled for this cluster after
@@ -171,18 +202,18 @@ type disk struct {
 // via --force, or an interactive yes to the prompt — so the cluster leaves zero
 // billable leftovers; otherwise it reports them with the exact cleanup command
 // and never deletes cloud data without consent. Best-effort throughout.
-func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name string, force bool) {
+func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name, location string, force bool) {
 	if project == "" {
 		return
 	}
 	res, err := p.executor.Execute(ctx, "gcloud", "compute", "disks", "list",
 		"--project", project,
 		"--filter", "labels.goog-k8s-cluster-name="+name,
-		"--format=value(name,zone.basename())")
+		"--format=value(name,zone.basename(),region.basename())")
 	if err != nil || res == nil {
 		return
 	}
-	disks := parseDisks(res.Stdout)
+	disks := disksInLocation(parseDisks(res.Stdout), location)
 	if len(disks) == 0 {
 		return
 	}
@@ -229,7 +260,13 @@ func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name string,
 func printOrphanList(disks []disk, name string) {
 	pterm.Warning.Printf("%d Persistent Disk(s) labeled for cluster %q survived the destroy (PVC-provisioned, outside terraform state):\n", len(disks), name)
 	for _, d := range disks {
-		pterm.Warning.Printf("  - %s\n", d.name)
+		// The location tells the operator WHICH cluster's disks these are —
+		// GKE cluster names repeat across locations.
+		if loc := d.location(); loc != "" {
+			pterm.Warning.Printf("  - %s (%s)\n", d.name, loc)
+		} else {
+			pterm.Warning.Printf("  - %s\n", d.name)
+		}
 	}
 }
 
@@ -241,18 +278,23 @@ func printOrphanCleanupHint(project, name string) {
 }
 
 // parseDisks turns `gcloud compute disks list
-// --format=value(name,zone.basename())` output into disks — one per non-empty
-// line, fields separated by whitespace (name, then optional zone).
+// --format=value(name,zone.basename(),region.basename())` output into disks —
+// one per non-empty line. value() output is TAB-separated with empty columns
+// kept: a regional disk has an empty zone column, so a whitespace split would
+// shift its region into the zone slot.
 func parseDisks(out string) []disk {
 	var disks []disk
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		fields := strings.Fields(line)
-		d := disk{name: fields[0]}
+		fields := strings.Split(line, "\t")
+		d := disk{name: strings.TrimSpace(fields[0])}
 		if len(fields) > 1 {
-			d.zone = fields[1]
+			d.zone = strings.TrimSpace(fields[1])
+		}
+		if len(fields) > 2 {
+			d.region = strings.TrimSpace(fields[2])
 		}
 		disks = append(disks, d)
 	}

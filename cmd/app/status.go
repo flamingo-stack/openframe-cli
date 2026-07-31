@@ -74,9 +74,13 @@ type statusAppJSON struct {
 
 // statusJSON is the machine-readable shape of `app status`.
 type statusJSON struct {
-	Reachable    bool            `json:"reachable"`
-	NodesReady   int             `json:"nodesReady"`
-	NodesTotal   int             `json:"nodesTotal"`
+	Reachable  bool `json:"reachable"`
+	NodesReady int  `json:"nodesReady"`
+	NodesTotal int  `json:"nodesTotal"`
+	// HealthError says WHY reachable is false (e.g. an RBAC-denied node read
+	// next to a fully populated applications array) — without it that
+	// combination read as self-contradictory output.
+	HealthError  string          `json:"healthError,omitempty"`
 	Ready        bool            `json:"ready"`
 	Summary      string          `json:"summary"`
 	Total        int             `json:"total"`
@@ -90,8 +94,13 @@ func statusToJSON(rep appstatus.Report) statusJSON {
 	for _, a := range rep.Apps {
 		apps = append(apps, statusAppJSON{Name: a.Name, Sync: a.Sync, Health: a.Health})
 	}
+	healthErr := ""
+	if rep.HealthErr != nil {
+		healthErr = rep.HealthErr.Error()
+	}
 	return statusJSON{
 		Reachable:    rep.Health.Reachable,
+		HealthError:  healthErr,
 		NodesReady:   rep.Health.NodesReady,
 		NodesTotal:   rep.Health.NodesTotal,
 		Ready:        rep.Ready(),
@@ -104,11 +113,26 @@ func statusToJSON(rep appstatus.Report) statusJSON {
 }
 
 func renderStatus(rep appstatus.Report) {
-	if !rep.Health.Reachable {
+	switch {
+	case !rep.Health.Reachable && rep.Total == 0:
 		pterm.Error.Println("Cluster is not reachable. Is it running and is your kube-context correct?")
+		if rep.HealthErr != nil {
+			pterm.Error.Printf("  cause: %v\n", rep.HealthErr)
+		}
 		return
+	case !rep.Health.Reachable:
+		// The application list DID come back, so the API server answered — only
+		// the node read failed (commonly RBAC: a namespace-scoped credential
+		// has no cluster-wide "nodes list"). Say that and keep the data instead
+		// of claiming the cluster is down and hiding a healthy platform.
+		msg := "Cluster node health could not be read"
+		if rep.HealthErr != nil {
+			msg += ": " + rep.HealthErr.Error()
+		}
+		pterm.Warning.Println(msg)
+	default:
+		pterm.Success.Printf("Cluster reachable (%d/%d nodes ready)\n", rep.Health.NodesReady, rep.Health.NodesTotal)
 	}
-	pterm.Success.Printf("Cluster reachable (%d/%d nodes ready)\n", rep.Health.NodesReady, rep.Health.NodesTotal)
 
 	if rep.Total == 0 {
 		pterm.Warning.Println("No OpenFrame applications found — is it installed? Run: openframe app install")

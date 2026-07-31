@@ -38,8 +38,19 @@ func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.
 		// Note: This is NOT a recoverable error - ArgoCD and app-of-apps are already installed,
 		// so retrying would reinstall them unnecessarily. WaitForApplications has its own internal retry logic.
 		if err := i.argoCDService.WaitForApplications(ctx, config); err != nil {
-			// Create a new non-recoverable error (don't use WrapAsChartError which preserves existing ChartError's Recoverable flag)
-			return errors.NewChartError("waiting", "ArgoCD applications", err).WithCluster(config.ClusterName)
+			// Create a new non-recoverable error (don't use WrapAsChartError which preserves existing ChartError's Recoverable flag).
+			// The service layer already wrapped with the same operation/component;
+			// rewrap its CAUSE, not the wrapper, or the message doubles up:
+			// "waiting failed for ArgoCD applications on cluster X: waiting failed for ..."
+			cause := err
+			var ce *errors.ChartError
+			if stderrors.As(err, &ce) && ce.Operation == "waiting" && ce.Component == "ArgoCD applications" {
+				cause = ce.Cause
+			}
+			// WithNonRetryable, not just default-false: the wait diagnostics
+			// embed pod logs whose text ("connection refused", "i/o timeout")
+			// would otherwise pattern-match the retry policy's transient table.
+			return errors.NewChartError("waiting", "ArgoCD applications", cause).WithCluster(config.ClusterName).WithNonRetryable()
 		}
 	}
 

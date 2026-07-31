@@ -17,6 +17,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -243,14 +244,14 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 
 	ws := p.registry.Workspace(config.Name)
 	freshWorkspace := !ws.Exists()
+	vars, err := tfvarsFor(config)
+	if err != nil {
+		return nil, err
+	}
 	// The collision check only guards NEW clusters: an existing workspace means
 	// the cloud cluster (partial or complete) is ours and create resumes it.
 	if freshWorkspace {
 		if err := p.preflightNameCollision(ctx, config); err != nil {
-			return nil, err
-		}
-		vars, err := tfvarsFor(config)
-		if err != nil {
 			return nil, err
 		}
 		record := tfengine.Record{
@@ -271,20 +272,19 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 				return nil, err
 			}
 		}
+	} else if backend != nil {
+		// Repointing an existing workspace's state backend needs a terraform
+		// state migration this CLI does not drive. Dropping the flag silently
+		// would leave the user believing their state moved — say it out loud.
+		pterm.Warning.Println("--backend-config is ignored when resuming an existing workspace; the backend chosen at first create stays in effect")
 	}
 	// An existing workspace means a previous create failed or was interrupted.
 	// Refresh the generated module from the CURRENT template before resuming:
 	// the retry must pick up template bugfixes (e.g. the private-nodes fix for
 	// org-policy environments), not replay the broken files. The state is
 	// untouched — terraform reconciles it against the refreshed config.
-	if ws.Exists() {
-		vars, err := tfvarsFor(config)
-		if err != nil {
-			return nil, err
-		}
-		if err := tfengine.WriteModule(ws.TerraformDir(), mainTF, vars); err != nil {
-			return nil, err
-		}
+	if err := tfengine.WriteModule(ws.TerraformDir(), mainTF, vars); err != nil {
+		return nil, err
 	}
 
 	if err := p.engine.Init(ctx, ws.TerraformDir()); err != nil {
@@ -333,6 +333,12 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	if err != nil {
 		return nil, err
 	}
+	// The module applied above was regenerated from the CURRENT config; make
+	// the record agree with it, or a resumed create with changed flags (e.g.
+	// --nodes) reports the first attempt's values from list/status forever.
+	record.Region = config.Cloud.Region
+	record.NodeCount = config.NodeCount
+	record.K8sVersion = vars.KubernetesVersion
 	endpoint, err := tfengine.StringOutput(outputs, "cluster_endpoint")
 	if err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, err)
@@ -386,7 +392,7 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 		// Sweep any PVC-provisioned disks that outlived the destroy: delete them
 		// when the caller consented to an unattended teardown (--force), else
 		// report them — a "cleaned up" delete must never silently leave orphans.
-		p.sweepOrphanedDisks(ctx, rec.Project, name, force)
+		p.sweepOrphanedDisks(ctx, rec.Project, name, rec.Region, force)
 	}
 	return ws.Remove()
 }
@@ -477,7 +483,7 @@ func infoFor(rec tfengine.Record) models.ClusterInfo {
 		Context:    rec.Name,
 		Project:    rec.Project,
 		Region:     rec.Region,
-		Status:     strings.ToTitle(string(rec.Status[0:1])) + string(rec.Status[1:]),
+		Status:     rec.Status.Title(),
 		NodeCount:  rec.NodeCount,
 		K8sVersion: rec.K8sVersion,
 		CreatedAt:  rec.CreatedAt,

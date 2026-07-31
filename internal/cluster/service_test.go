@@ -285,3 +285,33 @@ func TestShouldResumeCloudCreate(t *testing.T) {
 		}
 	}
 }
+
+// The default (text) status path must resolve through the cloud-aware lookup:
+// a registry-recorded GKE/EKS cluster used to be reported "not found" here
+// while `--output json` rendered it fine.
+func TestClusterService_ShowClusterStatus_FindsCloudCluster(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	service := NewClusterService(createTestExecutor())
+
+	reg := tfengine.NewRegistry(os.Getenv("OPENFRAME_CLUSTERS_DIR"))
+	record := tfengine.Record{
+		Name:      "cloudy",
+		Type:      models.ClusterTypeGKE,
+		Status:    tfengine.StatusReady,
+		Region:    "us-central1",
+		Project:   "proj",
+		NodeCount: 3,
+	}
+	if err := reg.Workspace("cloudy").Scaffold(record, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.ShowClusterStatus("cloudy", false, false, false); err != nil {
+		t.Fatalf("a registry-recorded cloud cluster must not be 'not found': %v", err)
+	}
+
+	// An unknown name still errors.
+	if err := service.ShowClusterStatus("ghost", false, false, false); err == nil {
+		t.Fatal("an unknown cluster must still report not found")
+	}
+}

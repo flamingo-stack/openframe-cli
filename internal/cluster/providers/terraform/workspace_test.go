@@ -93,3 +93,13 @@ func TestRegistry_GetMissingIsClusterNotFound(t *testing.T) {
 	var notFound models.ErrClusterNotFound
 	assert.ErrorAs(t, err, &notFound)
 }
+
+// A record with a missing status must render as "Unknown", not crash the whole
+// `cluster list` with an index-out-of-range: Registry.List accepts any
+// cluster.json that unmarshals, including hand-edited or truncated ones.
+func TestStatusTitle(t *testing.T) {
+	assert.Equal(t, "Ready", StatusReady.Title())
+	assert.Equal(t, "Creating", StatusCreating.Title())
+	assert.Equal(t, "Failed", StatusFailed.Title())
+	assert.Equal(t, "Unknown", Status("").Title())
+}

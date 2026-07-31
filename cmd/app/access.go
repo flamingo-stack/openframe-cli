@@ -78,11 +78,13 @@ func newArgoCDManager(contextName string, verbose bool) (*argocd.Manager, error)
 }
 
 // printAccess renders the ArgoCD sign-in details and how to reach the UI.
+// Everything goes through printers that SetSilent rewires: raw pterm.Printf
+// writes straight to stdout, which leaked the admin PASSWORD under --silent.
 func printAccess(password string) {
 	pterm.DefaultSection.Println("ArgoCD access")
-	pterm.Printf("  Username: admin\n")
-	pterm.Printf("  Password: %s\n", password)
+	pterm.DefaultBasicText.Printf("  Username: admin\n")
+	pterm.DefaultBasicText.Printf("  Password: %s\n", password)
 	pterm.Info.Println("Open the ArgoCD UI:")
-	pterm.Printf("  1. kubectl port-forward -n argocd svc/argocd-server 8080:443\n")
-	pterm.Printf("  2. open https://localhost:8080\n")
+	pterm.DefaultBasicText.Printf("  1. kubectl port-forward -n argocd svc/argocd-server 8080:443\n")
+	pterm.DefaultBasicText.Printf("  2. open https://localhost:8080\n")
 }

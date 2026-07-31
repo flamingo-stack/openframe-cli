@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
@@ -134,5 +135,63 @@ func TestIsImagePullReason(t *testing.T) {
 	}
 	if isImagePullReason("CrashLoopBackOff") {
 		t.Error("CrashLoopBackOff is not an image-pull reason")
+	}
+}
+
+// Both diagnostic-carrying errors must be marked SelfDiagnosed so the generic
+// handler suppresses its pattern-matched hint (which misfires on embedded pod
+// logs like "connect: connection refused").
+func TestDiagnosticErrors_AreSelfDiagnosed(t *testing.T) {
+	type selfDiagnosed interface{ SelfDiagnosed() bool }
+
+	dErr := degradedAppError([]Application{{Name: "tenant", Namespace: "tenant"}}, "\n  pod x: CrashLoopBackOff")
+	var sd selfDiagnosed
+	if !errorsAs(dErr, &sd) || !sd.SelfDiagnosed() {
+		t.Fatal("degradedAppError must be SelfDiagnosed")
+	}
+
+	tErr := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, []string{"  - a: health=Degraded"})
+	sd = nil
+	if !errorsAs(tErr, &sd) || !sd.SelfDiagnosed() {
+		t.Fatal("timeoutError WITH diagnostics must be SelfDiagnosed")
+	}
+
+	// Without diagnostics the timeout error stays plain — generic hints stay useful.
+	plain := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, nil)
+	sd = nil
+	if errorsAs(plain, &sd) {
+		t.Fatal("timeoutError WITHOUT diagnostics must stay a plain error")
+	}
+}
+
+func errorsAs(err error, target any) bool { return stderrors.As(err, target) }
+
+// Once past its thresholds, a candidate must be re-reported at the recheck
+// interval, not on every 2s tick: each report triggers a full pod diagnosis
+// (pod list + log streams + events), ~1800 rounds an hour otherwise.
+func TestDegradedTracker_ThrottlesRecheck(t *testing.T) {
+	tr := &degradedTracker{entries: map[string]degradedEntry{}, after: time.Minute}
+	base := time.Unix(5000, 0)
+	app := []Application{degApp("x", ArgoCDHealthDegraded, ArgoCDSyncSynced)}
+
+	// Drive past both thresholds at a 2s cadence and count the reports.
+	fired := 0
+	var lastFire time.Time
+	var prevFire time.Time
+	for i := 0; i < 400; i++ { // ~13 minutes of ticks
+		now := base.Add(time.Duration(i) * 2 * time.Second)
+		if out := tr.observe(app, now); len(out) > 0 {
+			fired++
+			prevFire, lastFire = lastFire, now
+		}
+	}
+	if fired == 0 {
+		t.Fatal("a persistently Degraded app must still be reported")
+	}
+	if fired > 15 {
+		t.Fatalf("reports must be throttled to ~1/min, got %d in ~13m", fired)
+	}
+	if !prevFire.IsZero() && lastFire.Sub(prevFire) < degradedRecheckInterval {
+		t.Fatalf("consecutive reports %v apart, want >= %v", lastFire.Sub(prevFire), degradedRecheckInterval)
 	}
 }
