@@ -62,6 +62,9 @@ func unicodeCapable() bool {
 	return true
 }
 
+// IsTerminal reports whether stdout is an interactive terminal.
+func IsTerminal() bool { return isTerminalEnvironment() }
+
 // ProgressBar renders a textual progress bar of the given cell width, e.g.
 // "██████░░░░" for 0.6×10. fraction is clamped to [0, 1].
 func ProgressBar(fraction float64, width int) string {
