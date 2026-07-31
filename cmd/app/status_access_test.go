@@ -2,9 +2,12 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	appstatus "github.com/flamingo-stack/openframe-cli/internal/app/status"
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
+	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	"github.com/spf13/cobra"
 )
 
@@ -97,5 +100,42 @@ func TestStatusToJSON_CarriesHealthError(t *testing.T) {
 	}
 	if statusToJSON(appstatus.Report{}).HealthError != "" {
 		t.Fatal("no health error → field stays empty (omitted from JSON)")
+	}
+}
+
+// --watch is a live terminal view: machine output must be rejected up front,
+// and each frame must carry the data a human polls for.
+func TestRenderWatchFrame(t *testing.T) {
+	rep := appstatus.Report{
+		Health: k8s.Health{Reachable: true, NodesReady: 3, NodesTotal: 3},
+		Apps: []argocd.Application{
+			{Name: "tenant", Sync: "Synced", Health: "Progressing"},
+		},
+		Total: 1,
+	}
+	frame := renderWatchFrame(rep, nil)
+	for _, want := range []string{"OpenFrame status", "3/3 nodes ready", "tenant", "Progressing", "Ctrl+C"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("frame lacks %q:\n%s", want, frame)
+		}
+	}
+
+	errFrame := renderWatchFrame(appstatus.Report{}, fmt.Errorf("boom"))
+	if !strings.Contains(errFrame, "boom") {
+		t.Fatalf("a failing poll must show its error and keep watching:\n%s", errFrame)
+	}
+
+	empty := renderWatchFrame(appstatus.Report{Health: k8s.Health{Reachable: true}}, nil)
+	if !strings.Contains(empty, "is it installed") {
+		t.Fatalf("no apps → install hint:\n%s", empty)
+	}
+}
+
+func TestStatusCommand_WatchRejectsMachineOutput(t *testing.T) {
+	cmd := getStatusCmd()
+	cmd.SetArgs([]string{"--watch", "--output", "json"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--watch") {
+		t.Fatalf("expected the watch/output conflict error, got %v", err)
 	}
 }

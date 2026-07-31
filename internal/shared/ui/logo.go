@@ -107,11 +107,16 @@ func showFancyLogo() {
 	// Use pterm default box with custom styling
 	pterm.DefaultBox.BoxStyle = boxStyle
 
-	// Create padded logo lines
+	// Create padded logo lines with a vertical cyan→purple gradient. pterm
+	// downsamples RGB on terminals without truecolor, so this is safe
+	// everywhere colors are safe at all.
+	gradStart := pterm.NewRGB(0, 200, 255)
+	gradEnd := pterm.NewRGB(168, 108, 255)
 	paddedLines := make([]string, 0, len(logoArt)+3)
 	paddedLines = append(paddedLines, "") // Top padding
-	for _, line := range logoArt {
-		paddedLines = append(paddedLines, " "+line+" ")
+	for i, line := range logoArt {
+		c := gradStart.Fade(0, float32(len(logoArt)-1), float32(i), gradEnd)
+		paddedLines = append(paddedLines, " "+c.Sprint(line)+" ")
 	}
 	paddedLines = append(paddedLines, "") // Bottom padding
 

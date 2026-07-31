@@ -394,3 +394,34 @@ func BenchmarkErrorHandler_HandleError(b *testing.B) {
 		handler.HandleError(err)
 	}
 }
+
+// The failure panel splits an error chain into headline + root cause.
+func TestSplitCause(t *testing.T) {
+	root := fmt.Errorf("quota exceeded")
+	wrapped := fmt.Errorf("create failed for cluster big: %w", root)
+	head, cause := splitCause(wrapped)
+	assert.Equal(t, "create failed for cluster big", head)
+	assert.Equal(t, "quota exceeded", cause)
+
+	// Two wrapping layers: headline keeps the whole outer chain, cause is root.
+	outer := fmt.Errorf("bootstrap failed: %w", wrapped)
+	head, cause = splitCause(outer)
+	assert.Equal(t, "bootstrap failed: create failed for cluster big", head)
+	assert.Equal(t, "quota exceeded", cause)
+
+	// A chain of one: first line is the headline, the rest is the cause block.
+	head, cause = splitCause(fmt.Errorf("apply failed\nstate kept in /tmp/x"))
+	assert.Equal(t, "apply failed", head)
+	assert.Equal(t, "state kept in /tmp/x", cause)
+
+	head, cause = splitCause(fmt.Errorf("plain"))
+	assert.Equal(t, "plain", head)
+	assert.Empty(t, cause)
+}
+
+func TestGenericHint_K3dCreateSpecialCase(t *testing.T) {
+	err := fmt.Errorf("cluster create operation failed: k3d cluster create demo: exit status 1")
+	hint := genericHint(err)
+	assert.Contains(t, hint, "docker info")
+	assert.Contains(t, hint, "6550")
+}

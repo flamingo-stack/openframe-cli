@@ -47,6 +47,9 @@ Examples:
 			// Show logo for subcommands, but not for the root cluster command
 			if cmd.Use != "cluster" {
 				ui.ShowLogoWithContext(cmd.Context())
+				// One dim line naming the current kube-context — the cheapest
+				// guard against pointing a destructive command at the wrong cluster.
+				ui.ShowContextHeader()
 			}
 			// create runs its own type-aware gate after the cluster type is known
 			// (a cloud cluster must not demand Docker/k3d); use only flips local

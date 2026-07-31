@@ -12,6 +12,8 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/steps"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
@@ -76,18 +78,29 @@ func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteract
 		actualClusterName = defaultClusterName
 	}
 
+	// The buildkit-style stage checklist: every stage announces itself, and
+	// closes with ✔/✖ + duration; the collected timings feed the summary card.
+	tracker := steps.NewTracker("Validate helm values", "Create cluster", "Install platform")
+
 	// Step 0: Pre-flight the helm values file BEFORE creating the cluster. A
 	// malformed `argocd:` override (or unparseable YAML) otherwise costs a full
 	// cluster create before the chart install rejects the same file.
+	tracker.Begin(0, "")
 	if err := chartServices.ValidateHelmValuesFile(); err != nil {
+		tracker.Fail(0)
 		return err
 	}
+	tracker.Done(0)
 
 	// Step 1: Create cluster with suppressed UI and get the rest.Config
+	tracker.Begin(1, actualClusterName)
 	kubeConfig, err := s.createClusterSuppressed(ctx, actualClusterName, verbose, nonInteractive)
 	if err != nil {
+		tracker.Fail(1)
+		ui.Notify("OpenFrame bootstrap failed")
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
+	tracker.Done(1)
 
 	// Add spacing between commands. DefaultBasicText, not raw fmt: --silent
 	// redirects it — these two raw Printlns were the "three blank lines" the
@@ -96,11 +109,31 @@ func (s *Service) bootstrap(ctx context.Context, clusterName string, nonInteract
 	pterm.DefaultBasicText.Println()
 
 	// Step 2: Install charts on the created cluster
+	tracker.Begin(2, "ArgoCD + app-of-apps")
 	if err := s.installChart(ctx, actualClusterName, nonInteractive, verbose, kubeConfig); err != nil {
+		tracker.Fail(2)
+		ui.Notify("OpenFrame bootstrap failed")
 		return fmt.Errorf("failed to install charts: %w", err)
 	}
+	tracker.Done(2)
 
+	printBootstrapSummary(actualClusterName, tracker)
+	// Desktop toast + bell for the user who switched away during the install;
+	// no-op off-TTY and under --silent.
+	ui.Notify(fmt.Sprintf("OpenFrame ready %s %s", ui.Glyphs().Bullet, steps.FormatDuration(tracker.Total())))
 	return nil
+}
+
+// printBootstrapSummary is the closing card: what was built, how long each
+// stage took, and where to go next.
+func printBootstrapSummary(clusterName string, tracker *steps.Tracker) {
+	g := ui.Glyphs()
+	pterm.DefaultBasicText.Println()
+	pterm.Success.Printf("OpenFrame ready %s %s\n", g.Bullet, steps.FormatDuration(tracker.Total()))
+	ui.SummaryRow("cluster", clusterName+" (context "+k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)+")")
+	ui.SummaryRow("stages", steps.TimingsLine(tracker.Timings()))
+	ui.SummaryRow("status", "openframe app status")
+	ui.SummaryRow("access", "openframe app access   (ArgoCD UI credentials)")
 }
 
 // createClusterSuppressed creates a cluster with suppressed UI elements
@@ -119,7 +152,7 @@ func (s *Service) installChart(ctx context.Context, clusterName string, nonInter
 // bootstrap just created. KubeContext must be set alongside KubeConfig: the
 // workflow ignores Args entirely once a rest.Config is provided, so without it
 // the target name came through empty — the interactive confirmation asked
-// "install OpenFrame chart on ''?" and every helm call ran WITHOUT
+// "install OpenFrame chart on ”?" and every helm call ran WITHOUT
 // --kube-context, silently targeting the kubeconfig's current context instead
 // of the cluster the native client was pointed at.
 func bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) utilTypes.InstallationRequest {

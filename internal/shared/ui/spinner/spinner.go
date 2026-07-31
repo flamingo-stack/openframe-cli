@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -31,6 +32,14 @@ const (
 )
 
 var defaultFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// activeCount tracks running spinners process-wide so other line-rewriting UI
+// (e.g. the download progress bar) can yield the cursor line instead of
+// fighting the animation for it.
+var activeCount atomic.Int32
+
+// AnyActive reports whether any spinner is currently running.
+func AnyActive() bool { return activeCount.Load() > 0 }
 
 // Spinner is a race-free status spinner. The zero value is not usable; use New.
 type Spinner struct {
@@ -106,6 +115,7 @@ func (s *Spinner) Start(text string) {
 	s.startedAt = time.Now()
 	s.stopCh = make(chan struct{})
 	s.doneCh = make(chan struct{})
+	activeCount.Add(1)
 	s.mu.Unlock()
 
 	go s.animate()
@@ -170,6 +180,7 @@ func (s *Spinner) finish(text string, style finalStyle) {
 		return
 	}
 	s.active = false
+	activeCount.Add(-1)
 	stopCh, doneCh := s.stopCh, s.doneCh
 	s.mu.Unlock()
 

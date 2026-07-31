@@ -20,13 +20,41 @@ func ConfirmApplyInteractive(summary PlanSummary) bool {
 	}
 
 	pterm.DefaultBasicText.Println()
-	for _, change := range summary.Changes {
-		pterm.DefaultBasicText.Printf("  %-3s %s\n", change.Action, change.Address)
-	}
-	pterm.DefaultBasicText.Printf("\nPlan: %d to add, %d to change, %d to destroy\n\n", summary.Add, summary.Change, summary.Destroy)
+	RenderPlanDiff(summary)
+	pterm.DefaultBasicText.Println()
 
 	confirmed, err := sharedUI.ConfirmActionInteractive(
 		fmt.Sprintf("Apply this plan (%d to add, %d to change, %d to destroy)?",
 			summary.Add, summary.Change, summary.Destroy), true)
 	return err == nil && confirmed
+}
+
+// RenderPlanDiff prints the plan as a git-style colored diff, grouped by
+// action — creates, then updates, then destroys/replaces — with a colored
+// counts line and an explicit destructive-changes warning. The flat
+// plan-order list with bare "+/~/-" prefixes hid a destroy in the middle of
+// forty creates.
+func RenderPlanDiff(summary PlanSummary) {
+	styles := map[string]func(string) string{
+		"+":   func(s string) string { return pterm.FgGreen.Sprint(s) },
+		"~":   func(s string) string { return pterm.FgYellow.Sprint(s) },
+		"-":   func(s string) string { return pterm.FgRed.Sprint(s) },
+		"-/+": func(s string) string { return pterm.FgMagenta.Sprint(s) },
+	}
+	for _, action := range []string{"+", "~", "-", "-/+"} {
+		style := styles[action]
+		for _, change := range summary.Changes {
+			if change.Action != action {
+				continue
+			}
+			pterm.DefaultBasicText.Printf("  %s\n", style(fmt.Sprintf("%-3s %s", change.Action, change.Address)))
+		}
+	}
+	pterm.DefaultBasicText.Printf("\nPlan: %s, %s, %s\n",
+		pterm.FgGreen.Sprintf("%d to add", summary.Add),
+		pterm.FgYellow.Sprintf("%d to change", summary.Change),
+		pterm.FgRed.Sprintf("%d to destroy", summary.Destroy))
+	if summary.Destroy > 0 {
+		pterm.Warning.Println("This plan DESTROYS resources — review the red lines above before applying")
+	}
 }

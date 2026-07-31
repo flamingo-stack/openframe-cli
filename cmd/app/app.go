@@ -35,6 +35,9 @@ Examples:
 			// Show logo for subcommands, but not for the root app command.
 			if cmd.Use != "app" {
 				ui.ShowLogoWithContext(cmd.Context())
+				// One dim line naming the current kube-context — the cheapest
+				// guard against installing onto the wrong cluster.
+				ui.ShowContextHeader()
 			}
 			// Prerequisites are checked ONCE inside the install/upgrade flow
 			// (InstallChartsWithConfigContext), not here — so the check no longer

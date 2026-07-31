@@ -311,6 +311,16 @@ func (m *Manager) waitGroupReady(ctx context.Context, names []string) []string {
 	return notReady
 }
 
+// SyncApplications triggers a sync (no prune) of the named applications —
+// the exported per-app entry point for the interactive status view.
+func (m *Manager) SyncApplications(ctx context.Context, names []string) error {
+	_, failed, firstErr := m.syncApplicationsByName(ctx, names, false)
+	if failed > 0 {
+		return firstErr
+	}
+	return nil
+}
+
 // syncApplicationsByName applies the sync-operation patch to each named
 // Application, returning how many were patched, how many failed, and the first
 // failure. Lazily initializes the Kubernetes clients like RefreshAndSync.

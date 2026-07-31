@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 )
 
@@ -119,10 +120,16 @@ func (eh *ErrorHandler) handleBranchNotFoundError(err *BranchNotFoundError) {
 	pterm.Info.Println("Check the ref, or pass an existing one with --ref (e.g. --ref main)")
 }
 
+// handleGenericError renders the structured failure panel:
+//
+//	✖ create failed for cluster big-gke
+//	  cause   googleapi: Error 403: quota exceeded
+//	  hint    💡 Request more quota, lower --nodes, or pick another region
+//	  resume  openframe cluster create big-gke
+//
+// One glance answers what failed, why, and what to do next — instead of the
+// previous single wall-of-text "❌ Operation failed / Error: a: b: c: d".
 func (eh *ErrorHandler) handleGenericError(err error) {
-	// Clean up common error patterns for better user experience
-	errorMsg := err.Error()
-
 	// Handle user interruptions (Ctrl+C). Do NOT os.Exit here — returning lets
 	// the caller's deferred cleanup run and the process exit via the normal
 	// error-return path.
@@ -131,41 +138,80 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 		return
 	}
 
-	// Extract meaningful error from complex error chains
-	if strings.Contains(errorMsg, "cluster create operation failed") {
-		pterm.Error.Printf("❌ Failed to create cluster\n")
+	headline, cause := splitCause(err)
+	pterm.Error.Printf("%s %s\n", ui.Glyphs().Fail, headline)
+	if cause != "" {
+		panelRow("cause", cause)
+	}
+	if eh.verbose && cause != "" && err.Error() != headline+": "+cause {
+		// The full chain names every wrapping layer — noise by default,
+		// useful when debugging which layer swallowed what.
+		panelRow("chain", err.Error())
+	}
+	if hint := genericHint(err); hint != "" {
+		panelRow("hint", "💡 "+hint)
+	}
+	var rh interface{ ResumeHint() string }
+	if stderrors.As(err, &rh) {
+		if hint := rh.ResumeHint(); hint != "" {
+			panelRow("resume", hint)
+		}
+	}
+}
 
-		// Try to extract the actual k3d error and give helpful advice
-		if strings.Contains(errorMsg, "exit status 1") && strings.Contains(errorMsg, "k3d cluster create") {
-			pterm.Printf("  Issue: k3d cluster creation failed\n")
-			fmt.Println()
-			pterm.Info.Printf("🔧 Troubleshooting steps:\n")
-			pterm.Printf("  1. Check Docker is running: docker info\n")
-			// 6550 is only the preferred API port; k3d falls back to 6551/6552
-			// when it is taken (providers/k3d/ports.go), and that fallback is
-			// exactly what a port conflict looks like.
-			pterm.Printf("  2. Check the API ports are free: lsof -i :6550-6552\n")
-			pterm.Printf("  3. Try with different name: openframe cluster create my-test\n")
-			pterm.Printf("  4. Check k3d directly: k3d version\n")
-		} else {
-			pterm.Printf("  Details: %s\n", errorMsg)
+// genericHint merges the pattern-matched friendly hint with the k3d-create
+// special case that used to be a separate hardcoded block.
+func genericHint(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "cluster create operation failed") &&
+		strings.Contains(msg, "exit status 1") && strings.Contains(msg, "k3d cluster create") {
+		// 6550 is only the preferred API port; k3d falls back to 6551/6552
+		// when it is taken (providers/k3d/ports.go), and that fallback is
+		// exactly what a port conflict looks like.
+		return "Check Docker is running (docker info) and the API ports are free (lsof -i :6550-6552), then retry — or try another name"
+	}
+	return friendlyHint(err)
+}
+
+// splitCause splits an error chain into the outer description and the root
+// cause. "create failed for cluster X: quota exceeded" → ("create failed for
+// cluster X", "quota exceeded"). A chain of one keeps everything in the
+// headline (first line) with any remaining lines as the cause block.
+func splitCause(err error) (headline, cause string) {
+	full := err.Error()
+	deepest := err
+	unwrapped := false
+	for {
+		u := stderrors.Unwrap(deepest)
+		if u == nil {
+			break
 		}
-	} else {
-		// Generic error handling
-		pterm.Error.Printf("❌ Operation failed\n")
-		if eh.verbose {
-			// %v already carries the full error chain; the Go type (e.g.
-			// *errors.errorString) is internal noise that only leaked implementation
-			// detail to the user.
-			pterm.Printf("  Details: %v\n", err)
-		} else {
-			// Show only the essential error message
-			pterm.Printf("  Error: %s\n", errorMsg)
+		deepest = u
+		unwrapped = true
+	}
+	if unwrapped {
+		causeText := deepest.Error()
+		if idx := strings.LastIndex(full, causeText); idx > 0 && causeText != "" {
+			head := strings.TrimRight(strings.TrimSuffix(full[:idx], ": "), ": \n")
+			if head != "" {
+				return head, causeText
+			}
 		}
-		// Add a plain-language next step for common failures (req 30).
-		if hint := friendlyHint(err); hint != "" {
-			pterm.Info.Printf("💡 %s\n", hint)
-		}
+	}
+	lines := strings.SplitN(full, "\n", 2)
+	if len(lines) == 2 {
+		return lines[0], lines[1]
+	}
+	return full, ""
+}
+
+// panelRow prints one aligned "key value" row of the failure panel; multi-line
+// values (pod logs, terraform output) stay indented under their key.
+func panelRow(key, value string) {
+	lines := strings.Split(strings.TrimRight(value, "\n"), "\n")
+	pterm.DefaultBasicText.Printf("  %s %s\n", pterm.FgGray.Sprintf("%-7s", key), lines[0])
+	for _, l := range lines[1:] {
+		pterm.DefaultBasicText.Printf("  %-7s %s\n", "", l)
 	}
 }
 
