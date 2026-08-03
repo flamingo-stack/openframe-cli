@@ -125,6 +125,57 @@ func TestRunUseCluster_ExternalGKEFetchesCredentials(t *testing.T) {
 	}
 }
 
+// TestRunUseCluster_ExternalEKSFetchesCredentials: when gcloud cannot find the
+// cluster, the flow falls through to AWS discovery and fetches credentials via
+// 'aws eks update-kubeconfig' with an --alias equal to the cluster name.
+func TestRunUseCluster_ExternalEKSFetchesCredentials(t *testing.T) {
+	mock := setupUse(t)
+	writeUseKubeconfig(t, "other", "other")
+	// gcloud finds nothing → the GKE half yields no match and the flow falls
+	// through to AWS.
+	mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+	mock.SetResponse("gcloud config configurations list", &executor.CommandResult{ExitCode: 0, Stdout: `[]`})
+	mock.SetResponse("sts get-caller-identity", &executor.CommandResult{ExitCode: 0, Stdout: `{"Account":"123456789012"}`})
+	mock.SetResponse("configure list-profiles", &executor.CommandResult{ExitCode: 0, Stdout: "dev\n"})
+	mock.SetResponse("configure get region", &executor.CommandResult{ExitCode: 0, Stdout: "us-east-1\n"})
+	mock.SetResponse("eks list-clusters", &executor.CommandResult{ExitCode: 0, Stdout: `{"clusters":["ext-eks"]}`})
+	mock.SetResponse("eks describe-cluster --name ext-eks", &executor.CommandResult{ExitCode: 0,
+		Stdout: `{"cluster":{"name":"ext-eks","arn":"arn:aws:eks:us-east-1:123456789012:cluster/ext-eks","status":"ACTIVE","version":"1.33"}}`})
+	mock.SetResponse("k3d cluster get ext-eks", &executor.CommandResult{ExitCode: 1, Stderr: "not found"})
+
+	err := runUseCluster(getUseCmd(), []string{"ext-eks"})
+	// The mock cannot actually write the context, so the switch fails — but the
+	// credentials fetch must have been attempted first, profile included.
+	if !mock.WasCommandExecuted("aws eks update-kubeconfig --name ext-eks --region us-east-1 --alias ext-eks --profile dev") {
+		t.Fatalf("expected an update-kubeconfig attempt, got: %v", mock.GetExecutedCommands())
+	}
+	if err == nil || !strings.Contains(err.Error(), "no kubeconfig context") {
+		t.Fatalf("expected a missing-context error after mock fetch, got: %v", err)
+	}
+}
+
+// TestRunUseCluster_NotFoundNamesBothClouds: with both CLIs usable but no such
+// cluster anywhere, the error must say where it looked.
+func TestRunUseCluster_NotFoundNamesBothClouds(t *testing.T) {
+	mock := setupUse(t)
+	writeUseKubeconfig(t, "other", "other")
+	mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 0, Stdout: "me@example.com\n"})
+	mock.SetResponse("gcloud config configurations list", &executor.CommandResult{ExitCode: 0, Stdout: `[]`})
+	mock.SetResponse("sts get-caller-identity", &executor.CommandResult{ExitCode: 0, Stdout: `{"Account":"123456789012"}`})
+	mock.SetResponse("configure list-profiles", &executor.CommandResult{ExitCode: 0, Stdout: "dev\n"})
+	mock.SetResponse("configure get region", &executor.CommandResult{ExitCode: 0, Stdout: "us-east-1\n"})
+	mock.SetResponse("eks list-clusters", &executor.CommandResult{ExitCode: 0, Stdout: `{"clusters":[]}`})
+	mock.SetResponse("k3d cluster get ghost", &executor.CommandResult{ExitCode: 1, Stderr: "not found"})
+
+	err := runUseCluster(getUseCmd(), []string{"ghost"})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+	if !strings.Contains(err.Error(), "gcloud configurations") || !strings.Contains(err.Error(), "AWS profiles") {
+		t.Fatalf("the error must name both searched clouds, got: %v", err)
+	}
+}
+
 func TestRunUseCluster_NotAuthenticatedIsActionable(t *testing.T) {
 	mock := setupUse(t)
 	writeUseKubeconfig(t, "other", "other")

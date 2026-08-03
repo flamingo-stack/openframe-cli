@@ -17,9 +17,8 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// Provider is the unified contract every cluster backend implements. The k3d
-// manager satisfies it today (see the compile-time assertion below); GKE/EKS
-// will implement the same interface when added.
+// Provider is the unified contract every cluster backend implements — see the
+// compile-time assertions below.
 type Provider interface {
 	// CreateCluster creates a cluster and returns a rest.Config for reaching it.
 	CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error)

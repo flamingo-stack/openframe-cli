@@ -96,9 +96,8 @@ func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService 
 }
 
 // providerFor resolves the backend for a cluster type. The k3d manager is the
-// service default (list/status/cleanup are k3d-scoped until cloud backends
-// land); anything else goes through the factory, which today yields
-// ErrProviderNotFound for the recognized cloud types.
+// service default (list/status/cleanup are k3d-scoped); the cloud types go
+// through the factory.
 func (s *ClusterService) providerFor(clusterType models.ClusterType) (provider.Provider, error) {
 	if clusterType == models.ClusterTypeK3d || clusterType == "" {
 		return s.manager, nil

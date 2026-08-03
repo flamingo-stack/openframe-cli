@@ -17,6 +17,7 @@ type ClusterConfig struct {
 	// Cloud-only answers (EKS/GKE)
 	Region      string
 	Project     string
+	Profile     string
 	MachineType string
 }
 
@@ -33,6 +34,7 @@ func (c ClusterConfig) ToDomain() models.ClusterConfig {
 		domain.Cloud = &models.CloudConfig{
 			Region:      c.Region,
 			Project:     c.Project,
+			Profile:     c.Profile,
 			MachineType: c.MachineType,
 		}
 	}
@@ -90,25 +92,36 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 	// list below is meaningless for cloud clusters, whose version comes from
 	// the module default.
 	if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
-		regionLabel, defaultRegion, defaultMachine := "AWS Region", "us-east-1", "m6i.large"
 		if clusterType == models.ClusterTypeGKE {
-			regionLabel, defaultRegion, defaultMachine = "GCP Region", "us-central1", "e2-standard-4"
-
 			project, err := steps.PromptProject()
 			if err != nil {
 				return ClusterConfig{}, err
 			}
 			w.config.Project = project
+
+			region, err := steps.PromptRegion("GCP Region", "us-central1", w.config.Project)
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.Region = region
+		} else {
+			profile, err := steps.PromptProfile()
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.Profile = profile
+
+			region, err := steps.PromptAWSRegion("AWS Region", "us-east-1", w.config.Profile)
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.Region = region
 		}
 
-		// w.config.Project is set for GKE (the project step ran above) and ""
-		// for EKS; PromptRegion uses it to offer a GCP region picker, else free-text.
-		region, err := steps.PromptRegion(regionLabel, defaultRegion, w.config.Project)
-		if err != nil {
-			return ClusterConfig{}, err
+		defaultMachine := "m6i.large"
+		if clusterType == models.ClusterTypeGKE {
+			defaultMachine = "e2-standard-4"
 		}
-		w.config.Region = region
-
 		machineType, err := steps.PromptMachineType(defaultMachine)
 		if err != nil {
 			return ClusterConfig{}, err

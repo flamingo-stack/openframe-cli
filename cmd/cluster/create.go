@@ -34,14 +34,13 @@ By default, shows a selection menu where you can choose:
 1. Quick start with defaults (press Enter) - creates cluster with default settings
 2. Interactive configuration wizard - step-by-step cluster customization
 
-Creates a local k3d cluster or a cloud GKE cluster for OpenFrame (AWS EKS
-creation is temporarily disabled and coming soon). If a cluster
-with the same name already exists it is left untouched and reused — delete it
-first to start from scratch. Use the bootstrap command to install OpenFrame
-components after creation.
+Creates a local k3d cluster or a cloud GKE/EKS cluster for OpenFrame. If a
+cluster with the same name already exists it is left untouched and reused —
+delete it first to start from scratch. Use the bootstrap command to install
+OpenFrame components after creation.
 
 Cloud clusters are provisioned with Terraform (installed automatically) and
-create AWS resources that incur costs; the workspace and state live under
+create cloud resources that incur costs; the workspace and state live under
 ~/.openframe/clusters/<name>. A failed create can be re-run to resume, or
 torn down with 'openframe cluster delete'.
 
@@ -50,7 +49,9 @@ Examples:
   openframe cluster create my-cluster        # Show selection with custom name
   openframe cluster create --skip-wizard     # Direct creation with defaults
   openframe cluster create --nodes 3 --type k3d --skip-wizard
-  openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard`,
+  openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard
+  openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard
+  openframe cluster create my-eks --type eks --region us-east-1 --profile staging --skip-wizard`,
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			utils.SyncGlobalFlags()
@@ -205,16 +206,6 @@ func showCostEstimate(ctx context.Context, exec executor.CommandExecutor, config
 	pterm.Info.Println("Tip: install infracost (https://www.infracost.io/docs/) to see a monthly cost estimate here")
 }
 
-// showEKSComingSoonBanner is the temporary stub for AWS EKS creation.
-func showEKSComingSoonBanner() {
-	pterm.DefaultBox.
-		WithTitle(" 🚧 AWS EKS — coming soon ").
-		WithTitleTopCenter().
-		Println("Creating AWS EKS clusters will be available shortly.\n" +
-			"GKE is fully supported today:\n" +
-			"  openframe cluster create my-gke --type gke --project <project> --region <region>")
-}
-
 func runCreateCluster(cmd *cobra.Command, args []string) error {
 	service := utils.GetCommandService()
 	globalFlags := utils.GetGlobalFlags()
@@ -292,17 +283,6 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 				BackendConfig: cf.BackendConfig,
 			}
 		}
-	}
-
-	// AWS EKS creation is temporarily gated behind a coming-soon banner while
-	// the GKE flow is being finished end-to-end. The EKS provider stays fully
-	// functional for existing clusters (status/delete/resume) — only NEW
-	// creates are gated.
-	if config.Type == models.ClusterTypeEKS {
-		showEKSComingSoonBanner()
-		// Non-zero on purpose: a scripted `--type eks` must not look like a
-		// successful create when nothing was provisioned.
-		return fmt.Errorf("AWS EKS cluster creation is coming soon — use --type gke or k3d for now")
 	}
 
 	// Show configuration summary for dry-run or skip-wizard modes

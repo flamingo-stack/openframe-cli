@@ -44,16 +44,14 @@ func (ws *WizardSteps) PromptClusterName(defaultName string) (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-// PromptClusterType prompts for cluster type selection. AWS EKS is listed but
-// gated: choosing it shows the coming-soon banner and re-prompts, so the
-// wizard never produces an EKS config while creation is stubbed.
+// PromptClusterType prompts for cluster type selection.
 func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 	prompt := promptui.Select{
 		Label: "Cluster Type",
 		Items: []string{
 			"k3d (Recommended for local development)",
 			"gke (Google Kubernetes Engine — provisions cloud resources that cost money)",
-			"eks (AWS Elastic Kubernetes Service — coming soon)",
+			"eks (AWS Elastic Kubernetes Service — provisions cloud resources that cost money)",
 		},
 		Templates: &promptui.SelectTemplates{
 			Label:    "{{ . }}:",
@@ -63,20 +61,17 @@ func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
 		},
 	}
 
-	for {
-		idx, _, err := prompt.Run()
-		if err != nil {
-			return "", err
-		}
-		switch idx {
-		case 1:
-			return models.ClusterTypeGKE, nil
-		case 2:
-			pterm.Info.Println("AWS EKS support is coming soon — pick k3d or gke for now")
-			continue
-		default:
-			return models.ClusterTypeK3d, nil
-		}
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	switch idx {
+	case 1:
+		return models.ClusterTypeGKE, nil
+	case 2:
+		return models.ClusterTypeEKS, nil
+	default:
+		return models.ClusterTypeK3d, nil
 	}
 }
 
@@ -124,6 +119,95 @@ func (ws *WizardSteps) PromptProject() (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
+// listSelectableProfiles fetches the user's named AWS profiles for the wizard
+// picker. Package var so tests can inject a fake list; nil on any error → the
+// caller falls back to free-text entry.
+var listSelectableProfiles = func(ctx context.Context) []string {
+	profiles, err := discovery.NewEKSDiscoverer(executor.NewRealCommandExecutor(false, false)).Profiles(ctx)
+	if err != nil {
+		return nil
+	}
+	return profiles
+}
+
+// defaultCredentialsChoice selects "no profile": the default AWS credential
+// chain (env vars, default profile, SSO session).
+const defaultCredentialsChoice = "(default credentials — no profile)"
+
+// manualProfileChoice is the profile picker's escape hatch to type a profile
+// the list didn't include.
+const manualProfileChoice = "↳ enter a profile name manually…"
+
+// PromptProfile asks which AWS profile an EKS cluster is created with.
+// Interactively, when the AWS config names profiles, it offers a picker (with
+// default-credentials and manual-entry escape hatches). It falls back to
+// free-text entry — where empty means the default credential chain — when
+// non-interactive, when no profiles are configured, or when aws errors.
+func (ws *WizardSteps) PromptProfile() (string, error) {
+	if !sharedUI.IsNonInteractive() {
+		if profiles := listSelectableProfiles(context.Background()); len(profiles) > 0 {
+			items := append([]string{defaultCredentialsChoice}, profiles...)
+			_, choice, err := sharedUI.SelectFromList("AWS Profile", append(items, manualProfileChoice))
+			if err != nil {
+				return "", err
+			}
+			if choice == defaultCredentialsChoice {
+				return "", nil
+			}
+			if choice != manualProfileChoice {
+				return strings.TrimSpace(choice), nil
+			}
+		}
+	}
+	prompt := promptui.Prompt{
+		Label: "AWS Profile (empty for default credentials)",
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
+// listSelectableAWSRegions fetches the AWS regions enabled for the account for
+// the wizard picker. Package var so tests can inject a fake list; nil on any
+// error → the caller falls back to free-text entry.
+var listSelectableAWSRegions = func(ctx context.Context, profile string) []string {
+	regions, err := discovery.NewEKSDiscoverer(executor.NewRealCommandExecutor(false, false)).Regions(ctx, profile)
+	if err != nil {
+		return nil
+	}
+	return regions
+}
+
+// PromptAWSRegion asks for the AWS region an EKS cluster lands in.
+// Interactively it offers a picker of the account's enabled regions (with a
+// manual-entry escape hatch); it falls back to free-text when non-interactive,
+// when regions can't be listed, or when aws errors.
+func (ws *WizardSteps) PromptAWSRegion(label, defaultRegion, profile string) (string, error) {
+	if !sharedUI.IsNonInteractive() {
+		if regions := listSelectableAWSRegions(context.Background(), profile); len(regions) > 0 {
+			_, choice, err := sharedUI.SelectFromList(label, append(regions, manualRegionChoice))
+			if err != nil {
+				return "", err
+			}
+			if choice != manualRegionChoice {
+				return strings.TrimSpace(choice), nil
+			}
+		}
+	}
+	prompt := promptui.Prompt{
+		Label:    label,
+		Default:  defaultRegion,
+		Validate: sharedUI.ValidateNonEmpty("region"),
+	}
+	result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
 // listSelectableRegions fetches a GCP project's Compute regions for the wizard
 // picker. Package var so tests can inject a fake list; nil on any error → the
 // caller falls back to free-text entry.
@@ -139,10 +223,11 @@ var listSelectableRegions = func(ctx context.Context, project string) []string {
 // list didn't include.
 const manualRegionChoice = "↳ enter a region manually…"
 
-// PromptRegion asks for the cloud region. For GKE (project != ""), interactively
+// PromptRegion asks for the GCP region a GKE cluster lands in. Interactively
 // it offers a picker of the project's Compute regions (with a manual-entry
 // escape hatch); it falls back to free-text when non-interactive, when no
-// project is known (EKS), when regions can't be listed, or when gcloud errors.
+// project is known, when regions can't be listed, or when gcloud errors.
+// (The EKS twin is PromptAWSRegion.)
 func (ws *WizardSteps) PromptRegion(label, defaultRegion, project string) (string, error) {
 	if project != "" && !sharedUI.IsNonInteractive() {
 		if regions := listSelectableRegions(context.Background(), project); len(regions) > 0 {
@@ -238,6 +323,9 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 	if config.Cloud != nil {
 		if config.Cloud.Project != "" {
 			data = append(data, []string{"Project", config.Cloud.Project})
+		}
+		if config.Cloud.Profile != "" {
+			data = append(data, []string{"AWS Profile", config.Cloud.Profile})
 		}
 		data = append(data, []string{"Region", config.Cloud.Region})
 		if config.Cloud.MachineType != "" {

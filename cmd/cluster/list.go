@@ -25,9 +25,10 @@ func getListCmd() *cobra.Command {
 Displays cluster information including name, type, status, and node count
 from all registered providers in a formatted table.
 
-With --all, additionally discovers GKE clusters that exist in the GCP
-projects of your gcloud configurations but were created outside openframe.
-Discovered clusters are read-only: openframe never modifies or deletes them.
+With --all, additionally discovers cloud clusters created outside openframe:
+GKE clusters in the GCP projects of your gcloud configurations, and EKS
+clusters in each AWS profile's default region. Discovered clusters are
+read-only: openframe never modifies or deletes them.
 
 Examples:
   openframe cluster list
@@ -93,51 +94,90 @@ func runListClusters(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// discoverExternalClusters runs GKE discovery, dropping entries that are
-// already managed (same name+project as a registry cluster). Auth problems
-// degrade to notices, never errors: a logged-out gcloud must not break list.
-// EKS discovery is not implemented yet — a notice says so.
+// discoverExternalClusters runs GKE and EKS discovery, dropping entries that
+// are already managed (same name+type+project as a registry cluster). Auth
+// problems degrade to notices, never errors: a logged-out gcloud or an expired
+// AWS session must not break list.
 func discoverExternalClusters(ctx context.Context, managed []models.ClusterInfo) ([]models.ClusterInfo, []string) {
-	notices := []string{"AWS EKS discovery is coming soon — external EKS clusters are not shown yet"}
+	var notices []string
+	var discovered []models.ClusterInfo
 
-	exec := utils.CommandExecutor()
-	d := discovery.NewGKEDiscoverer(exec)
-	switch d.AuthStatus(ctx) {
-	case discovery.CLIMissing:
-		return nil, append(notices, "GKE: gcloud is not installed — install it to discover external clusters")
-	case discovery.NotAuthenticated:
-		// One unambiguous flow: offer the login right here (interactive only —
-		// non-interactive sessions get the same message as before).
-		if err := discovery.NewAuthFlow(exec).Ensure(ctx, false); err != nil {
-			return nil, append(notices, "GKE: "+err.Error())
-		}
-	}
+	gkeClusters, gkeNotices := discoverGKE(ctx)
+	discovered = append(discovered, gkeClusters...)
+	notices = append(notices, gkeNotices...)
 
-	result, err := d.Discover(ctx)
-	if err != nil {
-		return nil, append(notices, fmt.Sprintf("GKE discovery failed: %v", err))
-	}
-	for _, w := range result.Warnings {
-		notices = append(notices, "GKE discovery skipped "+w)
-	}
+	eksClusters, eksNotices := discoverEKS(ctx)
+	discovered = append(discovered, eksClusters...)
+	notices = append(notices, eksNotices...)
 
 	isManaged := func(c models.ClusterInfo) bool {
 		for _, m := range managed {
-			// Project-aware: a local k3d cluster (empty Project) must not
-			// suppress an external GKE cluster that merely shares its name.
-			if m.Name == c.Name && m.Project == c.Project {
+			// Type- and project-aware: a local k3d cluster must not suppress an
+			// external cloud cluster that merely shares its name, and a GKE
+			// cluster's name must not shadow a same-named EKS one.
+			if m.Name == c.Name && m.Type == c.Type && m.Project == c.Project {
 				return true
 			}
 		}
 		return false
 	}
 	var external []models.ClusterInfo
-	for _, c := range result.Clusters {
+	for _, c := range discovered {
 		if !isManaged(c) {
 			external = append(external, c)
 		}
 	}
 	return external, notices
+}
+
+// discoverGKE is the GCP half of --all.
+func discoverGKE(ctx context.Context) ([]models.ClusterInfo, []string) {
+	exec := utils.CommandExecutor()
+	d := discovery.NewGKEDiscoverer(exec)
+	switch d.AuthStatus(ctx) {
+	case discovery.CLIMissing:
+		return nil, []string{"GKE: gcloud is not installed — install it to discover external clusters"}
+	case discovery.NotAuthenticated:
+		// One unambiguous flow: offer the login right here (interactive only —
+		// non-interactive sessions get the same message as before).
+		if err := discovery.NewAuthFlow(exec).Ensure(ctx, false); err != nil {
+			return nil, []string{"GKE: " + err.Error()}
+		}
+	}
+
+	result, err := d.Discover(ctx)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("GKE discovery failed: %v", err)}
+	}
+	var notices []string
+	for _, w := range result.Warnings {
+		notices = append(notices, "GKE discovery skipped "+w)
+	}
+	return result.Clusters, notices
+}
+
+// discoverEKS is the AWS half of --all. There is no interactive AWS login to
+// offer (credentials come from profiles/SSO/env, not a browser flow the CLI
+// can drive), so an unusable identity degrades straight to a notice.
+func discoverEKS(ctx context.Context) ([]models.ClusterInfo, []string) {
+	exec := utils.CommandExecutor()
+	d := discovery.NewEKSDiscoverer(exec)
+	switch d.AuthStatus(ctx) {
+	case discovery.CLIMissing:
+		return nil, []string{"EKS: the AWS CLI is not installed — install it to discover external clusters"}
+	case discovery.NotAuthenticated:
+		return nil, []string{"EKS: AWS credentials are not usable — run 'aws configure' or 'aws sso login' to discover external clusters"}
+	}
+
+	result, err := d.Discover(ctx)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("EKS discovery failed: %v", err)}
+	}
+	var notices []string
+	for _, w := range result.Warnings {
+		notices = append(notices, "EKS discovery skipped "+w)
+	}
+	return result.Clusters, notices
 }
 
 // clusterJSON is the machine-readable shape of a cluster.

@@ -230,8 +230,17 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	}
 	if err := p.engine.ApplyPlan(ctx, ws.TerraformDir(), planFile); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
+		if hint, ok := orphanFromInterruptedCreate(err, ws.TerraformDir()); ok {
+			return nil, models.NewClusterOperationError("create", config.Name,
+				fmt.Errorf("%w\n\n%s", err, hint))
+		}
+		// Carry the resume hint structurally as well as in the text: on Ctrl+C the
+		// interruption handler prints only "Operation cancelled by user." and drops
+		// the message, so a text-only hint would never reach the user even though
+		// the workspace state is preserved and the create IS resumable.
+		resumeHint := fmt.Sprintf("The terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", ws.Dir(), config.Name)
 		return nil, models.NewClusterOperationError("create", config.Name,
-			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run create to resume or 'openframe cluster delete %s' to tear down", err, ws.Dir(), config.Name))
+			withResumeHint(fmt.Errorf("%w\n%s", err, resumeHint), resumeHint))
 	}
 
 	outputs, err := p.engine.Outputs(ctx, ws.TerraformDir())
@@ -278,14 +287,27 @@ func (p *Provider) DeleteCluster(ctx context.Context, name string, clusterType m
 		return models.NewClusterNotFoundError(name)
 	}
 	// Read the record BEFORE destroy: the endpoint in it is what proves the
-	// kubeconfig entry is ours to remove afterwards.
+	// kubeconfig entry is ours to remove afterwards, and the region/profile are
+	// needed for the post-destroy orphan-volume sweep.
 	rec, recErr := ws.ReadRecord()
+	if recErr == nil {
+		// Tear down app workloads first so the EBS CSI driver deletes PVC-backed
+		// volumes and the cloud controller deletes Service-backed load balancers
+		// before the node group and VPC die — otherwise the volumes orphan as
+		// billable leftovers and the load balancers fail the VPC destroy.
+		// Best-effort; never blocks the destroy.
+		releaseWorkloadResources(ctx, rec)
+	}
 	if err := p.engine.Destroy(ctx, ws.TerraformDir()); err != nil {
 		return models.NewClusterOperationError("delete", name,
 			fmt.Errorf("%w\nThe terraform state is kept in %s; re-run delete to retry", err, ws.Dir()))
 	}
 	if recErr == nil {
 		_ = removeFromDefaultKubeconfig(rec)
+		// Sweep any PVC-provisioned volumes that outlived the destroy: delete them
+		// when the caller consented to an unattended teardown (--force), else
+		// report them — a "cleaned up" delete must never silently leave orphans.
+		p.sweepOrphanedVolumes(ctx, rec, force)
 	}
 	return ws.Remove()
 }
@@ -375,6 +397,7 @@ func infoFor(rec tfengine.Record) models.ClusterInfo {
 		Type:       models.ClusterTypeEKS,
 		Source:     models.SourceOpenframe,
 		Context:    rec.Name,
+		Profile:    rec.Profile,
 		Region:     rec.Region,
 		Status:     rec.Status.Title(),
 		NodeCount:  rec.NodeCount,
