@@ -130,9 +130,9 @@ var listSelectableProfiles = func(ctx context.Context) []string {
 	return profiles
 }
 
-// defaultCredentialsChoice selects "no profile": the default AWS credential
-// chain (env vars, default profile, SSO session).
-const defaultCredentialsChoice = "(default credentials — no profile)"
+// defaultChainChoice selects "no profile": the default AWS credential chain
+// (env vars, default profile, SSO session).
+const defaultChainChoice = "(default credentials — no profile)"
 
 // manualProfileChoice is the profile picker's escape hatch to type a profile
 // the list didn't include.
@@ -146,12 +146,12 @@ const manualProfileChoice = "↳ enter a profile name manually…"
 func (ws *WizardSteps) PromptProfile() (string, error) {
 	if !sharedUI.IsNonInteractive() {
 		if profiles := listSelectableProfiles(context.Background()); len(profiles) > 0 {
-			items := append([]string{defaultCredentialsChoice}, profiles...)
+			items := append([]string{defaultChainChoice}, profiles...)
 			_, choice, err := sharedUI.SelectFromList("AWS Profile", append(items, manualProfileChoice))
 			if err != nil {
 				return "", err
 			}
-			if choice == defaultCredentialsChoice {
+			if choice == defaultChainChoice {
 				return "", nil
 			}
 			if choice != manualProfileChoice {
