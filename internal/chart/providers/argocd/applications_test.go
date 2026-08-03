@@ -156,3 +156,34 @@ func TestParseApplications(t *testing.T) {
 		})
 	}
 }
+
+// applicationFromArgoApp must surface the app's non-Healthy child resources
+// (status.resources) with their per-resource health messages — the structure
+// that names WHICH Deployment/child-Application is failing inside a Degraded
+// app. Resources without a health block (ConfigMaps, …) are healthy by
+// definition and must not appear.
+func TestApplicationFromArgoApp_ExtractsUnhealthyResources(t *testing.T) {
+	raw := map[string]interface{}{
+		"metadata": map[string]interface{}{"name": "tenant"},
+		"status": map[string]interface{}{
+			"health": map[string]interface{}{"status": "Degraded"},
+			"sync":   map[string]interface{}{"status": "Synced"},
+			"resources": []interface{}{
+				map[string]interface{}{"kind": "ConfigMap", "name": "cm"}, // no health — skipped
+				map[string]interface{}{"kind": "Deployment", "name": "api", "namespace": "tenant",
+					"health": map[string]interface{}{"status": "Degraded", "message": "progress deadline exceeded"}},
+				map[string]interface{}{"kind": "StatefulSet", "name": "kafka", "namespace": "datasources",
+					"health": map[string]interface{}{"status": "Healthy"}}, // healthy — skipped
+			},
+		},
+	}
+	app, err := argoAppFromObject(raw)
+	assert.NoError(t, err)
+
+	got := applicationFromArgoApp(app)
+	assert.Len(t, got.UnhealthyResources, 1)
+	assert.Equal(t, ResourceIssue{
+		Kind: "Deployment", Name: "api", Namespace: "tenant",
+		Health: "Degraded", Message: "progress deadline exceeded",
+	}, got.UnhealthyResources[0])
+}

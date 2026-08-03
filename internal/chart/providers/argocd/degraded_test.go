@@ -150,14 +150,14 @@ func TestDiagnosticErrors_AreSelfDiagnosed(t *testing.T) {
 		t.Fatal("degradedAppError must be SelfDiagnosed")
 	}
 
-	tErr := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, []string{"  - a: health=Degraded"})
+	tErr := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, []string{"  - a: health=Degraded"}, "")
 	sd = nil
 	if !errorsAs(tErr, &sd) || !sd.SelfDiagnosed() {
 		t.Fatal("timeoutError WITH diagnostics must be SelfDiagnosed")
 	}
 
 	// Without diagnostics the timeout error stays plain — generic hints stay useful.
-	plain := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, nil)
+	plain := timeoutError(time.Minute, 1, 2, []string{"a"}, []string{"a"}, nil, "")
 	sd = nil
 	if errorsAs(plain, &sd) {
 		t.Fatal("timeoutError WITHOUT diagnostics must stay a plain error")

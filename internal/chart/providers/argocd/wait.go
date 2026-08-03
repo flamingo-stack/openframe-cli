@@ -256,6 +256,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	var lastNotReadyApps []string    // decorated "name (Health: X)" labels, for the list
 	var lastNotReadyNames []string   // bare names, for the kubectl example
 	var lastNotReadyDetails []string // per-app health messages, for the timeout diagnostic
+	var lastAppsSeen []Application   // full last parse, for the timeout workload diagnosis
 	lastReadyCount, lastTotalApps := 0, 0
 	heartbeatLastReady := 0
 	// The spinner already animates for interactive users, so the textual line is
@@ -290,7 +291,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerStopped = true
 				}
 				spinnerMutex.Unlock()
-				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps, lastNotReadyNames, lastNotReadyDetails)
+				// Deep workload diagnosis for the apps that never became ready:
+				// failing pods with reasons, their last crash-log lines, and
+				// recent warning events. This is the same inspection the
+				// Degraded fail-fast runs — the timeout path used to skip it,
+				// leaving only app-level health lines. Bounded (capToDeadline
+				// reserved a margin for exactly this) and best-effort.
+				workloadDiag := ""
+				if stuck := notReadyApplications(lastAppsSeen, maxAppsDiagnosedAtTimeout); len(stuck) > 0 {
+					pterm.Info.Printf("Collecting diagnostics for %d not-ready application(s)...\n", len(stuck))
+					workloadDiag, _ = m.diagnoseFailingApps(localCtx, stuck)
+				}
+				return timeoutError(timeout, lastReadyCount, lastTotalApps, lastNotReadyApps, lastNotReadyNames, lastNotReadyDetails, workloadDiag)
 			}
 
 			// Periodic cluster health check
@@ -426,6 +438,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			lastNotReadyApps, lastReadyCount, lastTotalApps = notReadyApps, currentlyReady, totalApps
 			lastNotReadyNames = assess.notReadyNames
 			lastNotReadyDetails = notReadyDiagnostics(apps)
+			lastAppsSeen = apps
 
 			// Fail fast on deterministic manifest errors (see fatalmanifest.go):
 			// once an app has shown the same "content missing at this revision"
@@ -927,6 +940,27 @@ func describeUnknownApps(unknownApps []Application) {
 // next-step hint that follows it.
 const maxAppsInTimeoutError = 10
 
+// maxAppsDiagnosedAtTimeout bounds the deep workload diagnosis at timeout: each
+// diagnosed app costs a pod list, a log stream per failing container, and an
+// events list, and the whole gather must fit the margin capToDeadline reserved.
+const maxAppsDiagnosedAtTimeout = 5
+
+// notReadyApplications returns up to limit applications that are not
+// Healthy+Synced, for the timeout workload diagnosis.
+func notReadyApplications(apps []Application, limit int) []Application {
+	var out []Application
+	for _, app := range apps {
+		if app.Health == ArgoCDHealthHealthy && app.Sync == ArgoCDSyncSynced {
+			continue
+		}
+		out = append(out, app)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
 // timeoutError builds the error returned when the wait budget is exhausted.
 //
 // The old message was "timeout waiting for ArgoCD applications after 1h0m0s" —
@@ -939,7 +973,7 @@ const maxAppsInTimeoutError = 10
 // must be kept separate: feeding a decorated label into `kubectl describe
 // application` produced `kubectl describe application argocd-apps (Health:
 // Progressing) -n argocd`, which is not a runnable command.
-func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notReadyNames, notReadyDetails []string) error {
+func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notReadyNames, notReadyDetails []string, workloadDiag string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "timeout after %s waiting for ArgoCD applications", timeout)
 	if total > 0 {
@@ -956,8 +990,9 @@ func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notRe
 		fmt.Fprintf(&b, "; still not ready: %s%s", strings.Join(shown, ", "), suffix)
 	}
 
-	// Per-app health messages say WHY (e.g. a CrashLoopBackOff pod for a
-	// Degraded+Synced app), so the timeout is actionable rather than opaque.
+	// Per-app health messages and unhealthy child resources say WHY (e.g. the
+	// exact Deployment that missed its progress deadline inside a Degraded app),
+	// so the timeout is actionable rather than opaque.
 	if len(notReadyDetails) > 0 {
 		b.WriteString("\nWhy they are not ready:")
 		for _, d := range notReadyDetails {
@@ -965,11 +1000,18 @@ func timeoutError(timeout time.Duration, ready, total int, notReadyLabels, notRe
 		}
 	}
 
+	// The pod-level view: failing containers with reasons, their last crash-log
+	// lines, and recent warning events — gathered at the moment of timeout.
+	if d := strings.TrimSpace(workloadDiag); d != "" {
+		b.WriteString("\nFailing workloads (pod errors, last logs, warning events):")
+		b.WriteString("\n" + indentLines(d, "  "))
+	}
+
 	b.WriteString("\nInspect them with: kubectl get applications -n argocd")
 	if len(notReadyNames) > 0 {
 		fmt.Fprintf(&b, "\nDetails for one: kubectl describe application %s -n argocd", notReadyNames[0])
 	}
-	if len(notReadyDetails) > 0 {
+	if len(notReadyDetails) > 0 || strings.TrimSpace(workloadDiag) != "" {
 		// The per-app health messages above ARE the diagnosis; suppress the
 		// generic handler's pattern-matched hint (it misfires on their content).
 		return selfDiagnosedError(b.String())
@@ -1014,10 +1056,16 @@ func defaultAppWaitTimeout() time.Duration {
 	return fallback
 }
 
-// notReadyDiagnostics returns one diagnostic line per not-ready application,
-// carrying ArgoCD's health message — which for a Degraded workload names the
-// failing resource/pod — so a timeout explains WHY, not just which app. The
-// message is trimmed to keep the error readable.
+// maxResourcesPerAppInDiagnostics bounds the unhealthy-children list per app:
+// one wedged node can degrade dozens of resources at once, and the point is to
+// name the failing pieces, not to inventory the cluster.
+const maxResourcesPerAppInDiagnostics = 8
+
+// notReadyDiagnostics returns one diagnostic block per not-ready application:
+// ArgoCD's app-level health message, plus the unhealthy CHILD resources with
+// their per-resource health messages — which is what names the exact
+// Deployment/StatefulSet/child-Application that is failing inside a Degraded
+// app (the app-level message is frequently empty). Trimmed to stay readable.
 func notReadyDiagnostics(apps []Application) []string {
 	const maxMsg = 300
 	var out []string
@@ -1032,6 +1080,27 @@ func notReadyDiagnostics(apps []Application) []string {
 			}
 			line += "\n      " + strings.ReplaceAll(msg, "\n", "\n      ")
 		}
+		shown := app.UnhealthyResources
+		suffix := ""
+		if len(shown) > maxResourcesPerAppInDiagnostics {
+			suffix = fmt.Sprintf("\n      … and %d more unhealthy resource(s)", len(shown)-maxResourcesPerAppInDiagnostics)
+			shown = shown[:maxResourcesPerAppInDiagnostics]
+		}
+		for _, res := range shown {
+			resLine := fmt.Sprintf("\n      %s %s", res.Kind, res.Name)
+			if res.Namespace != "" {
+				resLine = fmt.Sprintf("\n      %s %s/%s", res.Kind, res.Namespace, res.Name)
+			}
+			resLine += ": " + res.Health
+			if msg := strings.TrimSpace(res.Message); msg != "" {
+				if len(msg) > maxMsg {
+					msg = msg[:maxMsg] + "…"
+				}
+				resLine += " — " + strings.ReplaceAll(msg, "\n", " ")
+			}
+			line += resLine
+		}
+		line += suffix
 		out = append(out, line)
 	}
 	return out

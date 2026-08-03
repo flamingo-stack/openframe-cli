@@ -614,12 +614,12 @@ jobs:
       - name: 'App: install'
         if: matrix.os != 'darwin'
         shell: bash
-        timeout-minutes: 40
+        timeout-minutes: 30
         env:
-          # Cap the CLI's app-wait below this step's 40m limit so it fails with
+          # Cap the CLI's app-wait below this step's 30m limit so it fails with
           # its OWN diagnostic (stuck apps + health messages) instead of being
           # killed opaquely by the job timeout.
-          OPENFRAME_APP_WAIT_TIMEOUT: 25m
+          OPENFRAME_APP_WAIT_TIMEOUT: 20m
         run: |
           echo "==================================================================="
           echo "===  TEST: real app install (non-interactive, full ArgoCD wait)"
