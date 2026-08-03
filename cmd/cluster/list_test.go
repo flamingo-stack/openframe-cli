@@ -25,7 +25,7 @@ func TestListCommand(t *testing.T) {
 }
 
 // TestRunListClusters_AllDiscoversExternalGKE drives list --all end to end on
-// mocks: k3d listing + gcloud discovery, with the EKS coming-soon notice.
+// mocks: k3d listing + gcloud discovery.
 func TestRunListClusters_AllDiscoversExternalGKE(t *testing.T) {
 	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "kubeconfig"))
@@ -49,6 +49,36 @@ func TestRunListClusters_AllDiscoversExternalGKE(t *testing.T) {
 	// The discovery call chain must have run.
 	if !mock.WasCommandExecuted("clusters list --project proj-x") {
 		t.Fatal("expected GKE discovery to list clusters in configured projects")
+	}
+}
+
+// TestRunListClusters_AllDiscoversExternalEKS drives the AWS half of --all on
+// mocks: profile enumeration → per-profile region → list/describe clusters.
+func TestRunListClusters_AllDiscoversExternalEKS(t *testing.T) {
+	t.Setenv("OPENFRAME_CLUSTERS_DIR", t.TempDir())
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "kubeconfig"))
+	utils.InitGlobalFlags()
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("k3d cluster list", &executor.CommandResult{ExitCode: 0, Stdout: "[]"})
+	// gcloud is absent so the GKE half degrades to a notice.
+	mock.SetResponse("gcloud auth list", &executor.CommandResult{ExitCode: 1, Stderr: "executable file not found"})
+	mock.SetResponse("sts get-caller-identity", &executor.CommandResult{ExitCode: 0, Stdout: `{"Account":"123456789012"}`})
+	mock.SetResponse("configure list-profiles", &executor.CommandResult{ExitCode: 0, Stdout: "dev\n"})
+	mock.SetResponse("configure get region", &executor.CommandResult{ExitCode: 0, Stdout: "us-east-1\n"})
+	mock.SetResponse("eks list-clusters", &executor.CommandResult{ExitCode: 0, Stdout: `{"clusters":["ext-eks"]}`})
+	mock.SetResponse("eks describe-cluster --name ext-eks", &executor.CommandResult{ExitCode: 0,
+		Stdout: `{"cluster":{"name":"ext-eks","arn":"arn:aws:eks:us-east-1:123456789012:cluster/ext-eks","status":"ACTIVE","version":"1.33"}}`})
+	utils.SetTestExecutor(mock)
+	t.Cleanup(utils.ResetGlobalFlags)
+
+	cmd := getListCmd()
+	utils.GetGlobalFlags().List.All = true
+
+	if err := runListClusters(cmd, nil); err != nil {
+		t.Fatalf("list --all: %v", err)
+	}
+	if !mock.WasCommandExecuted("eks describe-cluster --name ext-eks") {
+		t.Fatal("expected EKS discovery to describe the clusters of each profile's region")
 	}
 }
 

@@ -333,6 +333,46 @@ func TestFlagValidation(t *testing.T) {
 	})
 }
 
+func TestValidateCreateFlags_CloudFlagRules(t *testing.T) {
+	t.Run("eks with skip-wizard requires a region", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, NodeCount: 3}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "--region is required for --type eks")
+	})
+
+	t.Run("eks without skip-wizard needs no region (the wizard asks)", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", NodeCount: 3}
+		assert.NoError(t, ValidateCreateFlags(flags))
+	})
+
+	t.Run("eks accepts a profile", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", Profile: "staging", NodeCount: 3}
+		assert.NoError(t, ValidateCreateFlags(flags))
+	})
+
+	t.Run("eks rejects --project", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", Project: "my-gcp-project", NodeCount: 3}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "--project only applies to --type gke")
+	})
+
+	t.Run("eks rejects --ha", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", HA: true, NodeCount: 3}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "--ha only applies to --type gke")
+	})
+
+	t.Run("gke rejects --profile", func(t *testing.T) {
+		flags := &CreateFlags{ClusterType: "gke", SkipWizard: true, Region: "us-central1", Project: "p", Profile: "staging", NodeCount: 3}
+		err := ValidateCreateFlags(flags)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "--profile only applies to --type eks")
+	})
+}
+
 func TestValidateCreateFlags_BackendConfig(t *testing.T) {
 	t.Run("accepted for cloud types", func(t *testing.T) {
 		flags := &CreateFlags{ClusterType: "eks", SkipWizard: true, Region: "us-east-1", NodeCount: 3, BackendConfig: "s3://bucket/prefix"}

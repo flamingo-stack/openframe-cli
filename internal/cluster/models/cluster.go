@@ -65,6 +65,8 @@ type ClusterInfo struct {
 	// Context is the kubeconfig context that reaches this cluster, when known.
 	Context string `json:"context,omitempty"`
 	Project string `json:"project,omitempty"`
+	// Profile is the AWS profile this cluster is reached with (EKS only).
+	Profile string `json:"profile,omitempty"`
 	Region  string `json:"region,omitempty"`
 	// Status is a human-readable server fraction ("1/1"). Machine consumers
 	// should prefer ReadyServers/TotalServers (verification report: a string

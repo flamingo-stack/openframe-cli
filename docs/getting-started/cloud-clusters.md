@@ -2,8 +2,6 @@
 
 > Looking for a step-by-step walkthrough? See the
 > [GKE Workflow](./gke-workflow.md) — this page is the reference.
-> AWS EKS creation is currently gated behind a coming-soon banner; the
-> sections below describe both providers for when it is enabled.
 
 Besides local k3d clusters, `openframe cluster create` can provision managed
 Kubernetes clusters in AWS (EKS) or Google Cloud (GKE) using Terraform under
@@ -66,7 +64,10 @@ for approval (the `terraform apply` shape; what you approve is exactly what
 runs — non-interactive sessions auto-approve). Provisioning then takes ~10–20
 minutes; the CLI streams per-resource progress. GKE nodes are private (no
 external IPs, egress via Cloud NAT) with a public control-plane endpoint, so
-the flow works in organizations enforcing `restrict_vm_external_ips`.
+the flow works in organizations enforcing `restrict_vm_external_ips`. EKS
+clusters get a dedicated VPC (2 AZs, nodes in private subnets behind a single
+NAT gateway) and the `aws-ebs-csi-driver` addon, so PersistentVolumeClaims
+work out of the box.
 When it finishes, your kubeconfig gets a context named after the cluster and
 it becomes the current context — `kubectl get nodes` just works
 (authentication runs through short-lived tokens via `aws eks get-token` /
@@ -99,7 +100,7 @@ create, only after a successful delete.
 
 ```bash
 openframe cluster list                # local + cloud clusters
-openframe cluster list --all          # + external clusters discovered in your GCP projects
+openframe cluster list --all          # + external clusters discovered in your GCP projects / AWS profiles
 openframe cluster use my-gke          # switch kubectl context (and gcloud configuration)
 openframe cluster status my-eks
 openframe cluster delete my-eks       # terraform destroy; asks to re-type the name

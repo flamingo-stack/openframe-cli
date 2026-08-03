@@ -165,8 +165,7 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 	}
 
 	// The wizard prompts for these; in skip-wizard mode they must come from
-	// flags. EKS is exempt while its creation is gated behind the coming-soon
-	// banner — the banner must win over a missing-flag error.
+	// flags.
 	isCloud := clusterType == ClusterTypeEKS || clusterType == ClusterTypeGKE
 	if clusterType == ClusterTypeGKE && flags.SkipWizard {
 		if flags.Region == "" {
@@ -174,6 +173,25 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 		}
 		if flags.Project == "" {
 			return fmt.Errorf("--project is required for --type gke with --skip-wizard")
+		}
+	}
+	if clusterType == ClusterTypeEKS && flags.SkipWizard && flags.Region == "" {
+		return fmt.Errorf("--region is required for --type eks with --skip-wizard")
+	}
+	// Cross-cloud flags must not be silently ignored: a --project on an EKS
+	// create (or --profile on GKE) means the user is confused about what will
+	// be billed where — fail fast instead of provisioning something else.
+	switch clusterType {
+	case ClusterTypeEKS:
+		if flags.Project != "" {
+			return fmt.Errorf("--project only applies to --type gke; EKS uses --profile to select AWS credentials")
+		}
+		if flags.HA {
+			return fmt.Errorf("--ha only applies to --type gke; the EKS control plane is always multi-AZ and --nodes is the exact node count")
+		}
+	case ClusterTypeGKE:
+		if flags.Profile != "" {
+			return fmt.Errorf("--profile only applies to --type eks; GKE uses your gcloud identity")
 		}
 	}
 	if !isCloud {

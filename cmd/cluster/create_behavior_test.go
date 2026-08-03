@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -76,8 +75,6 @@ func TestRunCreateCluster_DryRunDefaultsNameWhenNoArgs(t *testing.T) {
 	}
 }
 
-// While EKS creation is gated behind the coming-soon banner, the plan preview
-// is a GKE-only path (see TestRunCreateCluster_EKSShowsComingSoonBanner).
 func TestRunCreateCluster_CloudDryRunRunsPlanPreview(t *testing.T) {
 	setupCreate(t)
 	// Stub the preview: the real one shells out to terraform.
@@ -161,15 +158,14 @@ func TestRunClusterStatus_ListFailureSurfacesError(t *testing.T) {
 	}
 }
 
-// TestRunCreateCluster_EKSShowsComingSoonBanner: while EKS creation is gated,
-// --type eks must show the banner and exit cleanly — no prerequisite gate, no
-// provider calls, no validation errors about missing --region.
-func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
+// TestRunCreateCluster_EKSDryRunRunsPlanPreview: --type eks reaches the same
+// terraform plan preview as GKE, with the cloud config assembled from flags.
+func TestRunCreateCluster_EKSDryRunRunsPlanPreview(t *testing.T) {
 	setupCreate(t)
-	called := false
+	var previewed *models.ClusterConfig
 	orig := planPreviewFn
 	planPreviewFn = func(ctx context.Context, config models.ClusterConfig) error {
-		called = true
+		previewed = &config
 		return nil
 	}
 	t.Cleanup(func() { planPreviewFn = orig })
@@ -177,17 +173,19 @@ func TestRunCreateCluster_EKSShowsComingSoonBanner(t *testing.T) {
 	cmd := getCreateCmd()
 	gf := utils.GetGlobalFlags()
 	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
 	gf.Create.ClusterType = "eks"
+	gf.Create.Region = "us-east-1"
+	gf.Create.Profile = "staging"
 
-	err := runCreateCluster(cmd, []string{"cloud-cluster"})
-	if err == nil {
-		t.Fatal("gated eks create must exit non-zero — a script must not mistake the banner for success")
+	if err := runCreateCluster(cmd, []string{"cloud-cluster"}); err != nil {
+		t.Fatalf("eks dry-run should return nil, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "coming soon") {
-		t.Fatalf("expected an actionable coming-soon error, got: %v", err)
+	if previewed == nil {
+		t.Fatal("eks dry-run must invoke the terraform plan preview")
 	}
-	if called {
-		t.Fatal("eks must not reach the plan preview while gated")
+	if previewed.Cloud == nil || previewed.Cloud.Region != "us-east-1" || previewed.Cloud.Profile != "staging" {
+		t.Fatalf("preview received wrong config: %+v", previewed)
 	}
 }
 
