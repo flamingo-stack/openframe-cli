@@ -345,17 +345,17 @@ jobs:
           echo "==================================================================="
           "$OF_BIN" prerequisites check || echo "some prerequisites missing (expected pre-bootstrap)"
 
-      # Cloud-cluster command SURFACE, with no cloud and no Docker: the EKS
-      # coming-soon banner, flag validation, the GKE dry-run's graceful
-      # degradation, and `cluster use` error paths. Everything here is either
-      # exit-0 by design or an expected, asserted failure — no resource is
-      # ever created. Pure, so it runs on every OS (on Windows via the WSL
-      # forward, exercising the Linux binary's paths).
+      # Cloud-cluster command SURFACE, with no cloud and no Docker: flag
+      # validation, the EKS/GKE dry-runs' graceful degradation, and `cluster
+      # use` error paths. Everything here is either exit-0 by design or an
+      # expected, asserted failure — no resource is ever created. Pure, so it
+      # runs on every OS (on Windows via the WSL forward, exercising the Linux
+      # binary's paths).
       - name: 'Cluster: cloud command surface (no cloud, no Docker)'
         shell: bash
         run: |
           echo "==================================================================="
-          echo "===  TEST: cloud cluster surface — banner, validation, dry-run, use"
+          echo "===  TEST: cloud cluster surface — validation, dry-run, use"
           echo "==================================================================="
           fail() { echo "::error::$1"; exit 1; }
           # Portable hang guard: macOS runners ship coreutils' gtimeout, not
@@ -367,11 +367,26 @@ jobs:
             else "$@"; fi
           }
 
-          echo "--- EKS create is gated: banner + non-zero exit (scripts must not see success)"
+          echo "--- eks --skip-wizard demands --region"
           if "$OF_BIN" cluster create eks-smoke --type eks --skip-wizard >/tmp/eks.out 2>&1; then
-            cat /tmp/eks.out; fail "gated eks create must exit non-zero"
+            cat /tmp/eks.out; fail "eks without region must be rejected"
           fi
-          grep -qi "coming soon" /tmp/eks.out || { cat /tmp/eks.out; fail "eks banner text missing"; }
+          grep -q '\-\-region is required' /tmp/eks.out || { cat /tmp/eks.out; fail "missing required-flag message"; }
+
+          echo "--- eks dry-run degrades gracefully without terraform/credentials"
+          # Two legitimate outcomes on an unauthenticated runner: terraform absent
+          # -> soft skip (exit 0); terraform present -> the AWS credential
+          # preflight fails fast (non-interactive, exit non-zero). Never a hang,
+          # never a created resource.
+          set +e
+          run_to 120 "$OF_BIN" cluster create eks-smoke --type eks \
+            --region us-east-1 --skip-wizard --dry-run </dev/null >/tmp/eks.out 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 124 ] && { cat /tmp/eks.out; fail "eks dry-run hung on a prompt"; }
+          grep -qiE "skipping the plan preview|cannot authenticate|not installed" /tmp/eks.out \
+            || { cat /tmp/eks.out; fail "eks dry-run produced neither a skip nor an auth hint (exit $code)"; }
+          echo "OK (exit $code)"
 
           echo "--- unknown --type is rejected"
           if "$OF_BIN" cluster create x --type minikube --skip-wizard >/tmp/neg.out 2>&1; then
