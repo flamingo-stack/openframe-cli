@@ -26,10 +26,10 @@ import (
 // (verbose wants scrolling logs, which an in-place area would fight). All
 // methods are nil-safe: a nil dashboard is the "not active" mode.
 type appDashboard struct {
-	mu       sync.Mutex
-	area     *pterm.AreaPrinter
-	start    time.Time
-	stopped  bool
+	mu      sync.Mutex
+	area    *pterm.AreaPrinter
+	start   time.Time
+	stopped bool
 	frame   int
 	readyAt map[string]time.Duration
 	notes   []string
