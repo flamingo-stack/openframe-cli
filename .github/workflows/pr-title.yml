@@ -17,6 +17,8 @@ jobs:
   lint-title:
     name: Conventional PR title
     runs-on: ubuntu-latest
+    # Pinned Node toolchain instead of whatever the runner ships.
+    container: node:24-slim
     steps:
       - name: Lint PR title as a conventional commit
         env:

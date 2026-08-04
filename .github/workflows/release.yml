@@ -31,8 +31,10 @@ permissions:
   contents: read
 
 # Pinned semantic-release toolchain, shared by the plan and release jobs.
-# npx installs them ephemerally — no package.json in a Go repo. The runners'
-# preinstalled Node (>=20) satisfies semantic-release v24.
+# npx installs them ephemerally — no package.json in a Go repo. The plan job
+# pins Node via the node:24-slim container; the release job runs on a macOS
+# runner (containers are Linux-only there), so it uses the runner's
+# preinstalled Node — semantic-release v24 needs >=20.8, satisfied by both.
 env:
   SEMREL_PACKAGES: >-
     --package semantic-release@24
@@ -50,9 +52,17 @@ jobs:
   plan:
     name: Plan release (semantic-release dry-run)
     runs-on: ubuntu-latest
+    # Pinned Node toolchain instead of whatever the runner ships.
+    container: node:24-slim
     outputs:
       version: ${{ steps.semrel.outputs.version }}
     steps:
+      # Before checkout: the slim image has no git, and without it
+      # actions/checkout falls back to an API tarball download — no .git dir,
+      # which semantic-release cannot work with.
+      - name: Install git (slim image)
+        run: apt-get update -qq && apt-get install -y -qq git
+
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
