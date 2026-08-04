@@ -1,6 +1,7 @@
 package files
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -54,11 +55,15 @@ func (fc *FileCleanup) restoreFilesForced(verbose bool, success bool) error {
 	}
 
 	restoredCount := 0
+	var restoreErrs []error
+	restoreFailed := make(map[string]bool)
 	for _, backup := range fc.backups {
 		if err := fc.restoreFile(backup, verbose); err != nil {
 			if verbose {
 				pterm.Warning.Printf("Failed to restore %s: %v\n", backup.OriginalPath, err)
 			}
+			restoreErrs = append(restoreErrs, fmt.Errorf("restoring %s: %w", backup.OriginalPath, err))
+			restoreFailed[backup.OriginalPath] = true
 			continue
 		}
 		restoredCount++
@@ -72,10 +77,13 @@ func (fc *FileCleanup) restoreFilesForced(verbose bool, success bool) error {
 		}
 	}
 
-	// Clean up physical backup files
-	fc.cleanupBackupFiles(verbose)
+	// Clean up physical backup files — except for failed restores, whose
+	// backup is the only remaining copy of the original.
+	fc.cleanupBackupFiles(verbose, restoreFailed)
 
-	return nil
+	// Restore failures must reach the caller: a swallowed error here means the
+	// user's file silently stays in its modified state.
+	return errors.Join(restoreErrs...)
 }
 
 // RestoreFilesWithResult restores files based on success state
@@ -88,6 +96,8 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 	}
 
 	restoredCount := 0
+	var restoreErrs []error
+	restoreFailed := make(map[string]bool)
 	for _, backup := range fc.backups {
 		// For temporary files registered for success-only cleanup
 		if fc.cleanupOnSuccess && !backup.FileExisted && !success {
@@ -101,6 +111,8 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 			if verbose {
 				pterm.Warning.Printf("Failed to restore %s: %v\n", backup.OriginalPath, err)
 			}
+			restoreErrs = append(restoreErrs, fmt.Errorf("restoring %s: %w", backup.OriginalPath, err))
+			restoreFailed[backup.OriginalPath] = true
 			continue
 		}
 		restoredCount++
@@ -114,10 +126,13 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 		}
 	}
 
-	// Clean up physical backup files
-	fc.cleanupBackupFiles(verbose)
+	// Clean up physical backup files — except for failed restores, whose
+	// backup is the only remaining copy of the original.
+	fc.cleanupBackupFiles(verbose, restoreFailed)
 
-	return nil
+	// Restore failures must reach the caller: a swallowed error here means the
+	// user's file silently stays in its modified state.
+	return errors.Join(restoreErrs...)
 }
 
 // restoreFile restores a single file from backup
@@ -150,9 +165,14 @@ func (fc *FileCleanup) restoreFile(backup FileBackup, verbose bool) error {
 	return nil
 }
 
-// cleanupBackupFiles removes physical backup files
-func (fc *FileCleanup) cleanupBackupFiles(verbose bool) {
+// cleanupBackupFiles removes physical backup files. restoreFailed (keyed by
+// OriginalPath) lists backups whose restore did NOT succeed: deleting those
+// would destroy the only remaining copy of the original file.
+func (fc *FileCleanup) cleanupBackupFiles(verbose bool, restoreFailed map[string]bool) {
 	for _, backup := range fc.backups {
+		if restoreFailed[backup.OriginalPath] {
+			continue
+		}
 		if !backup.ContentOnly && backup.BackupPath != "" {
 			if err := os.Remove(backup.BackupPath); err != nil && !os.IsNotExist(err) {
 				if verbose {

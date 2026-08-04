@@ -49,19 +49,22 @@ type Spinner struct {
 	interval time.Duration
 	frames   []string
 
-	showTimer bool
-
 	mu        sync.Mutex
 	text      string
 	active    bool
+	showTimer bool
 	startedAt time.Time
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 }
 
-// WithTimer makes the spinner show elapsed time next to its text.
+// WithTimer makes the spinner show elapsed time next to its text. Guarded by
+// the mutex: callers may enable the timer after Start, while animate is
+// already reading the flag.
 func (s *Spinner) WithTimer() *Spinner {
+	s.mu.Lock()
 	s.showTimer = true
+	s.mu.Unlock()
 	return s
 }
 
@@ -163,9 +166,10 @@ func (s *Spinner) animate() {
 			s.mu.Lock()
 			text := s.text
 			started := s.startedAt
+			showTimer := s.showTimer
 			s.mu.Unlock()
 			if s.isTTY {
-				if s.showTimer {
+				if showTimer {
 					fmt.Fprintf(s.out, "\r%s %s (%s) ", s.frames[i%len(s.frames)], text, time.Since(started).Round(time.Second))
 				} else {
 					fmt.Fprintf(s.out, "\r%s %s ", s.frames[i%len(s.frames)], text)

@@ -32,3 +32,13 @@ func TestRestConfigForContext_UnknownContext(t *testing.T) {
 	_, err := RestConfigForContext(path, "does-not-exist")
 	require.Error(t, err)
 }
+
+func TestRestConfigForContext_KubeconfigList(t *testing.T) {
+	list, _, _ := writeKubeconfigList(t)
+
+	// A context living only in the second file of a $KUBECONFIG list must
+	// resolve — the raw list is not a single file path.
+	cfg, err := RestConfigForContext(list, "two-ctx")
+	require.NoError(t, err)
+	assert.Equal(t, "https://two.example", cfg.Host)
+}

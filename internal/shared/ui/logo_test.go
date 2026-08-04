@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -101,12 +102,31 @@ func TestShowFancyLogo(t *testing.T) {
 	})
 }
 
+// TestPlainLogoLines_BoxGeometry pins the box fix: every line the same rune
+// width (previously 88/84/82 disagreed) and proper corner glyphs (the top-right
+// corner was "┖", an up-and-right glyph).
+func TestPlainLogoLines_BoxGeometry(t *testing.T) {
+	lines := plainLogoLines()
+	assert.Len(t, lines, len(logoArt)+4, "top border, two separators, bottom border around the art")
+
+	width := utf8.RuneCountInString(lines[0])
+	for i, line := range lines {
+		assert.Equal(t, width, utf8.RuneCountInString(line), "line %d must match the box width", i)
+	}
+
+	top, bottom := lines[0], lines[len(lines)-1]
+	assert.True(t, strings.HasPrefix(top, topLeftCorner), "top border starts with %q", topLeftCorner)
+	assert.True(t, strings.HasSuffix(top, topRightCorner), "top border ends with %q", topRightCorner)
+	assert.Equal(t, "┓", topRightCorner, "down-and-left glyph, not the up-and-right ┖")
+	assert.True(t, strings.HasPrefix(bottom, bottomLeftCorner))
+	assert.True(t, strings.HasSuffix(bottom, bottomRightCorner))
+	assert.Contains(t, top, logoTitle)
+}
+
 func TestLogoConstants(t *testing.T) {
 	// Verify constants are defined correctly
 	assert.Equal(t, "OpenFrame Platform Bootstrapper", logoTitle)
 	assert.Equal(t, "━", borderChar)
-	assert.Equal(t, 84, borderLength)
-	assert.Equal(t, 2, logoLeftPadding)
 
 	// Verify logo art is not empty
 	assert.NotEmpty(t, logoArt)

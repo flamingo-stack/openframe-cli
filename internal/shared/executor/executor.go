@@ -410,6 +410,16 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 			result.ExitCode = -1
 		}
 
+		// A cancelled/expired context kills the child, but the exec error only
+		// says "signal: killed" — it never wraps ctx.Err(). Downstream both the
+		// Ctrl-C detection (errors.Is(err, context.Canceled)) and the retry
+		// classifier (errors.Is(err, context.DeadlineExceeded)) depend on the
+		// ctx error being in the chain, so join it in here. ctx is already the
+		// timeout-derived context when options.Timeout > 0.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = fmt.Errorf("%w (%w)", err, ctxErr)
+		}
+
 		// Log error in verbose mode. pterm.Debug, not fmt.Printf: the latter
 		// writes straight to stdout, so these diagnostics survived --silent and
 		// corrupted machine-readable output (`cluster list -o json`).
@@ -433,8 +443,12 @@ func (e *RealCommandExecutor) ExecuteWithOptions(ctx context.Context, options Ex
 				errorOutput = result.Stdout
 			}
 
-			// Detect WSL distribution not found error
-			if result.ExitCode == WSLExitCodeDistroNotFound || result.ExitCode == -1 {
+			// Detect WSL distribution not found error. -1 only means "child
+			// killed by the WSL layer" when the command actually ran and died
+			// (*exec.ExitError); it is also the catch-all for errors like
+			// exec.ErrNotFound, where a WSL diagnosis would misreport a plain
+			// "helm not on PATH" as a missing distro.
+			if result.ExitCode == WSLExitCodeDistroNotFound || (result.ExitCode == -1 && exitError != nil) {
 				wslErr := &WSLError{
 					Operation:  fmt.Sprintf("executing %s", options.Command),
 					ExitCode:   result.ExitCode,

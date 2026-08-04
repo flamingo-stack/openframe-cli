@@ -66,6 +66,21 @@ func TestShouldRetry_RetryableSubstringCaseInsensitive(t *testing.T) {
 		"non-retryable message must not retry")
 }
 
+// TestInstallationRetryPolicy_PendingHelmOperationNotRetried: with no
+// concurrent helm operator in this CLI, "another operation ... is in progress"
+// means a release wedged in pending-* by a killed run. Retrying hits the same
+// wedged release (the friendly hint says exactly that), so the pattern must
+// NOT be in the retryable set.
+func TestInstallationRetryPolicy_PendingHelmOperationNotRetried(t *testing.T) {
+	p := InstallationRetryPolicy()
+	err := errors.New("Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress")
+	assert.False(t, p.ShouldRetry(err, 0), "a wedged pending-* release cannot be cleared by retrying")
+
+	// Neighboring genuinely-transient helm conditions must keep retrying.
+	assert.True(t, p.ShouldRetry(errors.New("etcdserver: request timed out"), 0))
+	assert.True(t, p.ShouldRetry(errors.New("the server is currently unable to handle the request"), 0))
+}
+
 func TestGetDelay_JitterNeverNegativeOrBelowBase(t *testing.T) {
 	p := NewExponentialBackoffPolicy(10, time.Second)
 	p.MaxDelay = time.Hour
@@ -231,8 +246,8 @@ type wrapperErr struct {
 	recoverable bool
 }
 
-func (w *wrapperErr) Error() string              { return w.msg }
-func (w *wrapperErr) IsRecoverable() bool        { return w.recoverable }
+func (w *wrapperErr) Error() string                { return w.msg }
+func (w *wrapperErr) IsRecoverable() bool          { return w.recoverable }
 func (w *wrapperErr) GetRetryAfter() time.Duration { return 0 }
 
 type nonRetryableErr struct{ msg string }

@@ -47,6 +47,24 @@ func TestSpinner_StartTwiceJustUpdatesText(t *testing.T) {
 	s.Stop()
 }
 
+// TestSpinner_WithTimerAfterStartRaceFree: WithTimer may be called while the
+// animation goroutine is already reading showTimer, so the flag must be
+// mutex-guarded like the rest of the mutable state (verified by `-race`).
+func TestSpinner_WithTimerAfterStartRaceFree(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithWriter(&buf)
+	s.isTTY = true // animate only reads showTimer when it renders frames
+	s.interval = time.Millisecond
+	s.Start("working")
+
+	time.Sleep(5 * time.Millisecond) // let animate tick before the flag flips
+	s.WithTimer()
+	time.Sleep(5 * time.Millisecond) // and after
+
+	s.Stop()
+	assert.Contains(t, buf.String(), "working")
+}
+
 // TestSpinner_ConcurrentUpdateAndStopRaceFree is the point of this package: run
 // the animation goroutine while many goroutines update the text, then Stop.
 // Under `go test -race` this must be clean (Stop joins the animation goroutine).

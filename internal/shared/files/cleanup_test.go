@@ -161,6 +161,64 @@ func TestFileCleanup_RegularMode_AlwaysCleanup(t *testing.T) {
 	assert.NoFileExists(t, tempFile, "Temporary file should be deleted in regular cleanup mode regardless of success")
 }
 
+// TestRestoreFiles_RestoresFromBackupFile covers the FileExisted:true path: the
+// original content comes back from the backup file, and the now-redundant
+// backup is removed.
+func TestRestoreFiles_RestoresFromBackupFile(t *testing.T) {
+	cleanup := NewFileCleanup()
+
+	tmpDir := t.TempDir()
+	original := filepath.Join(tmpDir, "values.yaml")
+	backup := original + ".cli-backup"
+	require.NoError(t, os.WriteFile(backup, []byte("original content"), 0o600))
+	require.NoError(t, os.WriteFile(original, []byte("modified content"), 0o600))
+	cleanup.backups = append(cleanup.backups, FileBackup{
+		OriginalPath: original,
+		BackupPath:   backup,
+		FileExisted:  true,
+	})
+
+	require.NoError(t, cleanup.RestoreFiles(false))
+
+	content, err := os.ReadFile(original)
+	require.NoError(t, err)
+	assert.Equal(t, "original content", string(content))
+	assert.NoFileExists(t, backup, "backup is redundant once the restore succeeded")
+}
+
+// TestRestoreFiles_FailedRestoreReturnsErrorAndKeepsBackup pins the fix for the
+// swallowed-error bug: a failed restore must surface to the caller AND must not
+// delete the backup file — at that point it is the only copy of the original.
+func TestRestoreFiles_FailedRestoreReturnsErrorAndKeepsBackup(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	cleanup := NewFileCleanup()
+
+	tmpDir := t.TempDir()
+	backup := filepath.Join(tmpDir, "values.yaml.cli-backup")
+	require.NoError(t, os.WriteFile(backup, []byte("original content"), 0o600))
+
+	// Destination directory is unwritable, so the copy-back must fail.
+	roDir := filepath.Join(tmpDir, "ro")
+	require.NoError(t, os.Mkdir(roDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+	cleanup.backups = append(cleanup.backups, FileBackup{
+		OriginalPath: filepath.Join(roDir, "values.yaml"),
+		BackupPath:   backup,
+		FileExisted:  true,
+	})
+
+	err := cleanup.RestoreFiles(false)
+	require.Error(t, err, "a failed restore must reach the caller")
+	assert.FileExists(t, backup, "the backup of a failed restore is the only remaining copy — never delete it")
+
+	// Same guarantees on the success-path variant.
+	err = cleanup.RestoreFilesWithResult(false, true)
+	require.Error(t, err)
+	assert.FileExists(t, backup)
+}
+
 func TestFileCleanup_SignalInterruption_Scenario(t *testing.T) {
 	// This test simulates the scenario where user presses CTRL-C
 	cleanup := NewFileCleanup()

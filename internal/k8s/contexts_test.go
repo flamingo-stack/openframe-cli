@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const sampleKubeconfig = `apiVersion: v1
@@ -143,4 +144,102 @@ users:
 	if err := SwitchContext(path, "ghost"); err == nil {
 		t.Fatal("switching to a missing context must fail")
 	}
+}
+
+// $KUBECONFIG may be a path-list of files (kubectl convention). These tests
+// pin the merged handling: two files joined by the OS path-list separator.
+
+const kubeconfigFileOne = `apiVersion: v1
+kind: Config
+current-context: one-ctx
+clusters:
+- {name: c1, cluster: {server: https://one.example}}
+contexts:
+- {name: one-ctx, context: {cluster: c1, user: u}}
+users:
+- {name: u, user: {}}
+`
+
+const kubeconfigFileTwo = `apiVersion: v1
+kind: Config
+clusters:
+- {name: c2, cluster: {server: https://two.example}}
+contexts:
+- {name: two-ctx, context: {cluster: c2, user: u2}}
+users:
+- {name: u2, user: {}}
+`
+
+// writeKubeconfigList writes both files into one temp dir and returns their
+// paths joined by the OS path-list separator, plus the individual paths.
+func writeKubeconfigList(t *testing.T) (list, file1, file2 string) {
+	t.Helper()
+	dir := t.TempDir()
+	file1 = filepath.Join(dir, "config1")
+	file2 = filepath.Join(dir, "config2")
+	require.NoError(t, os.WriteFile(file1, []byte(kubeconfigFileOne), 0o600))
+	require.NoError(t, os.WriteFile(file2, []byte(kubeconfigFileTwo), 0o600))
+	return file1 + string(os.PathListSeparator) + file2, file1, file2
+}
+
+func TestLoadContexts_KubeconfigList(t *testing.T) {
+	list, _, _ := writeKubeconfigList(t)
+
+	contexts, current, err := LoadContexts(list)
+	require.NoError(t, err)
+	assert.Equal(t, "one-ctx", current, "current-context comes from the file that sets it")
+	require.Len(t, contexts, 2, "contexts from BOTH files must be merged")
+	assert.Equal(t, "one-ctx", contexts[0].Name)
+	assert.Equal(t, "two-ctx", contexts[1].Name)
+	assert.Equal(t, "c2", contexts[1].Cluster)
+}
+
+func TestResolveContextForCluster_KubeconfigList(t *testing.T) {
+	list, _, _ := writeKubeconfigList(t)
+
+	// A context living only in the SECOND file must be found by exact match
+	// instead of falling back to the k3d convention.
+	assert.Equal(t, "two-ctx", ResolveContextForCluster(list, "two-ctx"))
+}
+
+func TestSwitchContext_KubeconfigList(t *testing.T) {
+	list, file1, file2 := writeKubeconfigList(t)
+
+	// A context defined only in file 2 must be switchable; kubectl writes the
+	// pointer into the first file that already sets current-context (file 1).
+	require.NoError(t, SwitchContext(list, "two-ctx"))
+
+	cfg1, err := clientcmd.LoadFromFile(file1)
+	require.NoError(t, err)
+	assert.Equal(t, "two-ctx", cfg1.CurrentContext, "pointer belongs in the file that owned it")
+	require.Len(t, cfg1.Contexts, 1, "file 1 must not absorb file 2's entries")
+
+	cfg2, err := clientcmd.LoadFromFile(file2)
+	require.NoError(t, err)
+	assert.Empty(t, cfg2.CurrentContext, "file 2 must stay untouched")
+
+	// The merged view reflects the switch.
+	_, current, err := LoadContexts(list)
+	require.NoError(t, err)
+	assert.Equal(t, "two-ctx", current)
+
+	// Missing contexts still fail against the merged view.
+	require.Error(t, SwitchContext(list, "ghost"))
+}
+
+func TestSwitchContext_KubeconfigList_NoCurrentContextAnywhere(t *testing.T) {
+	dir := t.TempDir()
+	file2 := filepath.Join(dir, "config2")
+	// file2 sets no current-context and the first list entry does not exist →
+	// kubectl writes into the first EXISTING file.
+	require.NoError(t, os.WriteFile(file2, []byte(kubeconfigFileTwo), 0o600))
+	missing := filepath.Join(dir, "nope")
+	list := missing + string(os.PathListSeparator) + file2
+
+	require.NoError(t, SwitchContext(list, "two-ctx"))
+
+	assert.NoFileExists(t, missing, "a missing list entry must not be created")
+	cfg2, err := clientcmd.LoadFromFile(file2)
+	require.NoError(t, err)
+	assert.Equal(t, "two-ctx", cfg2.CurrentContext)
 }

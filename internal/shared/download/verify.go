@@ -29,6 +29,11 @@ import (
 // oversized response cannot exhaust memory before the checksum runs.
 const maxAssetBytes = 512 << 20 // 512 MiB
 
+// maxExtractBytes bounds a single archive member's decompressed size
+// (decompression-bomb guard). A var, not a const, so the boundary test can
+// lower it instead of building a 200 MiB archive.
+var maxExtractBytes int64 = 200 << 20 // 200 MiB
+
 // PinnedAsset is a single platform's download, pinned to a content digest.
 type PinnedAsset struct {
 	URL    string
@@ -204,10 +209,15 @@ func extractTarGzMember(data []byte, member string) ([]byte, error) {
 		if hdr.Typeflag != tar.TypeReg || path.Clean(hdr.Name) != want {
 			continue
 		}
-		// Cap extraction to guard against a decompression bomb.
-		b, err := io.ReadAll(io.LimitReader(tr, 200<<20))
+		// Cap extraction to guard against a decompression bomb. Read one byte
+		// past the cap: a bare LimitReader EOFs silently at the boundary, which
+		// would install a truncated binary instead of failing.
+		b, err := io.ReadAll(io.LimitReader(tr, maxExtractBytes+1))
 		if err != nil {
 			return nil, fmt.Errorf("extracting %q: %w", member, err)
+		}
+		if int64(len(b)) > maxExtractBytes {
+			return nil, fmt.Errorf("extracting %q: member exceeds the %d-byte cap", member, maxExtractBytes)
 		}
 		return b, nil
 	}
@@ -228,10 +238,16 @@ func extractZipMember(data []byte, member string) ([]byte, error) {
 				return nil, fmt.Errorf("extracting %q: %w", member, err)
 			}
 			defer func() { _ = rc.Close() }()
-			// Cap extraction to guard against a decompression bomb.
-			b, err := io.ReadAll(io.LimitReader(rc, 200<<20))
+			// Cap extraction to guard against a decompression bomb. Read one
+			// byte past the cap: a bare LimitReader EOFs silently at the
+			// boundary, which would install a truncated binary instead of
+			// failing.
+			b, err := io.ReadAll(io.LimitReader(rc, maxExtractBytes+1))
 			if err != nil {
 				return nil, fmt.Errorf("extracting %q: %w", member, err)
+			}
+			if int64(len(b)) > maxExtractBytes {
+				return nil, fmt.Errorf("extracting %q: member exceeds the %d-byte cap", member, maxExtractBytes)
 			}
 			return b, nil
 		}

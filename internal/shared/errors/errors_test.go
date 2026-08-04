@@ -225,7 +225,7 @@ type resumeHintStub struct {
 	hint string
 }
 
-func (s resumeHintStub) Error() string     { return s.err.Error() }
+func (s resumeHintStub) Error() string      { return s.err.Error() }
 func (s resumeHintStub) Unwrap() error      { return s.err }
 func (s resumeHintStub) ResumeHint() string { return s.hint }
 

@@ -269,15 +269,18 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation func() error) err
 // "tiller not ready" used to be listed here: Tiller was removed in Helm 3
 // (2019) and this CLI drives Helm 3/4, so it could never match. Likewise
 // "rate limited" — GitHub and the Kubernetes API server both say "too many
-// requests".
+// requests". And "another operation (install/upgrade/rollback) is in
+// progress": this CLI runs no concurrent helm operations, so that message
+// means a release wedged in pending-* by a killed run — retrying hits the
+// same wedged release every time (the friendly hint already says so and
+// points at rollback).
 func InstallationRetryPolicy() RetryPolicy {
 	policy := NewExponentialBackoffPolicy(3, 10*time.Second)
 	policy.MaxDelay = 5 * time.Minute
 	policy.RetryableErrs = map[string]bool{
 		// helm's own transient conditions
-		"another operation (install/upgrade/rollback) is in progress": true,
-		"the server is currently unable to handle the request":        true,
-		"etcdserver: request timed out":                               true,
+		"the server is currently unable to handle the request": true,
+		"etcdserver: request timed out":                        true,
 		// generic transport failures visible only as text from a child process
 		"i/o timeout":           true,
 		"connection refused":    true,

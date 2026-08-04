@@ -2,6 +2,7 @@ package download
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -45,6 +46,57 @@ func TestInstallVerifiedTarGz_ExtractsMember(t *testing.T) {
 	got, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
+}
+
+// TestExtractTarGzMember_RejectsOversizedMember pins the boundary fix: a
+// member larger than the cap must ERROR, not be silently truncated to the cap
+// (a bare LimitReader EOFs quietly, which would install a truncated binary).
+// The cap is lowered for the test so no 200 MiB archive is needed.
+func TestExtractTarGzMember_RejectsOversizedMember(t *testing.T) {
+	orig := maxExtractBytes
+	maxExtractBytes = 16
+	defer func() { maxExtractBytes = orig }()
+
+	over := makeTarGz(t, "linux-amd64/helm", bytes.Repeat([]byte("a"), 17))
+	_, err := extractTarGzMember(over, "linux-amd64/helm")
+	require.Error(t, err, "member one byte over the cap must be rejected")
+	assert.Contains(t, err.Error(), "cap")
+
+	// Exactly at the cap is still fine.
+	atCap := makeTarGz(t, "linux-amd64/helm", bytes.Repeat([]byte("a"), 16))
+	b, err := extractTarGzMember(atCap, "linux-amd64/helm")
+	require.NoError(t, err)
+	assert.Len(t, b, 16)
+}
+
+// makeZip builds a zip with a single regular file (extractZipMember has the
+// same truncation boundary as the tar path).
+func makeZip(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(name)
+	require.NoError(t, err)
+	_, err = w.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+func TestExtractZipMember_RejectsOversizedMember(t *testing.T) {
+	orig := maxExtractBytes
+	maxExtractBytes = 16
+	defer func() { maxExtractBytes = orig }()
+
+	over := makeZip(t, "terraform", bytes.Repeat([]byte("a"), 17))
+	_, err := extractZipMember(over, "terraform")
+	require.Error(t, err, "member one byte over the cap must be rejected")
+	assert.Contains(t, err.Error(), "cap")
+
+	atCap := makeZip(t, "terraform", bytes.Repeat([]byte("a"), 16))
+	b, err := extractZipMember(atCap, "terraform")
+	require.NoError(t, err)
+	assert.Len(t, b, 16)
 }
 
 func TestExtractTarGzMember_NotFound(t *testing.T) {
