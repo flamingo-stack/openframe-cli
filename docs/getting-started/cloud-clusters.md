@@ -33,6 +33,23 @@ auth state and, in an interactive session, offers to run `gcloud auth login`
 flow, no manual steps. Non-interactive sessions (CI) never prompt and fail
 with the exact command to run instead.
 
+**AWS identity is vetted before anything runs.** An EKS create (or its
+`--dry-run`) first resolves which identity it is about to use — your
+`--profile`, or the default credential chain — and shows the actual account
+and ARN:
+
+- *Interactive*: you must confirm it (`Use AWS profile 'staging' — account
+  123456789012, arn:… for this EKS operation?`); declining aborts and lists
+  your other configured profiles. The wizard additionally offers a picker of
+  the profiles found in your AWS config.
+- *Non-interactive (CI)*: never prompts — passing `--profile` (or having a
+  working default chain) is the consent, and the account in use is printed so
+  CI logs show whose account was billed.
+- *Nothing configured at all* (no named profiles and the default chain cannot
+  authenticate): the command fails with a pointer to the official AWS guide —
+  [Configuration and credential file settings](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html).
+  Set up credentials, then re-run (optionally with `--profile <name>`).
+
 Credentials are additionally preflighted before anything is created (`aws sts
 get-caller-identity` / `gcloud auth print-access-token`), so a broken login
 fails in seconds, not mid-provisioning.
@@ -55,9 +72,10 @@ openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard
 openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard
 ```
 
-Useful flags: `--machine-type`, `--min-nodes` / `--max-nodes`, `--spot`,
-`--profile` (AWS), `--nodes` (initial size), `--version` (`<major>.<minor>`,
-e.g. `1.33`).
+Useful flags: `--machine-type`, `--min-nodes` / `--max-nodes` (autoscaler
+bounds; defaults 1 / 4, must be at least 1 — an explicit 0 is rejected),
+`--spot`, `--profile` (AWS), `--nodes` (initial size), `--version`
+(`<major>.<minor>`, e.g. `1.33`).
 
 In interactive sessions the CLI first shows the full Terraform plan and asks
 for approval (the `terraform apply` shape; what you approve is exactly what
@@ -82,6 +100,14 @@ without creating anything (and without registering the cluster):
 openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard --dry-run
 # Plan: 47 to add, 0 to change, 0 to destroy
 ```
+
+The preview authenticates like a real create (including the AWS identity
+vetting above), but has classic `terraform plan` semantics: nothing is
+written — not to the cloud, and not to the workspace. Over an existing
+(failed/interrupted) workspace the preview shows what a **resume** would
+actually apply: the module and variables are regenerated from the current CLI
+and your current flags, planned against the workspace's saved state in a
+throwaway directory.
 
 ## Where the state lives
 
@@ -116,9 +142,14 @@ cleanup` does not apply to cloud clusters — use `delete`.
 
 ## Troubleshooting
 
+- **"no usable AWS configuration found"** — the default credential chain
+  cannot authenticate and no named profiles exist. Set up credentials first
+  (official guide: [Configuration and credential file settings](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)),
+  then re-run — optionally with `--profile <name>`.
 - **"AWS ... cannot authenticate" / "gcloud is not authenticated"** — fix
   credentials (`aws configure`, `gcloud auth login`) and re-run; nothing was
-  created.
+  created. For AWS the error lists your other configured profiles when the
+  selected one is broken.
 - **Create failed mid-way** — the error names the workspace directory. Re-run
   `cluster create <name>` to resume, or `cluster delete <name>` to tear down
   what was partially created.
