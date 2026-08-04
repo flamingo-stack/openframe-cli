@@ -1,0 +1,28 @@
+# semantic-release configuration — run by .github/workflows/release.yml on main.
+#
+# The release VERSION is derived from the commits since the last release tag,
+# per Conventional Commits: fix → patch, feat → minor, BREAKING CHANGE (footer
+# or "type!:" bang) → major. Commits with no conforming type (or types like
+# chore/docs/refactor) trigger no release on their own. This repo squash-merges
+# PRs, so the analyzed commit subjects ARE the PR titles — pr-title.yml lints
+# them into the conventional format at PR time.
+#
+# Division of labor: semantic-release computes the version and creates/pushes
+# the tag; everything user-visible — the GitHub Release, its label-based notes
+# (.github/release.yml via GoReleaser's github-native changelog), the signed
+# binaries, checksums and cosign bundle — is published by GoReleaser against
+# that tag. Hence no @semantic-release/github or release-notes plugin here.
+#
+# tagFormat is the bare "x.y.z" (no "v"): the self-updater and wsllauncher
+# download bare-tag asset URLs, and 0.4.x history is tagged that way. The
+# stray legacy "v0.0.1" tag does not match this format and is ignored.
+branches:
+  - main
+tagFormat: "${version}"
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+  # Exports the computed version to the workflow (runs in the verifyRelease
+  # phase, so it fires in --dry-run "plan" mode too). No-op outside Actions.
+  - - "@semantic-release/exec"
+    - verifyReleaseCmd: 'echo "version=${nextRelease.version}" >> "${GITHUB_OUTPUT:-/dev/null}"'

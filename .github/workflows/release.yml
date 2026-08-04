@@ -2,44 +2,100 @@ name: Release
 
 # =============================================================================
 # WORKFLOW CONFIGURATION
+#
+# Versioning is semantic-release (.releaserc.yml): the version is computed
+# from Conventional Commits since the last release tag — fix → patch, feat →
+# minor, BREAKING CHANGE → major. A push to main with no release-worthy
+# commits is a clean no-op (the plan job resolves no version and the release
+# job is skipped). workflow_dispatch just re-evaluates the same rules; there
+# is no manual version input anymore.
+#
+# The workflow file name and ref matter beyond aesthetics: the self-updater
+# pins the cosign signing identity to release.yml@refs/heads/main
+# (internal/shared/selfupdate/cosign.go), so this file must keep its name and
+# releases must run from main.
 # =============================================================================
 
-permissions:
-  contents: write
-  id-token: write # required for cosign keyless (OIDC) signing
-
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to Release (x.y.z). Leave empty for auto patch bump."
-        required: false
-        type: string
-        default: ''
+
+# One release at a time: two merges racing would both compute the same next
+# version and the loser's tag push would fail mid-release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Pinned semantic-release toolchain, shared by the plan and release jobs.
+# npx installs them ephemerally — no package.json in a Go repo. The runners'
+# preinstalled Node (>=20) satisfies semantic-release v24.
+env:
+  SEMREL_PACKAGES: >-
+    --package semantic-release@24
+    --package @semantic-release/exec@7
+    --package conventional-changelog-conventionalcommits@8
 
 # =============================================================================
 # JOBS
 # =============================================================================
 
 jobs:
-  version:
-    name: Resolve Version
-    uses: ./.github/workflows/version.yml
-    with:
-      version: ${{ inputs.version }}
+  # Cheap dry-run on ubuntu: decides IF a release happens and which version,
+  # before any expensive gate/signing work. verifyReleaseCmd in .releaserc.yml
+  # writes the version to the step output; no version → no release needed.
+  plan:
+    name: Plan release (semantic-release dry-run)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semrel.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # semantic-release reads the full history and tags to find the last
+          # release and analyze the commits since.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve next version
+        id: semrel
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==================================================================="
+          echo "===  PLAN: semantic-release dry-run (conventional commits)"
+          echo "==================================================================="
+          npx --yes $SEMREL_PACKAGES semantic-release --dry-run
+
+      - name: Report
+        env:
+          VERSION: ${{ steps.semrel.outputs.version }}
+        run: |
+          if [ -n "$VERSION" ]; then
+            echo "Release ${VERSION} will be published."
+          else
+            echo "No release-worthy commits since the last tag — nothing to do."
+          fi
 
   release:
     name: "Release"
-    needs: [version]
+    needs: [plan]
+    if: needs.plan.outputs.version != ''
     # macOS runner: binaries are code-signed in GoReleaser build hooks before
     # archiving (checksums must cover the signed bits), and codesign/notarytool
     # only exist on macOS. Windows Authenticode uses jsign, which runs anywhere.
     runs-on: macos-latest
-    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write # tag push + GitHub Release
+      id-token: write # required for cosign keyless (OIDC) signing
     steps:
       # The self-updater pins the cosign signing identity to
       # release.yml@refs/heads/main (internal/shared/selfupdate/cosign.go). The
-      # Fulcio certificate carries the DISPATCHING ref, so a release run from any
+      # Fulcio certificate carries the TRIGGERING ref, so a release run from any
       # other branch would publish assets that every `openframe update` rejects
       # ("release signature verification failed"). Fail loudly instead of
       # skipping so the dispatcher sees why.
@@ -49,17 +105,19 @@ jobs:
           DISPATCH_REF: ${{ github.ref }}
         run: |
           echo "==================================================================="
-          echo "===  GUARD: release dispatched from a non-main ref"
+          echo "===  GUARD: release triggered from a non-main ref"
           echo "==================================================================="
-          echo "::error::Releases must be dispatched from main (got $DISPATCH_REF). The cosign identity pinned by the self-updater only accepts release.yml@refs/heads/main, so assets signed from this ref would fail verification for every user."
+          echo "::error::Releases must run from main (got $DISPATCH_REF). The cosign identity pinned by the self-updater only accepts release.yml@refs/heads/main, so assets signed from this ref would fail verification for every user."
           exit 1
 
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Don't leave the checkout token in .git/config for later steps to
-          # inherit (zizmor: artipacked). The tag push below authenticates with
-          # an explicit token instead.
+          # Full history + tags for semantic-release (same reason as the plan
+          # job). Don't leave the checkout token in .git/config for later steps
+          # to inherit (zizmor: artipacked) — semantic-release authenticates its
+          # tag push with the explicit token below instead.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
@@ -116,22 +174,34 @@ jobs:
           echo "${JSIGN_SHA256}  $RUNNER_TEMP/jsign.jar" | shasum -a 256 -c -
           echo "JSIGN_JAR=$RUNNER_TEMP/jsign.jar" >> "$GITHUB_ENV"
 
-      - name: Create and push tag
-        id: tag
+      # semantic-release re-analyzes the commits (same result as the plan job),
+      # creates the bare x.y.z tag and pushes it. It does NOT create the GitHub
+      # Release — GoReleaser publishes the release with the label-based notes
+      # (.github/release.yml) against this tag in the next step.
+      - name: 'semantic-release: create and push tag'
+        id: semrel
         env:
-          VERSION: ${{ needs.version.outputs.version }}
-          # Explicit auth for the push, since the checkout no longer persists it.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git tag -a "${VERSION}" -m "Release ${VERSION}"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${VERSION}"
+          echo "==================================================================="
+          echo "===  semantic-release: tagging the next version"
+          echo "==================================================================="
+          npx --yes $SEMREL_PACKAGES semantic-release
+
+      - name: 'Guard: planned and tagged versions agree'
+        env:
+          PLANNED: ${{ needs.plan.outputs.version }}
+          TAGGED: ${{ steps.semrel.outputs.version }}
+        run: |
+          if [ "$PLANNED" != "$TAGGED" ]; then
+            echo "::error::plan resolved ${PLANNED} but semantic-release tagged ${TAGGED} — a commit landed on main between the jobs; re-run the workflow"
+            exit 1
+          fi
 
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ needs.version.outputs.version }}
+          GORELEASER_CURRENT_TAG: ${{ needs.plan.outputs.version }}
           # Enables scripts/sign-binary.sh in the build hooks. KEYCHAIN_PATH,
           # SIGNING_IDENTITY and JSIGN_JAR arrive via GITHUB_ENV from the
           # signing setup steps above.
@@ -151,7 +221,7 @@ jobs:
       # --- Smoke: verify what was actually shipped ----------------------------
       - name: 'Smoke: released binary reports the injected version'
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           echo "==================================================================="
           echo "===  SMOKE: dist binary runs and reports ${VERSION}"
@@ -172,14 +242,15 @@ jobs:
 
       - name: 'Smoke: published asset URLs resolve (WSL auto-install contract)'
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           echo "==================================================================="
           echo "===  SMOKE: bare-tag download URLs resolve for ${VERSION}"
           echo "==================================================================="
           # wsllauncher and `openframe update` download exactly these bare-tag
-          # URLs (releases are tagged "x.y.z", no "v" prefix). A 404 here means
-          # every released Windows binary breaks on first run (audit T0-3).
+          # URLs (releases are tagged "x.y.z", no "v" prefix — pinned by
+          # tagFormat in .releaserc.yml). A 404 here means every released
+          # Windows binary breaks on first run (audit T0-3).
           for asset in "openframe-cli_linux_amd64.tar.gz" "checksums.txt" "checksums.txt.bundle"; do
             url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
             ok=""
@@ -192,14 +263,14 @@ jobs:
           done
 
       # --- Cleanup: never leave a half-published release behind ---------------
-      # A leftover tag wedges the next dispatch: version.yml resolves the next
-      # version from published releases, so a re-run picks the same version and
+      # A leftover tag wedges the next run: semantic-release resolves the next
+      # version from existing tags, so a re-run computes the same version and
       # the tag push fails until someone hand-deletes the tag. A half-published
       # release failing smoke must not stay visible as `latest` either.
       - name: 'Cleanup: delete tag & release on failure'
-        if: failure() && steps.tag.outcome == 'success'
+        if: failure() && steps.semrel.outcome == 'success'
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "==================================================================="
@@ -225,13 +296,13 @@ jobs:
   # cleanup: never leave a bad release visible as latest).
   verify-windows-signature:
     name: "Verify: Windows Authenticode"
-    needs: [version, release]
+    needs: [plan, release]
     runs-on: windows-latest
     steps:
       - name: Download and verify published Windows binaries
         shell: pwsh
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = "Stop"
           foreach ($arch in @("amd64", "arm64")) {
@@ -268,12 +339,12 @@ jobs:
 
   verify-macos-signature:
     name: "Verify: macOS signature & notarization"
-    needs: [version, release]
+    needs: [plan, release]
     runs-on: macos-latest
     steps:
       - name: Download and verify published macOS binaries
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
           for arch in amd64 arm64; do
@@ -310,13 +381,15 @@ jobs:
   # already rolled itself back (verification is then skipped anyway).
   cleanup-on-failed-verification:
     name: "Cleanup: yank release on failed verification"
-    needs: [version, release, verify-windows-signature, verify-macos-signature]
+    needs: [plan, release, verify-windows-signature, verify-macos-signature]
     if: failure() && needs.release.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Delete release and tag
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "==================================================================="

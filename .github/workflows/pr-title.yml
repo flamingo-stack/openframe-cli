@@ -1,0 +1,29 @@
+name: PR Title
+
+# semantic-release (.releaserc.yml) derives release versions from Conventional
+# Commits, and this repo squash-merges PRs — so the PR TITLE becomes the commit
+# subject that semantic-release analyzes on main. A free-form title silently
+# contributes nothing to any release; this lint makes the format a merge gate.
+# Format: type(scope)?: subject — e.g. "fix(k3d): tolerate KUBECONFIG lists",
+# "feat!: drop v1 config" (the ! marks a breaking change → major bump).
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  lint-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint PR title as a conventional commit
+        env:
+          # Via env, never inline interpolation: a PR title is untrusted input.
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$TITLE" | npx --yes \
+            --package @commitlint/cli@19 \
+            --package @commitlint/config-conventional@19 \
+            commitlint --extends @commitlint/config-conventional --verbose
