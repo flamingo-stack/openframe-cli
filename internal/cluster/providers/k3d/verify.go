@@ -275,10 +275,11 @@ func firstKubeconfigPath(kubeconfig string) string {
 		if entry == "" {
 			continue // empty list elements are ignored, as kubectl does
 		}
+		entry = filepath.Clean(entry)
 		if first == "" {
 			first = entry
 		}
-		if _, err := os.Stat(entry); err == nil {
+		if _, err := os.Stat(entry); err == nil { // #nosec G703 -- entry is the user's own $KUBECONFIG (same trust domain as kubectl); only existence is probed
 			return entry
 		}
 	}
