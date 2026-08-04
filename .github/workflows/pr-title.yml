@@ -23,7 +23,12 @@ jobs:
           # Via env, never inline interpolation: a PR title is untrusted input.
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          printf '%s\n' "$TITLE" | npx --yes \
-            --package @commitlint/cli@19 \
-            --package @commitlint/config-conventional@19 \
+          # A local install, not `npx --package`: commitlint resolves --extends
+          # from the CURRENT DIRECTORY, while npx puts the packages into its
+          # ephemeral cache — the config was unresolvable from cwd
+          # (MODULE_NOT_FOUND). No checkout needed; node_modules lands in the
+          # empty workspace.
+          npm install --no-save --no-audit --no-fund \
+            @commitlint/cli@19 @commitlint/config-conventional@19
+          printf '%s\n' "$TITLE" | npx --no-install \
             commitlint --extends @commitlint/config-conventional --verbose
