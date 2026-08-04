@@ -7,6 +7,8 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
 // PortConfig holds the allocated ports for a k3d cluster
@@ -18,9 +20,9 @@ type PortConfig struct {
 
 // findAvailablePorts finds available TCP ports for API, HTTP, and HTTPS
 // It prefers standard ports (6550, 80, 443) and falls back to high ports (6551, 8080, 8443) if needed
-func (m *K3dManager) findAvailablePorts() (PortConfig, error) {
+func (m *K3dManager) findAvailablePorts(ctx context.Context) (PortConfig, error) {
 	// Get ports used by existing k3d clusters
-	usedPorts := m.getUsedPortsByExistingClusters()
+	usedPorts := m.getUsedPortsByExistingClusters(ctx)
 
 	config := PortConfig{}
 
@@ -65,11 +67,18 @@ func (m *K3dManager) findPort(preferred []int, searchStart int, usedPorts map[in
 }
 
 // getUsedPortsByExistingClusters returns a map of ports used by existing k3d clusters
-func (m *K3dManager) getUsedPortsByExistingClusters() map[int]bool {
+func (m *K3dManager) getUsedPortsByExistingClusters(ctx context.Context) map[int]bool {
 	usedPorts := make(map[int]bool)
 
-	ctx := context.Background()
-	result, err := m.executor.Execute(ctx, "k3d", "cluster", "list", "--output", "json")
+	// The caller's ctx keeps this cancellable; the 30-second timeout matches
+	// the manager's other k3d shell-outs so a hung `k3d cluster list` cannot
+	// stall cluster create indefinitely.
+	options := executor.ExecuteOptions{
+		Command: "k3d",
+		Args:    []string{"cluster", "list", "--output", "json"},
+		Timeout: 30 * time.Second,
+	}
+	result, err := m.executor.ExecuteWithOptions(ctx, options)
 	if err != nil {
 		return usedPorts // Return empty map on error, will rely on port availability check
 	}

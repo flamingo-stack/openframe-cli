@@ -3,6 +3,8 @@ package k3d
 import (
 	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,7 +32,7 @@ func TestGetUsedPortsByExistingClusters(t *testing.T) {
 	mock.SetResponse("k3d cluster list", &executor.CommandResult{Stdout: clusterListJSON})
 	m := NewK3dManager(mock, false)
 
-	used := m.getUsedPortsByExistingClusters()
+	used := m.getUsedPortsByExistingClusters(context.Background())
 
 	for _, want := range []int{6550, 80, 443} {
 		if !used[want] {
@@ -50,14 +52,14 @@ func TestGetUsedPortsByExistingClusters_ErrorsYieldEmpty(t *testing.T) {
 	t.Run("executor error", func(t *testing.T) {
 		mock := executor.NewMockCommandExecutor()
 		mock.SetShouldFail(true, "k3d unavailable")
-		if used := NewK3dManager(mock, false).getUsedPortsByExistingClusters(); len(used) != 0 {
+		if used := NewK3dManager(mock, false).getUsedPortsByExistingClusters(context.Background()); len(used) != 0 {
 			t.Fatalf("want empty map on executor error, got %v", used)
 		}
 	})
 	t.Run("malformed JSON", func(t *testing.T) {
 		mock := executor.NewMockCommandExecutor()
 		mock.SetResponse("k3d cluster list", &executor.CommandResult{Stdout: "FATAL: not json"})
-		if used := NewK3dManager(mock, false).getUsedPortsByExistingClusters(); len(used) != 0 {
+		if used := NewK3dManager(mock, false).getUsedPortsByExistingClusters(context.Background()); len(used) != 0 {
 			t.Fatalf("want empty map on malformed JSON, got %v", used)
 		}
 	})
@@ -101,6 +103,50 @@ func TestWaitForTCPPort(t *testing.T) {
 		err := m.waitForTCPPort(ctx, "127.0.0.1", "1", 5, time.Millisecond)
 		if err == nil {
 			t.Fatal("expected cancellation error")
+		}
+	})
+}
+
+// --- verify.go: getKubeconfigPath / firstKubeconfigPath ---
+
+// KUBECONFIG may hold a kubectl-style path list; passing it verbatim to
+// clientcmd.LoadFromFile fails, surfacing as "cluster created but not
+// reachable" right after a successful create.
+func TestGetKubeconfigPath_PathList(t *testing.T) {
+	m := NewK3dManager(executor.NewMockCommandExecutor(), false)
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	existing := filepath.Join(dir, "existing")
+	if err := os.WriteFile(existing, []byte("apiVersion: v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("single path is returned verbatim", func(t *testing.T) {
+		t.Setenv("KUBECONFIG", missing)
+		if got := m.getKubeconfigPath(); got != missing {
+			t.Fatalf("single-path KUBECONFIG must pass through unchanged, got %q", got)
+		}
+	})
+
+	t.Run("list resolves to the first existing file", func(t *testing.T) {
+		t.Setenv("KUBECONFIG", missing+string(os.PathListSeparator)+existing)
+		if got := m.getKubeconfigPath(); got != existing {
+			t.Fatalf("want first existing entry %q, got %q", existing, got)
+		}
+	})
+
+	t.Run("list with no existing file falls back to the first entry", func(t *testing.T) {
+		other := filepath.Join(dir, "also-missing")
+		t.Setenv("KUBECONFIG", missing+string(os.PathListSeparator)+other)
+		if got := m.getKubeconfigPath(); got != missing {
+			t.Fatalf("want first entry %q when nothing exists yet, got %q", missing, got)
+		}
+	})
+
+	t.Run("leading empty entry is skipped", func(t *testing.T) {
+		t.Setenv("KUBECONFIG", string(os.PathListSeparator)+existing)
+		if got := m.getKubeconfigPath(); got != existing {
+			t.Fatalf("empty list entries must be ignored, got %q", got)
 		}
 	})
 }

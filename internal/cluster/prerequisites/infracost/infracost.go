@@ -68,12 +68,7 @@ func (i *Installer) Install() error {
 		return fmt.Errorf("creating %s: %w", binDir, err)
 	}
 
-	member := fmt.Sprintf("infracost-%s-%s", runtime.GOOS, runtime.GOARCH)
-	dest := filepath.Join(binDir, "infracost")
-	if runtime.GOOS == "windows" {
-		member = "infracost.exe"
-		dest += ".exe"
-	}
+	member, dest := archiveMemberAndDest(runtime.GOOS, runtime.GOARCH, binDir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -86,4 +81,18 @@ func (i *Installer) Install() error {
 	pterm.Success.Printf("Installed verified infracost %s to %s\n", download.Infracost.Version, dest)
 	pterm.Info.Println("To enable estimates, get a free API key once: infracost auth login")
 	return nil
+}
+
+// archiveMemberAndDest returns the release-archive member holding the binary
+// and the install destination for a platform. The layout is irregular (hence
+// the direct InstallVerifiedTarGz call): unix archives embed os/arch in the
+// member name, while windows archives ship a bare infracost.exe.
+func archiveMemberAndDest(goos, goarch, binDir string) (member, dest string) {
+	member = fmt.Sprintf("infracost-%s-%s", goos, goarch)
+	dest = filepath.Join(binDir, "infracost")
+	if goos == "windows" {
+		member = "infracost.exe"
+		dest += ".exe"
+	}
+	return member, dest
 }

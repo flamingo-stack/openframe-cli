@@ -59,6 +59,27 @@ func TestForceCleanup_RejectsShellMetacharacters(t *testing.T) {
 	}
 }
 
+// TestCreateCluster_RejectsShellMetacharacters mirrors the DeleteCluster
+// guard: the name is interpolated into the generated k3d YAML config, so it
+// must be rejected before any command runs or any file is written.
+func TestCreateCluster_RejectsShellMetacharacters(t *testing.T) {
+	for _, name := range injectionNames {
+		t.Run(name, func(t *testing.T) {
+			mock := executor.NewMockCommandExecutor()
+			m := NewK3dManager(mock, false)
+
+			_, err := m.CreateCluster(context.Background(), models.ClusterConfig{
+				Name:      name,
+				Type:      models.ClusterTypeK3d,
+				NodeCount: 1,
+			})
+			require.Errorf(t, err, "name %q must be rejected", name)
+			assert.Zerof(t, mock.GetCommandCount(),
+				"no command may run for the invalid name %q — it is interpolated into the k3d config YAML", name)
+		})
+	}
+}
+
 // TestDeleteCluster_AcceptsValidNames: the guard must not break real names.
 func TestDeleteCluster_AcceptsValidNames(t *testing.T) {
 	for _, name := range []string{"dev", "openframe-test", "a", "cluster-123", "Dev-2"} {

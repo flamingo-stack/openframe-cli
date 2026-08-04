@@ -48,6 +48,14 @@ func NewK3dManager(exec executor.CommandExecutor, verbose bool) *K3dManager {
 // CreateCluster creates a new K3D cluster using config file approach
 // Returns the *rest.Config for the created cluster that can be used to interact with it
 func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterConfig) (*rest.Config, error) {
+	// Mirror DeleteCluster's boundary validation: the name is interpolated into
+	// the generated k3d YAML config and later reaches Docker/shell fallbacks, so
+	// restrict it to [a-zA-Z0-9-] here as defense in depth, independent of any
+	// command-layer validation.
+	if err := models.ValidateClusterName(config.Name); err != nil {
+		return nil, models.NewInvalidConfigError("name", config.Name, err.Error())
+	}
+
 	if err := m.validateClusterConfig(config); err != nil {
 		return nil, err
 	}
@@ -66,7 +74,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	}
 
 	// No Windows branch: the CLI forwards into WSL and runs as linux (see wsllauncher).
-	configFile, err := m.createK3dConfigFile(config)
+	configFile, err := m.createK3dConfigFile(ctx, config)
 	if err != nil {
 		return nil, models.NewClusterOperationError("create", config.Name, fmt.Errorf("failed to create config file: %w", err))
 	}
@@ -389,11 +397,10 @@ func (m *K3dManager) validateClusterConfig(config models.ClusterConfig) error {
 }
 
 // createK3dConfigFile creates a k3d config file
-func (m *K3dManager) createK3dConfigFile(config models.ClusterConfig) (string, error) {
+func (m *K3dManager) createK3dConfigFile(ctx context.Context, config models.ClusterConfig) (string, error) {
+	// defaultK3sImage is a multi-arch manifest (amd64/arm64) — no per-arch
+	// selection is needed.
 	image := defaultK3sImage
-	if runtime.GOARCH == "arm64" {
-		image = defaultK3sImage
-	}
 	if config.K8sVersion != "" {
 		image = "rancher/k3s:" + config.K8sVersion
 	}
@@ -413,7 +420,7 @@ agents: %d
 image: %s`, config.Name, servers, agents, image)
 
 	// Find available ports, preferring standard ports (80, 443) with fallback to high ports
-	ports, err := m.findAvailablePorts()
+	ports, err := m.findAvailablePorts(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to find available ports: %w", err)
 	}

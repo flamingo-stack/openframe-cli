@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -861,15 +862,39 @@ func (s *ClusterService) ShowClusterStatus(name string, detailed bool, skipApps 
 	return nil
 }
 
+// readinessDisplay renders a provider status string as "Ready (…)" or
+// "Partial (…)". Providers speak different dialects: k3d reports a
+// "running/total" server fraction, cloud providers report words like "Ready" —
+// so a literal comparison against "1/1" would mislabel healthy GKE/EKS
+// clusters and multi-server k3d clusters as Partial.
+func readinessDisplay(status string) string {
+	if isFullyReady(status) {
+		return fmt.Sprintf("Ready (%s)", status)
+	}
+	return fmt.Sprintf("Partial (%s)", status)
+}
+
+// isFullyReady reports whether a status string means everything is up: the
+// literal "Ready" (cloud providers) or an n/n fraction with n > 0 (k3d).
+func isFullyReady(status string) bool {
+	if strings.EqualFold(status, "ready") {
+		return true
+	}
+	readyStr, totalStr, found := strings.Cut(status, "/")
+	if !found {
+		return false
+	}
+	ready, err1 := strconv.Atoi(readyStr)
+	total, err2 := strconv.Atoi(totalStr)
+	return err1 == nil && err2 == nil && ready > 0 && ready == total
+}
+
 // displayDetailedClusterStatus shows comprehensive cluster information
 func (s *ClusterService) displayDetailedClusterStatus(status models.ClusterInfo, detailed bool, verbose bool) {
 	pterm.DefaultBasicText.Println()
 
 	// Main cluster information box
-	statusDisplay := fmt.Sprintf("Ready (%s)", status.Status)
-	if status.Status != "1/1" {
-		statusDisplay = fmt.Sprintf("Partial (%s)", status.Status)
-	}
+	statusDisplay := readinessDisplay(status.Status)
 
 	// Calculate age
 	ageStr := "Unknown"

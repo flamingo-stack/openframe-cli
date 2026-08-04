@@ -17,9 +17,9 @@ var mainTF []byte
 
 // tfvars mirrors the variables block of templates/main.tf.
 type tfvars struct {
-	ClusterName       string `json:"cluster_name"`
-	Project           string `json:"project"`
-	Region            string `json:"region"`
+	ClusterName string `json:"cluster_name"`
+	Project     string `json:"project"`
+	Region      string `json:"region"`
 	// Regional is always emitted (not omitempty): the template default is zonal,
 	// and dropping a false here would be correct-by-accident — keep it explicit.
 	Regional          bool   `json:"regional"`

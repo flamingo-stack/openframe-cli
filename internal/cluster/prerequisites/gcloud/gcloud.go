@@ -12,14 +12,19 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 )
 
-func commandExists(cmd string) bool {
-	_, err := exec.LookPath(cmd)
-	return err == nil
-}
+// Test seams: binary lookup and command execution are package-level vars so
+// the install logic is testable without brew/gcloud actually running.
+var (
+	lookPath = exec.LookPath
+	runQuiet = func(name string, args ...string) error {
+		cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
+		return cmd.Run()
+	}
+)
 
-func runQuiet(name string, args ...string) error {
-	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-	return cmd.Run()
+func commandExists(cmd string) bool {
+	_, err := lookPath(cmd)
+	return err == nil
 }
 
 // GcloudInstaller manages the gcloud CLI.

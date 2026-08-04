@@ -246,7 +246,7 @@ func extractHostPort(urlStr string) (string, string, error) {
 func (m *K3dManager) getKubeconfigPath() string {
 	// Check if KUBECONFIG environment variable is set
 	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
-		return kubeconfig
+		return firstKubeconfigPath(kubeconfig)
 	}
 
 	// Default to ~/.kube/config
@@ -257,6 +257,35 @@ func (m *K3dManager) getKubeconfigPath() string {
 	}
 
 	return filepath.Join(homeDir, ".kube", "config")
+}
+
+// firstKubeconfigPath reduces a KUBECONFIG value to one file usable with
+// clientcmd.LoadFromFile. kubectl accepts a colon-separated path list there;
+// loading the raw list verbatim fails, which made CreateCluster report
+// "cluster created but not reachable" after a successful create. Mirror
+// kubectl's precedence minimally: the first existing entry wins, falling back
+// to the first entry when none exist yet (k3d will create it). A single path
+// is returned unchanged.
+func firstKubeconfigPath(kubeconfig string) string {
+	if !strings.ContainsRune(kubeconfig, os.PathListSeparator) {
+		return kubeconfig
+	}
+	first := ""
+	for _, entry := range filepath.SplitList(kubeconfig) {
+		if entry == "" {
+			continue // empty list elements are ignored, as kubectl does
+		}
+		if first == "" {
+			first = entry
+		}
+		if _, err := os.Stat(entry); err == nil {
+			return entry
+		}
+	}
+	if first == "" {
+		return kubeconfig
+	}
+	return first
 }
 
 // cleanupStaleLockFiles removes any stale kubeconfig lock files.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	sharedexec "github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 )
 
@@ -19,8 +20,15 @@ import (
 // all — only a pointer to the provider's pricing page. No pricing is ever
 // hardcoded.
 
-// InfracostAvailable reports whether the infracost binary is on PATH.
+// InfracostAvailable reports whether the infracost binary is reachable,
+// preferring the CLI-managed install in ~/.openframe/bin like FindTerraform:
+// each CLI run is a fresh process, so a bare LookPath would never see the
+// CLI's own install and the user would be re-offered the download every
+// session.
 func InfracostAvailable() bool {
+	if binDir, err := download.UserBinDir(); err == nil {
+		download.PrependToPath(binDir)
+	}
 	_, err := exec.LookPath("infracost")
 	return err == nil
 }

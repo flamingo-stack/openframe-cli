@@ -147,6 +147,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The port scan runs `k3d cluster list` through ExecuteWithOptions (bounded).
+				m.On("ExecuteWithOptions", mock.Anything, mock.Anything).Return(&execPkg.CommandResult{Stdout: "[]"}, nil).Maybe()
 			},
 		},
 		{
@@ -169,6 +171,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+				// The port scan runs `k3d cluster list` through ExecuteWithOptions (bounded).
+				m.On("ExecuteWithOptions", mock.Anything, mock.Anything).Return(&execPkg.CommandResult{Stdout: "[]"}, nil).Maybe()
 			},
 		},
 		{
@@ -225,6 +229,8 @@ func TestK3dManager_CreateCluster(t *testing.T) {
 				m.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 				m.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 				m.On("Execute", mock.Anything, "k3d", mock.Anything).Return(nil, errors.New("k3d error")).Maybe()
+				// The port scan runs `k3d cluster list` through ExecuteWithOptions (bounded).
+				m.On("ExecuteWithOptions", mock.Anything, mock.Anything).Return(&execPkg.CommandResult{Stdout: "[]"}, nil).Maybe()
 			},
 			expectedError: "failed to create cluster test-cluster",
 		},
@@ -278,6 +284,8 @@ func TestK3dManager_CreateCluster_VerboseMode(t *testing.T) {
 	executor.On("Execute", mock.Anything, "sudo", mock.Anything).Return(&execPkg.CommandResult{Stdout: ""}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "wsl", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
 	executor.On("Execute", mock.Anything, "k3d", mock.Anything).Return(&execPkg.CommandResult{Stdout: "success"}, nil).Maybe()
+	// The port scan runs `k3d cluster list` through ExecuteWithOptions (bounded).
+	executor.On("ExecuteWithOptions", mock.Anything, mock.Anything).Return(&execPkg.CommandResult{Stdout: "[]"}, nil).Maybe()
 
 	manager := NewK3dManager(executor, true) // verbose mode
 	config := models.ClusterConfig{

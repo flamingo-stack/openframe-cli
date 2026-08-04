@@ -315,3 +315,27 @@ func TestClusterService_ShowClusterStatus_FindsCloudCluster(t *testing.T) {
 		t.Fatal("an unknown cluster must still report not found")
 	}
 }
+
+// The status box must not hardcode "1/1" as the only healthy shape: cloud
+// providers report "Ready" and multi-server k3d clusters report "n/n", and
+// both used to display as Partial.
+func TestReadinessDisplay(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"1/1", "Ready (1/1)"},
+		{"3/3", "Ready (3/3)"},
+		{"1/3", "Partial (1/3)"},
+		{"0/1", "Partial (0/1)"},
+		{"0/0", "Partial (0/0)"}, // zero servers is never healthy
+		{"Ready", "Ready (Ready)"},
+		{"Stopped", "Partial (Stopped)"},
+		{"", "Partial ()"},
+	}
+	for _, tc := range cases {
+		if got := readinessDisplay(tc.status); got != tc.want {
+			t.Errorf("readinessDisplay(%q) = %q, want %q", tc.status, got, tc.want)
+		}
+	}
+}

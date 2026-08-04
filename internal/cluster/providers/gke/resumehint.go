@@ -10,7 +10,7 @@ type resumeHintError struct {
 	hint string
 }
 
-func (e *resumeHintError) Error() string     { return e.err.Error() }
+func (e *resumeHintError) Error() string      { return e.err.Error() }
 func (e *resumeHintError) Unwrap() error      { return e.err }
 func (e *resumeHintError) ResumeHint() string { return e.hint }
 

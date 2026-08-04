@@ -118,6 +118,13 @@ func WriteModule(dir string, mainTF []byte, tfvars any) error {
 // terraform state (a partially-created cluster must be resumed or destroyed,
 // never silently re-scaffolded over).
 func (w *Workspace) Scaffold(record Record, mainTF []byte, tfvars any) error {
+	// The state file is the only pointer to already-created (billed!) cloud
+	// resources — it can outlive cluster.json (e.g. a crash before the record
+	// write), so check for it directly rather than trusting Exists().
+	statePath := filepath.Join(w.TerraformDir(), "terraform.tfstate")
+	if info, err := os.Stat(statePath); err == nil && info.Size() > 0 {
+		return fmt.Errorf("refusing to scaffold over existing terraform state %s: resume or destroy that cluster first", statePath)
+	}
 	if err := WriteModule(w.TerraformDir(), mainTF, tfvars); err != nil {
 		return err
 	}

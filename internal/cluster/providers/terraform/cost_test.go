@@ -2,6 +2,9 @@ package terraform
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -60,4 +63,25 @@ func TestEstimateMonthlyCost(t *testing.T) {
 		_, err := EstimateMonthlyCost(context.Background(), executor.NewMockCommandExecutor(), nil)
 		assert.Error(t, err)
 	})
+}
+
+// InfracostAvailable must see the CLI-managed install in ~/.openframe/bin even
+// when it is not on the inherited PATH: each CLI run is a fresh process, and a
+// bare LookPath would re-offer the download every session.
+func TestInfracostAvailable_SeesUserBinDirInstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix PATH/HOME semantics")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A PATH without the managed bin dir — the pre-fix failure mode.
+	t.Setenv("PATH", filepath.Join(home, "elsewhere"))
+
+	assert.False(t, InfracostAvailable(), "no binary anywhere must report unavailable")
+
+	binDir := filepath.Join(home, ".openframe", "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "infracost"), []byte("#!/bin/sh\n"), 0o750)) // #nosec G306 -- must be executable for LookPath
+
+	assert.True(t, InfracostAvailable(), "the CLI's own install must be found without it being on the inherited PATH")
 }

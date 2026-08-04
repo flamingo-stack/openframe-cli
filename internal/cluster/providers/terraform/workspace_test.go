@@ -47,6 +47,29 @@ func TestWorkspace_ScaffoldAndReadBack(t *testing.T) {
 	assert.Equal(t, "us-east-1", vars["region"])
 }
 
+// Scaffold's documented refusal: a terraform.tfstate is the only pointer to
+// already-created (billed!) cloud resources, so re-scaffolding over it must
+// fail instead of silently replacing the module and record.
+func TestWorkspace_ScaffoldRefusesExistingState(t *testing.T) {
+	ws := OpenWorkspace(t.TempDir(), "demo")
+	require.NoError(t, ws.Scaffold(testRecord("demo"), []byte("# tf v1"), nil))
+	statePath := filepath.Join(ws.TerraformDir(), "terraform.tfstate")
+	require.NoError(t, os.WriteFile(statePath, []byte(`{"version":4}`), 0o600))
+
+	err := ws.Scaffold(testRecord("demo"), []byte("# tf v2"), nil)
+	require.Error(t, err, "scaffolding over live state must fail")
+
+	// The original module must be untouched.
+	mainTF, readErr := os.ReadFile(filepath.Join(ws.TerraformDir(), "main.tf"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "# tf v1", string(mainTF))
+
+	// An EMPTY state file (e.g. terraform init touched it but nothing was ever
+	// applied) points at no resources — scaffolding may proceed.
+	require.NoError(t, os.WriteFile(statePath, nil, 0o600))
+	assert.NoError(t, ws.Scaffold(testRecord("demo"), []byte("# tf v3"), nil))
+}
+
 func TestWorkspace_SetStatus(t *testing.T) {
 	ws := OpenWorkspace(t.TempDir(), "demo")
 	require.NoError(t, ws.Scaffold(testRecord("demo"), nil, nil))

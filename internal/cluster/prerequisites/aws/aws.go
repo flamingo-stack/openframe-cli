@@ -21,8 +21,24 @@ func NewAwsInstaller() *AwsInstaller {
 	return &AwsInstaller{}
 }
 
+// Test seams: binary lookup and command execution are package-level vars so
+// the per-distro install logic is testable without touching real package
+// managers or an installed aws binary.
+var (
+	lookPath   = exec.LookPath
+	runCommand = func(name string, args ...string) error {
+		cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
+		return cmd.Run()
+	}
+	awsVersionOutput = func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return exec.CommandContext(ctx, "aws", "--version").CombinedOutput()
+	}
+)
+
 func commandExists(cmd string) bool {
-	_, err := exec.LookPath(cmd)
+	_, err := lookPath(cmd)
 	return err == nil
 }
 
@@ -100,13 +116,19 @@ func (a *AwsInstaller) installLinux() error {
 // installedIsV2 reports whether the aws binary on PATH is the v2 CLI. v1
 // prints its version to stderr, v2 to stdout — check both.
 func installedIsV2() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "aws", "--version").CombinedOutput()
-	return err == nil && strings.HasPrefix(string(out), "aws-cli/2.")
+	out, err := awsVersionOutput()
+	return err == nil && isV2Output(out)
 }
 
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-	return cmd.Run()
+// isV2Output classifies `aws --version` output. The version token is scanned
+// anywhere in the output, not just at the start: CombinedOutput can carry
+// stderr noise (e.g. Python deprecation warnings from a wrapper) before the
+// version line, and a prefix check would then misreport v2 as v1.
+func isV2Output(out []byte) bool {
+	for _, tok := range strings.Fields(string(out)) {
+		if strings.HasPrefix(tok, "aws-cli/2.") {
+			return true
+		}
+	}
+	return false
 }
