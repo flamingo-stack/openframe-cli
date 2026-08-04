@@ -300,3 +300,47 @@ func TestOfferInfracostLogin_NonInteractiveNeverPrompts(t *testing.T) {
 		t.Fatal("non-interactive sessions must not run infracost auth login")
 	}
 }
+
+// An explicit --min-nodes/--max-nodes 0 used to be silently replaced by the
+// terraform template defaults (omitempty drops zeros from tfvars) — the user
+// asked for a zero floor and got 1 without a word. It must be rejected loudly.
+func TestRunCreateCluster_RejectsExplicitZeroMinNodes(t *testing.T) {
+	setupCreate(t)
+	cmd := getCreateCmd()
+	utils.GetGlobalFlags().Create.SkipWizard = true
+	if err := cmd.Flags().Set("min-nodes", "0"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCreateCluster(cmd, []string{"my-cluster"})
+	if err == nil {
+		t.Fatal("expected an error for explicit --min-nodes 0")
+	}
+}
+
+func TestRunCreateCluster_RejectsExplicitZeroMaxNodes(t *testing.T) {
+	setupCreate(t)
+	cmd := getCreateCmd()
+	utils.GetGlobalFlags().Create.SkipWizard = true
+	if err := cmd.Flags().Set("max-nodes", "0"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCreateCluster(cmd, []string{"my-cluster"})
+	if err == nil {
+		t.Fatal("expected an error for explicit --max-nodes 0")
+	}
+}
+
+// Unset bounds must keep working: the template defaults (min 1 / max 4) apply.
+func TestRunCreateCluster_UnsetNodeBoundsStillDryRuns(t *testing.T) {
+	setupCreate(t)
+	cmd := getCreateCmd()
+	gf := utils.GetGlobalFlags()
+	gf.Create.SkipWizard = true
+	gf.Create.DryRun = true
+
+	if err := runCreateCluster(cmd, []string{"valid-name"}); err != nil {
+		t.Fatalf("unset --min/max-nodes must not error, got %v", err)
+	}
+}

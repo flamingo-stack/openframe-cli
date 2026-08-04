@@ -255,6 +255,18 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 			nodeCount = 3
 		}
 
+		// An explicit --min-nodes/--max-nodes 0 used to be silently replaced by
+		// the terraform template defaults (1/4): `omitempty` drops zeros from the
+		// generated tfvars, so the flag value never reached terraform. A zero
+		// bound is not supported — reject it loudly instead of provisioning
+		// something other than what was asked. Unset keeps the template default.
+		if cmd.Flags().Changed("min-nodes") && globalFlags.Create.MinNodes == 0 {
+			return fmt.Errorf("--min-nodes must be at least 1 (a zero-node floor is not supported; omit the flag for the default of 1)")
+		}
+		if cmd.Flags().Changed("max-nodes") && globalFlags.Create.MaxNodes == 0 {
+			return fmt.Errorf("--max-nodes must be at least 1 (omit the flag for the default of 4)")
+		}
+
 		config = models.ClusterConfig{
 			Name:       clusterName,
 			Type:       models.ClusterType(globalFlags.Create.ClusterType),
