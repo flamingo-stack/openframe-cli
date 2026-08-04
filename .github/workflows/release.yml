@@ -79,6 +79,12 @@ jobs:
           echo "==================================================================="
           echo "===  PLAN: semantic-release dry-run (conventional commits)"
           echo "==================================================================="
+          # The container runs as root while the runner-mounted workspace is
+          # owned by uid 1001, and actions/checkout writes its safe.directory
+          # entry into a TEMPORARY global git config that dies with its step —
+          # so git here refuses the repo ("dubious ownership") and
+          # semantic-release misreports it as ENOGITREPO "not a git repository".
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           npx --yes $SEMREL_PACKAGES semantic-release --dry-run
 
       - name: Report
