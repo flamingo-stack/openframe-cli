@@ -19,18 +19,24 @@ nothing to any release.
 
 ## Flow
 
-1. Merge `develop` into `main` (or push to `main`).
-2. [release.yml](../../.github/workflows/release.yml) runs:
-   - **plan** — `semantic-release --dry-run` resolves the next version from the
-     commits. No release-worthy commits → the run ends here as a no-op.
+Releases are **manual**: merging to `main` never ships anything by itself.
+When you decide to ship, dispatch the workflow from `main`:
+
+```bash
+gh workflow run release.yml --ref main
+```
+
+1. [release.yml](../../.github/workflows/release.yml) then runs:
+   - **plan** — `semantic-release --dry-run` resolves the next version from
+     the commits since the last tag. No release-worthy commits → the run ends
+     here as a no-op.
    - **release** (macOS runner) — lint + unit-test gates, signing setup, then
      `semantic-release` creates and pushes the bare `x.y.z` tag, and
      **GoReleaser** builds, signs and publishes the GitHub Release against it.
    - **verify** — the published Windows/macOS assets are downloaded on real
      runners and their signatures verified; a failure yanks the release + tag.
-3. `workflow_dispatch` on `main` just re-evaluates the same rules (useful to
-   retry after a rolled-back failure). Dispatching from any other branch fails
-   the guard step by design.
+2. Re-dispatching after a rolled-back failure is safe (same rules re-apply).
+   Dispatching from any other branch fails the guard step by design.
 
 ## Invariants (do not break)
 

@@ -3,12 +3,15 @@ name: Release
 # =============================================================================
 # WORKFLOW CONFIGURATION
 #
-# Versioning is semantic-release (.releaserc.yml): the version is computed
-# from Conventional Commits since the last release tag — fix → patch, feat →
-# minor, BREAKING CHANGE → major. A push to main with no release-worthy
-# commits is a clean no-op (the plan job resolves no version and the release
-# job is skipped). workflow_dispatch just re-evaluates the same rules; there
-# is no manual version input anymore.
+# Releases are MANUAL: dispatch this workflow from main when you decide to
+# ship. Versioning stays automatic (semantic-release, .releaserc.yml): the
+# version is computed from the Conventional Commits since the last release
+# tag — fix → patch, feat → minor, BREAKING CHANGE → major; there is no
+# version input. A dispatch with no release-worthy commits is a clean no-op
+# (the plan job resolves no version and the release job is skipped).
+#
+# Deliberately NOT triggered on push: merging to main must never ship a
+# release by itself — the dispatch is the human "ship it" decision.
 #
 # The workflow file name and ref matter beyond aesthetics: the self-updater
 # pins the cosign signing identity to release.yml@refs/heads/main
@@ -17,12 +20,10 @@ name: Release
 # =============================================================================
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
-# One release at a time: two merges racing would both compute the same next
-# version and the loser's tag push would fail mid-release.
+# One release at a time: two dispatches racing would both compute the same
+# next version and the loser's tag push would fail mid-release.
 concurrency:
   group: release
   cancel-in-progress: false
