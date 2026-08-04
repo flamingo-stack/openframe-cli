@@ -9,6 +9,9 @@ import (
 func TestTracker_TimingsAndTotal(t *testing.T) {
 	tr := NewTracker("one", "two")
 	tr.Begin(0, "")
+	// Windows' monotonic clock can report an instant Begin→Done as exactly 0,
+	// failing the total>0 assertion — give the stage measurable duration.
+	time.Sleep(2 * time.Millisecond)
 	tr.Done(0)
 	tr.Begin(1, "detail")
 	tr.Fail(1)

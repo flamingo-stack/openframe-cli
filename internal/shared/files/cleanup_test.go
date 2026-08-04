@@ -3,6 +3,7 @@ package files
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -192,6 +193,9 @@ func TestRestoreFiles_RestoresFromBackupFile(t *testing.T) {
 func TestRestoreFiles_FailedRestoreReturnsErrorAndKeepsBackup(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits do not block writes on Windows (ACLs, not mode bits)")
 	}
 	cleanup := NewFileCleanup()
 

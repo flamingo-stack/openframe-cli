@@ -71,6 +71,12 @@ func TestMainIntegration(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command("./"+testBinary, tc.args...)
+			// On native Windows the binary forwards the whole CLI into WSL,
+			// which the test environment need not have (the e2e workflow leg
+			// sets WSL up; the unit-test leg does not). These subtests exercise
+			// pure cobra surface (help/version/flag parsing), so bypass the
+			// forward and run natively everywhere.
+			cmd.Env = append(os.Environ(), "OPENFRAME_NO_WSL_FORWARD=1")
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr

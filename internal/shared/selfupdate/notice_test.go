@@ -16,7 +16,11 @@ import (
 // counter of fetchLatest invocations so tests can assert the 24h gate held.
 func stubNotice(t *testing.T, rel Release, fetchErr error) (time.Time, *int) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// os.UserHomeDir reads USERPROFILE on Windows — without this the state
+	// file lands in (and leaks between tests via) the real user profile.
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("OPENFRAME_NO_UPDATE_CHECK", "")
 	at := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	calls := 0
@@ -176,6 +180,7 @@ func TestMaybeNotifySuppression(t *testing.T) {
 // resolvable home, loading yields the zero state and saving is a silent no-op.
 func TestStateHomeLookupFailure(t *testing.T) {
 	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // the Windows home source for os.UserHomeDir
 	if st := loadState(); st != (noticeState{}) {
 		t.Fatalf("expected zero state without a home dir, got %+v", st)
 	}

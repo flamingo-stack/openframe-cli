@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,14 @@ func applicationsCRD() *apiextensionsv1.CustomResourceDefinition {
 // waitForArgoCDReady gate (CRD, pod existence, pod readiness) runs in
 // milliseconds. clientsInitialized keeps initKubernetesClients from reaching
 // for a real kubeconfig.
-func readyWaitManager(crds []runtime.Object, pods ...runtime.Object) *Manager {
+func readyWaitManager(t *testing.T, crds []runtime.Object, pods ...runtime.Object) *Manager {
+	t.Helper()
+	// The native-Windows guard (platform.ErrWindowsNeedsWSL) rejects cluster
+	// operations before the wait loop ever touches these fake clients — the
+	// production path on Windows runs inside WSL as linux.
+	if goruntime.GOOS == "windows" {
+		t.Skip("waitForArgoCDReady is guarded off on native Windows (WSL forward)")
+	}
 	return &Manager{
 		kubeClient:         fake.NewSimpleClientset(pods...),
 		apiextClient:       apiextfake.NewSimpleClientset(crds...),
@@ -56,7 +64,7 @@ func readyWaitManager(crds []runtime.Object, pods ...runtime.Object) *Manager {
 }
 
 func TestWaitForArgoCDReady_ReadyPodsPassTheFullGate(t *testing.T) {
-	m := readyWaitManager(
+	m := readyWaitManager(t,
 		[]runtime.Object{applicationsCRD()},
 		argoPartOfPod("argocd-server", true),
 		argoPartOfPod("argocd-repo-server", true),
@@ -74,7 +82,7 @@ func TestWaitForArgoCDReady_ReadyPodsPassTheFullGate(t *testing.T) {
 
 func TestWaitForArgoCDReady_NoPodsTimesOutWithCreationError(t *testing.T) {
 	// skipCRDs exercises the CRDs-managed-by-Helm branch; no pods ever appear.
-	m := readyWaitManager(nil)
+	m := readyWaitManager(t, nil)
 
 	err := m.waitForArgoCDReady(context.Background(), false, true)
 	if err == nil {
@@ -86,7 +94,7 @@ func TestWaitForArgoCDReady_NoPodsTimesOutWithCreationError(t *testing.T) {
 }
 
 func TestWaitForArgoCDReady_PodsNeverReadyTimesOutWithReadyError(t *testing.T) {
-	m := readyWaitManager(
+	m := readyWaitManager(t,
 		[]runtime.Object{applicationsCRD()},
 		argoPartOfPod("argocd-server", false),
 	)
@@ -103,7 +111,7 @@ func TestWaitForArgoCDReady_PodsNeverReadyTimesOutWithReadyError(t *testing.T) {
 func TestWaitForArgoCDReady_MissingCRDTimesOutWithReleaseHint(t *testing.T) {
 	// No CRD registered: the gate must fail before ever looking at pods, and
 	// the error must point at the Helm release that installs the CRD.
-	m := readyWaitManager(nil, argoPartOfPod("argocd-server", true))
+	m := readyWaitManager(t, nil, argoPartOfPod("argocd-server", true))
 
 	err := m.waitForArgoCDReady(context.Background(), false, false)
 	if err == nil {
@@ -116,7 +124,7 @@ func TestWaitForArgoCDReady_MissingCRDTimesOutWithReleaseHint(t *testing.T) {
 
 func TestWaitForArgoCDReady_ContextCancelledMidWaitReturnsPromptly(t *testing.T) {
 	// Generous budgets so only cancellation can end the wait early.
-	m := readyWaitManager(nil)
+	m := readyWaitManager(t, nil)
 	m.podWaitTimeout = 30 * time.Second
 	m.podWaitInterval = 50 * time.Millisecond
 
