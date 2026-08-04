@@ -188,9 +188,14 @@ func parseBackend(config models.ClusterConfig) (*tfengine.BackendConfig, error) 
 }
 
 // PlanCluster previews what CreateCluster would do — a real terraform plan —
-// without registering the cluster or touching any state. A brand-new cluster
-// is planned in a throwaway directory; an existing (failed/interrupted)
-// workspace is planned in place to show what a resume would change.
+// without registering the cluster or writing to any workspace (classic
+// `terraform plan` semantics: no side effects). Both cases plan in a
+// throwaway directory built the way CreateCluster would run: module and
+// tfvars regenerated from the CURRENT template and flags. For an existing
+// (failed/interrupted) workspace the local state and backend block are copied
+// in so the diff is against the real cluster state — previously the preview
+// planned the workspace's OLD module/tfvars in place, showing a different
+// footprint than the resume would actually apply (which refreshes both).
 func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig) (tfengine.PlanSummary, error) {
 	if err := validate(config); err != nil {
 		return tfengine.PlanSummary{}, err
@@ -202,27 +207,28 @@ func (p *Provider) PlanCluster(ctx context.Context, config models.ClusterConfig)
 		return tfengine.PlanSummary{}, err
 	}
 
-	dir := p.registry.Workspace(config.Name).TerraformDir()
-	if !p.registry.Workspace(config.Name).Exists() {
-		vars, err := tfvarsFor(config)
-		if err != nil {
-			return tfengine.PlanSummary{}, err
-		}
-		tmp, err := os.MkdirTemp("", "openframe-plan-*")
-		if err != nil {
-			return tfengine.PlanSummary{}, err
-		}
-		defer func() { _ = os.RemoveAll(tmp) }()
-		if err := tfengine.WriteModule(tmp, mainTF, vars); err != nil {
-			return tfengine.PlanSummary{}, err
-		}
-		dir = tmp
-	}
-
-	if err := p.engine.Init(ctx, dir); err != nil {
+	vars, err := tfvarsFor(config)
+	if err != nil {
 		return tfengine.PlanSummary{}, err
 	}
-	return p.engine.Plan(ctx, dir)
+	tmp, err := os.MkdirTemp("", "openframe-plan-*")
+	if err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	if err := tfengine.WriteModule(tmp, mainTF, vars); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	if ws := p.registry.Workspace(config.Name); ws.Exists() {
+		if err := tfengine.CopyPlanInputs(ws.TerraformDir(), tmp); err != nil {
+			return tfengine.PlanSummary{}, err
+		}
+	}
+
+	if err := p.engine.Init(ctx, tmp); err != nil {
+		return tfengine.PlanSummary{}, err
+	}
+	return p.engine.Plan(ctx, tmp)
 }
 
 // CreateCluster provisions the cluster and returns a rest.Config for it.

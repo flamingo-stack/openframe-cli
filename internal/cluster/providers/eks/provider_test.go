@@ -326,3 +326,56 @@ func TestCreateCluster_DeclinedPlanAppliesNothing(t *testing.T) {
 	var notFound models.ErrClusterNotFound
 	assert.ErrorAs(t, err, &notFound, "declined brand-new create must remove the fresh workspace")
 }
+
+// A dry-run over an EXISTING workspace must preview what a resume would
+// actually apply — current template + current flags against the workspace's
+// state — while writing NOTHING to the workspace (classic terraform-plan
+// semantics). The old behavior planned the stale on-disk module in place.
+// (GKE twin: TestPlanCluster_ExistingWorkspacePreviewsResumeWithoutSideEffects.)
+func TestPlanCluster_ExistingWorkspacePreviewsResumeWithoutSideEffects(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "kubeconfig"))
+	calls := &[]string{}
+	var workdirs []string
+	// Captured at runner-creation time: the throwaway plan dir is deleted when
+	// PlanCluster returns, so its contents must be read while it exists.
+	seen := map[string]string{}
+	engine := tfengine.NewEngineWithRunner(func(workdir string) (tfengine.Runner, error) {
+		workdirs = append(workdirs, workdir)
+		for _, name := range []string{"main.tf", "terraform.tfstate"} {
+			if data, err := os.ReadFile(filepath.Join(workdir, name)); err == nil {
+				seen[name] = string(data)
+			}
+		}
+		return &fakeRunner{calls: calls}, nil
+	})
+	registry := tfengine.NewRegistry(t.TempDir())
+	p := NewWithDeps(engine, registry, executor.NewMockCommandExecutor())
+
+	_, err := p.CreateCluster(context.Background(), eksConfig("demo"))
+	require.NoError(t, err)
+
+	wsDir := registry.Workspace("demo").TerraformDir()
+	staleMain := filepath.Join(wsDir, "main.tf")
+	require.NoError(t, os.WriteFile(staleMain, []byte("# stale broken template"), 0o600))
+	statePath := filepath.Join(wsDir, "terraform.tfstate")
+	require.NoError(t, os.WriteFile(statePath, []byte(`{"version":4}`), 0o600))
+
+	workdirs = nil
+	summary, err := p.PlanCluster(context.Background(), eksConfig("demo"))
+	require.NoError(t, err)
+	assert.True(t, summary.HasChanges())
+
+	require.NotEmpty(t, workdirs)
+	for _, wd := range workdirs {
+		assert.NotEqual(t, wsDir, wd, "plan must not run inside the workspace")
+	}
+	assert.Contains(t, seen["main.tf"], "private_subnets", "preview must regenerate the module like a resume does")
+	assert.Equal(t, `{"version":4}`, seen["terraform.tfstate"])
+
+	afterMain, err := os.ReadFile(staleMain)
+	require.NoError(t, err)
+	assert.Equal(t, "# stale broken template", string(afterMain), "dry-run must not write to the workspace")
+	afterState, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Equal(t, `{"version":4}`, string(afterState))
+}
