@@ -1,0 +1,6 @@
+# actionlint configuration: declare the self-hosted runner labels used by
+# test.yml so `actionlint` (run locally or in CI) validates runs-on cleanly.
+self-hosted-runner:
+  labels:
+    - Linux-x64
+    - Windows-x64

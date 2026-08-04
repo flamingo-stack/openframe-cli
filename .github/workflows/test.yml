@@ -3,16 +3,23 @@ name: Test
 permissions:
   contents: read
 
+# The cheap gates (lint, cross-compile matrix, unit tests) run for BOTH
+# develop and main — develop is where the actual work merges, and guarding
+# only main left every develop PR untested. The heavy e2e lifecycle job stays
+# main-bound (see its `if`), so develop traffic doesn't monopolize the
+# self-hosted runners.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
-  group: pr-${{ github.head_ref || github.ref }}
-  cancel-in-progress: false
+  group: test-${{ github.head_ref || github.ref }}
+  # A superseded PR run is dead weight on the self-hosted runners — cancel it.
+  # Runs on main/develop pushes still queue (never cancel a branch-tip run).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 
 # =============================================================================
@@ -98,10 +105,75 @@ jobs:
             GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
           done
 
+  # Unit tests as their own fast job: they used to be the LAST steps of the
+  # e2e job below, which meant (a) a unit-test failure surfaced only after the
+  # ~50-minute cluster lifecycle, and (b) an e2e flake earlier in the job
+  # skipped them entirely, masking their result. Same three OS legs, no
+  # Docker/cluster needed.
+  unit:
+    name: Unit tests on ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: Linux-x64
+          - os: windows
+            arch: amd64
+            runner: Windows-x64
+          - os: darwin
+            arch: arm64
+            runner: macos-26
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil, tests/scripts)"
+          echo "==================================================================="
+          make test-unit
+
+      - name: Run unit tests with race detector
+        # Linux only (race detector needs CGO/gcc). A blocking gate: the
+        # codebase is race-clean (the pterm spinner was replaced with a
+        # synchronized wrapper in internal/shared/ui/spinner).
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          echo "==================================================================="
+          echo "===  TEST: unit tests with -race (linux only)"
+          echo "==================================================================="
+          make test-race
+
   test-cli:
     name: Test CLI on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 70
+    # The full e2e lifecycle (real k3d cluster, 20-minute ArgoCD install) is
+    # main-bound: it guards what ships, while develop PRs get the cheap gates
+    # above. Lint gates it — never burn an hour of self-hosted runner time on
+    # code that fails a 3-minute lint. The fork guard keeps pull_request code
+    # off the self-hosted runners unless the PR comes from this repo itself.
+    needs: [lint]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
 
     env:
       # Path to the built binary for this matrix leg. On Windows it forwards the
@@ -699,23 +771,3 @@ jobs:
           echo "==================================================================="
           "$OF_BIN" app uninstall --context "$OF_CONTEXT" --yes || true
           "$OF_BIN" cluster delete "$OF_CLUSTER" --force || true
-
-      - name: Run unit tests
-        shell: bash
-        run: |
-          echo "==================================================================="
-          echo "===  TEST: unit tests (root, cmd, internal, tests/testutil, tests/scripts)"
-          echo "==================================================================="
-          make test-unit
-
-      - name: Run unit tests with race detector
-        # Linux only (race detector needs CGO/gcc). Now a blocking gate: the
-        # codebase is race-clean (the pterm spinner was replaced with a
-        # synchronized wrapper in internal/shared/ui/spinner).
-        if: matrix.os == 'linux'
-        shell: bash
-        run: |
-          echo "==================================================================="
-          echo "===  TEST: unit tests with -race (linux only)"
-          echo "==================================================================="
-          make test-race

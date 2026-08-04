@@ -1,6 +1,8 @@
 name: Cleanup
 
-# 1) Deletes Branches with no activity for 2 month
+# Deletes branches with no activity for 2 months. (The old hourly cron drove a
+# since-removed stale-pr job — every one of those 24 runs/day matched no job
+# and did nothing.)
 
 # =============================================================================
 # WORKFLOW CONFIGURATION
@@ -8,8 +10,7 @@ name: Cleanup
 
 on:
   schedule:
-    - cron: '17 * * * *'   # hourly -> stale-pr
-    - cron: '41 4 * * *'   # daily  -> stale-branches
+    - cron: '41 4 * * *'   # daily -> stale-branches
   workflow_dispatch:
 
 permissions:
@@ -22,10 +23,11 @@ permissions:
 jobs:
   stale-branches:
     name: Delete Stale Branches
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '41 4 * * *'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
+      pull-requests: read # open-PR guard below
     steps:
       - name: Delete branches with no commits for MAX_AGE_DAYS
         env:
@@ -35,13 +37,31 @@ jobs:
         run: |
           set -o pipefail
           CUTOFF=$(date -u -d "$MAX_AGE_DAYS days ago" +%Y-%m-%dT%H:%M:%SZ)
+          OWNER="${REPO%%/*}"
           echo "Deleting branches with no commit since $CUTOFF"
 
           gh api --paginate "repos/$REPO/branches?protected=false&per_page=100" \
             --jq '.[].name' |
           while read -r br; do
-            last=$(gh api "repos/$REPO/commits/$br" --jq '.commit.committer.date')
+            # The long-lived branches are non-negotiable, protected or not.
+            case "$br" in main|develop) continue ;; esac
+
+            # An API hiccup must SKIP the branch, not delete it: the old
+            # `last=$(gh api ...)` left last empty on failure, and
+            # [[ "" < "$CUTOFF" ]] is true — a transient 5xx deleted branches.
+            if ! last=$(gh api "repos/$REPO/commits/$br" --jq '.commit.committer.date') || [[ -z "$last" ]]; then
+              echo "Skipping $br (could not resolve last commit)"
+              continue
+            fi
             [[ "$last" < "$CUTOFF" ]] || continue
+
+            # Deleting a branch force-closes its open PRs — age alone is not
+            # consent for that. Skip (and skip on a failed check, same logic).
+            if ! open=$(gh api "repos/$REPO/pulls?state=open&head=$OWNER:$br" --jq 'length') || [[ "$open" != "0" ]]; then
+              echo "Skipping $br (open PR, or PR check failed)"
+              continue
+            fi
+
             echo "Deleting $br (last commit $last)"
-            gh api --silent -X DELETE "repos/$REPO/git/refs/heads/$br"
+            gh api --silent -X DELETE "repos/$REPO/git/refs/heads/$br" || echo "Failed to delete $br (continuing)"
           done
