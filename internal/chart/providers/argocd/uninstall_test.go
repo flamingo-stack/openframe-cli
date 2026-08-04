@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func newArgoApp(name string) *unstructured.Unstructured {
@@ -43,6 +45,32 @@ func TestManager_DeleteApplications(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Fatalf("expected all applications deleted, %d remain", len(list.Items))
+	}
+}
+
+// An Application that vanishes between the List and its Delete (ArgoCD pruning
+// races the uninstall) is tolerated but must NOT be counted as deleted — the
+// count feeds the uninstall UI.
+func TestManager_DeleteApplications_VanishedNotCounted(t *testing.T) {
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{applicationGVR: "ApplicationList"},
+		newArgoApp("stays"), newArgoApp("vanishes"),
+	)
+	dc.PrependReactor("delete", "applications", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.(k8stesting.DeleteAction).GetName() == "vanishes" {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "applications"}, "vanishes")
+		}
+		return false, nil, nil
+	})
+	m := &Manager{dynamicClient: dc}
+
+	n, err := m.DeleteApplications(context.Background())
+	if err != nil {
+		t.Fatalf("DeleteApplications: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted = %d, want 1 (the vanished app was not deleted by us)", n)
 	}
 }
 

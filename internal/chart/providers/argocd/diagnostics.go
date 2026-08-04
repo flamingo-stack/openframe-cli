@@ -153,14 +153,20 @@ func (m *Manager) checkRepoServerHealth(ctx context.Context, _ bool) *RepoServer
 	for i := range pods.Items {
 		pod := pods.Items[i]
 		for _, cs := range pod.Status.ContainerStatuses {
+			// OOMKilled is a *terminated* reason (current or previous instance),
+			// never a waiting reason — the old `Waiting.Reason == "OOMKilled"`
+			// branch could not match, so an OOMKilled repo-server was always
+			// classified recoverable via the RestartCount branch below and the
+			// caller's "not automatically recoverable" warning never fired.
+			// Checked first so an OOM-caused restart is not shadowed.
+			if oomKilled(cs) {
+				return &RepoServerIssue{Type: "resource", Message: fmt.Sprintf("repo-server container '%s' was OOMKilled - needs more memory", cs.Name), Recoverable: false}
+			}
 			if cs.RestartCount > 0 {
 				return &RepoServerIssue{Type: "resource", Message: fmt.Sprintf("repo-server container '%s' has restarted %d time(s) - may indicate OOM or crash", cs.Name, cs.RestartCount), Recoverable: true}
 			}
-			if cs.State.Waiting != nil {
-				reason := cs.State.Waiting.Reason
-				if reason == "CrashLoopBackOff" || reason == "OOMKilled" {
-					return &RepoServerIssue{Type: "resource", Message: fmt.Sprintf("repo-server container '%s' is in %s state", cs.Name, reason), Recoverable: reason != "OOMKilled"}
-				}
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+				return &RepoServerIssue{Type: "resource", Message: fmt.Sprintf("repo-server container '%s' is in CrashLoopBackOff state", cs.Name), Recoverable: true}
 			}
 		}
 		if pod.Status.Phase != corev1.PodRunning {
@@ -168,6 +174,18 @@ func (m *Manager) checkRepoServerHealth(ctx context.Context, _ bool) *RepoServer
 		}
 	}
 	return nil
+}
+
+// oomKilled reports whether the container's current or previous instance was
+// terminated by the OOM killer.
+func oomKilled(cs corev1.ContainerStatus) bool {
+	if t := cs.State.Terminated; t != nil && t.Reason == "OOMKilled" {
+		return true
+	}
+	if t := cs.LastTerminationState.Terminated; t != nil && t.Reason == "OOMKilled" {
+		return true
+	}
+	return false
 }
 
 // hardRefreshApplications annotates each named Application with a HARD refresh

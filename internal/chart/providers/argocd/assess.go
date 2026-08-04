@@ -56,8 +56,15 @@ func assessApplications(apps []Application, everReady map[string]bool) appAssess
 // isDeploymentComplete reports whether every currently-visible application is
 // ready. The high-water-mark guard withholds completion when the API
 // momentarily returns fewer apps than we have ever seen, so success is never
-// declared against a partial listing.
-func isDeploymentComplete(totalApps, currentlyReady, maxSeenTotal int) bool {
+// declared against a partial listing. expectedTotal is the number of
+// applications the app-of-apps plans to create (<= 0 when unknown): the
+// app-of-apps creates children in waves, and without this guard a first wave
+// that turned Healthy+Synced before the next wave's Application CRs were even
+// created rode out the stabilization window and declared success at e.g. 5/17.
+func isDeploymentComplete(totalApps, currentlyReady, maxSeenTotal, expectedTotal int) bool {
+	if expectedTotal > 0 && totalApps < expectedTotal {
+		return false
+	}
 	return totalApps > 0 && currentlyReady == totalApps && totalApps >= maxSeenTotal
 }
 

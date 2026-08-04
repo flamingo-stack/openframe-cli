@@ -55,20 +55,27 @@ func TestAssessApplications_EverReadyIsSticky(t *testing.T) {
 // correctness-critical predicate of the install wait.
 func TestIsDeploymentComplete(t *testing.T) {
 	cases := []struct {
-		name                       string
-		total, ready, maxSeenTotal int
-		want                       bool
+		name                                 string
+		total, ready, maxSeenTotal, expected int
+		want                                 bool
 	}{
-		{"all ready at high-water mark", 27, 27, 27, true},
-		{"all visible ready but count dropped below HWM", 20, 20, 27, false},
-		{"not all ready", 27, 26, 27, false},
-		{"zero apps never completes", 0, 0, 0, false},
-		{"more than ever seen, all ready", 28, 28, 27, true},
+		{"all ready at high-water mark", 27, 27, 27, -1, true},
+		{"all visible ready but count dropped below HWM", 20, 20, 27, -1, false},
+		{"not all ready", 27, 26, 27, -1, false},
+		{"zero apps never completes", 0, 0, 0, -1, false},
+		{"more than ever seen, all ready", 28, 28, 27, -1, true},
+		// The planned count from the app-of-apps: an early wave that is fully
+		// ready must NOT complete while later waves' Application CRs are still
+		// missing — this was the 5-of-17 false success.
+		{"first wave ready but fewer than planned", 5, 5, 5, 17, false},
+		{"all planned apps present and ready", 17, 17, 17, 17, true},
+		{"planned count unknown (0) falls back to HWM rule", 5, 5, 5, 0, true},
+		{"more apps than planned, all ready", 18, 18, 18, 17, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := isDeploymentComplete(c.total, c.ready, c.maxSeenTotal); got != c.want {
-				t.Fatalf("isDeploymentComplete(%d,%d,%d) = %v, want %v", c.total, c.ready, c.maxSeenTotal, got, c.want)
+			if got := isDeploymentComplete(c.total, c.ready, c.maxSeenTotal, c.expected); got != c.want {
+				t.Fatalf("isDeploymentComplete(%d,%d,%d,%d) = %v, want %v", c.total, c.ready, c.maxSeenTotal, c.expected, got, c.want)
 			}
 		})
 	}

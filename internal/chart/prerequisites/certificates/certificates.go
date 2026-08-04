@@ -249,10 +249,17 @@ func (c *CertificateInstaller) generateCertificates() error {
 		}
 	}
 
-	// Generate localhost certificates (silently)
-	generateCmd := exec.Command("bash", "-c", // #nosec G204 -- shell string built from constant/program-derived values, not untrusted input
-		fmt.Sprintf("cd '%s' && mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1 >/dev/null 2>&1", certDir))
-	if err := generateCmd.Run(); err != nil {
+	// Generate localhost certificates. Direct argv, not a bash -c string: the
+	// old `cd '<certDir>' && ... >/dev/null 2>&1` broke on a `'` in the home
+	// path and threw mkcert's actual error away, leaving the user with a bare
+	// "exit status 1". Output is captured (still silent on success) so the
+	// failure message can carry mkcert's own diagnostic.
+	generateCmd := exec.Command("mkcert", "-cert-file", "localhost.pem", "-key-file", "localhost-key.pem", "localhost", "127.0.0.1", "::1") // #nosec G204 -- explicit argv, no shell; args are constants
+	generateCmd.Dir = certDir
+	if out, err := generateCmd.CombinedOutput(); err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("failed to generate certificates: %w (mkcert output: %s)", err, msg)
+		}
 		return fmt.Errorf("failed to generate certificates: %w", err)
 	}
 

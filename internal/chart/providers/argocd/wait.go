@@ -205,7 +205,6 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	}
 
 	maxAppsSeenTotal := 0
-	maxAppsSeenReady := 0
 	consecutiveAllReady := 0
 	stabilizationChecks := m.StabilizationChecks
 	if stabilizationChecks <= 0 {
@@ -335,12 +334,19 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
 
-					// Add exponential backoff delay between failures to avoid hammering WSL
+					// Add exponential backoff delay between failures to avoid hammering
+					// WSL. Ctx-aware: a plain Sleep here held Ctrl+C hostage for up to
+					// 10s per failure — exactly during the flaky-cluster episodes where
+					// users reach for it.
 					backoffDelay := time.Duration(consecutiveFailures) * 2 * time.Second
 					if backoffDelay > 10*time.Second {
 						backoffDelay = 10 * time.Second
 					}
-					time.Sleep(backoffDelay)
+					select {
+					case <-localCtx.Done():
+						return fmt.Errorf("operation cancelled: %w", localCtx.Err())
+					case <-time.After(backoffDelay):
+					}
 				} else {
 					consecutiveFailures = 0
 				}
@@ -399,12 +405,17 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 						return fmt.Errorf("cluster became unreachable while waiting for applications: %w", err)
 					}
 
-					// Add backoff delay between failures
+					// Add backoff delay between failures. Ctx-aware for the same
+					// reason as the connectivity backoff above.
 					backoffDelay := time.Duration(consecutiveFailures) * 2 * time.Second
 					if backoffDelay > 10*time.Second {
 						backoffDelay = 10 * time.Second
 					}
-					time.Sleep(backoffDelay)
+					select {
+					case <-localCtx.Done():
+						return fmt.Errorf("operation cancelled: %w", localCtx.Err())
+					case <-time.After(backoffDelay):
+					}
 				}
 
 				// Retry on other errors (with normal interval via lastCheck)
@@ -655,24 +666,16 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				}
 			}
 
-			// Use the high water mark of applications that have ever been ready
-			readyCount := len(everReadyApps)
-
-			if readyCount > maxAppsSeenReady {
-				maxAppsSeenReady = readyCount
-			}
-
 			// Check if deployment is complete — ALL currently detected apps must be
 			// healthy and synced (not just "ever ready"), guarded by the high-water
-			// mark of the app count (see isDeploymentComplete).
-			allReady := isDeploymentComplete(totalApps, currentlyReady, maxAppsSeenTotal)
+			// mark of the app count AND the planned count from the app-of-apps
+			// (see isDeploymentComplete).
+			allReady := isDeploymentComplete(totalApps, currentlyReady, maxAppsSeenTotal, totalAppsExpected)
 			if !allReady && totalApps > 0 && totalApps < maxAppsSeenTotal && config.Verbose {
 				pterm.Warning.Printf("Application count dropped: %d visible vs %d previously seen — waiting for all apps to reappear\n", totalApps, maxAppsSeenTotal)
 			}
-
-			// Update ready count for display purposes (still use everReady for progress tracking)
-			if currentlyReady > maxAppsSeenReady {
-				maxAppsSeenReady = currentlyReady
+			if !allReady && config.Verbose && totalAppsExpected > 0 && totalApps < totalAppsExpected && currentlyReady == totalApps && totalApps > 0 {
+				pterm.Debug.Printf("All %d visible apps ready, but the app-of-apps plans %d — waiting for the remaining Application CRs\n", totalApps, totalAppsExpected)
 			}
 
 			// Stabilization window: require multiple consecutive all-ready checks
@@ -809,6 +812,10 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	podExistenceInterval := 3 * time.Second
 	podExistenceStart := time.Now()
 	podsExist := false
+	// Time-based throttle, not `elapsed%15 == 0`: the loop advances by 3s plus
+	// API latency, so exact multiples of 15 land by luck (see the main loop's
+	// periodic-output throttles for the same fix).
+	lastPodWaitNote := time.Time{}
 
 	for time.Since(podExistenceStart) < podExistenceTimeout {
 		select {
@@ -830,7 +837,8 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 			break
 		}
 
-		if verbose && int(time.Since(podExistenceStart).Seconds())%15 == 0 {
+		if verbose && time.Since(lastPodWaitNote) >= 15*time.Second {
+			lastPodWaitNote = time.Now()
 			pterm.Info.Println("Waiting for ArgoCD pods to be created...")
 		}
 

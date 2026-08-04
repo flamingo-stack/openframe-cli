@@ -500,7 +500,10 @@ func (m *Manager) DeleteApplications(ctx context.Context) (int, error) {
 	deleted := 0
 	for i := range list.Items {
 		name := list.Items[i].GetName()
-		if derr := res.Delete(ctx, name, metav1.DeleteOptions{}); derr != nil && !apierrors.IsNotFound(derr) {
+		if derr := res.Delete(ctx, name, metav1.DeleteOptions{}); derr != nil {
+			if apierrors.IsNotFound(derr) {
+				continue // vanished between List and Delete — nothing was deleted here
+			}
 			return deleted, fmt.Errorf("deleting application %q: %w", name, derr)
 		}
 		deleted++
