@@ -15,6 +15,17 @@ import (
 // checks the last-known-latest version is served from the on-disk cache.
 const checkInterval = 24 * time.Hour
 
+// timeNow and fetchLatest seam off the two process-external effects behind the
+// rate-limited check — the clock driving the 24h gate and the GitHub query —
+// so tests can exercise the gate without waiting or touching the network.
+var (
+	timeNow = time.Now
+
+	fetchLatest = func(ctx context.Context) (Release, error) {
+		return Client{Token: GitHubToken()}.Latest(ctx)
+	}
+)
+
 // noticeState is the cached result of the passive update check.
 type noticeState struct {
 	LastCheck int64  `json:"lastCheck"` // unix seconds
@@ -78,7 +89,7 @@ func MaybeNotify(ctx context.Context, current string, interactive bool) string {
 	if noticeSuppressed(current, interactive) {
 		return ""
 	}
-	now := time.Now()
+	now := timeNow()
 	if st := loadState(); st.Latest != "" && st.LastCheck != 0 &&
 		now.Sub(time.Unix(st.LastCheck, 0)) < checkInterval {
 		// Serve from cache within the interval — no network call.
@@ -90,7 +101,7 @@ func MaybeNotify(ctx context.Context, current string, interactive bool) string {
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	rel, err := Client{Token: GitHubToken()}.Latest(ctx)
+	rel, err := fetchLatest(ctx)
 	if err != nil {
 		return "" // best effort; stay silent on any failure
 	}
