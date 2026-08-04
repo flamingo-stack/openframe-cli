@@ -741,8 +741,17 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		return err
 	}
 
-	maxRetries := 100 // 100 retries * 3 seconds = 5 minutes max
-	retryInterval := 3 * time.Second
+	// Injectable budgets (see the Manager fields): zero keeps the production
+	// defaults, so real installs behave exactly as before. Tests inject tiny
+	// values to exercise the timeout paths quickly.
+	maxRetries := m.crdWaitRetries
+	if maxRetries <= 0 {
+		maxRetries = 100 // 100 retries * 3 seconds = 5 minutes max
+	}
+	retryInterval := m.podWaitInterval
+	if retryInterval <= 0 {
+		retryInterval = 3 * time.Second
+	}
 
 	// Initialize Kubernetes clients for native API access
 	if err := m.initKubernetesClients(); err != nil {
@@ -799,7 +808,13 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 				pterm.Info.Println("Waiting for ArgoCD CRD applications.argoproj.io...")
 			}
 
-			time.Sleep(retryInterval)
+			// Ctx-aware: a plain Sleep would hold Ctrl+C hostage for the whole
+			// interval (same fix as the main loop's backoff sleeps).
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("operation cancelled: %w", ctx.Err())
+			case <-time.After(retryInterval):
+			}
 		}
 	}
 
@@ -808,8 +823,11 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 		pterm.Info.Println("Waiting for ArgoCD pods to be ready...")
 	}
 
-	podExistenceTimeout := 120 * time.Second
-	podExistenceInterval := 3 * time.Second
+	podExistenceTimeout := m.podWaitTimeout
+	if podExistenceTimeout <= 0 {
+		podExistenceTimeout = 120 * time.Second
+	}
+	podExistenceInterval := retryInterval
 	podExistenceStart := time.Now()
 	podsExist := false
 	// Time-based throttle, not `elapsed%15 == 0`: the loop advances by 3s plus
@@ -842,7 +860,11 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 			pterm.Info.Println("Waiting for ArgoCD pods to be created...")
 		}
 
-		time.Sleep(podExistenceInterval)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		case <-time.After(podExistenceInterval):
+		}
 	}
 
 	if !podsExist {
@@ -852,7 +874,10 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 	}
 
 	// Wait for all pods to be Ready using native client
-	podReadyTimeout := 5 * time.Minute
+	podReadyTimeout := m.podReadyTimeout
+	if podReadyTimeout <= 0 {
+		podReadyTimeout = 5 * time.Minute
+	}
 	podReadyStart := time.Now()
 
 	for time.Since(podReadyStart) < podReadyTimeout {
@@ -870,7 +895,11 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 			if verbose {
 				pterm.Warning.Printf("Failed to list pods: %v\n", err)
 			}
-			time.Sleep(retryInterval)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("operation cancelled: %w", ctx.Err())
+			case <-time.After(retryInterval):
+			}
 			continue
 		}
 
@@ -889,7 +918,11 @@ func (m *Manager) waitForArgoCDReady(ctx context.Context, verbose bool, skipCRDs
 			return nil
 		}
 
-		time.Sleep(retryInterval)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled: %w", ctx.Err())
+		case <-time.After(retryInterval):
+		}
 	}
 
 	m.printArgoCDPodDiagnostics(ctx)

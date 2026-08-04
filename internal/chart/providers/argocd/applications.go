@@ -70,6 +70,26 @@ type Manager struct {
 	// to converge before triggering the next one. Zero means the default
 	// (defaultGroupWait). Tests set a tiny value for speed.
 	groupWait time.Duration
+
+	// crdWaitRetries bounds how many times waitForArgoCDReady polls for the
+	// ArgoCD CRD before giving up, one poll per podWaitInterval. Zero means the
+	// default (100, ~5 minutes at 3s). Tests set a tiny value for speed.
+	crdWaitRetries int
+
+	// podWaitTimeout bounds how long waitForArgoCDReady waits for the first
+	// ArgoCD pod to be created. Zero means the default (120s). Tests set a
+	// tiny value for speed.
+	podWaitTimeout time.Duration
+
+	// podWaitInterval is the poll interval waitForArgoCDReady uses between CRD
+	// and pod checks. Zero means the default (3s). Tests set a tiny value for
+	// speed.
+	podWaitInterval time.Duration
+
+	// podReadyTimeout bounds how long waitForArgoCDReady waits for the existing
+	// ArgoCD pods to all report Ready. Zero means the default (5m). Tests set a
+	// tiny value for speed.
+	podReadyTimeout time.Duration
 }
 
 // WithWaitTimeout sets a custom WaitForApplications timeout and returns the
