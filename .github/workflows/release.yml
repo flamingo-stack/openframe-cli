@@ -54,6 +54,12 @@ jobs:
     runs-on: ubuntu-latest
     # Pinned Node toolchain instead of whatever the runner ships.
     container: node:24-slim
+    # contents: write, even though the plan never publishes anything:
+    # semantic-release verifies push access up front (a no-op
+    # `git push --dry-run` of the current commit) in dry-run mode too, and a
+    # read-only GITHUB_TOKEN fails that probe with EGITNOPERMISSION/403.
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.semrel.outputs.version }}
     steps:
