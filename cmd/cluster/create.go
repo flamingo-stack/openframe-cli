@@ -106,6 +106,13 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 			return err
 		}
 	}
+	// The dry-run plan authenticates against AWS too — vet/announce the
+	// identity the same way the real create does.
+	if config.Type == models.ClusterTypeEKS {
+		if err := confirmAWSIdentity(ctx, exec, config.Cloud.Profile); err != nil {
+			return err
+		}
+	}
 
 	pterm.Info.Printf("Computing terraform plan for %s cluster '%s'...\n", config.Type, config.Name)
 	summary, err := planner.PlanCluster(ctx, config)
@@ -318,6 +325,16 @@ func runCreateCluster(cmd *cobra.Command, args []string) error {
 	// dry-run must not mutate the system.
 	if err := prerequisites.CheckForClusterType(config.Type); err != nil {
 		return err
+	}
+
+	// Single identity flow for EKS (the GKE twin is the AuthFlow below): vet
+	// WHICH AWS account the create is about to bill — confirmed interactively,
+	// announced non-interactively, and an actionable setup-guide error when no
+	// AWS configuration exists at all.
+	if config.Type == models.ClusterTypeEKS {
+		if err := confirmAWSIdentity(cmd.Context(), utils.CommandExecutor(), config.Cloud.Profile); err != nil {
+			return err
+		}
 	}
 
 	// Single auth flow: for GKE, offer `gcloud auth login` (+ ADC for
