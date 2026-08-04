@@ -119,6 +119,24 @@ func TestReport_UnreachableSummary(t *testing.T) {
 	}
 }
 
+// Apps listed but nodes unreadable (namespace-scoped RBAC): the renderers show
+// the table plus a "node health could not be read" warning, so the summary
+// must report the app counts too — not claim the cluster is unreachable.
+func TestReport_UnreachableWithAppsSummary(t *testing.T) {
+	svc := NewService(
+		fakeLister{apps: []argocd.Application{app("a", "Healthy", "Synced"), app("b", "Progressing", "OutOfSync")}},
+		fakeHealth{h: k8s.Health{Reachable: false}, err: errors.New("nodes is forbidden")},
+		nil,
+	)
+	rep, _ := svc.Report(context.Background(), false)
+	if rep.Ready() {
+		t.Fatal("unknown node health must not report Ready")
+	}
+	if got := rep.Summary(); got != "1/2 synced, 1/2 healthy — NOT READY (node health unavailable)" {
+		t.Fatalf("Summary = %q", got)
+	}
+}
+
 func TestReport_NoAppsSummary(t *testing.T) {
 	svc := NewService(fakeLister{apps: nil}, fakeHealth{h: k8s.Health{Reachable: true, NodesReady: 1}}, nil)
 	rep, _ := svc.Report(context.Background(), false)

@@ -222,6 +222,13 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 
 	err := rootCmd.ExecuteContext(ctx)
 
+	// Restore default signal handling before the post-command window: the
+	// NotifyContext handler keeps capturing SIGINT after the context has been
+	// consumed, so during an opted-in auto-update (up to 10 minutes) Ctrl-C was
+	// swallowed with no way to interrupt. After stop(), Ctrl-C terminates the
+	// process again.
+	stop()
+
 	// Post-command self-update handling, best-effort and printed to stderr so it
 	// never blocks the command, changes its exit code, or corrupts machine output
 	// on stdout. All paths are suppressed in CI / non-TTY / dev builds and by

@@ -45,7 +45,12 @@ func (r Report) Ready() bool {
 
 // Summary is a one-line, human-readable status suitable for logs or a header.
 func (r Report) Summary() string {
-	if !r.Health.Reachable {
+	// "cluster unreachable" only when nothing was listed either. Applications
+	// listed with the node read failed (commonly namespace-scoped RBAC: apps
+	// listable, nodes not) means the API server DID answer — the renderers
+	// print the table plus a "node health could not be read" warning, and the
+	// summary must not contradict them by declaring the cluster down.
+	if !r.Health.Reachable && r.Total == 0 {
 		return "cluster unreachable"
 	}
 	if r.Total == 0 {
@@ -55,7 +60,11 @@ func (r Report) Summary() string {
 	if r.Ready() {
 		state = "READY"
 	}
-	return fmt.Sprintf("%d/%d synced, %d/%d healthy — %s", r.Synced, r.Total, r.Healthy, r.Total, state)
+	line := fmt.Sprintf("%d/%d synced, %d/%d healthy — %s", r.Synced, r.Total, r.Healthy, r.Total, state)
+	if !r.Health.Reachable {
+		line += " (node health unavailable)"
+	}
+	return line
 }
 
 // Service aggregates platform status from its injected sources.

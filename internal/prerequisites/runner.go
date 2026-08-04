@@ -69,6 +69,14 @@ func (r Runner) Run(ctx context.Context, set Set) Result {
 	var res Result
 
 	for _, item := range set.Items {
+		// A cancelled ctx means the user aborted: stop probing and installing
+		// instead of marching every remaining installer into its own ctx.Err
+		// failure. The rest are reported missing (with the cancellation as the
+		// reason) so Result.OK() cannot claim success for an aborted run.
+		if err := ctx.Err(); err != nil {
+			res.Missing = append(res.Missing, missing(item, err))
+			continue
+		}
 		if satisfied(item) {
 			res.Satisfied = append(res.Satisfied, item.Name)
 			continue

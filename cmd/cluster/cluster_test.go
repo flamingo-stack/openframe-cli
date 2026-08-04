@@ -33,3 +33,18 @@ func TestClusterGroup_PersistentPreRunEHonorsVerbose(t *testing.T) {
 		t.Fatal("--verbose must survive the cluster group's shadowing hook")
 	}
 }
+
+// delete and cleanup are type-aware like create: a cloud cluster needs
+// terraform, not Docker/k3d, and the generic gate may install k3d/helm as a
+// side effect — so they must bypass the group-level gate and run their own
+// after DetectClusterType. Unknown (future) subcommands keep the generic gate.
+func TestClusterGroup_TypeAwareCommandsSkipGenericGate(t *testing.T) {
+	for _, name := range []string{"create", "use", "status", "list", "delete", "cleanup"} {
+		if !skipsGenericPrerequisiteGate(name) {
+			t.Errorf("%s must skip the generic k3d prerequisite gate", name)
+		}
+	}
+	if skipsGenericPrerequisiteGate("some-future-command") {
+		t.Error("unknown subcommands must default to the generic gate")
+	}
+}

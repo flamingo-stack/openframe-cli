@@ -123,6 +123,27 @@ func TestCheck_DetailBecomesReason(t *testing.T) {
 	assert.Empty(t, byName["k3d"].Reason, "a prereq with no Detail must leave Reason empty")
 }
 
+// TestRun_StopsAfterContextCancellation: once ctx is cancelled the runner must
+// not attempt the remaining installers (each would just fail with its own
+// ctx.Err noise); the untried items are reported missing with the cancellation
+// as the reason so the result never reads as OK.
+func TestRun_StopsAfterContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a, aState := prereq("docker", false, true, false)
+	b, bState := prereq("k3d", false, true, false)
+	res := Runner{OS: "linux"}.Run(ctx, Set{Items: []Prerequisite{a, b}})
+
+	assert.False(t, *aState, "installer must not run after cancellation")
+	assert.False(t, *bState, "installer must not run after cancellation")
+	require.Len(t, res.Missing, 2)
+	for _, m := range res.Missing {
+		assert.ErrorIs(t, m.Err, context.Canceled)
+	}
+	assert.False(t, res.OK())
+}
+
 // TestRun_DetailReasonSurvivesFailedInstall: on Linux, when an auto-install
 // runs but the tool is still unsatisfied (Docker installed but daemon down),
 // the Detail reason must still be attached — this is the exact WSL-Alpine case

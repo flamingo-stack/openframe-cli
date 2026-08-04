@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	appstatus "github.com/flamingo-stack/openframe-cli/internal/app/status"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func loadedModel(apps ...argocd.Application) *model {

@@ -51,14 +51,7 @@ Examples:
 				// guard against pointing a destructive command at the wrong cluster.
 				ui.ShowContextHeader()
 			}
-			// create runs its own type-aware gate after the cluster type is known
-			// (a cloud cluster must not demand Docker/k3d); use only flips local
-			// kubeconfig/gcloud state and needs no tools at all. status and list
-			// are cross-provider read-only views: they must work against a cloud
-			// cluster with Docker stopped, so they skip the k3d gate and degrade
-			// gracefully instead (k3d enumeration is best-effort in the service).
-			switch cmd.Name() {
-			case "create", "use", "status", "list":
+			if skipsGenericPrerequisiteGate(cmd.Name()) {
 				return nil
 			}
 			return prerequisites.CheckPrerequisites()
@@ -84,4 +77,22 @@ Examples:
 	models.AddGlobalFlags(clusterCmd, utils.GetGlobalFlags().Global)
 
 	return clusterCmd
+}
+
+// skipsGenericPrerequisiteGate reports which subcommands bypass the group's
+// generic k3d gate (Docker running + k3d + helm). create, delete and cleanup
+// are type-aware: they gate AFTER the cluster type is known (see create.go /
+// delete.go / cleanup.go), because a cloud cluster needs terraform + the cloud
+// CLI, not Docker — and the generic gate may INSTALL k3d/helm, a side effect a
+// cloud delete in CI must never trigger. use only flips local kubeconfig/gcloud
+// state and needs no tools at all. status and list are cross-provider read-only
+// views: they must work against a cloud cluster with Docker stopped, so they
+// degrade gracefully instead (k3d enumeration is best-effort in the service).
+// Future subcommands get the generic gate by default.
+func skipsGenericPrerequisiteGate(name string) bool {
+	switch name {
+	case "create", "use", "status", "list", "delete", "cleanup":
+		return true
+	}
+	return false
 }

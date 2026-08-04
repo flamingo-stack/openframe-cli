@@ -74,11 +74,17 @@ func newCheckCmd(current string) *cobra.Command {
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Validate --output BEFORE the network round-trip: a bad format must
+			// not burn a GitHub API call only to be rejected by the renderer.
+			format, _ := cmd.Flags().GetString("output")
+			if err := validateOutputFormat(format); err != nil {
+				return err
+			}
 			u := selfupdate.Updater{Current: current, Client: selfupdate.Client{Token: selfupdate.GitHubToken()}}
 
 			// Spinner only in human (text) mode — json/yaml must keep stdout clean.
 			var sp *spinner.Spinner
-			if format, _ := cmd.Flags().GetString("output"); format == "" || format == "text" {
+			if format == "" || format == "text" {
 				sp = spinner.Start("Checking for updates...")
 			}
 			st, _, err := u.Check(cmd.Context(), "")
@@ -233,6 +239,18 @@ func reportStatus(cmd *cobra.Command, st selfupdate.Status) error {
 		default:
 			pterm.Success.Printfln("Up to date (%s).", st.Current)
 		}
+		return nil
+	default:
+		return validateOutputFormat(format)
+	}
+}
+
+// validateOutputFormat rejects unknown --output values. Kept as the single
+// source of the error so the pre-flight check in `check` and the renderer's
+// defensive default can never drift apart.
+func validateOutputFormat(format string) error {
+	switch format {
+	case "", "text", "json", "yaml":
 		return nil
 	default:
 		return fmt.Errorf("invalid --output %q (want \"text\", \"json\", or \"yaml\")", format)

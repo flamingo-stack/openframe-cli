@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
@@ -111,6 +112,15 @@ func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	if !proceed {
 		pterm.Info.Println("Cluster name did not match — nothing was deleted")
 		return nil
+	}
+
+	// Type-aware prerequisite gate, mirroring create: it can only run here,
+	// after DetectClusterType — the group-level generic gate demanded Docker/
+	// k3d/helm even for cloud clusters (which need terraform + the cloud CLI)
+	// and could install tools as a side effect of a delete. After the
+	// confirmations on purpose: a declined destroy must not install anything.
+	if err := prerequisites.CheckForClusterType(clusterType); err != nil {
+		return sharedErrors.HandleGlobalError(err, globalFlags.Global.Verbose)
 	}
 
 	// Execute cluster deletion through service layer

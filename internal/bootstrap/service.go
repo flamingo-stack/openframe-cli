@@ -9,7 +9,6 @@ import (
 	chartServices "github.com/flamingo-stack/openframe-cli/internal/chart/services"
 	utilTypes "github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster"
-	"github.com/flamingo-stack/openframe-cli/internal/k8s"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
@@ -131,7 +130,10 @@ func printBootstrapSummary(clusterName string, tracker *steps.Tracker) {
 	g := ui.Glyphs()
 	pterm.DefaultBasicText.Println()
 	pterm.Success.Printf("OpenFrame ready %s %s\n", g.Bullet, steps.FormatDuration(tracker.Total()))
-	ui.SummaryRow("cluster", clusterName+" (context "+k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)+")")
+	// "k3d-"+name, not ResolveContextForCluster: bootstrap always creates a k3d
+	// cluster, and an unrelated exact-name context must not be shown as ours
+	// (same reasoning as bootstrapInstallRequest).
+	ui.SummaryRow("cluster", clusterName+" (context k3d-"+clusterName+")")
 	ui.SummaryRow("stages", steps.TimingsLine(tracker.Timings()))
 	ui.SummaryRow("status", "openframe app status")
 	ui.SummaryRow("access", "openframe app access   (ArgoCD UI credentials)")
@@ -185,7 +187,13 @@ func bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, k
 		CertDir:        "",                           // Auto-detected
 		NonInteractive: nonInteractive,
 		KubeConfig:     kubeConfig,
-		KubeContext:    k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName),
+		// "k3d-"+name by construction: bootstrap ALWAYS creates a k3d cluster.
+		// ResolveContextForCluster must NOT be used here — it prefers an
+		// exact-name match, so a pre-existing unrelated context literally named
+		// like the cluster would send every helm call there while KubeConfig
+		// points the native clients at the just-created k3d cluster: the exact
+		// split-target failure described above.
+		KubeContext: "k3d-" + clusterName,
 		// Inject cluster access from the orchestrator (composition root) so the
 		// app subsystem stays isolated from cluster-creation code (req 18/19).
 		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),

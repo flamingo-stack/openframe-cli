@@ -1,15 +1,18 @@
 package bootstrap
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	appCmd "github.com/flamingo-stack/openframe-cli/cmd/app"
 	clusterCmd "github.com/flamingo-stack/openframe-cli/cmd/cluster"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/steps"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/rest"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/rest"
 )
 
 func init() {
@@ -149,10 +152,10 @@ func TestServiceVerboseFlagHandling(t *testing.T) {
 
 // KubeContext must ride alongside KubeConfig: the chart workflow ignores Args
 // once a rest.Config is provided, so without it the confirmation prompt read
-// "install OpenFrame chart on ''?" and helm ran without --kube-context,
+// "install OpenFrame chart on ”?" and helm ran without --kube-context,
 // targeting whatever context was current instead of the created cluster.
 func TestBootstrapInstallRequest_SetsKubeContext(t *testing.T) {
-	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "config")) // no entries → k3d- fallback
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "config")) // context is fixed, not resolved from kubeconfig
 	req := bootstrapInstallRequest("demo", true, false, &rest.Config{})
 	if req.KubeContext != "k3d-demo" {
 		t.Fatalf("KubeContext = %q, want k3d-demo", req.KubeContext)
@@ -163,4 +166,56 @@ func TestBootstrapInstallRequest_SetsKubeContext(t *testing.T) {
 	if req.KubeConfig == nil {
 		t.Fatal("KubeConfig must be passed through")
 	}
+}
+
+// A kubeconfig context named EXACTLY like the cluster must not divert helm:
+// bootstrap always creates a k3d cluster (context "k3d-<name>"), so resolving
+// the context by name would send every helm call to the unrelated cluster
+// while the native clients target the new k3d one — the split-target failure.
+func TestBootstrapInstallRequest_ExactNameContextCollision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- name: other
+  cluster:
+    server: https://127.0.0.1:6443
+contexts:
+- name: demo
+  context:
+    cluster: other
+    user: u
+users:
+- name: u
+  user: {}
+current-context: demo
+`
+	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", path)
+	req := bootstrapInstallRequest("demo", true, false, &rest.Config{})
+	if req.KubeContext != "k3d-demo" {
+		t.Fatalf("KubeContext = %q, want k3d-demo (exact-name context must not win)", req.KubeContext)
+	}
+}
+
+// bootstrapSummaryMarkdown feeds the GitHub Actions Step Summary panel; a
+// failed stage must carry the ✖ marker so the card doesn't read as all-green,
+// and stages that never finished must not appear at all.
+func TestBootstrapSummaryMarkdown(t *testing.T) {
+	tracker := steps.NewTracker("Validate helm values", "Create cluster", "Install platform")
+	tracker.Begin(0, "")
+	tracker.Done(0)
+	tracker.Begin(1, "demo")
+	tracker.Fail(1)
+
+	md := bootstrapSummaryMarkdown("demo", tracker)
+
+	assert.True(t, strings.HasPrefix(md, "### OpenFrame ready · "), "header missing: %q", md)
+	assert.Contains(t, md, "**Cluster:** `demo`\n")
+	assert.Contains(t, md, "| stage | duration |\n|---|---|\n")
+	assert.Contains(t, md, "| Validate helm values | ")
+	assert.Contains(t, md, "| Create cluster ✖ | ", "failed stage must render the ✖ marker")
+	assert.NotContains(t, md, "Install platform", "unfinished stages must not appear")
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -76,6 +77,17 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		operationsUI.ShowOperationError("cleanup", clusterName, err)
 		return fmt.Errorf("failed to detect cluster type: %w", err)
+	}
+
+	// Type-aware prerequisite gate, after the type is known (the group-level
+	// generic gate skips cleanup, see cluster.go). Only the k3d path needs
+	// tools: a cloud cluster is about to be rejected by the service with a
+	// pointer to `cluster delete`, and that message must not be preempted by a
+	// Docker demand.
+	if clusterType == models.ClusterTypeK3d {
+		if err := prerequisites.CheckForClusterType(clusterType); err != nil {
+			return err
+		}
 	}
 
 	// Inject the ArgoCD-backed application cleaner (composition root: only the
