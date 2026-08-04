@@ -26,6 +26,23 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// installFileCleanup is the consumer-side seam over shared/files.FileCleanup —
+// exactly the calls the installation workflow makes. The real *files.FileCleanup
+// satisfies it; tests substitute a spy to assert WHICH cleanup path ran
+// (forced restore on error vs success-only restore).
+type installFileCleanup interface {
+	RegisterTempFile(filePath string) error
+	SetCleanupOnSuccessOnly(enabled bool)
+	RestoreFiles(verbose bool) error
+	RestoreFilesOnSuccess(verbose bool) error
+}
+
+// installServicesFactory builds the per-target collaborators performInstallation
+// consumes: the ArgoCD service (install + application wait) and the app-of-apps
+// service. The factory runs after the install target is resolved, so it sees the
+// final ChartInstallConfig (ClusterName/KubeContext — the F4 one-target rule).
+type installServicesFactory func(cs *ChartService, cfg config.ChartInstallConfig) (types.ArgoCDService, types.AppOfAppsService, error)
+
 // ChartService handles high-level chart operations
 type ChartService struct {
 	executor       executor.CommandExecutor
@@ -40,6 +57,55 @@ type ChartService struct {
 	// helm CLI, the native checks, and the readiness wait all watch the same
 	// cluster (audit F4).
 	kubeConfig *rest.Config
+
+	// Collaborator seams. Production wiring leaves them nil and the *OrDefault
+	// accessors below fall back to the real implementations; tests inject fakes
+	// to exercise the install orchestration without a cluster (see
+	// install_orchestration_test.go). Kept unexported on purpose — the public
+	// constructors' signatures and behavior are unchanged.
+	newFileCleanup     func() installFileCleanup
+	installServices    installServicesFactory
+	installRetryPolicy sharedErrors.RetryPolicy
+}
+
+// fileCleanupOrDefault returns the injected file-cleanup factory's product, or
+// the real FileCleanup used in production.
+func (cs *ChartService) fileCleanupOrDefault() installFileCleanup {
+	if cs.newFileCleanup != nil {
+		return cs.newFileCleanup()
+	}
+	return files.NewFileCleanup()
+}
+
+// installServicesOrDefault returns the injected install collaborators, or the
+// production wiring from defaultInstallServices.
+func (cs *ChartService) installServicesOrDefault(cfg config.ChartInstallConfig) (types.ArgoCDService, types.AppOfAppsService, error) {
+	if cs.installServices != nil {
+		return cs.installServices(cs, cfg)
+	}
+	return defaultInstallServices(cs, cfg)
+}
+
+// defaultInstallServices is the production wiring for the install collaborators.
+// The ArgoCD wait manager gets the SAME rest.Config the HelmManager was built
+// with (falling back to the selected cluster's context) — never the kubeconfig's
+// current context, which may point at an entirely different cluster (audit F4).
+func defaultInstallServices(cs *ChartService, cfg config.ChartInstallConfig) (types.ArgoCDService, types.AppOfAppsService, error) {
+	pathResolver := cs.configService.GetPathResolver()
+	argoCDService, err := NewArgoCDForTarget(cs.helmManager, pathResolver, cs.executor, cs.kubeConfig, cfg.ClusterName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return argoCDService, NewAppOfApps(cs.helmManager, cs.gitRepository, pathResolver), nil
+}
+
+// installRetryPolicyOrDefault returns the injected retry policy, or the
+// production InstallationRetryPolicy.
+func (cs *ChartService) installRetryPolicyOrDefault() sharedErrors.RetryPolicy {
+	if cs.installRetryPolicy != nil {
+		return cs.installRetryPolicy
+	}
+	return sharedErrors.InstallationRetryPolicy()
 }
 
 // NewChartService creates a new chart service with the given rest.Config
@@ -127,7 +193,7 @@ func (cs *ChartService) InstallWithContext(ctx context.Context, req types.Instal
 	}
 
 	// Create installation workflow with direct dependencies
-	fileCleanup := files.NewFileCleanup()
+	fileCleanup := cs.fileCleanupOrDefault()
 	fileCleanup.SetCleanupOnSuccessOnly(true) // Only clean temporary files after successful ArgoCD sync
 
 	workflow := &InstallationWorkflow{
@@ -152,7 +218,7 @@ func (cs *ChartService) InstallWithContextDeferred(ctx context.Context, req type
 type InstallationWorkflow struct {
 	chartService   *ChartService
 	clusterService types.ClusterAccess
-	fileCleanup    *files.FileCleanup
+	fileCleanup    installFileCleanup
 }
 
 func (w *InstallationWorkflow) ExecuteWithContext(parentCtx context.Context, req types.InstallationRequest) error {
@@ -496,16 +562,13 @@ func (w *InstallationWorkflow) buildConfiguration(req types.InstallationRequest,
 
 // performInstallation executes the actual installation
 func (w *InstallationWorkflow) performInstallation(ctx context.Context, config config.ChartInstallConfig) error {
-	// Create installer directly without factory. The ArgoCD wait manager gets
-	// the SAME rest.Config the HelmManager was built with (falling back to the
-	// selected cluster's context) — never the kubeconfig's current context,
-	// which may point at an entirely different cluster (audit F4).
-	pathResolver := w.chartService.configService.GetPathResolver()
-	argoCDService, err := NewArgoCDForTarget(w.chartService.helmManager, pathResolver, w.chartService.executor, w.chartService.kubeConfig, config.ClusterName)
+	// Resolve the install collaborators through the service's seam (real wiring
+	// in production, fakes in tests — see defaultInstallServices for the F4
+	// one-target guarantees of the real construction).
+	argoCDService, appOfAppsService, err := w.chartService.installServicesOrDefault(config)
 	if err != nil {
 		return fmt.Errorf("failed to create ArgoCD service for the install target: %w", err)
 	}
-	appOfAppsService := NewAppOfApps(w.chartService.helmManager, w.chartService.gitRepository, pathResolver)
 
 	installer := &Installer{
 		argoCDService:    argoCDService,
@@ -526,7 +589,7 @@ func (w *InstallationWorkflow) performInstallation(ctx context.Context, config c
 
 // performInstallationWithRetry executes installation with retry policy
 func (w *InstallationWorkflow) performInstallationWithRetry(parentCtx context.Context, config config.ChartInstallConfig) error {
-	retryPolicy := sharedErrors.InstallationRetryPolicy()
+	retryPolicy := w.chartService.installRetryPolicyOrDefault()
 	retryExecutor := sharedErrors.NewRetryExecutor(retryPolicy)
 	// No retry callback - let the spinner handle progress indication
 
