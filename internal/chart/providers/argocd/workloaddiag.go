@@ -57,8 +57,9 @@ type containerIssue struct {
 }
 
 // failingContainers returns the containers in a pod that are in an error state:
-// waiting with an error reason (excluding the benign startup reasons), or
-// terminated with a non-zero exit. Pure and testable.
+// waiting with an error reason (excluding the benign startup reasons),
+// terminated with a non-zero exit, or crash-looping while momentarily Running
+// between restarts. Pure and testable.
 func failingContainers(p corev1.Pod) []containerIssue {
 	var issues []containerIssue
 	statuses := append(append([]corev1.ContainerStatus{}, p.Status.InitContainerStatuses...), p.Status.ContainerStatuses...)
@@ -73,6 +74,13 @@ func failingContainers(p corev1.Pod) []containerIssue {
 			if reason == "" {
 				reason = fmt.Sprintf("Exited(%d)", cs.State.Terminated.ExitCode)
 			}
+		case cs.RestartCount >= crashLoopRestartThreshold &&
+			cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.ExitCode != 0:
+			// A CrashLooping container spends part of each cycle Running (or in a
+			// benign waiting state), where only the restart count and the previous
+			// instance's non-zero exit betray the loop — without this branch such
+			// a pod is skipped and its crash logs never pulled.
+			reason = "CrashLoop (running between restarts)"
 		default:
 			continue
 		}

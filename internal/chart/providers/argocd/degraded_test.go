@@ -127,6 +127,39 @@ func TestFailingContainers_ClassifiesTerminalStates(t *testing.T) {
 	}
 }
 
+// runningCrashLoopPod is a pod whose container is momentarily Running between
+// crash-loop restarts: high restart count, previous instance exited non-zero,
+// no error in the CURRENT state at all.
+func runningCrashLoopPod(name, container, image string, restarts, lastExit int32) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name: container, Image: image, RestartCount: restarts,
+			State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+			LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: lastExit}},
+		}}},
+	}
+}
+
+// A CrashLooping container caught in the Running window between crashes has no
+// Waiting/Terminated state to inspect — the restart count plus the previous
+// instance's non-zero exit must still classify it as a terminal failure, or
+// the pod is skipped entirely and its crash logs never pulled.
+func TestFailingContainers_CrashLoopRunningBetweenRestarts(t *testing.T) {
+	got := failingContainers(runningCrashLoopPod("p", "c", "img", 8, 1))
+	if len(got) != 1 || !got[0].terminal || got[0].reason != "CrashLoop (running between restarts)" {
+		t.Fatalf("running-between-restarts crash loop must be a terminal failure, got %+v", got)
+	}
+	// Below the restart threshold: could be a transient hiccup, not a loop.
+	if got := failingContainers(runningCrashLoopPod("p", "c", "img", crashLoopRestartThreshold-1, 1)); len(got) != 0 {
+		t.Fatalf("restarts below the threshold must not be a failure, got %+v", got)
+	}
+	// Previous instance exited cleanly: restarts alone are not a crash loop.
+	if got := failingContainers(runningCrashLoopPod("p", "c", "img", 8, 0)); len(got) != 0 {
+		t.Fatalf("a clean previous exit must not be a failure, got %+v", got)
+	}
+}
+
 func TestIsImagePullReason(t *testing.T) {
 	for _, r := range []string{"ImagePullBackOff", "ErrImagePull", "InvalidImageName"} {
 		if !isImagePullReason(r) {

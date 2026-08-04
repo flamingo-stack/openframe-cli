@@ -58,6 +58,25 @@ func TestDiagnoseFailingApps_OwnTerminalPodAborts(t *testing.T) {
 	}
 }
 
+// A CrashLooping pod caught Running between restarts (the real-world timeout
+// diagnostic: 8 restarts, healthy-looking current state) must still get a pod
+// line in the diagnostic and mark its own app stuck — previously it was
+// skipped entirely and only namespace events were printed.
+func TestDiagnoseFailingApps_RunningBetweenRestartsIsReported(t *testing.T) {
+	p := runningCrashLoopPod("openframe-management-0", "management", "img", 8, 1)
+	p.Namespace = "tenant"
+	p.Labels = map[string]string{"app.kubernetes.io/instance": "tenant"}
+	m := &Manager{kubeClient: fake.NewSimpleClientset(&p)}
+	diag, stuck := m.diagnoseFailingApps(context.Background(),
+		[]Application{{Name: "tenant", Namespace: "tenant"}})
+	if len(stuck) != 1 || stuck[0].Name != "tenant" {
+		t.Fatalf("a running-between-restarts crash loop must mark the app stuck, got %v", stuck)
+	}
+	if !strings.Contains(diag, "openframe-management-0") || !strings.Contains(diag, "CrashLoop (running between restarts)") {
+		t.Fatalf("diagnostic must name the pod and the crash loop, got:\n%s", diag)
+	}
+}
+
 // Unlabeled workloads (no tracking labels at all) fall back to the namespace
 // listing for the human diagnostic, but never drive a fail-fast: the failure
 // cannot be attributed to the candidate app.
