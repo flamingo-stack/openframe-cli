@@ -23,6 +23,10 @@ plugins:
   - - "@semantic-release/commit-analyzer"
     - preset: conventionalcommits
   # Exports the computed version to the workflow (runs in the verifyRelease
-  # phase, so it fires in --dry-run "plan" mode too). No-op outside Actions.
+  # phase, so it fires in --dry-run "plan" mode too). NOTE: the exec plugin
+  # renders the command as a JS template literal, so every ${...} must be a
+  # valid JS expression — bash forms like ${GITHUB_OUTPUT:-/dev/null} throw a
+  # SyntaxError at run time. Hence the brace-less $GITHUB_OUTPUT, which the
+  # template pass leaves alone (Actions always sets it).
   - - "@semantic-release/exec"
-    - verifyReleaseCmd: 'echo "version=${nextRelease.version}" >> "${GITHUB_OUTPUT:-/dev/null}"'
+    - verifyReleaseCmd: 'echo "version=${nextRelease.version}" >> "$GITHUB_OUTPUT"'
