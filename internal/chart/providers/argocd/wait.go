@@ -12,6 +12,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	sharedui "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	uispinner "github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -662,8 +663,15 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				lastProgressPrint = time.Now()
 				delta := currentlyReady - heartbeatLastReady
 				heartbeatLastReady = currentlyReady
-				pterm.Info.Printf("[%s] apps %d/%d ready (%+d since last check) · elapsed %s\n",
-					time.Now().Format("15:04:05"), currentlyReady, totalApps, delta, elapsed.Round(time.Second))
+				beat := fmt.Sprintf("apps %d/%d ready (%+d since last check) · elapsed %s",
+					currentlyReady, totalApps, delta, elapsed.Round(time.Second))
+				// The embedded clock serves plain (non-verbose) CI logs; under
+				// --verbose every status line is already timestamped by the
+				// writer, and a second clock on the same row is noise.
+				if !sharedui.TimestampsActive() {
+					beat = fmt.Sprintf("[%s] ", time.Now().Format("15:04:05")) + beat
+				}
+				pterm.Info.Println(beat)
 				if p := pendingSummary(apps, 6); p != "" {
 					pterm.Info.Printf("pending: %s\n", p)
 				}

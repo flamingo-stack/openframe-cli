@@ -25,17 +25,40 @@ func ApplyGlobalOutputFlags(cmd *cobra.Command) {
 	}
 	if v, _ := cmd.Flags().GetBool("verbose"); v && !silentFlag {
 		pterm.EnableDebugMessages()
-		// Timestamped debug lines: --verbose exists to correlate the CLI's
-		// actions with cluster events, which needs a clock on every line.
-		pterm.Debug = *pterm.Debug.WithWriter(NewTimestampWriter(os.Stdout))
+		// Timestamped status lines: --verbose exists to correlate the CLI's
+		// actions with cluster events, which needs a clock on every line. ALL
+		// status printers get the clock, not just Debug — info/warning lines
+		// are events on the same timeline, and a timestamp on only some rows
+		// leaves the message columns ragged. One shared writer keeps the
+		// line-start state consistent across printers.
+		timestamped = true
+		ts := NewTimestampWriter(os.Stdout)
+		for _, p := range []*pterm.PrefixPrinter{
+			&pterm.Debug, &pterm.Info, &pterm.Warning, &pterm.Error, &pterm.Success,
+		} {
+			*p = *p.WithWriter(ts)
+		}
 	}
 	// Last: the theme reads IsPlain/IsSilent, which the flags above just set.
+	// Under --verbose it also composes with the timestamp writers above: the
+	// CI annotation tee wraps Warning's writer, so it sees the rendered text
+	// BEFORE the clock is prepended — annotations stay timestamp-free.
 	ApplyStatusPrefixTheme()
 }
 
 // silent records whether --silent suppressed non-error output. Read by the logo
 // renderer so it can honor the flag.
 var silent bool
+
+// timestamped records whether the status printers carry a per-line wall clock
+// (--verbose). Long-running loops that embed their OWN clock in messages (the
+// ArgoCD wait heartbeat does, for plain CI logs) consult this to avoid
+// printing two clocks on one line.
+var timestamped bool
+
+// TimestampsActive reports whether status-printer lines are already
+// timestamped by the --verbose writer.
+func TimestampsActive() bool { return timestamped }
 
 // SetSilent honors the --silent flag's contract ("suppress all output except
 // errors"): it routes every non-error pterm printer to io.Discard and marks the
