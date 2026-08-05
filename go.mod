@@ -43,7 +43,14 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
-	github.com/chzyer/readline v1.5.1 // indirect
+	// readline is pinned to the commit promptui v0.9.0 declares. readline
+	// v1.5.x changes prompt teardown (stdin wrapping, ioloop/Close semantics)
+	// in ways promptui was never adapted to: after any interactive picker it
+	// leaks readers parked on stdin/channel sends, which can wedge the process
+	// after the prompt returns — the terminal stops echoing, Ctrl+C is
+	// swallowed, and the command never exits. The excludes below keep a future
+	// `go get -u` from silently re-upgrading onto the broken combination.
+	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.4 // indirect
@@ -166,4 +173,9 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
+)
+
+exclude (
+	github.com/chzyer/readline v1.5.0
+	github.com/chzyer/readline v1.5.1
 )
