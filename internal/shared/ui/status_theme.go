@@ -101,10 +101,19 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func (a *annotationWriter) Write(p []byte) (int, error) {
 	n, err := a.inner.Write(p)
 	msg := strings.TrimSpace(ansiSeq.ReplaceAllString(string(p), ""))
-	// Drop the prefix column ("warning"/"error  "/▲/✖) — the annotation level
-	// already carries the severity.
+	// Drop the printer's own severity marker — the annotation level already
+	// carries it. Exactly ONE marker is stripped (the printed line always
+	// starts with the printer's tag, and stripping sequentially would eat
+	// message text: "warning  errors found" must not become "s found").
+	// Under NO_COLOR pterm's RawOutput mode renders the tag as "<word>: ",
+	// so a trailing colon after the matched prefix is dropped too.
 	for _, prefix := range []string{"warning", "error", Glyphs().Warn, Glyphs().Fail} {
-		msg = strings.TrimSpace(strings.TrimPrefix(msg, prefix))
+		rest, ok := strings.CutPrefix(msg, prefix)
+		if !ok {
+			continue
+		}
+		msg = strings.TrimSpace(strings.TrimPrefix(rest, ":"))
+		break
 	}
 	if msg == "" {
 		return n, err

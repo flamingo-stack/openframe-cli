@@ -96,3 +96,34 @@ func TestAnnotationWriter_DeduplicatesRepeats(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(got, "Stuck app tenant"))
 	assert.Equal(t, 1, strings.Count(got, "Stuck app mysql"))
 }
+
+// Exactly one severity marker is stripped, in both forms pterm prints it:
+// the padded/styled tag ("warning  msg") and RawOutput's "warning: msg"
+// (NO_COLOR). Stripping must not cascade into message text.
+func TestAnnotationWriter_PrefixStripping(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	cases := []struct {
+		line string
+		want string
+	}{
+		// RawOutput (NO_COLOR) form: no leading colon may leak through.
+		{"warning: disk almost full\n", "::warning title=openframe::disk almost full\n"},
+		// A message that itself starts with "error..." must survive intact.
+		{"warning  errors found in 3 charts\n", "::warning title=openframe::errors found in 3 charts\n"},
+	}
+	for _, tc := range cases {
+		old := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		aw := newAnnotationWriter(io.Discard, "warning")
+		_, _ = aw.Write([]byte(tc.line))
+
+		_ = w.Close()
+		os.Stdout = old
+		var sb strings.Builder
+		_, _ = io.Copy(&sb, r)
+		assert.Equal(t, tc.want, sb.String(), "line %q", tc.line)
+	}
+}
