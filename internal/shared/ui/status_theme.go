@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/pterm/pterm"
 )
@@ -73,18 +74,26 @@ func ApplyStatusPrefixTheme() {
 }
 
 // annotationWriter tees a status printer's output into a GitHub Actions
-// ::warning:: or ::error:: workflow command, one annotation per printed line,
-// with ANSI styling and the printer's own prefix column stripped.
+// ::warning:: or ::error:: workflow command, with ANSI styling and the
+// printer's own prefix column stripped.
+//
+// Each distinct message is annotated ONCE per process: the runner echoes every
+// workflow command inline in the log ("Warning: …"), so re-annotating a
+// repeating message (the ArgoCD wait re-prints its stuck-app summary every few
+// minutes) would double a growing share of the log — and GitHub keeps only 10
+// annotations per step, so repeats also crowd out genuinely new warnings.
 type annotationWriter struct {
 	inner io.Writer
 	level string
+	mu    sync.Mutex
+	seen  map[string]struct{}
 }
 
 func newAnnotationWriter(inner io.Writer, level string) io.Writer {
 	if inner == nil {
 		inner = os.Stdout
 	}
-	return &annotationWriter{inner: inner, level: level}
+	return &annotationWriter{inner: inner, level: level, seen: make(map[string]struct{})}
 }
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -97,13 +106,23 @@ func (a *annotationWriter) Write(p []byte) (int, error) {
 	for _, prefix := range []string{"warning", "error", Glyphs().Warn, Glyphs().Fail} {
 		msg = strings.TrimSpace(strings.TrimPrefix(msg, prefix))
 	}
-	if msg != "" {
-		// Reuse the escaped emitters so runner parsing rules live in one place.
-		if a.level == "warning" {
-			WarningAnnotation("openframe", msg)
-		} else {
-			ErrorAnnotation("openframe", msg)
-		}
+	if msg == "" {
+		return n, err
+	}
+	a.mu.Lock()
+	_, dup := a.seen[msg]
+	if !dup {
+		a.seen[msg] = struct{}{}
+	}
+	a.mu.Unlock()
+	if dup {
+		return n, err
+	}
+	// Reuse the escaped emitters so runner parsing rules live in one place.
+	if a.level == "warning" {
+		WarningAnnotation("openframe", msg)
+	} else {
+		ErrorAnnotation("openframe", msg)
 	}
 	return n, err
 }

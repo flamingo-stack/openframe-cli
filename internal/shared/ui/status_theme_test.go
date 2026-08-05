@@ -68,3 +68,31 @@ func TestAnnotationWriter_EmitsWorkflowCommand(t *testing.T) {
 	assert.NotContains(t, got, "\x1b[")
 	assert.NotContains(t, got, "::warning title=openframe::warning")
 }
+
+// A message printed repeatedly (the ArgoCD wait re-prints its stuck-app
+// summary every few minutes) must annotate only once: the runner echoes every
+// workflow command inline in the log, and GitHub keeps just 10 annotations per
+// step, so repeats both double the log and crowd out new warnings.
+func TestAnnotationWriter_DeduplicatesRepeats(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = old })
+
+	aw := newAnnotationWriter(io.Discard, "warning")
+	for range 3 {
+		_, _ = aw.Write([]byte("warning  Stuck app tenant: health=Degraded\n"))
+	}
+	_, _ = aw.Write([]byte("warning  Stuck app mysql: health=Progressing\n"))
+
+	_ = w.Close()
+	os.Stdout = old
+	var sb strings.Builder
+	_, _ = io.Copy(&sb, r)
+
+	got := sb.String()
+	assert.Equal(t, 1, strings.Count(got, "Stuck app tenant"))
+	assert.Equal(t, 1, strings.Count(got, "Stuck app mysql"))
+}

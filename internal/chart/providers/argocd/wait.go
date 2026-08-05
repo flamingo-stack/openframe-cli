@@ -623,7 +623,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					if config.Verbose {
 						describeUnknownApps(unknownApps)
 					} else if dash == nil {
-						pterm.Info.Println("  Re-run with --verbose for per-application detail.")
+						pterm.Info.Println("Re-run with --verbose for per-application detail.")
 					}
 				}
 
@@ -634,7 +634,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					lastStuckSummary = time.Now()
 					for _, app := range apps {
 						if app.Health != ArgoCDHealthHealthy && app.Health != ArgoCDHealthMissing {
-							line := fmt.Sprintf("  Stuck app %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
+							line := fmt.Sprintf("Stuck app %s: health=%s sync=%s", app.Name, app.Health, app.Sync)
 							if app.Condition != "" {
 								line += " condition=" + app.Condition
 							}
@@ -659,10 +659,10 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				pterm.Info.Printf("[%s] apps %d/%d ready (%+d since last check) · elapsed %s\n",
 					time.Now().Format("15:04:05"), currentlyReady, totalApps, delta, elapsed.Round(time.Second))
 				if p := pendingSummary(apps, 6); p != "" {
-					pterm.Info.Printf("  pending: %s\n", p)
+					pterm.Info.Printf("pending: %s\n", p)
 				}
 				if config.Verbose && len(healthyApps) > 0 && len(healthyApps) <= 5 {
-					pterm.Debug.Printf("  Recently completed: %v\n", healthyApps)
+					pterm.Debug.Printf("Recently completed: %v\n", healthyApps)
 				}
 			}
 
