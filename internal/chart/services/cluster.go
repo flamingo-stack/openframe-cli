@@ -47,7 +47,8 @@ func (c *ClusterSelector) SelectCluster(args []string, nonInteractive, verbose b
 	if verbose {
 		pterm.Info.Printf("Found %d clusters\n", len(clusters))
 		for _, cluster := range clusters {
-			pterm.Info.Printf("  - %s (%s)\n", cluster.Name, cluster.Status)
+			// Items under the Info header: no repeated info tag per line.
+			pterm.DefaultBasicText.Printf("  - %s (%s)\n", cluster.Name, cluster.Status)
 		}
 	}
 

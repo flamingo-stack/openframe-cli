@@ -262,10 +262,13 @@ func printOrphanList(disks []disk, name string) {
 	for _, d := range disks {
 		// The location tells the operator WHICH cluster's disks these are —
 		// GKE cluster names repeat across locations.
+		// List items go through DefaultBasicText (the repo's header+items
+		// pattern): the Warning header above carries the severity, and
+		// repeating the warning tag on every item just breaks the column.
 		if loc := d.location(); loc != "" {
-			pterm.Warning.Printf("  - %s (%s)\n", d.name, loc)
+			pterm.DefaultBasicText.Printf("  - %s (%s)\n", d.name, loc)
 		} else {
-			pterm.Warning.Printf("  - %s\n", d.name)
+			pterm.DefaultBasicText.Printf("  - %s\n", d.name)
 		}
 	}
 }

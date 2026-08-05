@@ -83,9 +83,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// Show initial verbose info if enabled
 	if config.Verbose {
 		pterm.Info.Println("Starting ArgoCD application synchronization...")
-		pterm.Debug.Println("  - Waiting for applications to be created by app-of-apps")
-		pterm.Debug.Println("  - Each application must reach Healthy + Synced status")
-		pterm.Debug.Println("  - Progress updates every 10 seconds in verbose mode")
+		pterm.Debug.Println("Waiting for applications to be created by app-of-apps")
+		pterm.Debug.Println("Each application must reach Healthy + Synced status")
+		pterm.Debug.Println("Progress updates every 10 seconds in verbose mode")
 	}
 
 	// Display: the live dashboard (interactive terminal, non-verbose) shows

@@ -271,7 +271,9 @@ func (p *Provider) sweepOrphanedVolumes(ctx context.Context, rec tfengine.Record
 func printOrphanList(volumes []string, name string) {
 	pterm.Warning.Printf("%d EBS volume(s) tagged for cluster %q survived the destroy (PVC-provisioned, outside terraform state):\n", len(volumes), name)
 	for _, id := range volumes {
-		pterm.Warning.Printf("  - %s\n", id)
+		// Items under the Warning header go through DefaultBasicText so the
+		// warning tag isn't repeated per line (same pattern as cleanup lists).
+		pterm.DefaultBasicText.Printf("  - %s\n", id)
 	}
 }
 

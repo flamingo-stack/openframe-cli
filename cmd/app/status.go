@@ -207,7 +207,9 @@ func renderStatus(rep appstatus.Report) {
 	case !rep.Health.Reachable && rep.Total == 0:
 		pterm.Error.Println("Cluster is not reachable. Is it running and is your kube-context correct?")
 		if rep.HealthErr != nil {
-			pterm.Error.Printf("  cause: %v\n", rep.HealthErr)
+			// Same shape as the shared error panel's cause row — dim key,
+			// indented under the headline, no repeated error tag.
+			pterm.DefaultBasicText.Printf("  %s %v\n", pterm.FgGray.Sprintf("%-7s", "cause"), rep.HealthErr)
 		}
 		return
 	case !rep.Health.Reachable:

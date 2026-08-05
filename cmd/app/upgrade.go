@@ -177,7 +177,8 @@ func previewOutOfSync(ctx context.Context, manager *argocd.Manager, verbose, pru
 	for _, a := range apps {
 		if a.Sync != argocd.ArgoCDSyncSynced {
 			outOfSync++
-			pterm.Info.Printf("  OutOfSync: %s (health=%s, sync=%s)\n", a.Name, a.Health, a.Sync)
+			// List item, not a standalone status: no repeated info tag.
+			pterm.DefaultBasicText.Printf("  OutOfSync: %s (health=%s, sync=%s)\n", a.Name, a.Health, a.Sync)
 		}
 	}
 	if outOfSync == 0 {
