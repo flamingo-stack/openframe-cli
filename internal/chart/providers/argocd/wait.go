@@ -114,12 +114,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 	// waitNote routes one-off in-wait announcements: pinned under the live
 	// dashboard when it is active (a plain print would be visually swallowed
 	// by the area redraw within 2s), ordinary silence-aware prints otherwise.
-	waitNote := func(styled string) {
+	// It takes the status printer plus the RAW message — not a pre-styled
+	// string — so the non-dashboard path prints through the printer's own
+	// writer: that is where the CI ::warning:: annotation tee lives, and a
+	// pre-styled DefaultBasicText print silently bypassed it. The dashboard
+	// path never annotates, but it only runs on interactive terminals — CI is
+	// always the printer path.
+	waitNote := func(p *pterm.PrefixPrinter, format string, args ...any) {
 		if dash != nil {
-			dash.Note(styled)
+			dash.Note(p.Sprintf(format, args...))
 			return
 		}
-		pterm.DefaultBasicText.Println(styled)
+		p.Printfln(format, args...)
 	}
 
 	// Function to stop spinner safely
@@ -424,7 +430,7 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 			// Reset consecutive failures on successful query
 			if consecutiveFailures > 0 {
-				waitNote(pterm.Success.Sprint("Application queries restored"))
+				waitNote(&pterm.Success, "Application queries restored")
 				consecutiveFailures = 0
 			}
 
@@ -513,18 +519,18 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				if config.SyncStragglersOnStall {
 					if !stragglerSyncTriggered {
 						stragglerSyncTriggered = true
-						stallNote(pterm.Warning.Sprintf("No progress for %s; triggering sync of %d OutOfSync application(s): %v",
-							stallAfter.Round(time.Second), len(stragglers), stragglers))
+						stallNote(&pterm.Warning, "No progress for %s; triggering sync of %d OutOfSync application(s): %v",
+							stallAfter.Round(time.Second), len(stragglers), stragglers)
 						patched, failedCount, syncErr := m.syncApplicationsByName(localCtx, stragglers, false)
 						if failedCount > 0 {
-							stallNote(pterm.Warning.Sprintf("Straggler sync: %d triggered, %d failed (first error: %v)", patched, failedCount, syncErr))
+							stallNote(&pterm.Warning, "Straggler sync: %d triggered, %d failed (first error: %v)", patched, failedCount, syncErr)
 						}
 					}
 				} else if !stallHintShown {
 					stallHintShown = true
-					stallNote(pterm.Warning.Sprintf("No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v",
-						stallAfter.Round(time.Second), len(stragglers), stragglers))
-					stallNote(pterm.Info.Sprint("They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out."))
+					stallNote(&pterm.Warning, "No progress for %s; %d application(s) are OutOfSync and may have auto-sync disabled: %v",
+						stallAfter.Round(time.Second), len(stragglers), stragglers)
+					stallNote(&pterm.Info, "They will not sync on their own — run `openframe app upgrade --sync` (or sync them in ArgoCD) to roll them out.")
 				}
 			}
 
@@ -598,15 +604,15 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 									// out to its timeout. triggerRepoServerRecovery already
 									// hard-refreshed app.Name; cover the rest.
 									if refreshed := m.hardRefreshApplications(localCtx, appNames(unknownApps)); refreshed > 0 {
-										waitNote(pterm.Info.Sprintf("Hard-refreshed %d application(s) stuck in Unknown.", refreshed))
+										waitNote(&pterm.Info, "Hard-refreshed %d application(s) stuck in Unknown.", refreshed)
 									}
 								} else {
-									waitNote(pterm.Warning.Sprint("Could not restart the ArgoCD repo-server; continuing to wait."))
+									waitNote(&pterm.Warning, "Could not restart the ArgoCD repo-server; continuing to wait.")
 								}
 							} else if repoServerRecoveryAttempts == maxRepoServerRecoveryAttempts {
 								repoServerRecoveryAttempts++ // prevent repeated attempts
-								waitNote(pterm.Warning.Sprintf("ArgoCD repo-server did not recover after %d restarts; continuing to wait for the timeout.",
-									maxRepoServerRecoveryAttempts))
+								waitNote(&pterm.Warning, "ArgoCD repo-server did not recover after %d restarts; continuing to wait for the timeout.",
+									maxRepoServerRecoveryAttempts)
 							}
 							break // Only recover one app at a time
 						}
@@ -618,8 +624,8 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 				// (throttled); the per-application dump stays behind --verbose.
 				if len(unknownApps) > 0 && elapsed > 5*time.Minute && time.Since(lastUnknownWarn) >= 5*time.Minute {
 					lastUnknownWarn = time.Now()
-					waitNote(pterm.Warning.Sprintf("%d application(s) have 'Unknown' status after %s. Possible causes: controller pod not ready, git repository unreachable, or resource constraints.",
-						len(unknownApps), elapsed.Round(time.Second)))
+					waitNote(&pterm.Warning, "%d application(s) have 'Unknown' status after %s. Possible causes: controller pod not ready, git repository unreachable, or resource constraints.",
+						len(unknownApps), elapsed.Round(time.Second))
 					if config.Verbose {
 						describeUnknownApps(unknownApps)
 					} else if dash == nil {
