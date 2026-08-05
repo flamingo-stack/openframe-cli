@@ -9,7 +9,6 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
-	"github.com/manifoldco/promptui"
 	"github.com/pterm/pterm"
 )
 
@@ -23,45 +22,28 @@ func NewWizardSteps() *WizardSteps {
 
 // PromptClusterName prompts for cluster name with validation
 func (ws *WizardSteps) PromptClusterName(defaultName string) (string, error) {
-	prompt := promptui.Prompt{
-		Label:   "Cluster Name",
-		Default: defaultName,
-		Validate: func(input string) error {
-			// First check if empty
-			if err := sharedUI.ValidateNonEmpty("cluster name")(input); err != nil {
-				return err
-			}
-			// Then validate with domain rules
-			return models.ValidateClusterName(strings.TrimSpace(input))
-		},
-	}
-
-	result, err := prompt.Run()
+	result, err := sharedUI.PromptInput("Cluster Name", defaultName, func(input string) error {
+		// First check if empty
+		if err := sharedUI.ValidateNonEmpty("cluster name")(input); err != nil {
+			return err
+		}
+		// Then validate with domain rules
+		return models.ValidateClusterName(strings.TrimSpace(input))
+	})
 	if err != nil {
 		return "", err
 	}
 
-	return strings.TrimSpace(result), nil
+	return result, nil
 }
 
 // PromptClusterType prompts for cluster type selection.
 func (ws *WizardSteps) PromptClusterType() (models.ClusterType, error) {
-	prompt := promptui.Select{
-		Label: "Cluster Type",
-		Items: []string{
-			"k3d (Recommended for local development)",
-			"gke (Google Kubernetes Engine — provisions cloud resources that cost money)",
-			"eks (AWS Elastic Kubernetes Service — provisions cloud resources that cost money)",
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
+	idx, _, err := sharedUI.SelectOption("Cluster Type", []string{
+		"k3d (Recommended for local development)",
+		"gke (Google Kubernetes Engine — provisions cloud resources that cost money)",
+		"eks (AWS Elastic Kubernetes Service — provisions cloud resources that cost money)",
+	})
 	if err != nil {
 		return "", err
 	}
@@ -108,15 +90,7 @@ func (ws *WizardSteps) PromptProject() (string, error) {
 			}
 		}
 	}
-	prompt := promptui.Prompt{
-		Label:    "GCP Project",
-		Validate: sharedUI.ValidateNonEmpty("project"),
-	}
-	result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
+	return sharedUI.PromptInput("GCP Project", "", sharedUI.ValidateNonEmpty("project"))
 }
 
 // listSelectableProfiles fetches the user's named AWS profiles for the wizard
@@ -159,14 +133,7 @@ func (ws *WizardSteps) PromptProfile() (string, error) {
 			}
 		}
 	}
-	prompt := promptui.Prompt{
-		Label: "AWS Profile (empty for default credentials)",
-	}
-	result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
+	return sharedUI.PromptInput("AWS Profile (empty for default credentials)", "", nil)
 }
 
 // listSelectableAWSRegions fetches the AWS regions enabled for the account for
@@ -196,16 +163,7 @@ func (ws *WizardSteps) PromptAWSRegion(label, defaultRegion, profile string) (st
 			}
 		}
 	}
-	prompt := promptui.Prompt{
-		Label:    label,
-		Default:  defaultRegion,
-		Validate: sharedUI.ValidateNonEmpty("region"),
-	}
-	result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
+	return sharedUI.PromptInput(label, defaultRegion, sharedUI.ValidateNonEmpty("region"))
 }
 
 // listSelectableRegions fetches a GCP project's Compute regions for the wizard
@@ -240,41 +198,18 @@ func (ws *WizardSteps) PromptRegion(label, defaultRegion, project string) (strin
 			}
 		}
 	}
-	prompt := promptui.Prompt{
-		Label:    label,
-		Default:  defaultRegion,
-		Validate: sharedUI.ValidateNonEmpty("region"),
-	}
-	result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
+	return sharedUI.PromptInput(label, defaultRegion, sharedUI.ValidateNonEmpty("region"))
 }
 
 // PromptMachineType prompts for the node instance type of a cloud cluster.
 func (ws *WizardSteps) PromptMachineType(defaultType string) (string, error) {
-	prompt := promptui.Prompt{
-		Label:    "Node Instance Type",
-		Default:  defaultType,
-		Validate: sharedUI.ValidateNonEmpty("instance type"),
-	}
-	result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
+	return sharedUI.PromptInput("Node Instance Type", defaultType, sharedUI.ValidateNonEmpty("instance type"))
 }
 
 // PromptNodeCount prompts for number of worker nodes
 func (ws *WizardSteps) PromptNodeCount(defaultCount int) (int, error) {
-	prompt := promptui.Prompt{
-		Label:    "Number of Worker Nodes",
-		Default:  strconv.Itoa(defaultCount),
-		Validate: sharedUI.ValidateIntRange(1, 10, "node count"),
-	}
-
-	result, err := prompt.Run()
+	result, err := sharedUI.PromptInput("Number of Worker Nodes", strconv.Itoa(defaultCount),
+		sharedUI.ValidateIntRange(1, 10, "node count"))
 	if err != nil {
 		return 0, err
 	}
@@ -291,18 +226,7 @@ func (ws *WizardSteps) PromptK8sVersion() (string, error) {
 		"v1.30.9-k3s1",
 	}
 
-	prompt := promptui.Select{
-		Label: "Kubernetes Version",
-		Items: versions,
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	_, result, err := prompt.Run()
+	_, result, err := sharedUI.SelectOption("Kubernetes Version", versions)
 	if err != nil {
 		return "", err
 	}
@@ -348,18 +272,8 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		}
 	}
 
-	prompt := promptui.Select{
-		Label: "Create cluster with this configuration?",
-		Items: []string{"Yes, create the cluster", "No, go back and modify"},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
+	idx, _, err := sharedUI.SelectOption("Create cluster with this configuration?",
+		[]string{"Yes, create the cluster", "No, go back and modify"})
 	if err != nil {
 		return false, err
 	}

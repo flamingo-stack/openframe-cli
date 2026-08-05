@@ -234,15 +234,17 @@ func panelRow(key, value string) {
 // cancelled: <ctx.Err()>"). Crucially it does NOT match context.DeadlineExceeded,
 // so a real timeout is not mislabeled as a user cancellation — and it won't
 // false-match an unrelated error that merely mentions "context canceled" in its
-// text. The remaining string checks cover promptui's Ctrl-C at an interactive
-// prompt ("^C") and the exact "interrupted" some prompt sites return. "interrupted"
-// is matched exactly (not as a substring) so an unrelated "connection was
-// interrupted" network error is not mislabeled as a user cancellation.
+// text. ui.ErrPromptInterrupted matches structurally too, so a %w-wrapped
+// aborted prompt ("cluster selection failed: interrupted") still counts. The
+// remaining string checks cover the exact "interrupted" some prompt sites
+// return and legacy "^C" strings. "interrupted" is matched exactly (not as a
+// substring) so an unrelated "connection was interrupted" network error is not
+// mislabeled as a user cancellation.
 func isInterruption(err error) bool {
 	if err == nil {
 		return false
 	}
-	if stderrors.Is(err, context.Canceled) {
+	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, ui.ErrPromptInterrupted) {
 		return true
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))

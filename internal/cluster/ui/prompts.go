@@ -6,7 +6,6 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
-	"github.com/manifoldco/promptui"
 	"github.com/pterm/pterm"
 )
 
@@ -89,10 +88,7 @@ func CostHint(clusterType models.ClusterType) string {
 // deletes billed infrastructure irreversibly.
 func ConfirmTypedClusterName(name string) (bool, error) {
 	pterm.Warning.Printf("Deleting a cloud cluster destroys all its cloud resources.\n")
-	prompt := promptui.Prompt{
-		Label: fmt.Sprintf("Type the cluster name (%s) to confirm", name),
-	}
-	entered, err := prompt.Run()
+	entered, err := sharedUI.PromptInput(fmt.Sprintf("Type the cluster name (%s) to confirm", name), "", nil)
 	if err != nil {
 		return false, err
 	}

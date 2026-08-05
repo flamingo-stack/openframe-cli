@@ -6,17 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Note: These tests are limited because promptui interacts with stdin/stdout
-// In a real test environment, you would mock the promptui package or use integration tests
-
-// TestSelectTemplates asserts on the shared selectTemplates the selectors use,
-// so a styling change is a deliberate, reviewed edit.
-func TestSelectTemplates(t *testing.T) {
-	assert.Equal(t, "{{ . }}?", selectTemplates.Label)
-	assert.Equal(t, "→ {{ . | cyan }}", selectTemplates.Active) // active row: arrow
-	assert.Equal(t, "  {{ . | white }}", selectTemplates.Inactive)
-	assert.Equal(t, "✓ {{ . | green }}", selectTemplates.Selected) // chosen row: check
-}
+// Note: These tests are limited because the prompts interact with a live
+// terminal; interactive behavior is covered by PTY-driven integration testing.
 
 // Test that the package exports the expected functions
 func TestPackageExports(t *testing.T) {
@@ -27,6 +18,20 @@ func TestPackageExports(t *testing.T) {
 		assert.NotNil(t, SelectFromList)
 	})
 
+	t.Run("SelectOption function exists", func(t *testing.T) {
+		assert.NotNil(t, SelectOption)
+	})
+
+	t.Run("PromptInput function exists", func(t *testing.T) {
+		assert.NotNil(t, PromptInput)
+	})
+}
+
+// TestErrPromptInterrupted pins the exact error text: the shared error handler
+// (errors.isInterruption) matches the literal "interrupted" to print a friendly
+// cancellation notice, so a wording change here silently breaks Ctrl+C UX.
+func TestErrPromptInterrupted(t *testing.T) {
+	assert.Equal(t, "interrupted", ErrPromptInterrupted.Error())
 }
 
 func TestValidateNonEmpty(t *testing.T) {

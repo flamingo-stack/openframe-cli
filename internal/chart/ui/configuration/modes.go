@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
-	"github.com/manifoldco/promptui"
+	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
 )
 
@@ -14,21 +14,10 @@ func (w *ConfigurationWizard) showConfigurationModeSelection() (string, error) {
 	pterm.Info.Printf("How would you like to configure your chart installation?\n")
 	fmt.Println()
 
-	prompt := promptui.Select{
-		Label: "Configuration Mode",
-		Items: []string{
-			"Default configuration",
-			"Interactive configuration",
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "→ {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "{{ . | green }}",
-		},
-	}
-
-	idx, _, err := prompt.Run()
+	idx, _, err := sharedUI.SelectOption("Configuration Mode", []string{
+		"Default configuration",
+		"Interactive configuration",
+	})
 	if err != nil {
 		return "", err
 	}

@@ -4,11 +4,11 @@ go 1.26.0
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
+	github.com/charmbracelet/huh v1.0.0
 	github.com/elastic/go-sysinfo v1.15.5
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/hashicorp/terraform-json v0.28.0
-	github.com/manifoldco/promptui v0.9.0
 	github.com/pterm/pterm v0.12.83
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
@@ -22,6 +22,15 @@ require (
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
 	sigs.k8s.io/yaml v1.6.0
+)
+
+require (
+	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/catppuccin/go v0.3.0 // indirect
+	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 )
 
 require (
@@ -43,14 +52,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
-	// readline is pinned to the commit promptui v0.9.0 declares. readline
-	// v1.5.x changes prompt teardown (stdin wrapping, ioloop/Close semantics)
-	// in ways promptui was never adapted to: after any interactive picker it
-	// leaks readers parked on stdin/channel sends, which can wedge the process
-	// after the prompt returns — the terminal stops echoing, Ctrl+C is
-	// swallowed, and the command never exits. The excludes below keep a future
-	// `go get -u` from silently re-upgrading onto the broken combination.
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.4 // indirect
@@ -173,9 +174,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
-)
-
-exclude (
-	github.com/chzyer/readline v1.5.0
-	github.com/chzyer/readline v1.5.1
 )
