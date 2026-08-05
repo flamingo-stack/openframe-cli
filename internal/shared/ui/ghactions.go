@@ -38,6 +38,15 @@ func ErrorAnnotation(title, message string) {
 	fmt.Printf("::error title=%s::%s\n", escapeAnnotationProperty(title), escapeAnnotationData(message))
 }
 
+// WarningAnnotation surfaces a warning as a ::warning:: annotation (shown in
+// the job summary and on the PR when applicable).
+func WarningAnnotation(title, message string) {
+	if !InGitHubActions() {
+		return
+	}
+	fmt.Printf("::warning title=%s::%s\n", escapeAnnotationProperty(title), escapeAnnotationData(message))
+}
+
 // AppendStepSummary appends a markdown fragment to the job's Step Summary.
 // Best-effort: a missing or unwritable summary file is silently skipped.
 func AppendStepSummary(markdown string) {

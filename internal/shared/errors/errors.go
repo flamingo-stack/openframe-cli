@@ -142,7 +142,9 @@ func (eh *ErrorHandler) handleGenericError(err error) {
 	// In GitHub Actions the failure also becomes a job/PR annotation, so the
 	// cause is visible without opening the 40-minute log.
 	ui.ErrorAnnotation(headline, firstLine(cause))
-	pterm.Error.Printf("%s %s\n", ui.Glyphs().Fail, headline)
+	// No manual failure glyph: the themed pterm.Error prefix carries it
+	// (✖ interactively, the "error" tag otherwise).
+	pterm.Error.Printf("%s\n", headline)
 	if cause != "" {
 		panelRow("cause", cause)
 	}

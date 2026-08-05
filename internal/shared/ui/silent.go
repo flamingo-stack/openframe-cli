@@ -29,6 +29,8 @@ func ApplyGlobalOutputFlags(cmd *cobra.Command) {
 		// actions with cluster events, which needs a clock on every line.
 		pterm.Debug = *pterm.Debug.WithWriter(NewTimestampWriter(os.Stdout))
 	}
+	// Last: the theme reads IsPlain/IsSilent, which the flags above just set.
+	ApplyStatusPrefixTheme()
 }
 
 // silent records whether --silent suppressed non-error output. Read by the logo
