@@ -94,7 +94,22 @@ func SelectOption(label string, items []string) (int, string, error) {
 	return runSelect(label, items)
 }
 
+// requireInteractive fails fast when no one can answer a prompt (CI, piped
+// stdin). Unix CI already fails fast — bubbletea cannot open /dev/tty there —
+// but Windows runners DO have a console, where a prompt blocks reading it until
+// the job times out (a wizard test hung a Windows runner for its full 10
+// minutes exactly this way). Same contract as RequireConfirmation.
+func requireInteractive(label string) error {
+	if IsNonInteractive() {
+		return fmt.Errorf("prompt %q requires an interactive terminal", label)
+	}
+	return nil
+}
+
 func runSelect(label string, items []string) (int, string, error) {
+	if err := requireInteractive(label); err != nil {
+		return 0, "", err
+	}
 	options := make([]huh.Option[int], len(items))
 	for i, item := range items {
 		options[i] = huh.NewOption(item, i)
@@ -105,10 +120,13 @@ func runSelect(label string, items []string) (int, string, error) {
 		Options(options...).
 		Value(&idx)
 	if len(items) > selectPageSize {
-		// Long lists scroll; tell the user the filter exists.
+		// Long lists scroll; tell the user the filter exists. huh's Height
+		// includes the title and description rows (viewport = height - chrome),
+		// so +2 shows exactly selectPageSize option rows; while filtering the
+		// title row becomes the filter input — still one row, so this holds.
 		sel = sel.
 			Description("type / to filter").
-			Height(selectPageSize + 3) // rows + title/description chrome
+			Height(selectPageSize + 2)
 	}
 	if err := sel.Run(); err != nil {
 		return 0, "", normalizePromptError(err)
@@ -121,6 +139,9 @@ func runSelect(label string, items []string) (int, string, error) {
 // on each submission attempt and blocks until it passes. The result is
 // whitespace-trimmed.
 func PromptInput(label, defaultVal string, validate func(string) error) (string, error) {
+	if err := requireInteractive(label); err != nil {
+		return "", err
+	}
 	value := defaultVal
 	in := huh.NewInput().
 		Title(label).
