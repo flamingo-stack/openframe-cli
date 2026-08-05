@@ -339,7 +339,8 @@ The project uses these key Go library dependencies:
 |---|---|
 | **github.com/spf13/cobra** | CLI framework for all commands, flags, help generation, and completion |
 | **github.com/pterm/pterm** | Rich terminal UI: spinners, tables, boxes, interactive prompts, color output |
-| **github.com/manifoldco/promptui** | Interactive selection menus and text input prompts in wizards |
+| **github.com/charmbracelet/huh** | Interactive selection menus (with `/` filtering) and text input prompts in wizards |
+| **github.com/charmbracelet/bubbletea** | TUI runtime: powers huh prompts and the interactive `app status` view |
 | **k8s.io/client-go** | Native Kubernetes API access: kubeconfig loading, rest.Config, typed clients |
 | **k8s.io/apimachinery** | Kubernetes API types, GVR definitions for ArgoCD Application CRDs |
 | **k8s.io/apiextensions-apiserver** | CRD client for checking/managing ArgoCD CRD installation |
