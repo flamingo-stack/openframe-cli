@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClusterType(t *testing.T) {
@@ -256,4 +257,29 @@ func TestJSONSerialization(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotContains(t, string(local), "cloud")
 	})
+}
+
+// ParseClusterType is the single parser behind every --type flag: canonical
+// names, provider aliases (aws→eks, gcp→gke), case-insensitivity, empty as
+// "caller's default", and a clear error for anything else.
+func TestParseClusterType(t *testing.T) {
+	for in, want := range map[string]ClusterType{
+		"k3d": ClusterTypeK3d,
+		"eks": ClusterTypeEKS,
+		"aws": ClusterTypeEKS,
+		"gke": ClusterTypeGKE,
+		"gcp": ClusterTypeGKE,
+		"EKS": ClusterTypeEKS,
+		"AWS": ClusterTypeEKS,
+		"":    "",
+	} {
+		got, err := ParseClusterType(in)
+		require.NoErrorf(t, err, "input %q", in)
+		assert.Equalf(t, want, got, "input %q", in)
+	}
+
+	_, err := ParseClusterType("minikube")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown cluster type 'minikube'")
+	assert.Contains(t, err.Error(), "supported: k3d, eks, gke")
 }

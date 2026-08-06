@@ -69,7 +69,7 @@ func AddGlobalFlags(cmd *cobra.Command, global *GlobalFlags) {
 
 // AddCreateFlags adds create-specific flags to a command
 func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
-	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d, eks, gke)")
+	cmd.Flags().StringVarP(&flags.ClusterType, "type", "t", "", "Cluster type (k3d, eks, gke; aws/gcp work as aliases)")
 	cmd.Flags().IntVarP(&flags.NodeCount, "nodes", "n", 3, "Number of nodes (default 3)")
 	cmd.Flags().StringVar(&flags.K8sVersion, "version", "", "Kubernetes version")
 	cmd.Flags().BoolVar(&flags.SkipWizard, "skip-wizard", false, "Skip interactive wizard")
@@ -155,14 +155,14 @@ func ValidateCreateFlags(flags *CreateFlags) error {
 		return err
 	}
 
-	// Reject unknown --type values up front.
-	clusterType := ClusterType(flags.ClusterType)
-	switch clusterType {
-	case "", ClusterTypeK3d, ClusterTypeGKE, ClusterTypeEKS:
-		// known
-	default:
-		return fmt.Errorf("unknown cluster type '%s' (supported: k3d, eks, gke)", flags.ClusterType)
+	// Reject unknown --type values up front, and write the canonical form
+	// back so every later ClusterType(flags.ClusterType) cast sees eks/gke,
+	// never a raw alias like "aws".
+	clusterType, err := ParseClusterType(flags.ClusterType)
+	if err != nil {
+		return err
 	}
+	flags.ClusterType = string(clusterType)
 
 	// The wizard prompts for these; in skip-wizard mode they must come from
 	// flags.
