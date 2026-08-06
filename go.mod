@@ -2,6 +2,12 @@ module github.com/flamingo-stack/openframe-cli
 
 go 1.26.0
 
+// 1.26.0/1.26.1 crash at random on windows-amd64 (return addresses corrupted
+// during GC stack scanning — golang/go#77975); the fix shipped in 1.26.2.
+// CI and releases resolve the toolchain from this file, so this line is what
+// keeps the shipped Windows binaries off the buggy runtimes.
+toolchain go1.26.5
+
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v1.0.0
