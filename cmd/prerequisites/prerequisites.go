@@ -42,19 +42,19 @@ Examples:
 }
 
 // addTypeFlag registers the --type flag on a subcommand, matching the flag's
-// shape on `cluster create` (-t shorthand, same value set).
+// shape on `cluster create` (-t shorthand, same value set and aliases).
 func addTypeFlag(cmd *cobra.Command, clusterType *string) {
-	cmd.Flags().StringVarP(clusterType, "type", "t", "k3d", "Cluster type (k3d, eks, gke)")
+	cmd.Flags().StringVarP(clusterType, "type", "t", "k3d", "Cluster type (k3d, eks, gke; aws/gcp work as aliases)")
 }
 
 // installCommandFor renders the recovery command for a failed check, carrying
 // the selected --type: after `check --type eks` a bare install would default
 // back to k3d and install the wrong toolset. The default type stays unspoken
 // so the common local case keeps the short command.
-func installCommandFor(clusterType string) string {
+func installCommandFor(clusterType models.ClusterType) string {
 	cmd := "openframe prerequisites install"
-	if t := models.ClusterType(clusterType); t != models.ClusterTypeK3d && t != "" {
-		cmd += " --type " + clusterType
+	if clusterType != models.ClusterTypeK3d && clusterType != "" {
+		cmd += " --type " + string(clusterType)
 	}
 	return cmd
 }
@@ -67,14 +67,20 @@ func checkCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			set, err := clusterprereq.SetForClusterType(models.ClusterType(clusterType))
+			// ParseClusterType, not a raw cast: the aliases (aws/gcp) and
+			// case-insensitivity must behave exactly as on `cluster create`.
+			parsedType, err := models.ParseClusterType(clusterType)
+			if err != nil {
+				return err
+			}
+			set, err := clusterprereq.SetForClusterType(parsedType)
 			if err != nil {
 				return err
 			}
 			res := fw.NewRunner().Check(set)
 			printResult(res)
 			if !res.OK() {
-				return fmt.Errorf("%d prerequisite(s) missing — run '%s'", len(res.Missing), installCommandFor(clusterType))
+				return fmt.Errorf("%d prerequisite(s) missing — run '%s'", len(res.Missing), installCommandFor(parsedType))
 			}
 			return nil
 		},
@@ -91,7 +97,11 @@ func installCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			set, err := clusterprereq.SetForClusterType(models.ClusterType(clusterType))
+			parsedType, err := models.ParseClusterType(clusterType)
+			if err != nil {
+				return err
+			}
+			set, err := clusterprereq.SetForClusterType(parsedType)
 			if err != nil {
 				return err
 			}

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // ClusterType represents different types of Kubernetes clusters
 type ClusterType string
@@ -10,6 +14,27 @@ const (
 	ClusterTypeGKE ClusterType = "gke"
 	ClusterTypeEKS ClusterType = "eks"
 )
+
+// ParseClusterType normalizes a user-supplied cluster type: case-insensitive,
+// accepting the provider names as aliases (aws → eks, gcp → gke) — the mental
+// model "my AWS cluster" is as common as the product name. Every --type flag
+// must parse through here so the aliases work identically across commands.
+// Empty stays empty (the caller's default applies); unknown values are an
+// error naming the accepted set.
+func ParseClusterType(s string) (ClusterType, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return "", nil
+	case "k3d":
+		return ClusterTypeK3d, nil
+	case "eks", "aws":
+		return ClusterTypeEKS, nil
+	case "gke", "gcp":
+		return ClusterTypeGKE, nil
+	default:
+		return "", fmt.Errorf("unknown cluster type '%s' (supported: k3d, eks, gke)", s)
+	}
+}
 
 // ClusterConfig holds cluster configuration
 type ClusterConfig struct {

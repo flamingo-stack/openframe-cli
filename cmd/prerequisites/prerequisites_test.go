@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,7 @@ func TestSubcommands_UnknownType(t *testing.T) {
 			err := root.Execute()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "minikube")
-			assert.Contains(t, err.Error(), "k3d, eks, or gke")
+			assert.Contains(t, err.Error(), "supported: k3d, eks, gke")
 		})
 	}
 }
@@ -60,9 +61,9 @@ func TestSubcommands_UnknownType(t *testing.T) {
 // wrong toolset. The default type stays unspoken to keep the common local
 // command short.
 func TestInstallCommandFor(t *testing.T) {
-	assert.Equal(t, "openframe prerequisites install", installCommandFor("k3d"))
-	assert.Equal(t, "openframe prerequisites install --type eks", installCommandFor("eks"))
-	assert.Equal(t, "openframe prerequisites install --type gke", installCommandFor("gke"))
+	assert.Equal(t, "openframe prerequisites install", installCommandFor(models.ClusterTypeK3d))
+	assert.Equal(t, "openframe prerequisites install --type eks", installCommandFor(models.ClusterTypeEKS))
+	assert.Equal(t, "openframe prerequisites install --type gke", installCommandFor(models.ClusterTypeGKE))
 }
 
 // End-to-end shape of the recovery hint: a typed check that finds tools
@@ -82,4 +83,22 @@ func TestCheck_MissingCloudToolsPointAtTypedInstall(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "openframe prerequisites install --type eks",
 		"the recovery command must keep the selected type, or install defaults back to k3d")
+}
+
+// The provider-name aliases must behave exactly like the canonical types —
+// and the recovery hint must echo the CANONICAL type, teaching the shorter
+// spelling as a side effect.
+func TestCheck_AliasTypeMapsToCanonicalSet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+
+	root := GetPrerequisitesCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"check", "--type", "aws"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openframe prerequisites install --type eks",
+		"--type aws must select the eks set and hint its canonical name")
 }
