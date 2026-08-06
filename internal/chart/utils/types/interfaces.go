@@ -45,6 +45,14 @@ type AppOfAppsService interface {
 	GetStatus(ctx context.Context, namespace string) (models.ChartInfo, error)
 }
 
+// GitRefValidator preflights that a chart ref exists in the remote repository
+// — one ls-remote round-trip — so a typo'd --ref fails in seconds, BEFORE
+// ArgoCD is installed onto the cluster. Implemented by the git repository
+// provider.
+type GitRefValidator interface {
+	ValidateRef(ctx context.Context, config *models.AppOfAppsConfig) error
+}
+
 // InstallationRequest contains all parameters for chart installation
 type InstallationRequest struct {
 	Args         []string

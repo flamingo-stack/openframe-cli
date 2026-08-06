@@ -14,10 +14,30 @@ import (
 type Installer struct {
 	argoCDService    types.ArgoCDService
 	appOfAppsService types.AppOfAppsService
+	// refValidator preflights the chart ref before anything touches the
+	// cluster; nil skips the preflight (tests, callers without a repo).
+	refValidator types.GitRefValidator
 }
 
 // InstallChartsWithContext handles the complete chart installation process with context support
 func (i *Installer) InstallChartsWithContext(ctx context.Context, config config.ChartInstallConfig) error {
+	// A bad --ref must fail HERE, in seconds — not after ArgoCD has been
+	// installed: the clone was the first place a typo'd ref surfaced, leaving
+	// the cluster with ArgoCD deployed and no applications.
+	if config.HasAppOfApps() && i.refValidator != nil {
+		appConfig := *config.AppOfApps
+		if appConfig.GitHubBranch == "" {
+			appConfig.GitHubBranch = "main" // mirror the app-of-apps default
+		}
+		if err := i.refValidator.ValidateRef(ctx, &appConfig); err != nil {
+			var bnfErr *sharedErrors.BranchNotFoundError
+			if stderrors.As(err, &bnfErr) {
+				return err // renders its own actionable panel; don't wrap
+			}
+			return errors.WrapAsChartError("preflight", "chart repository", err).WithCluster(config.ClusterName)
+		}
+	}
+
 	// Install ArgoCD first
 	if err := i.argoCDService.Install(ctx, config); err != nil {
 		return errors.WrapAsChartError("installation", "ArgoCD", err).WithCluster(config.ClusterName)

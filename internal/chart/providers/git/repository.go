@@ -9,8 +9,11 @@ import (
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
+	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	gogit "github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/pterm/pterm"
 )
 
@@ -73,6 +76,45 @@ func (r *Repository) CloneChartRepository(ctx context.Context, config *models.Ap
 	}
 	// Mask the token in any surfaced output as defense-in-depth.
 	return nil, fmt.Errorf("failed to clone repository: %s", maskToken(lastErr.Error(), auth.token))
+}
+
+// ValidateRef checks — in one ls-remote round-trip, before anything touches
+// the cluster — that the configured ref exists in the chart repository as a
+// branch or tag. The clone used to be the first place a bad --ref surfaced,
+// AFTER ArgoCD was already installed: certificates refreshed, helm release
+// deployed, API port awaited, then "branch does not exist" — leaving the
+// cluster mutated with no applications. A missing ref returns a
+// *sharedErrors.BranchNotFoundError carrying the refs the repository DOES
+// offer, so the error can answer the next question instead of prompting it.
+func (r *Repository) ValidateRef(ctx context.Context, config *models.AppOfAppsConfig) error {
+	auth := extractGitAuth(config.GitHubRepo)
+	remote := gogit.NewRemote(memory.NewStorage(), &gitconfig.RemoteConfig{
+		Name: "origin",
+		URLs: []string{auth.cleanURL},
+	})
+	refs, err := remote.ListContext(ctx, &gogit.ListOptions{Auth: auth.buildAuth()})
+	if err != nil {
+		// Same transport and auth as the clone: whatever broke here would have
+		// broken the clone too, only after the cluster had been mutated.
+		return fmt.Errorf("could not list refs of the chart repository: %s", maskToken(err.Error(), auth.token))
+	}
+
+	var branches, tags []string
+	for _, ref := range refs {
+		name := ref.Name()
+		switch {
+		case name.IsBranch():
+			branches = append(branches, name.Short())
+		case name.IsTag():
+			tags = append(tags, name.Short())
+		}
+	}
+	for _, existing := range append(branches, tags...) {
+		if existing == config.GitHubBranch {
+			return nil
+		}
+	}
+	return sharedErrors.NewBranchNotFoundErrorWithRefs(config.GitHubBranch, branches, tags)
 }
 
 // chartResult validates that chartPath exists inside the freshly cloned tempDir

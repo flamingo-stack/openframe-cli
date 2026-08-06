@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
+	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/require"
@@ -147,4 +148,37 @@ func ofcredCount(t *testing.T) int {
 	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "ofcred-*"))
 	require.NoError(t, err)
 	return len(matches)
+}
+
+// ValidateRef is the pre-install ls-remote preflight: a bad --ref must be
+// caught in one round-trip BEFORE ArgoCD is installed onto the cluster.
+func TestValidateRef_BranchAndTag(t *testing.T) {
+	url, branch := makeLocalRepo(t, "manifests/app-of-apps")
+	tagLocalRepo(t, url, "1.0.48")
+	repo := NewRepository()
+
+	for _, ref := range []string{branch, "1.0.48"} {
+		require.NoError(t, repo.ValidateRef(context.Background(), &models.AppOfAppsConfig{
+			GitHubRepo:   url,
+			GitHubBranch: ref,
+		}), "existing ref %q must validate", ref)
+	}
+}
+
+func TestValidateRef_MissingRefListsAvailable(t *testing.T) {
+	url, branch := makeLocalRepo(t, "manifests/app-of-apps")
+	tagLocalRepo(t, url, "1.0.48")
+	repo := NewRepository()
+
+	err := repo.ValidateRef(context.Background(), &models.AppOfAppsConfig{
+		GitHubRepo:   url,
+		GitHubBranch: "v1.4.0",
+	})
+	require.Error(t, err)
+
+	var bnfErr *sharedErrors.BranchNotFoundError
+	require.ErrorAs(t, err, &bnfErr, "a missing ref must be a BranchNotFoundError so the handler renders it")
+	require.Equal(t, "v1.4.0", bnfErr.Branch)
+	require.Contains(t, bnfErr.Branches, branch, "the error must carry the refs the repository DOES offer")
+	require.Contains(t, bnfErr.Tags, "1.0.48")
 }

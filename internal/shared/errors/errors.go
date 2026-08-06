@@ -4,6 +4,8 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
@@ -117,6 +119,9 @@ func (eh *ErrorHandler) handleCommandError(err *executor.CommandError, outer err
 // from a config file or a default rather than from something the user typed.
 func (eh *ErrorHandler) handleBranchNotFoundError(err *BranchNotFoundError) {
 	pterm.Error.Printfln("Branch %q does not exist in the chart repository", err.Branch)
+	if available := err.AvailableSummary(); available != "" {
+		pterm.Info.Printfln("Available refs — %s", available)
+	}
 	pterm.Info.Println("Check the ref, or pass an existing one with --ref (e.g. --ref main)")
 }
 
@@ -269,6 +274,12 @@ func (eh *ErrorHandler) isUserInterruption(err error) bool {
 // BranchNotFoundError represents a branch not found error
 type BranchNotFoundError struct {
 	Branch string
+	// Branches and Tags list what the repository actually offers, when the
+	// caller had them (the ls-remote preflight does; the clone path does not).
+	// They turn "check the ref" into an answer: the chart repo's tag scheme is
+	// not guessable (262 tags, none with a v prefix) — see AvailableSummary.
+	Branches []string
+	Tags     []string
 }
 
 func (e *BranchNotFoundError) Error() string {
@@ -278,6 +289,65 @@ func (e *BranchNotFoundError) Error() string {
 // NewBranchNotFoundError creates a new branch not found error
 func NewBranchNotFoundError(branch string) *BranchNotFoundError {
 	return &BranchNotFoundError{Branch: branch}
+}
+
+// NewBranchNotFoundErrorWithRefs creates a branch not found error that also
+// carries the refs the repository does offer, for actionable display.
+func NewBranchNotFoundErrorWithRefs(branch string, branches, tags []string) *BranchNotFoundError {
+	return &BranchNotFoundError{Branch: branch, Branches: branches, Tags: tags}
+}
+
+// maxTagsShown caps the tag listing: the chart repository carries hundreds of
+// tags, and a wall of them would bury the branches (the refs most users want).
+const maxTagsShown = 10
+
+// AvailableSummary renders the refs the repository offers as one human line,
+// or "" when the error does not carry them. Branches are listed in full
+// (there are few); tags are version-sorted and capped at the highest
+// maxTagsShown with a "+N more" marker.
+func (e *BranchNotFoundError) AvailableSummary() string {
+	if len(e.Branches) == 0 && len(e.Tags) == 0 {
+		return ""
+	}
+	var parts []string
+	if len(e.Branches) > 0 {
+		branches := append([]string(nil), e.Branches...)
+		sort.Strings(branches)
+		parts = append(parts, "branches: "+strings.Join(branches, ", "))
+	}
+	if len(e.Tags) > 0 {
+		tags := append([]string(nil), e.Tags...)
+		sort.Slice(tags, func(i, j int) bool { return versionLess(tags[j], tags[i]) })
+		more := ""
+		if len(tags) > maxTagsShown {
+			more = fmt.Sprintf(", … +%d more", len(tags)-maxTagsShown)
+			tags = tags[:maxTagsShown]
+		}
+		parts = append(parts, "tags: "+strings.Join(tags, ", ")+more)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// versionLess orders version-like strings numerically per dot-separated part
+// ("1.0.9" < "1.0.48"), falling back to string order for non-numeric parts —
+// plain sort.Strings would rank 1.0.9 above 1.0.48.
+func versionLess(a, b string) bool {
+	as, bs := strings.Split(strings.TrimPrefix(a, "v"), "."), strings.Split(strings.TrimPrefix(b, "v"), ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		an, aerr := strconv.Atoi(as[i])
+		bn, berr := strconv.Atoi(bs[i])
+		switch {
+		case aerr == nil && berr == nil:
+			if an != bn {
+				return an < bn
+			}
+		default:
+			if as[i] != bs[i] {
+				return as[i] < bs[i]
+			}
+		}
+	}
+	return len(as) < len(bs)
 }
 
 // HandleGlobalError provides a global error handling entry point

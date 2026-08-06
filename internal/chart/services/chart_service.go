@@ -63,9 +63,19 @@ type ChartService struct {
 	// to exercise the install orchestration without a cluster (see
 	// install_orchestration_test.go). Kept unexported on purpose — the public
 	// constructors' signatures and behavior are unchanged.
-	newFileCleanup     func() installFileCleanup
-	installServices    installServicesFactory
-	installRetryPolicy sharedErrors.RetryPolicy
+	newFileCleanup      func() installFileCleanup
+	installServices     installServicesFactory
+	installRetryPolicy  sharedErrors.RetryPolicy
+	installRefValidator types.GitRefValidator
+}
+
+// installRefValidatorOrDefault returns the injected --ref preflight, or the
+// production git repository provider.
+func (cs *ChartService) installRefValidatorOrDefault() types.GitRefValidator {
+	if cs.installRefValidator != nil {
+		return cs.installRefValidator
+	}
+	return cs.gitRepository
 }
 
 // fileCleanupOrDefault returns the injected file-cleanup factory's product, or
@@ -573,6 +583,7 @@ func (w *InstallationWorkflow) performInstallation(ctx context.Context, config c
 	installer := &Installer{
 		argoCDService:    argoCDService,
 		appOfAppsService: appOfAppsService,
+		refValidator:     w.chartService.installRefValidatorOrDefault(),
 	}
 
 	err = installer.InstallChartsWithContext(ctx, config)

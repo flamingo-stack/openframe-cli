@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	chartModels "github.com/flamingo-stack/openframe-cli/internal/chart/models"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/config"
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/types"
 	sharedErrors "github.com/flamingo-stack/openframe-cli/internal/shared/errors"
@@ -65,15 +66,29 @@ func (s *spyFileCleanup) called(name string) bool {
 	return false
 }
 
+// stubRefValidator fakes the --ref ls-remote preflight: the orchestration
+// tests must not reach the network (the production validator would try to
+// list refs of the fake GitHub URL).
+type stubRefValidator struct {
+	err   error
+	calls int
+}
+
+func (s *stubRefValidator) ValidateRef(context.Context, *chartModels.AppOfAppsConfig) error {
+	s.calls++
+	return s.err
+}
+
 // orchestrationHarness wires a real ChartService (real HelmManager, real
 // Installer, real retry executor) with faked install collaborators.
 type orchestrationHarness struct {
-	svc        *ChartService
-	argoCD     *MockArgoCDService
-	appOfApps  *MockAppOfAppsService
-	cleanup    *spyFileCleanup
-	order      []string
-	installCfg *config.ChartInstallConfig // config seen by the collaborator factory
+	svc          *ChartService
+	argoCD       *MockArgoCDService
+	appOfApps    *MockAppOfAppsService
+	cleanup      *spyFileCleanup
+	refValidator *stubRefValidator
+	order        []string
+	installCfg   *config.ChartInstallConfig // config seen by the collaborator factory
 }
 
 // step returns a mock Run-callback recording invocation order across fakes.
@@ -91,12 +106,14 @@ func newOrchestrationHarness(t *testing.T) *orchestrationHarness {
 	}
 
 	h := &orchestrationHarness{
-		svc:       svc,
-		argoCD:    new(MockArgoCDService),
-		appOfApps: new(MockAppOfAppsService),
-		cleanup:   &spyFileCleanup{real: files.NewFileCleanup()},
+		svc:          svc,
+		argoCD:       new(MockArgoCDService),
+		appOfApps:    new(MockAppOfAppsService),
+		cleanup:      &spyFileCleanup{real: files.NewFileCleanup()},
+		refValidator: &stubRefValidator{},
 	}
 	svc.newFileCleanup = func() installFileCleanup { return h.cleanup }
+	svc.installRefValidator = h.refValidator
 	svc.installServices = func(_ *ChartService, cfg config.ChartInstallConfig) (types.ArgoCDService, types.AppOfAppsService, error) {
 		h.installCfg = &cfg
 		return h.argoCD, h.appOfApps, nil
@@ -261,6 +278,24 @@ func TestInstallWithContext_CollaboratorFactoryErrorPropagates(t *testing.T) {
 	requireTempValuesGone(t, h)
 }
 
+// TestInstallWithContext_BadRefFailsBeforeAnythingTouchesTheCluster is the
+// regression guard: a ref that does not exist in the chart repository must
+// fail the install in the preflight — before ArgoCD is installed — and must
+// not be retried. The bad ref used to surface only at clone time, AFTER
+// ArgoCD was deployed, leaving the cluster mutated with no applications.
+func TestInstallWithContext_BadRefFailsBeforeAnythingTouchesTheCluster(t *testing.T) {
+	h := newOrchestrationHarness(t)
+	h.refValidator.err = sharedErrors.NewBranchNotFoundErrorWithRefs("v1.4.0", []string{"main"}, []string{"1.0.48"})
+
+	err := h.svc.InstallWithContext(context.Background(), installRequest())
+
+	var bnfErr *sharedErrors.BranchNotFoundError
+	assert.True(t, stderrors.As(err, &bnfErr), "the BranchNotFoundError must surface unwrapped, got: %v", err)
+	assert.Equal(t, 1, h.refValidator.calls, "a definitive bad-ref verdict must not be retried")
+	h.argoCD.AssertNotCalled(t, "Install", mock.Anything, mock.Anything)
+	h.appOfApps.AssertNotCalled(t, "Install", mock.Anything, mock.Anything)
+}
+
 // TestInstallWithContextDeferred_ResolvesHelmManagerThenInstalls covers the
 // deferred entry point: the service starts without a HelmManager (standalone
 // install) and the workflow initializes it from the request's rest.Config
@@ -273,12 +308,14 @@ func TestInstallWithContextDeferred_ResolvesHelmManagerThenInstalls(t *testing.T
 		t.Fatalf("NewChartServiceDeferred: %v", err)
 	}
 	h := &orchestrationHarness{
-		svc:       svc,
-		argoCD:    new(MockArgoCDService),
-		appOfApps: new(MockAppOfAppsService),
-		cleanup:   &spyFileCleanup{real: files.NewFileCleanup()},
+		svc:          svc,
+		argoCD:       new(MockArgoCDService),
+		appOfApps:    new(MockAppOfAppsService),
+		cleanup:      &spyFileCleanup{real: files.NewFileCleanup()},
+		refValidator: &stubRefValidator{},
 	}
 	svc.newFileCleanup = func() installFileCleanup { return h.cleanup }
+	svc.installRefValidator = h.refValidator
 	svc.installServices = func(cs *ChartService, cfg config.ChartInstallConfig) (types.ArgoCDService, types.AppOfAppsService, error) {
 		// By collaborator-construction time the deferred HelmManager must exist.
 		assert.NotNil(t, cs.helmManager, "deferred HelmManager must be initialized before collaborators are built")

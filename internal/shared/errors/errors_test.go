@@ -450,3 +450,30 @@ func TestGenericHint_K3dCreateSpecialCase(t *testing.T) {
 	assert.Contains(t, hint, "docker info")
 	assert.Contains(t, hint, "6550")
 }
+
+// AvailableSummary turns "check the ref" into an answer: it lists what the
+// repository actually offers. Tags sort numerically per part (1.0.9 < 1.0.48 —
+// plain string sort would invert them) and are capped so hundreds of release
+// tags cannot bury the branches.
+func TestBranchNotFoundError_AvailableSummary(t *testing.T) {
+	t.Run("empty without refs", func(t *testing.T) {
+		assert.Empty(t, NewBranchNotFoundError("x").AvailableSummary())
+	})
+
+	t.Run("branches and version-sorted tags", func(t *testing.T) {
+		e := NewBranchNotFoundErrorWithRefs("v1.4.0", []string{"main", "develop"}, []string{"1.0.9", "1.0.48", "0.9.1"})
+		s := e.AvailableSummary()
+		assert.Equal(t, "branches: develop, main; tags: 1.0.48, 1.0.9, 0.9.1", s)
+	})
+
+	t.Run("tags capped with more-marker", func(t *testing.T) {
+		tags := make([]string, 0, 25)
+		for i := 1; i <= 25; i++ {
+			tags = append(tags, fmt.Sprintf("1.0.%d", i))
+		}
+		s := NewBranchNotFoundErrorWithRefs("x", nil, tags).AvailableSummary()
+		assert.Contains(t, s, "1.0.25", "the highest tags must be the ones shown")
+		assert.Contains(t, s, "+15 more")
+		assert.NotContains(t, s, "1.0.1,", "low tags beyond the cap must be elided")
+	})
+}
