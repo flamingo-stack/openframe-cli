@@ -612,4 +612,34 @@ contexts:
 		"a gcloud context for a different cluster must not match")
 	assert.Empty(t, infoFor(tfengine.Record{Name: "my-gke", Project: "other-project"}).Context,
 		"a gcloud context in a different project must not match")
+	assert.Empty(t, infoFor(tfengine.Record{Name: "my-gke", Project: "my-project", Region: "europe-west1"}).Context,
+		"a gcloud context in a different region must not match")
+}
+
+// A same-name, same-project cluster living in TWO regions must resolve to the
+// recorded region's context — the prefix/suffix alone accepts both, and the
+// lexically first (europe before us) would otherwise win regardless of the
+// record.
+func TestInfoFor_SameNameAcrossRegionsPicksRecordedRegion(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte(`
+apiVersion: v1
+kind: Config
+contexts:
+- name: gke_my-project_europe-west1_my-gke
+  context:
+    cluster: c
+    user: u
+- name: gke_my-project_us-central1-a_my-gke
+  context:
+    cluster: c
+    user: u
+`), 0o600))
+	t.Setenv("KUBECONFIG", kubeconfig)
+
+	assert.Equal(t, "gke_my-project_us-central1-a_my-gke",
+		infoFor(tfengine.Record{Name: "my-gke", Project: "my-project", Region: "us-central1"}).Context)
+	assert.Equal(t, "gke_my-project_europe-west1_my-gke",
+		infoFor(tfengine.Record{Name: "my-gke", Project: "my-project", Region: "europe-west1"}).Context,
+		"the regional (zone-less) context form must match its region exactly")
 }

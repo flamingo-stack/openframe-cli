@@ -493,8 +493,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, name string, clusterType m
 // plan-stage failure has no context at all). Beyond the plain name our merge
 // writes, it recognizes the gke_<project>_<location>_<name> context `gcloud
 // container clusters get-credentials` creates — the same candidate shape
-// discovery's matchContext uses; the location (zone or region) is matched
-// loosely since the record stores only the region.
+// discovery's matchContext uses. The record stores only the region, so the
+// location segment must be the region itself (regional cluster) or a zone
+// inside it ("us-central1-a") — without that check, a same-name same-project
+// cluster in ANOTHER region could satisfy the prefix/suffix alone and the
+// lexically first context would win.
 func kubeContextFor(rec tfengine.Record) string {
 	if tfengine.KubeconfigHasContext(rec.Name) {
 		return rec.Name
@@ -502,7 +505,11 @@ func kubeContextFor(rec tfengine.Record) string {
 	prefix := "gke_" + rec.Project + "_"
 	suffix := "_" + rec.Name
 	return tfengine.KubeconfigContextMatching(func(name string) bool {
-		return strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+			return false
+		}
+		location := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+		return location == rec.Region || strings.HasPrefix(location, rec.Region+"-")
 	})
 }
 
