@@ -47,6 +47,18 @@ func addTypeFlag(cmd *cobra.Command, clusterType *string) {
 	cmd.Flags().StringVarP(clusterType, "type", "t", "k3d", "Cluster type (k3d, eks, gke)")
 }
 
+// installCommandFor renders the recovery command for a failed check, carrying
+// the selected --type: after `check --type eks` a bare install would default
+// back to k3d and install the wrong toolset. The default type stays unspoken
+// so the common local case keeps the short command.
+func installCommandFor(clusterType string) string {
+	cmd := "openframe prerequisites install"
+	if t := models.ClusterType(clusterType); t != models.ClusterTypeK3d && t != "" {
+		cmd += " --type " + clusterType
+	}
+	return cmd
+}
+
 func checkCmd() *cobra.Command {
 	var clusterType string
 	cmd := &cobra.Command{
@@ -62,7 +74,7 @@ func checkCmd() *cobra.Command {
 			res := fw.NewRunner().Check(set)
 			printResult(res)
 			if !res.OK() {
-				return fmt.Errorf("%d prerequisite(s) missing — run 'openframe prerequisites install'", len(res.Missing))
+				return fmt.Errorf("%d prerequisite(s) missing — run '%s'", len(res.Missing), installCommandFor(clusterType))
 			}
 			return nil
 		},

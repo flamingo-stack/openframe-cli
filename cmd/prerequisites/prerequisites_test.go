@@ -54,3 +54,32 @@ func TestSubcommands_UnknownType(t *testing.T) {
 		})
 	}
 }
+
+// installCommandFor must carry the selected --type: after `check --type eks`
+// a bare `prerequisites install` would default back to k3d and install the
+// wrong toolset. The default type stays unspoken to keep the common local
+// command short.
+func TestInstallCommandFor(t *testing.T) {
+	assert.Equal(t, "openframe prerequisites install", installCommandFor("k3d"))
+	assert.Equal(t, "openframe prerequisites install --type eks", installCommandFor("eks"))
+	assert.Equal(t, "openframe prerequisites install --type gke", installCommandFor("gke"))
+}
+
+// End-to-end shape of the recovery hint: a typed check that finds tools
+// missing must point at a typed install. HOME and PATH are pointed at empty
+// temp dirs so every eks tool (terraform, aws — both PATH lookups) reads as
+// missing regardless of the host.
+func TestCheck_MissingCloudToolsPointAtTypedInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+
+	root := GetPrerequisitesCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"check", "--type", "eks"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openframe prerequisites install --type eks",
+		"the recovery command must keep the selected type, or install defaults back to k3d")
+}
