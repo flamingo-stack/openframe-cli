@@ -588,3 +588,28 @@ func TestPlanCluster_ExistingWorkspacePreviewsResumeWithoutSideEffects(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, `{"version":4}`, string(afterState))
 }
+
+// A cluster reachable only through the gke_<project>_<location>_<name>
+// context that `gcloud container clusters get-credentials` writes must still
+// show that context — same candidate shape as discovery's matchContext.
+func TestInfoFor_MatchesGcloudContext(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte(`
+apiVersion: v1
+kind: Config
+contexts:
+- name: gke_my-project_us-central1-a_my-gke
+  context:
+    cluster: c
+    user: u
+`), 0o600))
+	t.Setenv("KUBECONFIG", kubeconfig)
+
+	rec := tfengine.Record{Name: "my-gke", Project: "my-project", Region: "us-central1"}
+	assert.Equal(t, "gke_my-project_us-central1-a_my-gke", infoFor(rec).Context)
+
+	assert.Empty(t, infoFor(tfengine.Record{Name: "other", Project: "my-project"}).Context,
+		"a gcloud context for a different cluster must not match")
+	assert.Empty(t, infoFor(tfengine.Record{Name: "my-gke", Project: "other-project"}).Context,
+		"a gcloud context in a different project must not match")
+}

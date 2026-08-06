@@ -52,12 +52,14 @@ func TestTemplate_OperatorCanReachTheCluster(t *testing.T) {
 // template.
 func TestTemplate_DeclaresCoreAddons(t *testing.T) {
 	src := string(mainTF)
+	// Match the addon map ENTRIES, not the raw source: the addon names also
+	// appear in comments, which must not be able to satisfy this guard.
 	for _, addon := range []string{"vpc-cni", "kube-proxy", "coredns"} {
-		assert.Containsf(t, src, addon,
+		assert.Regexpf(t, `(?m)^\s*`+regexp.QuoteMeta(addon)+`\s*=\s*\{`, src,
 			"module v21 installs no addons by itself — %s must be declared or the cluster is born broken", addon)
 	}
-	assert.Contains(t, src, "before_compute = true",
-		"vpc-cni must install before the node group, or nodes wait on a missing CNI")
+	assert.Regexp(t, `(?ms)^\s*vpc-cni\s*=\s*\{[^}]*^\s*before_compute\s*=\s*true`, src,
+		"vpc-cni itself must install before the node group, or nodes wait on a missing CNI")
 }
 
 // The EBS CSI controller is a regular pod reaching the node role via IMDS —

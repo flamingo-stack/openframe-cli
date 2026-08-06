@@ -488,15 +488,27 @@ func (p *Provider) GetKubeconfig(ctx context.Context, name string, clusterType m
 	return string(data), nil
 }
 
+// kubeContextFor resolves the kubeconfig context that reaches this cluster,
+// or "" when none exists — never a value fabricated from the cluster name (a
+// plan-stage failure has no context at all). Beyond the plain name our merge
+// writes, it recognizes the gke_<project>_<location>_<name> context `gcloud
+// container clusters get-credentials` creates — the same candidate shape
+// discovery's matchContext uses; the location (zone or region) is matched
+// loosely since the record stores only the region.
+func kubeContextFor(rec tfengine.Record) string {
+	if tfengine.KubeconfigHasContext(rec.Name) {
+		return rec.Name
+	}
+	prefix := "gke_" + rec.Project + "_"
+	suffix := "_" + rec.Name
+	return tfengine.KubeconfigContextMatching(func(name string) bool {
+		return strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
+	})
+}
+
 // infoFor maps a registry record onto the shared ClusterInfo shape.
 func infoFor(rec tfengine.Record) models.ClusterInfo {
-	// The kubeconfig context exists only once a successful create merged it —
-	// report what the kubeconfig holds, never a value fabricated from the
-	// cluster name (a plan-stage failure has no context at all).
-	kubeContext := ""
-	if tfengine.KubeconfigHasContext(rec.Name) {
-		kubeContext = rec.Name
-	}
+	kubeContext := kubeContextFor(rec)
 	return models.ClusterInfo{
 		Name:       rec.Name,
 		Type:       models.ClusterTypeGKE,

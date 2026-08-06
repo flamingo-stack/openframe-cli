@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -241,6 +242,11 @@ func TestNewEngine_VerboseWrapsRunnerForSelectiveStdout(t *testing.T) {
 	binDir := filepath.Join(home, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(binDir, "terraform"), []byte("#!/bin/sh\n"), 0o750)) // #nosec G306 -- must be executable for LookPath
+	if runtime.GOOS == "windows" {
+		// Windows LookPath resolves only PATHEXT extensions, so the bare
+		// "terraform" fixture is invisible there — provide terraform.exe too.
+		require.NoError(t, os.WriteFile(filepath.Join(binDir, "terraform.exe"), []byte("stub"), 0o750)) // #nosec G306
+	}
 	t.Setenv("PATH", binDir)
 
 	verbose, err := NewEngine(true).newRunner(t.TempDir())

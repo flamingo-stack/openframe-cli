@@ -91,13 +91,16 @@ type verboseRunner struct {
 // the first command of an instance — priming it first keeps even that blob
 // off the terminal.
 func (r *verboseRunner) withStdout(ctx context.Context, fn func() error) error {
-	if _, _, err := r.Terraform.Version(ctx, false); err != nil {
+	if _, _, err := r.Version(ctx, false); err != nil {
 		return err
 	}
-	r.Terraform.SetStdout(os.Stdout)
-	defer r.Terraform.SetStdout(io.Discard)
+	r.SetStdout(os.Stdout)
+	defer r.SetStdout(io.Discard)
 	return fn()
 }
+
+// The overrides below must call through r.Terraform explicitly — a bare
+// r.Init/r.Plan would recurse into the override itself.
 
 func (r *verboseRunner) Init(ctx context.Context, opts ...tfexec.InitOption) error {
 	return r.withStdout(ctx, func() error { return r.Terraform.Init(ctx, opts...) })

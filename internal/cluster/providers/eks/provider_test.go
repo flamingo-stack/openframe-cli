@@ -433,3 +433,28 @@ func TestCreateCluster_ResumeRefreshesStatusAndCreatedAt(t *testing.T) {
 	assert.True(t, resumed.CreatedAt.After(failed.CreatedAt),
 		"CREATED must reflect when the cluster became Ready, not the first failed attempt")
 }
+
+// A cluster reachable only through the ARN-named context that
+// `aws eks update-kubeconfig` writes must still show that context — same
+// candidate shapes as discovery's matchEKSContext.
+func TestInfoFor_MatchesARNContext(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte(`
+apiVersion: v1
+kind: Config
+contexts:
+- name: arn:aws:eks:us-east-1:719857072830:cluster/my-eks
+  context:
+    cluster: c
+    user: u
+`), 0o600))
+	t.Setenv("KUBECONFIG", kubeconfig)
+
+	rec := tfengine.Record{Name: "my-eks", Region: "us-east-1"}
+	assert.Equal(t, "arn:aws:eks:us-east-1:719857072830:cluster/my-eks", infoFor(rec).Context)
+
+	assert.Empty(t, infoFor(tfengine.Record{Name: "other", Region: "us-east-1"}).Context,
+		"an ARN context for a different cluster must not match")
+	assert.Empty(t, infoFor(tfengine.Record{Name: "my-eks", Region: "eu-west-1"}).Context,
+		"an ARN context in a different region must not match")
+}
