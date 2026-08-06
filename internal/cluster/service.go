@@ -19,6 +19,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -210,9 +211,10 @@ func (s *ClusterService) CreateCluster(ctx context.Context, config models.Cluste
 		pterm.Success.Printf("Cluster '%s' created successfully\n", config.Name)
 	}
 
-	// Get and display cluster status
+	// Get and display cluster status, verified against the live API — the box
+	// must never assert "Ready" on the provisioner's exit code alone.
 	if clusterInfo, statusErr := mgr.GetClusterStatus(ctx, config.Name); statusErr == nil {
-		s.displayClusterCreationSummary(clusterInfo)
+		s.displayClusterCreationSummary(ctx, clusterInfo, restConfig)
 	}
 
 	// Show next steps
@@ -748,20 +750,116 @@ func apiServerLine(endpoint string) string {
 	return "API:      " + endpoint
 }
 
-// displayClusterCreationSummary displays a summary after cluster creation
-func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) {
+// clusterHealth is what a post-create verification actually observed.
+// verifyErr is a failure to LOOK (unreachable API), which is different from
+// looking and seeing something unhealthy.
+type clusterHealth struct {
+	readyNodes, totalNodes int
+	hasDefaultStorageClass bool
+	verifyErr              error
+}
+
+// healthy reports whether everything checked out: every node Ready (and at
+// least one exists) and a default StorageClass present — without it every
+// PersistentVolumeClaim of the platform (Kafka, MongoDB, Cassandra, …) stays
+// Pending forever.
+func (h clusterHealth) healthy() bool {
+	return h.verifyErr == nil && h.totalNodes > 0 && h.readyNodes == h.totalNodes && h.hasDefaultStorageClass
+}
+
+// verifyClusterHealth checks the just-created cluster with client-go: node
+// readiness and the presence of a default StorageClass. It polls briefly —
+// nodes registered a moment ago may still be flipping to Ready — and returns
+// the last observation rather than waiting indefinitely.
+func verifyClusterHealth(ctx context.Context, restConfig *rest.Config) clusterHealth {
+	client, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return clusterHealth{verifyErr: err}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	var h clusterHealth
+	for {
+		h = observeClusterHealth(ctx, client)
+		if h.healthy() {
+			return h
+		}
+		select {
+		case <-ctx.Done():
+			return h // report the truth as last seen, not an error
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// observeClusterHealth performs one health observation via the given client.
+func observeClusterHealth(ctx context.Context, client kubernetes.Interface) clusterHealth {
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return clusterHealth{verifyErr: err}
+	}
+	h := clusterHealth{totalNodes: len(nodes.Items)}
+	for _, n := range nodes.Items {
+		for _, cond := range n.Status.Conditions {
+			if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+				h.readyNodes++
+				break
+			}
+		}
+	}
+	classes, err := client.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		h.verifyErr = err
+		return h
+	}
+	for _, sc := range classes.Items {
+		if sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" {
+			h.hasDefaultStorageClass = true
+			break
+		}
+	}
+	return h
+}
+
+// summaryStatusLines renders the STATUS and NODES rows of the creation box
+// from what was VERIFIED, never from the provisioner's exit code alone: the
+// old hardcoded "Ready" printed identically over NotReady nodes or a cluster
+// that could not bind a single PVC.
+func summaryStatusLines(h clusterHealth, configuredNodes int) (status, nodes string) {
+	switch {
+	case h.verifyErr != nil:
+		return pterm.Yellow("Provisioned (health not verified — API unreachable)"),
+			fmt.Sprintf("%d (configured)", configuredNodes)
+	case h.healthy():
+		return pterm.Green("Ready"), fmt.Sprintf("%d/%d Ready", h.readyNodes, h.totalNodes)
+	default:
+		return pterm.Yellow(fmt.Sprintf("Provisioned — %d/%d nodes Ready", h.readyNodes, h.totalNodes)),
+			fmt.Sprintf("%d/%d Ready", h.readyNodes, h.totalNodes)
+	}
+}
+
+// displayClusterCreationSummary displays a summary after cluster creation.
+// The STATUS row states what was verified via the API, not assumed.
+func (s *ClusterService) displayClusterCreationSummary(ctx context.Context, info models.ClusterInfo, restConfig *rest.Config) {
 	pterm.DefaultBasicText.Println()
+
+	health := clusterHealth{verifyErr: fmt.Errorf("no rest config")}
+	if restConfig != nil {
+		health = verifyClusterHealth(ctx, restConfig)
+	}
+	statusLine, nodesLine := summaryStatusLines(health, info.NodeCount)
 
 	// Create a clean box for the summary
 	boxContent := fmt.Sprintf(
 		"NAME:     %s\n"+
 			"TYPE:     %s\n"+
 			"STATUS:   %s\n"+
-			"NODES:    %d",
+			"NODES:    %s",
 		pterm.Bold.Sprint(info.Name),
 		strings.ToUpper(string(info.Type)),
-		pterm.Green("Ready"),
-		info.NodeCount,
+		statusLine,
+		nodesLine,
 	)
 	// The k3d-<name> Docker network is k3d-specific; a cloud cluster shows its
 	// region instead so the box never invents a k3d network for GKE/EKS.
@@ -772,10 +870,24 @@ func (s *ClusterService) displayClusterCreationSummary(info models.ClusterInfo) 
 	}
 	boxContent += "\n" + apiServerLine(s.apiServerEndpoint(info.Name))
 
+	title := " ✅ Cluster Created "
+	if !health.healthy() {
+		// The infrastructure applied, but "Created" with a green Ready would
+		// overstate what is known — keep the title honest too.
+		title = " ⚠️ Cluster Provisioned "
+	}
 	pterm.DefaultBox.
-		WithTitle(" ✅ Cluster Created ").
+		WithTitle(title).
 		WithTitleTopCenter().
 		Println(boxContent)
+
+	// Name the specific gap, so the user is not left diffing a yellow word.
+	if health.verifyErr == nil && !health.hasDefaultStorageClass {
+		pterm.Warning.Println("No default StorageClass — every PersistentVolumeClaim will stay Pending until one is set")
+	}
+	if health.verifyErr == nil && health.totalNodes > 0 && health.readyNodes < health.totalNodes {
+		pterm.Warning.Println("Some nodes are not Ready yet — check them with: kubectl get nodes")
+	}
 }
 
 // showNextSteps displays clean next steps after cluster creation

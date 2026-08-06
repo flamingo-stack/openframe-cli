@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
@@ -376,4 +377,59 @@ func TestPlanCluster_ExistingWorkspacePreviewsResumeWithoutSideEffects(t *testin
 	afterState, err := os.ReadFile(statePath)
 	require.NoError(t, err)
 	assert.Equal(t, `{"version":4}`, string(afterState))
+}
+
+// The CONTEXT column must reflect the kubeconfig, not the cluster name: a
+// plan-stage failure leaves no kubeconfig entry, and the list used to print
+// one anyway.
+func TestInfoFor_ContextComesFromKubeconfig(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte(`
+apiVersion: v1
+kind: Config
+contexts:
+- name: merged-eks
+  context:
+    cluster: merged-eks
+    user: merged-eks
+`), 0o600))
+	t.Setenv("KUBECONFIG", kubeconfig)
+
+	assert.Equal(t, "merged-eks", infoFor(tfengine.Record{Name: "merged-eks"}).Context,
+		"a context the kubeconfig holds must be reported")
+	assert.Empty(t, infoFor(tfengine.Record{Name: "failed-at-plan"}).Context,
+		"no kubeconfig entry — the list must not fabricate a context from the name")
+}
+
+// A resumed create must end Ready with a FRESH CreatedAt: the row used to
+// keep the first failed attempt's timestamp forever, and stay "Failed" in
+// list while the resume was running.
+func TestCreateCluster_ResumeRefreshesStatusAndCreatedAt(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "kubeconfig"))
+	base := t.TempDir()
+	mock := executor.NewMockCommandExecutor()
+
+	providerWith := func(applyErr error) *Provider {
+		calls := &[]string{}
+		engine := tfengine.NewEngineWithRunner(func(workdir string) (tfengine.Runner, error) {
+			return &fakeRunner{calls: calls, applyErr: applyErr}, nil
+		})
+		return NewWithDeps(engine, tfengine.NewRegistry(base), mock)
+	}
+
+	_, err := providerWith(errors.New("quota exceeded")).CreateCluster(context.Background(), eksConfig("demo"))
+	require.Error(t, err)
+	failed, err := tfengine.NewRegistry(base).Get("demo")
+	require.NoError(t, err)
+	require.Equal(t, tfengine.StatusFailed, failed.Status)
+
+	time.Sleep(10 * time.Millisecond) // make the CreatedAt refresh observable
+	_, err = providerWith(nil).CreateCluster(context.Background(), eksConfig("demo"))
+	require.NoError(t, err)
+
+	resumed, err := tfengine.NewRegistry(base).Get("demo")
+	require.NoError(t, err)
+	assert.Equal(t, tfengine.StatusReady, resumed.Status)
+	assert.True(t, resumed.CreatedAt.After(failed.CreatedAt),
+		"CREATED must reflect when the cluster became Ready, not the first failed attempt")
 }

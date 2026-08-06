@@ -292,6 +292,11 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	if err := tfengine.WriteModule(ws.TerraformDir(), mainTF, vars); err != nil {
 		return nil, err
 	}
+	if !freshWorkspace {
+		// A resumed create is creating again — `cluster list` must not keep
+		// reporting the previous attempt's "Failed" while an apply is running.
+		_ = ws.SetStatus(tfengine.StatusCreating)
+	}
 
 	if err := p.engine.Init(ctx, ws.TerraformDir()); err != nil {
 		_ = ws.SetStatus(tfengine.StatusFailed)
@@ -358,6 +363,9 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 		return nil, models.NewClusterOperationError("create", config.Name, err)
 	}
 	record.Status = tfengine.StatusReady
+	// CREATED means "when this cluster became Ready": a resumed create must
+	// not keep the first, failed attempt's timestamp forever.
+	record.CreatedAt = time.Now().UTC()
 	if err := ws.WriteRecord(record); err != nil {
 		return nil, err
 	}
@@ -482,11 +490,18 @@ func (p *Provider) GetKubeconfig(ctx context.Context, name string, clusterType m
 
 // infoFor maps a registry record onto the shared ClusterInfo shape.
 func infoFor(rec tfengine.Record) models.ClusterInfo {
+	// The kubeconfig context exists only once a successful create merged it —
+	// report what the kubeconfig holds, never a value fabricated from the
+	// cluster name (a plan-stage failure has no context at all).
+	kubeContext := ""
+	if tfengine.KubeconfigHasContext(rec.Name) {
+		kubeContext = rec.Name
+	}
 	return models.ClusterInfo{
 		Name:       rec.Name,
 		Type:       models.ClusterTypeGKE,
 		Source:     models.SourceOpenframe,
-		Context:    rec.Name,
+		Context:    kubeContext,
 		Project:    rec.Project,
 		Region:     rec.Region,
 		Status:     rec.Status.Title(),
