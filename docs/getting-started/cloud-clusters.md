@@ -84,8 +84,14 @@ minutes; the CLI streams per-resource progress. GKE nodes are private (no
 external IPs, egress via Cloud NAT) with a public control-plane endpoint, so
 the flow works in organizations enforcing `restrict_vm_external_ips`. EKS
 clusters get a dedicated VPC (2 AZs, nodes in private subnets behind a single
-NAT gateway) and the `aws-ebs-csi-driver` addon, so PersistentVolumeClaims
-work out of the box.
+NAT gateway), the core addons (`vpc-cni`, `kube-proxy`, `coredns`) and the
+`aws-ebs-csi-driver` addon with a default gp3 StorageClass, so networking and
+PersistentVolumeClaims work out of the box. The generated Terraform pins the
+upstream EKS/VPC modules to exact versions — upstream default changes arrive
+only with a deliberate CLI release, never mid-`create`. The default node type
+is `m7i-flex.large`, which is Free-Tier-eligible: a brand-new AWS account (its
+Free plan refuses non-eligible instance types) can run the documented flow
+unchanged.
 When it finishes, your kubeconfig gets a context named after the cluster and
 it becomes the current context — `kubectl get nodes` just works
 (authentication runs through short-lived tokens via `aws eks get-token` /

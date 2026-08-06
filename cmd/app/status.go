@@ -28,6 +28,7 @@ sync/health, summarizes overall readiness, and prints how to sign in.
 Examples:
   openframe app status
   openframe app status --context k3d-openframe-dev`,
+		Args:        noPositionalArgs,
 		RunE:        runStatusCommand,
 		Annotations: map[string]string{"readonly": "true"},
 	}

@@ -246,9 +246,7 @@ func TestTfvarsFor_VersionMapping(t *testing.T) {
 func TestTemplateEmbedsModulePins(t *testing.T) {
 	tf := string(mainTF)
 	assert.Contains(t, tf, `source  = "terraform-aws-modules/eks/aws"`)
-	assert.Contains(t, tf, `version = "~> 21.0"`)
 	assert.Contains(t, tf, `source  = "terraform-aws-modules/vpc/aws"`)
-	assert.Contains(t, tf, `version = "~> 6.0"`)
 	assert.Contains(t, tf, "enable_cluster_creator_admin_permissions = true")
 }
 

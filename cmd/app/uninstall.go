@@ -27,6 +27,7 @@ Examples:
   openframe app uninstall
   openframe app uninstall --context k3d-openframe-dev
   openframe app uninstall --yes --delete-namespace`,
+		Args: noPositionalArgs,
 		RunE: runUninstallCommand,
 	}
 	cmd.Flags().StringP("context", "c", "", "Kube-context to use (defaults to the current context)")

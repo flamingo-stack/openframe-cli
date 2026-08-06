@@ -25,6 +25,7 @@ password, and the command to open the ArgoCD UI locally.
 Examples:
   openframe app access
   openframe app access --context k3d-openframe-dev`,
+		Args:        noPositionalArgs,
 		RunE:        runAccessCommand,
 		Annotations: map[string]string{"readonly": "true"},
 	}

@@ -139,3 +139,30 @@ func TestStatusCommand_WatchRejectsMachineOutput(t *testing.T) {
 		t.Fatalf("expected the watch/output conflict error, got %v", err)
 	}
 }
+
+// A stray positional argument must fail loudly, not be silently discarded:
+// `openframe app status my-eks` used to run against whatever the current
+// kube-context was — masked in the linear create→install flow, wrong (and for
+// uninstall destructive) the moment the context had moved elsewhere.
+func TestContextTargetedCommands_RejectPositionalArgs(t *testing.T) {
+	for _, build := range []func() *cobra.Command{getStatusCmd, getAccessCmd, getUninstallCmd} {
+		cmd := build()
+		t.Run(cmd.Name(), func(t *testing.T) {
+			if cmd.Args == nil {
+				t.Fatal("Args validator missing — cobra defaults to ArbitraryArgs and a cluster name is silently ignored")
+			}
+			err := cmd.Args(cmd, []string{"my-eks"})
+			if err == nil {
+				t.Fatal("a positional cluster name must be rejected")
+			}
+			for _, want := range []string{"my-eks", "--context"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q must mention %q", err.Error(), want)
+				}
+			}
+			if err := cmd.Args(cmd, nil); err != nil {
+				t.Fatalf("no positional args must stay valid, got %v", err)
+			}
+		})
+	}
+}

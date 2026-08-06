@@ -118,7 +118,9 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 			w.config.Region = region
 		}
 
-		defaultMachine := "m6i.large"
+		// Mirrors the template default: the Free-Tier-eligible drop-in for
+		// m6i.large, so the wizard's suggestion also works on a new AWS account.
+		defaultMachine := "m7i-flex.large"
 		if clusterType == models.ClusterTypeGKE {
 			defaultMachine = "e2-standard-4"
 		}

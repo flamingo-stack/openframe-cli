@@ -182,6 +182,13 @@ func genericHint(err error) string {
 // cause. "create failed for cluster X: quota exceeded" → ("create failed for
 // cluster X", "quota exceeded"). A chain of one keeps everything in the
 // headline (first line) with any remaining lines as the cause block.
+//
+// The cause is everything from the deepest error onward, not the deepest
+// error's text alone: tfexec wraps a bare *exec.ExitError and APPENDS
+// terraform's stderr after it, so the deepest text is "exit status 1" while
+// the actual reason (quota, eligibility, …) lives in the tail. Cutting the
+// cause at the deepest text alone showed the user "cause: exit status 1"
+// after a 30-minute apply and threw the explanation away.
 func splitCause(err error) (headline, cause string) {
 	full := err.Error()
 	deepest := err
@@ -199,7 +206,7 @@ func splitCause(err error) (headline, cause string) {
 		if idx := strings.LastIndex(full, causeText); idx > 0 && causeText != "" {
 			head := strings.TrimRight(strings.TrimSuffix(full[:idx], ": "), ": \n")
 			if head != "" {
-				return head, causeText
+				return head, strings.TrimSpace(full[idx:])
 			}
 		}
 	}

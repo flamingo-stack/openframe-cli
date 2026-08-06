@@ -412,7 +412,7 @@ openframe cluster create --type k3d --nodes 1 --skip-wizard
 openframe app install                                # Interactive context picker
 openframe app install -c k3d-openframe-dev          # Explicit context
 openframe app install --non-interactive             # CI (reuse existing values file)
-openframe app install --ref v1.2.3                  # Deploy specific tag
+openframe app install --ref 1.0.48                  # Deploy specific tag
 openframe app install --dry-run                     # Preview only
 ```
 

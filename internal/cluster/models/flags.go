@@ -77,7 +77,7 @@ func AddCreateFlags(cmd *cobra.Command, flags *CreateFlags) {
 	cmd.Flags().StringVar(&flags.Region, "region", "", "Cloud region (required for cloud types)")
 	cmd.Flags().StringVar(&flags.Profile, "profile", "", "AWS credentials profile (eks only)")
 	cmd.Flags().StringVar(&flags.Project, "project", "", "GCP project (required for --type gke)")
-	cmd.Flags().StringVar(&flags.MachineType, "machine-type", "", "Node instance type (cloud only; defaults: m6i.large on eks, e2-standard-4 on gke)")
+	cmd.Flags().StringVar(&flags.MachineType, "machine-type", "", "Node instance type (cloud only; defaults: m7i-flex.large on eks, e2-standard-4 on gke)")
 	cmd.Flags().IntVar(&flags.MinNodes, "min-nodes", 0, "Node group minimum size (cloud only, at least 1; default 1)")
 	cmd.Flags().IntVar(&flags.MaxNodes, "max-nodes", 0, "Node group maximum size (cloud only, at least 1; default 4)")
 	cmd.Flags().BoolVar(&flags.Spot, "spot", false, "Use spot capacity for nodes (cloud only)")

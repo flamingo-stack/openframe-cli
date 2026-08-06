@@ -35,7 +35,7 @@ Examples:
   openframe app install my-cluster                        # Install on specific cluster
   openframe app install --non-interactive                 # Use existing openframe-helm-values.yaml (CI/CD)
   openframe app install --ref develop                     # Deploy a branch
-  openframe app install --ref v1.2.3                      # Deploy a release tag`, argocd.ArgoCDChartVersion),
+  openframe app install --ref 1.0.48                      # Deploy a release tag`, argocd.ArgoCDChartVersion),
 		RunE:          runInstallCommand,
 		SilenceErrors: true, // Errors are handled by our custom error handler
 		SilenceUsage:  true, // Don't show usage on errors
@@ -218,7 +218,10 @@ func addInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force", "f", false, "Force installation even if charts already exist")
 	cmd.Flags().Bool("dry-run", false, "Show what would be installed without executing")
 	cmd.Flags().String("github-repo", chartmodels.RepoOSSTenant, "GitHub repository URL")
-	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. v1.2.3) to deploy")
+	// The example must match the chart repository's actual tag scheme (1.0.48,
+	// no v prefix) — a help text advertising v1.2.3 produced exactly the failing
+	// `--ref v…` invocations it seemed to endorse.
+	cmd.Flags().StringP("ref", "r", "", "Git ref (branch or release tag, e.g. 1.0.48) to deploy")
 	cmd.Flags().String("cert-dir", "", "Certificate directory (auto-detected if not provided)")
 	cmd.Flags().Bool("non-interactive", false, "Skip all prompts, use existing openframe-helm-values.yaml")
 	cmd.Flags().StringP("context", "c", "", "Kube-context to install into (skips interactive selection)")

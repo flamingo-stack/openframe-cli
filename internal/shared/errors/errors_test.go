@@ -219,6 +219,31 @@ func TestErrorHandler_HandleError_GenericError(t *testing.T) {
 	}
 }
 
+func TestSplitCause_SimpleChain(t *testing.T) {
+	err := fmt.Errorf("create failed for cluster X: %w", errors.New("quota exceeded"))
+	headline, cause := splitCause(err)
+	assert.Equal(t, "create failed for cluster X", headline)
+	assert.Equal(t, "quota exceeded", cause)
+}
+
+// tfexec wraps a bare *exec.ExitError and appends terraform's stderr AFTER it:
+// err.Error() is "exit status 1\nError: <the real reason>". The deepest error
+// alone is the useless "exit status 1" — the cause must keep the tail, or a
+// 30-minute apply failure renders as "cause: exit status 1" with the actual
+// reason (quota, Free Tier eligibility, …) discarded.
+func TestSplitCause_KeepsTextAfterDeepestError(t *testing.T) {
+	exitErr := errors.New("exit status 1")
+	tfErr := fmt.Errorf("%w\nError: creating EC2 Instance: InvalidParameterCombination - not eligible for Free Tier", exitErr)
+	err := fmt.Errorf("cluster create operation failed for 'my-eks': %w",
+		fmt.Errorf("terraform apply failed: %w", tfErr))
+
+	headline, cause := splitCause(err)
+	assert.Equal(t, "cluster create operation failed for 'my-eks': terraform apply failed", headline)
+	assert.Contains(t, cause, "exit status 1")
+	assert.Contains(t, cause, "not eligible for Free Tier",
+		"the informative tail after the deepest error must reach the user")
+}
+
 // resumeHintStub carries a resume hint the way the gke provider's error does.
 type resumeHintStub struct {
 	err  error

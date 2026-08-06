@@ -1,9 +1,24 @@
 package app
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/spf13/cobra"
 )
+
+// noPositionalArgs rejects stray positional arguments loudly, naming the flag
+// that does the targeting. Without it cobra defaults to ArbitraryArgs, and
+// `openframe app status my-eks` silently ran against whatever the current
+// kube-context happened to be — for uninstall, destructively so.
+func noPositionalArgs(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("%q takes no positional arguments (got %q) — use --context to target a cluster",
+			cmd.CommandPath(), strings.Join(args, " "))
+	}
+	return nil
+}
 
 // GetAppCmd returns the app command and its subcommands.
 func GetAppCmd() *cobra.Command {

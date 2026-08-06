@@ -65,12 +65,52 @@ func NewEngine(verbose bool) *Engine {
 				return nil, fmt.Errorf("initializing terraform runner: %w", err)
 			}
 			if verbose {
-				tf.SetStdout(os.Stdout)
 				tf.SetStderr(os.Stderr)
+				return &verboseRunner{Terraform: tf}, nil
 			}
 			return tf, nil
 		},
 	}
+}
+
+// verboseRunner streams terraform's human-readable output (init, plan) to the
+// terminal in verbose mode WITHOUT tee-ing the machine-readable commands.
+// Holding tf.SetStdout(os.Stdout) for the runner's whole life did exactly
+// that: tfexec merges its JSON parse buffer with the configured stdout, so
+// `terraform show -json` dumped the entire plan — one 641 KB line, CA cert
+// and user-data included — into the terminal, burying the very errors
+// --verbose exists to reveal. Stdout is therefore enabled only around the
+// human-output commands; ApplyJSON/DestroyJSON are unaffected either way
+// (they pipe stdout to their own progress writer).
+type verboseRunner struct {
+	*tfexec.Terraform
+}
+
+// withStdout runs fn with terraform's human stdout streaming to the terminal,
+// then silences it again. tfexec lazily runs `terraform version -json` before
+// the first command of an instance — priming it first keeps even that blob
+// off the terminal.
+func (r *verboseRunner) withStdout(ctx context.Context, fn func() error) error {
+	if _, _, err := r.Terraform.Version(ctx, false); err != nil {
+		return err
+	}
+	r.Terraform.SetStdout(os.Stdout)
+	defer r.Terraform.SetStdout(io.Discard)
+	return fn()
+}
+
+func (r *verboseRunner) Init(ctx context.Context, opts ...tfexec.InitOption) error {
+	return r.withStdout(ctx, func() error { return r.Terraform.Init(ctx, opts...) })
+}
+
+func (r *verboseRunner) Plan(ctx context.Context, opts ...tfexec.PlanOption) (bool, error) {
+	var changes bool
+	err := r.withStdout(ctx, func() error {
+		var planErr error
+		changes, planErr = r.Terraform.Plan(ctx, opts...)
+		return planErr
+	})
+	return changes, err
 }
 
 // NewEngineWithRunner is the test constructor.

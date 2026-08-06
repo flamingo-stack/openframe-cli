@@ -38,7 +38,10 @@ func tfvarsFor(config models.ClusterConfig) (tfvars, error) {
 
 	version := strings.TrimPrefix(config.K8sVersion, "v")
 	if version == "latest" {
-		version = "" // template maps empty to the EKS default (its latest)
+		// Omitted from tfvars → the template's pinned default applies. Not the
+		// EKS-side "latest": module v21 cannot plan with a null version, so the
+		// template always carries a concrete one.
+		version = ""
 	}
 	if version != "" && !eksVersionRE.MatchString(version) {
 		return tfvars{}, models.NewInvalidConfigError("version", config.K8sVersion,
