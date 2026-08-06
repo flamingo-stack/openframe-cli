@@ -6,6 +6,7 @@ package prerequisites
 import (
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	clusterprereq "github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	fw "github.com/flamingo-stack/openframe-cli/internal/prerequisites"
 	"github.com/pterm/pterm"
@@ -20,7 +21,11 @@ func GetPrerequisitesCmd() *cobra.Command {
 		Short:   "Check and install the tools OpenFrame needs",
 		Long: `Prerequisites - check and install the tools OpenFrame needs
 
-Verifies that Docker, kubectl, k3d, and helm are available (and Docker running).
+Verifies the tools for the chosen cluster type (--type, default k3d):
+
+  • k3d - Docker (running), k3d, helm
+  • eks - terraform, AWS CLI
+  • gke - terraform, gcloud, gke-gcloud-auth-plugin
 
   • check   - report what is installed, without changing anything
   • install - install anything missing (macOS/Linux); on Windows, print the docs
@@ -28,21 +33,32 @@ Verifies that Docker, kubectl, k3d, and helm are available (and Docker running).
 
 Examples:
   openframe prerequisites check
-  openframe prerequisites install`,
+  openframe prerequisites check --type eks
+  openframe prerequisites install --type gke`,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	cmd.AddCommand(checkCmd(), installCmd())
 	return cmd
 }
 
+// addTypeFlag registers the --type flag on a subcommand, matching the flag's
+// shape on `cluster create` (-t shorthand, same value set).
+func addTypeFlag(cmd *cobra.Command, clusterType *string) {
+	cmd.Flags().StringVarP(clusterType, "type", "t", "k3d", "Cluster type (k3d, eks, gke)")
+}
+
 func checkCmd() *cobra.Command {
-	return &cobra.Command{
+	var clusterType string
+	cmd := &cobra.Command{
 		Use:           "check",
 		Short:         "Report which prerequisites are installed (no changes)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			set := clusterprereq.ClusterSet()
+			set, err := clusterprereq.SetForClusterType(models.ClusterType(clusterType))
+			if err != nil {
+				return err
+			}
 			res := fw.NewRunner().Check(set)
 			printResult(res)
 			if !res.OK() {
@@ -51,16 +67,22 @@ func checkCmd() *cobra.Command {
 			return nil
 		},
 	}
+	addTypeFlag(cmd, &clusterType)
+	return cmd
 }
 
 func installCmd() *cobra.Command {
-	return &cobra.Command{
+	var clusterType string
+	cmd := &cobra.Command{
 		Use:           "install",
 		Short:         "Install any missing prerequisites (macOS/Linux)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			set := clusterprereq.ClusterSet()
+			set, err := clusterprereq.SetForClusterType(models.ClusterType(clusterType))
+			if err != nil {
+				return err
+			}
 			runner := fw.NewRunner()
 			if !runner.AutoInstalls() {
 				pterm.Warning.Println("Automatic install isn't supported on this OS — please install the tools below manually.")
@@ -73,6 +95,8 @@ func installCmd() *cobra.Command {
 			return nil
 		},
 	}
+	addTypeFlag(cmd, &clusterType)
+	return cmd
 }
 
 // printResult renders a friendly, plain-language summary for non-technical users.
