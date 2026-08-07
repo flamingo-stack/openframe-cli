@@ -259,3 +259,39 @@ func TestNewEngine_VerboseWrapsRunnerForSelectiveStdout(t *testing.T) {
 	assert.IsType(t, &tfexec.Terraform{}, quiet,
 		"non-verbose needs no wrapper — stdout is never streamed")
 }
+
+// TestEngine_ApplyWritesOpLog (report M8): a long cloud operation must leave a
+// file record, not just terminal scrollback. Apply tees terraform's raw
+// JSON-UI stream into the workspace's terraform.log, and a failure names the
+// log path.
+func TestEngine_ApplyWritesOpLog(t *testing.T) {
+	dir := t.TempDir()
+	stream := `{"@level":"info","@message":"module.gke: Creating...","type":"apply_start"}` + "\n"
+	f := &fakeRunner{applyJSON: stream}
+	e := engineWith(f)
+
+	require.NoError(t, e.Apply(context.Background(), dir))
+
+	logged, err := os.ReadFile(filepath.Join(dir, OpLogName))
+	require.NoError(t, err, "apply must write %s in the workspace dir", OpLogName)
+	assert.Contains(t, string(logged), "=== terraform apply", "each run starts with a header")
+	assert.Contains(t, string(logged), "module.gke: Creating...", "the raw stream is preserved")
+
+	// A second run appends rather than truncates: the log is the workspace's
+	// operation history.
+	require.NoError(t, e.Apply(context.Background(), dir))
+	logged2, err := os.ReadFile(filepath.Join(dir, OpLogName))
+	require.NoError(t, err)
+	assert.Greater(t, len(logged2), len(logged), "runs append, never truncate")
+}
+
+// TestEngine_ApplyFailureNamesTheLog: the error must point at the full record.
+func TestEngine_ApplyFailureNamesTheLog(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeRunner{apply: errors.New("quota exceeded")}
+	e := engineWith(f)
+
+	err := e.Apply(context.Background(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), OpLogName, "the failure must name the log file")
+}
