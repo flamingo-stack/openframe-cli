@@ -325,17 +325,17 @@ jobs:
           WORK="$(mktemp -d)"; export HOME="$WORK/home"; mkdir -p "$HOME"
           go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$WORK/openframe" .
           OF="$WORK/openframe"
-          [ "$("$OF" --version | cut -d' ' -f1)" = "0.0.1" ] || { echo "::error::ldflags version injection broken"; exit 1; }
+          [ "$("$OF" --version | head -n1 | cut -d' ' -f1)" = "0.0.1" ] || { echo "::error::ldflags version injection broken"; exit 1; }
 
           echo "--- update to the latest release (verifies the cosign bundle)"
           "$OF" update --yes
-          got="$("$OF" --version | cut -d' ' -f1)"
+          got="$("$OF" --version | head -n1 | cut -d' ' -f1)"
           [ "$got" = "$LATEST" ] || { echo "::error::after update --version is $got, want $LATEST"; exit 1; }
           echo "updated 0.0.1 -> $got"
 
           echo "--- rollback restores the previous binary (offline)"
           "$OF" update rollback --yes
-          back="$("$OF" --version | cut -d' ' -f1)"
+          back="$("$OF" --version | head -n1 | cut -d' ' -f1)"
           [ "$back" = "0.0.1" ] || { echo "::error::after rollback --version is $back, want 0.0.1"; exit 1; }
 
           echo "--- rollback again: nothing left to restore, clean exit"
@@ -346,7 +346,7 @@ jobs:
             W2="$(mktemp -d)"; HOME="$W2/home"; mkdir -p "$HOME"
             go build -ldflags "-X github.com/flamingo-stack/openframe-cli/cmd.version=0.0.1" -o "$W2/openframe" .
             HOME="$W2/home" "$W2/openframe" update "$spelling" --yes
-            v="$(HOME="$W2/home" "$W2/openframe" --version | cut -d' ' -f1)"
+            v="$(HOME="$W2/home" "$W2/openframe" --version | head -n1 | cut -d' ' -f1)"
             [ "$v" = "$LATEST" ] || { echo "::error::update $spelling landed on $v, want $LATEST"; exit 1; }
             echo "OK: update $spelling -> $v"
           done
