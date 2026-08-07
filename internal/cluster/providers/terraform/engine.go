@@ -140,10 +140,31 @@ func (e *Engine) Init(ctx context.Context, dir string) error {
 // later is still diagnosable.
 const OpLogName = "terraform.log"
 
+// bestEffortTee mirrors every chunk into the log sink while it works and
+// drops the sink on its first write failure. It exists because io.MultiWriter
+// propagates a sink error: exec.Cmd returns a stdout-writer error from Wait,
+// so a disk filling up mid-apply would report the terraform run as FAILED
+// while terraform actually completed and changed resources. The log is a
+// record of the operation — it must never decide its outcome.
+type bestEffortTee struct {
+	progress io.Writer
+	sink     io.Writer // nil once a write failed; never re-enabled
+}
+
+func (t *bestEffortTee) Write(p []byte) (int, error) {
+	if t.sink != nil {
+		if _, err := t.sink.Write(p); err != nil {
+			t.sink = nil
+		}
+	}
+	return t.progress.Write(p)
+}
+
 // opSinks builds the writer an apply/destroy streams into: the progress
 // writer, teed into dir's terraform.log when it can be opened. Logging is
-// best-effort — a directory that cannot take the log (read-only, gone) must
-// never block the operation, so the fallback is the progress writer alone.
+// best-effort end to end — a directory that cannot take the log (read-only,
+// gone) skips it, and a write failure after opening only stops the mirroring
+// (bestEffortTee above); neither may ever fail the operation itself.
 // The returned close is always safe to call; logPath is empty when no log is
 // being written.
 func (e *Engine) opSinks(dir, op string) (w io.Writer, close func(), logPath string) {
@@ -153,7 +174,7 @@ func (e *Engine) opSinks(dir, op string) (w io.Writer, close func(), logPath str
 		return progress, func() {}, ""
 	}
 	fmt.Fprintf(f, "=== terraform %s — %s ===\n", op, time.Now().UTC().Format(time.RFC3339))
-	return io.MultiWriter(progress, f), func() { _ = f.Close() }, f.Name()
+	return &bestEffortTee{progress: progress, sink: f}, func() { _ = f.Close() }, f.Name()
 }
 
 // opFailure wraps a failed apply/destroy, pointing at the full log when one

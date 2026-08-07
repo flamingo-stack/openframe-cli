@@ -1,6 +1,7 @@
 package terraform
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -294,4 +295,32 @@ func TestEngine_ApplyFailureNamesTheLog(t *testing.T) {
 	err := e.Apply(context.Background(), dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), OpLogName, "the failure must name the log file")
+}
+
+// failingWriter errors on every write, simulating a log file on a filesystem
+// that filled up or vanished after the file was opened.
+type failingWriter struct{ writes int }
+
+func (f *failingWriter) Write(p []byte) (int, error) {
+	f.writes++
+	return 0, errors.New("no space left on device")
+}
+
+// TestBestEffortTee_LogFailureNeverFailsTheRun: a terraform.log write error
+// must not propagate — exec.Cmd would surface it from Wait and report a
+// completed apply as failed. The sink is dropped on first failure; progress
+// keeps flowing.
+func TestBestEffortTee_LogFailureNeverFailsTheRun(t *testing.T) {
+	var progress bytes.Buffer
+	sink := &failingWriter{}
+	tee := &bestEffortTee{progress: &progress, sink: sink}
+
+	n, err := tee.Write([]byte("line 1\n"))
+	require.NoError(t, err, "a log-sink failure must not surface from the tee")
+	assert.Equal(t, len("line 1\n"), n)
+
+	_, err = tee.Write([]byte("line 2\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, sink.writes, "the sink is dropped after its first failure, not retried")
+	assert.Equal(t, "line 1\nline 2\n", progress.String(), "progress output continues past the log failure")
 }
