@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/debug"
 	"syscall"
 
@@ -123,7 +124,14 @@ Every command runs interactively by default (wizards, confirmations) and
 non-interactively with flags for CI and automation. Cloud creates show a full
 terraform plan (and an infracost estimate, when installed) before anything is
 applied; deletes require typed confirmation and clean up after themselves.`,
-		Version: fmt.Sprintf("%s (%s) built on %s", versionInfo.Version, versionInfo.Commit, versionInfo.Date),
+		// The version MUST stay the first whitespace token: selfupdate's
+		// rollback labels the saved binary by parsing `--version` output that
+		// way (binaryVersion in internal/shared/selfupdate). The toolchain and
+		// platform ride along because they are the first questions of any bug
+		// report about a downloaded release.
+		Version: fmt.Sprintf("%s (%s) built on %s — %s %s/%s",
+			versionInfo.Version, versionInfo.Commit, versionInfo.Date,
+			runtime.Version(), runtime.GOOS, runtime.GOARCH),
 		// Silence errors and usage globally - we handle our own error display
 		SilenceErrors: true,
 		SilenceUsage:  true,

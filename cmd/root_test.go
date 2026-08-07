@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -111,9 +112,15 @@ func TestGetRootCmd(t *testing.T) {
 		t.Error("Short description should not be empty")
 	}
 
-	expectedVersion := "test-version (test-commit) built on test-date"
-	if cmd.Version != expectedVersion {
-		t.Errorf("expected version %q, got %q", expectedVersion, cmd.Version)
+	// The version must stay the FIRST whitespace token — selfupdate's rollback
+	// labels the saved binary by parsing `--version` output that way — followed
+	// by the commit/date and the toolchain/platform suffix.
+	expectedPrefix := "test-version (test-commit) built on test-date — "
+	if !strings.HasPrefix(cmd.Version, expectedPrefix) {
+		t.Errorf("expected version to start with %q, got %q", expectedPrefix, cmd.Version)
+	}
+	if !strings.Contains(cmd.Version, runtime.GOOS+"/"+runtime.GOARCH) {
+		t.Errorf("expected version to name the platform, got %q", cmd.Version)
 	}
 }
 
