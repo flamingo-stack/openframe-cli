@@ -100,21 +100,29 @@ func GetRootCmd(versionInfo VersionInfo) *cobra.Command {
 func buildRootCommand(versionInfo VersionInfo) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "openframe",
-		Short: "OpenFrame CLI - Kubernetes cluster bootstrapping and chart deployment",
-		Long: `OpenFrame CLI - Interactive Kubernetes Platform Bootstrapper
+		Short: "OpenFrame CLI - provision Kubernetes clusters and deploy the OpenFrame platform",
+		Long: `OpenFrame CLI - Kubernetes Platform Bootstrapper
 
-OpenFrame CLI replaces the shell scripts with a modern, interactive terminal UI
-for managing OpenFrame Kubernetes deployments. Built following best practices
-for CLI design with wizard-style interactive prompts.
+Provision a Kubernetes cluster — local k3d for development, or cloud GKE/EKS
+via Terraform — install the OpenFrame platform onto it (ArgoCD app-of-apps),
+and manage the full lifecycle: prerequisites, status, upgrades, teardown.
 
-Key Features:
-  - Interactive Wizard - Step-by-step guided setup
-  - Cluster Management - local K3d and cloud GKE / AWS EKS clusters
-  - Helm Integration - App-of-Apps pattern with ArgoCD
-  - Prerequisite Checking - Validates tools before running
+Typical flows:
+  openframe bootstrap                    # local: k3d cluster + platform in one step
+  openframe cluster create --type gke    # cloud: plan, confirm, provision...
+  openframe app install                  # ...then install the platform onto it
 
-The CLI provides both interactive modes for new users and flag-based
-operation for automation and power users.`,
+Command groups:
+  cluster        create, delete, list, status, use, cleanup (prune node images)
+  app            install, upgrade, status, access, uninstall
+  bootstrap      cluster create + app install in one step
+  prerequisites  check and install required tools (--type k3d|eks|gke)
+  update         update this CLI to a newer release
+
+Every command runs interactively by default (wizards, confirmations) and
+non-interactively with flags for CI and automation. Cloud creates show a full
+terraform plan (and an infracost estimate, when installed) before anything is
+applied; deletes require typed confirmation and clean up after themselves.`,
 		Version: fmt.Sprintf("%s (%s) built on %s", versionInfo.Version, versionInfo.Commit, versionInfo.Date),
 		// Silence errors and usage globally - we handle our own error display
 		SilenceErrors: true,

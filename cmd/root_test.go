@@ -31,7 +31,7 @@ func TestRootCommand(t *testing.T) {
 		t.Errorf("expected Use to be 'openframe', got %q", cmd.Use)
 	}
 
-	expectedShort := "OpenFrame CLI - Kubernetes cluster bootstrapping and chart deployment"
+	expectedShort := "OpenFrame CLI - provision Kubernetes clusters and deploy the OpenFrame platform"
 	if cmd.Short != expectedShort {
 		t.Errorf("expected Short to be %q, got %q", expectedShort, cmd.Short)
 	}
