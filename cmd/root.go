@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/flamingo-stack/openframe-cli/cmd/app"
@@ -14,6 +15,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/cmd/cluster"
 	"github.com/flamingo-stack/openframe-cli/cmd/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/cmd/update"
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
@@ -97,6 +99,27 @@ func GetRootCmd(versionInfo VersionInfo) *cobra.Command {
 	return buildRootCommand(versionInfo)
 }
 
+// pinnedDependencies renders the versions this build installs (verified,
+// checksum-pinned downloads) and deploys — so `--version` answers not just
+// "which CLI" but "which terraform/helm/argocd comes with it". Sources: the
+// PinnedTool definitions in internal/shared/download and the ArgoCD chart pin
+// in internal/chart/providers/argocd.
+func pinnedDependencies() string {
+	var b strings.Builder
+	b.WriteString("Pinned dependencies (installed verified at exactly these versions):\n")
+	for _, dep := range []struct{ name, version string }{
+		{"terraform", download.Terraform.Version},
+		{"helm", download.Helm.Version},
+		{"k3d", download.K3d.Version},
+		{"mkcert", download.Mkcert.Version},
+		{"infracost", download.Infracost.Version + " (optional, cost estimates)"},
+		{"argo-cd", "chart " + argocd.ArgoCDChartVersion},
+	} {
+		fmt.Fprintf(&b, "  %-10s %s\n", dep.name, dep.version)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // buildRootCommand constructs the root command with given version info
 func buildRootCommand(versionInfo VersionInfo) *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -128,10 +151,13 @@ applied; deletes require typed confirmation and clean up after themselves.`,
 		// rollback labels the saved binary by parsing `--version` output that
 		// way (binaryVersion in internal/shared/selfupdate). The toolchain and
 		// platform ride along because they are the first questions of any bug
-		// report about a downloaded release.
-		Version: fmt.Sprintf("%s (%s) built on %s — %s %s/%s",
+		// report about a downloaded release; the pinned-dependency block below
+		// them answers the second ("which terraform/helm/argocd does this build
+		// install?") without digging through the source.
+		Version: fmt.Sprintf("%s (%s) built on %s — %s %s/%s\n\n%s",
 			versionInfo.Version, versionInfo.Commit, versionInfo.Date,
-			runtime.Version(), runtime.GOOS, runtime.GOARCH),
+			runtime.Version(), runtime.GOOS, runtime.GOARCH,
+			pinnedDependencies()),
 		// Silence errors and usage globally - we handle our own error display
 		SilenceErrors: true,
 		SilenceUsage:  true,

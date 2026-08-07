@@ -12,7 +12,9 @@ import (
 
 	"github.com/pterm/pterm"
 
+	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/config"
+	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/tests/testutil"
 )
@@ -121,6 +123,19 @@ func TestGetRootCmd(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Version, runtime.GOOS+"/"+runtime.GOARCH) {
 		t.Errorf("expected version to name the platform, got %q", cmd.Version)
+	}
+	// The pinned-dependency block: --version must answer "which
+	// terraform/helm/argocd does this build install" from the single sources
+	// of truth (download pins, argocd chart pin), never hardcoded copies.
+	for _, dep := range []string{
+		"terraform  " + download.Terraform.Version,
+		"helm       " + download.Helm.Version,
+		"k3d        " + download.K3d.Version,
+		"argo-cd    chart " + argocd.ArgoCDChartVersion,
+	} {
+		if !strings.Contains(cmd.Version, dep) {
+			t.Errorf("expected version output to list pinned dependency %q, got:\n%s", dep, cmd.Version)
+		}
 	}
 }
 
