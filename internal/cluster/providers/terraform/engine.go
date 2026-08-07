@@ -135,9 +135,9 @@ func (e *Engine) Init(ctx context.Context, dir string) error {
 }
 
 // OpLogName is the per-workspace record of terraform apply/destroy runs. Long
-// cloud operations used to leave the terminal as their only record (report
-// M8); every run now appends its raw terraform JSON-UI stream here, so a
-// failure hours later is still diagnosable.
+// cloud operations used to leave the terminal as their only record; every
+// run now appends its raw terraform JSON-UI stream here, so a failure hours
+// later is still diagnosable.
 const OpLogName = "terraform.log"
 
 // opSinks builds the writer an apply/destroy streams into: the progress

@@ -104,9 +104,9 @@ func (p *Provider) preflightCredentials(ctx context.Context, project string) err
 // requiredServices are the project APIs a GKE cluster needs active. They used
 // to be google_project_service resources inside EVERY cluster workspace, so
 // two clusters in one shared project claimed ownership of the same
-// project-level toggles and every destroy planned their removal (report M5).
-// Enabling is now this create-time step: idempotent, and owned by no cluster's
-// terraform state.
+// project-level toggles and every destroy planned their removal. Enabling is
+// now this create-time step: idempotent, and owned by no cluster's terraform
+// state.
 var requiredServices = []string{"compute.googleapis.com", "container.googleapis.com"}
 
 // ensureProjectServices enables the required project APIs before terraform
@@ -566,7 +566,7 @@ func kubeContextFor(rec tfengine.Record) string {
 func infoFor(rec tfengine.Record) models.ClusterInfo {
 	kubeContext := kubeContextFor(rec)
 	// A regional cluster's recorded count is per zone; list/status must show
-	// the real node total, not the flag value that under-reports it 3× (S2).
+	// the real node total, not the flag value that under-reports it 3×.
 	nodeCount := rec.NodeCount
 	if rec.HA {
 		nodeCount = rec.NodeCount * models.GKERegionalZones

@@ -86,8 +86,8 @@ func CostHint(clusterType models.ClusterType) string {
 
 // NodesLine renders a config's node count honestly: a regional (--ha) cluster
 // provisions its count PER ZONE, so "3" would silently mean 9 nodes and ~3×
-// the expected bill (verification-report finding S2 — the summary said 3, GCP
-// came up with 9). Zonal clusters keep the plain number.
+// the expected bill — a verification pass hit exactly that (the summary said
+// 3, GCP came up with 9). Zonal clusters keep the plain number.
 func NodesLine(config models.ClusterConfig) string {
 	if config.Cloud == nil || !config.Cloud.HA {
 		return strconv.Itoa(config.NodeCount)

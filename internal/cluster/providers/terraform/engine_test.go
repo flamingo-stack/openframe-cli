@@ -260,7 +260,7 @@ func TestNewEngine_VerboseWrapsRunnerForSelectiveStdout(t *testing.T) {
 		"non-verbose needs no wrapper — stdout is never streamed")
 }
 
-// TestEngine_ApplyWritesOpLog (report M8): a long cloud operation must leave a
+// TestEngine_ApplyWritesOpLog: a long cloud operation must leave a
 // file record, not just terminal scrollback. Apply tees terraform's raw
 // JSON-UI stream into the workspace's terraform.log, and a failure names the
 // log path.

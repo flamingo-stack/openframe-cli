@@ -32,11 +32,11 @@ func TestTemplate_NeverManagesTheProject(t *testing.T) {
 	// Belt and braces: no google_project* resource of ANY kind — including
 	// google_project_service. API enablement moved to a create-time gcloud step
 	// (ensureProjectServices) precisely so no cluster workspace owns
-	// project-level state in a shared project (report M5).
+	// project-level state in a shared project.
 	projectResRE := regexp.MustCompile(`resource\s+"(google_project[a-z_]*)"`)
 	for _, m := range projectResRE.FindAllStringSubmatch(src, -1) {
 		assert.Failf(t, "project-scoped resource in the GKE template",
-			"%q must not be managed per-cluster: project-level state belongs to no single cluster (M5)", m[1])
+			"%q must not be managed per-cluster: project-level state belongs to no single cluster", m[1])
 	}
 }
 
