@@ -19,9 +19,9 @@ func getCleanupCmd() *cobra.Command {
 		Short: "Prune unused container images from cluster nodes",
 		Long: `Reclaim disk space by pruning unused container images inside each cluster node.
 
-Only images no container references are removed. Installed applications, Helm
-releases and namespaces are never touched — to remove the OpenFrame platform
-use 'openframe app uninstall', to remove the whole cluster use
+Only images that no container references are removed. Installed applications,
+Helm releases and namespaces are never touched. To remove the OpenFrame
+platform use 'openframe app uninstall'; to remove the whole cluster use
 'openframe cluster delete'.
 
 Examples:

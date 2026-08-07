@@ -146,7 +146,8 @@ Command groups:
 Every command runs interactively by default (wizards, confirmations) and
 non-interactively with flags for CI and automation. Cloud creates show a full
 terraform plan (and an infracost estimate, when installed) before anything is
-applied; deletes require typed confirmation and clean up after themselves.`,
+applied; cloud deletes require typed confirmation, destroy the
+terraform-managed resources, and report any leftovers they could not remove.`,
 		// The version MUST stay the first whitespace token: selfupdate's
 		// rollback labels the saved binary by parsing `--version` output that
 		// way (binaryVersion in internal/shared/selfupdate). The toolchain and

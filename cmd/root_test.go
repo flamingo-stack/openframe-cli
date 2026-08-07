@@ -127,10 +127,15 @@ func TestGetRootCmd(t *testing.T) {
 	// The pinned-dependency block: --version must answer "which
 	// terraform/helm/argocd does this build install" from the single sources
 	// of truth (download pins, argocd chart pin), never hardcoded copies.
+	if !strings.Contains(cmd.Version, runtime.Version()) {
+		t.Errorf("expected version to name the Go toolchain, got %q", cmd.Version)
+	}
 	for _, dep := range []string{
 		"terraform  " + download.Terraform.Version,
 		"helm       " + download.Helm.Version,
 		"k3d        " + download.K3d.Version,
+		"mkcert     " + download.Mkcert.Version,
+		"infracost  " + download.Infracost.Version,
 		"argo-cd    chart " + argocd.ArgoCDChartVersion,
 	} {
 		if !strings.Contains(cmd.Version, dep) {

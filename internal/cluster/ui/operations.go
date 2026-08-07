@@ -255,7 +255,9 @@ func (ui *OperationsUI) ShowCleanupSummary(clusterName string, result models.Cle
 		for _, f := range result.Failures {
 			pterm.DefaultBasicText.Printf("  • %s\n", f)
 		}
-		pterm.Info.Printf("Re-run with --force, or delete the cluster: openframe cluster delete %s\n", clusterName)
+		// A plain re-run hint: --force only skips the confirmation prompt, so
+		// suggesting it here would imply a more aggressive retry that doesn't exist.
+		pterm.Info.Printf("Re-run the cleanup, or delete the cluster: openframe cluster delete %s\n", clusterName)
 	}
 }
 
