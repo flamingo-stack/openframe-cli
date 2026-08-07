@@ -32,7 +32,7 @@ OpenFrame CLI is part of the broader [OpenFrame](https://openframe.ai) ecosystem
 - **Lifecycle operations**: Create, delete, list, and monitor Kubernetes clusters
 - **K3D integration**: Lightweight Kubernetes for development and testing
 - **Status monitoring**: Real-time cluster health and resource monitoring
-- **Easy cleanup**: Remove clusters and associated resources with simple commands
+- **Easy teardown**: `cluster delete` removes a cluster and its resources; `cluster cleanup` reclaims disk by pruning unused node images
 
 ### 📦 Chart & Application Management
 - **Helm chart installation**: Streamlined chart deployment with dependency management

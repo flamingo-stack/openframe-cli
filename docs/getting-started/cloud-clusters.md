@@ -74,8 +74,11 @@ openframe cluster create my-gke --type gke --project my-project --region us-cent
 
 Useful flags: `--machine-type`, `--min-nodes` / `--max-nodes` (autoscaler
 bounds; defaults 1 / 4, must be at least 1 — an explicit 0 is rejected),
-`--spot`, `--profile` (AWS), `--nodes` (initial size), `--version`
-(`<major>.<minor>`, e.g. `1.33`).
+`--spot` (spot-capacity nodes, typically 60–90% off the node cost — the cost
+warning suggests it for test clusters), `--profile` (AWS), `--nodes` (initial
+size), `--version` (`<major>.<minor>`, e.g. `1.33`), `--ha` (GKE: regional
+control plane and nodes; the node count is then **per zone**, and every
+summary shows the `N per zone × 3 zones` math).
 
 In interactive sessions the CLI first shows the full Terraform plan and asks
 for approval (the `terraform apply` shape; what you approve is exactly what
@@ -118,9 +121,11 @@ throwaway directory.
 ## Where the state lives
 
 Each cloud cluster owns a workspace in `~/.openframe/clusters/<name>/`: the
-generated Terraform module and the state file. The state is the only pointer
-to your billed cloud resources — the workspace is never deleted on a failed
-create, only after a successful delete.
+generated Terraform module, the state file, and a `terraform.log` that every
+apply/destroy appends its full output stream to (so a long operation leaves a
+record beyond the terminal). The state is the only pointer to your billed
+cloud resources — the workspace is never deleted on a failed create, only
+after a successful delete.
 
 - **A create failed or was interrupted?** Re-run the same `cluster create` —
   it resumes where it stopped.
@@ -143,8 +148,12 @@ openframe app install                 # install OpenFrame onto the current conte
 credentials via gcloud when the kubeconfig has no entry yet, and activates
 the gcloud configuration matching the cluster's project.
 
-`cluster delete --force` skips the typed confirmation (for CI). `cluster
-cleanup` does not apply to cloud clusters — use `delete`.
+`cluster delete` tears down more than the terraform state: application
+namespaces are removed first so PVC-backed disks/volumes are reclaimed while
+the nodes still run, and anything that survives the destroy is swept up
+afterwards — listed and deleted with your consent. `--force` skips the typed
+confirmation and consents to that sweep (for CI). `cluster cleanup` does not
+apply to cloud clusters — use `delete`.
 
 ## Troubleshooting
 
@@ -160,4 +169,7 @@ cleanup` does not apply to cloud clusters — use `delete`.
   `cluster create <name>` to resume, or `cluster delete <name>` to tear down
   what was partially created.
 - **Verbose Terraform output** — add `--verbose` to stream Terraform's own
-  logs during create/delete.
+  logs during create/delete. Either way, the full stream of every
+  apply/destroy is appended to
+  `~/.openframe/clusters/<name>/terraform/terraform.log`, and a failed
+  operation names that path.

@@ -385,7 +385,7 @@ openframe bootstrap --verbose               # Show detailed ArgoCD sync progress
 | `delete [NAME]` | Delete a cluster and its resources | `openframe cluster delete dev --force` |
 | `list` | List all managed clusters | `openframe cluster list -o json` |
 | `status [NAME]` | Show detailed cluster status | `openframe cluster status dev -o yaml` |
-| `cleanup [NAME]` | Remove unused images and resources | `openframe cluster cleanup dev --force` |
+| `cleanup [NAME]` | Prune unused container images from cluster nodes | `openframe cluster cleanup dev --force` |
 
 **`cluster create` flags:**
 
