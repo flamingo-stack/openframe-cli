@@ -241,7 +241,7 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		{"Setting", "Value"},
 		{"Cluster Name", config.Name},
 		{"Cluster Type", string(config.Type)},
-		{"Node Count", strconv.Itoa(config.NodeCount)},
+		{"Node Count", NodesLine(config)},
 		{"Kubernetes Version", config.K8sVersion},
 	}
 	if config.Cloud != nil {
@@ -255,10 +255,16 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 		if config.Cloud.MachineType != "" {
 			data = append(data, []string{"Instance Type", config.Cloud.MachineType})
 		}
+		if config.Cloud.Spot {
+			data = append(data, []string{"Spot Nodes", "yes"})
+		}
 	}
 
 	if config.Cloud != nil {
 		pterm.Warning.Println(CostHint(config.Type))
+		if hint := SpotHint(config); hint != "" {
+			pterm.Info.Println(hint)
+		}
 	}
 
 	// Use pterm for consistent styling

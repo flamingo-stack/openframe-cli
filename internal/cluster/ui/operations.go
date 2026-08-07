@@ -335,7 +335,7 @@ func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dr
 	// "silent" output (verification report saw the leak and graded it silent).
 	pterm.DefaultBasicText.Printf("   Name: %s\n", pterm.Cyan(config.Name))
 	pterm.DefaultBasicText.Printf("   Type: %s\n", string(config.Type))
-	pterm.DefaultBasicText.Printf("  Nodes: %d\n", config.NodeCount)
+	pterm.DefaultBasicText.Printf("  Nodes: %s\n", NodesLine(config))
 
 	if config.K8sVersion != "" {
 		pterm.DefaultBasicText.Printf("Version: %s\n", config.K8sVersion)
@@ -348,7 +348,13 @@ func (ui *OperationsUI) ShowConfigurationSummary(config models.ClusterConfig, dr
 		if config.Cloud.MachineType != "" {
 			pterm.DefaultBasicText.Printf("Instance: %s\n", config.Cloud.MachineType)
 		}
+		if config.Cloud.Spot {
+			pterm.DefaultBasicText.Printf("   Spot: yes (spot-capacity nodes)\n")
+		}
 		pterm.Warning.Println(CostHint(config.Type))
+		if hint := SpotHint(config); hint != "" {
+			pterm.Info.Println(hint)
+		}
 	}
 
 	pterm.DefaultBasicText.Println()

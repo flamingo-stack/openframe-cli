@@ -57,6 +57,10 @@ type Record struct {
 	Project    string             `json:"project,omitempty"` // GCP
 	K8sVersion string             `json:"k8s_version,omitempty"`
 	NodeCount  int                `json:"node_count"`
+	// HA records a regional (multi-zone) cluster, where NodeCount is per zone
+	// rather than a total. Absent (false) on zonal clusters and on records
+	// predating this field — those display NodeCount as-is.
+	HA bool `json:"ha,omitempty"`
 	CreatedAt  time.Time          `json:"created_at"`
 	Endpoint   string             `json:"endpoint,omitempty"`
 	CACert     string             `json:"ca_cert,omitempty"` // base64, as EKS emits it

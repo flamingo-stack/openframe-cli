@@ -45,6 +45,35 @@ func TestGcloudCommandContract(t *testing.T) {
 			},
 		},
 		{
+			name: "project services: single idempotent enable of the required APIs",
+			run: func(t *testing.T, p *Provider) {
+				require.NoError(t, p.ensureProjectServices(context.Background(), "my-project"))
+			},
+			want: [][]string{
+				{"gcloud", "services", "enable", "compute.googleapis.com", "container.googleapis.com",
+					"--project", "my-project"},
+			},
+		},
+		{
+			name: "project services: denied enable falls back to an enabled-state probe",
+			prepare: func(mock *executor.MockCommandExecutor) {
+				mock.SetResponse("services enable", &executor.CommandResult{
+					ExitCode: 1, Stderr: "PERMISSION_DENIED"})
+				mock.SetResponse("services list", &executor.CommandResult{
+					ExitCode: 0, Stdout: "compute.googleapis.com\ncontainer.googleapis.com\n"})
+			},
+			run: func(t *testing.T, p *Provider) {
+				// Both APIs are already on — a deploy-only identity may proceed.
+				require.NoError(t, p.ensureProjectServices(context.Background(), "my-project"))
+			},
+			want: [][]string{
+				{"gcloud", "services", "enable", "compute.googleapis.com", "container.googleapis.com",
+					"--project", "my-project"},
+				{"gcloud", "services", "list", "--enabled", "--project", "my-project",
+					"--format=value(config.name)"},
+			},
+		},
+		{
 			name: "name-collision preflight: project-wide (location-unscoped) name filter",
 			run: func(t *testing.T, p *Provider) {
 				require.NoError(t, p.preflightNameCollision(context.Background(), gkeConfig("demo")))
@@ -112,4 +141,20 @@ func TestExecConfig_PinsPluginContract(t *testing.T) {
 	assert.Empty(t, cfg.Args, "the plugin takes no arguments")
 	assert.Equal(t, clientcmdapi.NeverExecInteractiveMode, cfg.InteractiveMode)
 	assert.True(t, cfg.ProvideClusterInfo)
+}
+
+// TestEnsureProjectServices_FailsWhenAPIsAreOff: the enabled-state fallback is
+// only an escape hatch for deploy-only identities on an already-configured
+// project. When a required API is genuinely off and cannot be enabled, create
+// must stop with the exact manual command, not proceed into a terraform apply
+// that fails minutes later.
+func TestEnsureProjectServices_FailsWhenAPIsAreOff(t *testing.T) {
+	mock := executor.NewMockCommandExecutor()
+	mock.SetResponse("services enable", &executor.CommandResult{ExitCode: 1, Stderr: "PERMISSION_DENIED"})
+	mock.SetResponse("services list", &executor.CommandResult{ExitCode: 0, Stdout: "compute.googleapis.com\n"})
+	p := NewWithDeps(nil, nil, mock)
+
+	err := p.ensureProjectServices(context.Background(), "my-project")
+	require.Error(t, err, "a missing required API must stop the create")
+	assert.Contains(t, err.Error(), "gcloud services enable", "the error must carry the manual fix")
 }

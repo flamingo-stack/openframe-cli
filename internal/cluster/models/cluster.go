@@ -48,6 +48,13 @@ type ClusterConfig struct {
 	Cloud *CloudConfig `json:"cloud,omitempty"`
 }
 
+// GKERegionalZones is how many zones GKE spreads a regional cluster across by
+// default (the module passes no explicit node locations). A regional node
+// pool's node count is PER ZONE, so every display of an HA cluster's nodes
+// must show the ×zones math — "Nodes: 3" that silently provisions 9 was a
+// verification-report finding (S2).
+const GKERegionalZones = 3
+
 // CloudConfig holds the provider-agnostic knobs for a managed cloud cluster.
 type CloudConfig struct {
 	Region      string `json:"region"`

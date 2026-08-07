@@ -101,6 +101,47 @@ func (p *Provider) preflightCredentials(ctx context.Context, project string) err
 	return nil
 }
 
+// requiredServices are the project APIs a GKE cluster needs active. They used
+// to be google_project_service resources inside EVERY cluster workspace, so
+// two clusters in one shared project claimed ownership of the same
+// project-level toggles and every destroy planned their removal (report M5).
+// Enabling is now this create-time step: idempotent, and owned by no cluster's
+// terraform state.
+var requiredServices = []string{"compute.googleapis.com", "container.googleapis.com"}
+
+// ensureProjectServices enables the required project APIs before terraform
+// runs. Enabling needs the serviceusage permission, which a
+// deploy-only identity may lack — so a failed enable is only fatal when the
+// APIs are actually off: already-enabled APIs let the create proceed.
+func (p *Provider) ensureProjectServices(ctx context.Context, project string) error {
+	args := append([]string{"services", "enable"}, requiredServices...)
+	args = append(args, "--project", project)
+	if _, err := p.executor.Execute(ctx, "gcloud", args...); err == nil {
+		return nil
+	}
+
+	res, listErr := p.executor.Execute(ctx, "gcloud", "services", "list", "--enabled",
+		"--project", project, "--format=value(config.name)")
+	if listErr == nil && res != nil {
+		enabled := make(map[string]struct{})
+		for _, line := range strings.Split(res.Stdout, "\n") {
+			enabled[strings.TrimSpace(line)] = struct{}{}
+		}
+		missing := false
+		for _, svc := range requiredServices {
+			if _, ok := enabled[svc]; !ok {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			return nil // enable was denied, but everything needed is already on
+		}
+	}
+	return fmt.Errorf("required GCP APIs could not be enabled on project %s — enable them once with an authorized identity:\n  gcloud services enable %s --project %s",
+		project, strings.Join(requiredServices, " "), project)
+}
+
 // preflightNameCollision refuses to create a cluster whose name already
 // exists in the target project but has no openframe workspace: terraform
 // would build the VPC first and then fail mid-apply on the duplicate cluster,
@@ -244,6 +285,12 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	if err := p.preflightCredentials(ctx, config.Cloud.Project); err != nil {
 		return nil, err
 	}
+	// Enable the required project APIs here, not in the module (see
+	// requiredServices). Deliberately absent from PlanCluster: a dry-run must
+	// keep classic plan semantics — zero side effects on the project.
+	if err := p.ensureProjectServices(ctx, config.Cloud.Project); err != nil {
+		return nil, err
+	}
 	if err := p.ensureZone(ctx, &config); err != nil {
 		return nil, err
 	}
@@ -268,6 +315,7 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 			Project:    config.Cloud.Project,
 			K8sVersion: vars.KubernetesVersion,
 			NodeCount:  config.NodeCount,
+			HA:         config.Cloud.HA,
 			CreatedAt:  time.Now().UTC(),
 		}
 		if err := ws.Scaffold(record, mainTF, vars); err != nil {
@@ -349,6 +397,7 @@ func (p *Provider) CreateCluster(ctx context.Context, config models.ClusterConfi
 	// --nodes) reports the first attempt's values from list/status forever.
 	record.Region = config.Cloud.Region
 	record.NodeCount = config.NodeCount
+	record.HA = config.Cloud.HA
 	record.K8sVersion = vars.KubernetesVersion
 	endpoint, err := tfengine.StringOutput(outputs, "cluster_endpoint")
 	if err != nil {
@@ -516,6 +565,12 @@ func kubeContextFor(rec tfengine.Record) string {
 // infoFor maps a registry record onto the shared ClusterInfo shape.
 func infoFor(rec tfengine.Record) models.ClusterInfo {
 	kubeContext := kubeContextFor(rec)
+	// A regional cluster's recorded count is per zone; list/status must show
+	// the real node total, not the flag value that under-reports it 3× (S2).
+	nodeCount := rec.NodeCount
+	if rec.HA {
+		nodeCount = rec.NodeCount * models.GKERegionalZones
+	}
 	return models.ClusterInfo{
 		Name:       rec.Name,
 		Type:       models.ClusterTypeGKE,
@@ -524,7 +579,7 @@ func infoFor(rec tfengine.Record) models.ClusterInfo {
 		Project:    rec.Project,
 		Region:     rec.Region,
 		Status:     rec.Status.Title(),
-		NodeCount:  rec.NodeCount,
+		NodeCount:  nodeCount,
 		K8sVersion: rec.K8sVersion,
 		CreatedAt:  rec.CreatedAt,
 	}

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -81,6 +82,34 @@ func CostHint(clusterType models.ClusterType) string {
 	default:
 		return "Cloud clusters create resources that incur costs"
 	}
+}
+
+// NodesLine renders a config's node count honestly: a regional (--ha) cluster
+// provisions its count PER ZONE, so "3" would silently mean 9 nodes and ~3×
+// the expected bill (verification-report finding S2 — the summary said 3, GCP
+// came up with 9). Zonal clusters keep the plain number.
+func NodesLine(config models.ClusterConfig) string {
+	if config.Cloud == nil || !config.Cloud.HA {
+		return strconv.Itoa(config.NodeCount)
+	}
+	return fmt.Sprintf("%d per zone × %d zones = %d total (regional)",
+		config.NodeCount, models.GKERegionalZones, config.NodeCount*models.GKERegionalZones)
+}
+
+// SpotHint nudges test-cluster users toward spot capacity, next to the cost
+// warning — the flag already exists but nothing advertised it. Empty when spot
+// is already on (nothing to suggest) or for non-cloud types. Like CostHint it
+// carries no exact price: the discount range is the provider's own
+// (preemptible/spot pricing), not a figure this CLI computes.
+func SpotHint(config models.ClusterConfig) string {
+	if config.Cloud == nil || config.Cloud.Spot {
+		return ""
+	}
+	switch config.Type {
+	case models.ClusterTypeEKS, models.ClusterTypeGKE:
+		return "Tip: for test clusters, --spot runs nodes on spot capacity (typically 60-90% off the node cost)"
+	}
+	return ""
 }
 
 // ConfirmTypedClusterName requires the user to re-type the cluster name

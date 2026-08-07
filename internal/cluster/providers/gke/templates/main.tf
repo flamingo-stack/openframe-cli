@@ -76,15 +76,11 @@ provider "google" {
   }
 }
 
-# GKE needs these services active in the project; disable_on_destroy=false so
-# a cluster teardown never switches off APIs other workloads may use.
-resource "google_project_service" "required" {
-  for_each = toset(["compute.googleapis.com", "container.googleapis.com"])
-
-  service            = each.value
-  disable_on_destroy = false
-}
-
+# The required project APIs (compute, container) are enabled by the CLI before
+# terraform runs — deliberately NOT managed here. As google_project_service
+# resources, every cluster workspace in a shared project claimed ownership of
+# the same project-level toggles, and every destroy planned their removal
+# (report M5). Project-level state belongs to no single cluster.
 module "network" {
   source  = "terraform-google-modules/network/google"
   version = "~> 18.0"
@@ -112,8 +108,6 @@ module "network" {
       }
     ]
   }
-
-  depends_on = [google_project_service.required]
 }
 
 # Private nodes have no external IPs (required by orgs enforcing the
