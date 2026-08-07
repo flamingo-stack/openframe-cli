@@ -148,7 +148,7 @@ const OpLogName = "terraform.log"
 // being written.
 func (e *Engine) opSinks(dir, op string) (w io.Writer, close func(), logPath string) {
 	progress := newProgressWriter(e.verbose)
-	f, err := os.OpenFile(filepath.Join(dir, OpLogName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, OpLogName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- dir is a CLI-managed workspace directory (same trust as the terraform state written next to it), joined with a constant filename
 	if err != nil {
 		return progress, func() {}, ""
 	}
