@@ -267,6 +267,17 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string, clus
 	case "delete":
 		pterm.Success.Printf("Cluster '%s' deleted successfully\n", pterm.Cyan(clusterName))
 
+		// The RESOURCES row must only claim what this path verified. A k3d
+		// delete removes everything the cluster owned. A cloud delete destroys
+		// the terraform-managed resources — PVC-provisioned disks live outside
+		// the state, and the provider's orphan sweep has already reported (or
+		// deleted) any survivors right above this box; "Cleaned up" printed
+		// under that warning would contradict it.
+		resources := pterm.Gray("Cleaned up")
+		if clusterType != models.ClusterTypeK3d {
+			resources = pterm.Gray("Terraform-managed destroyed (leftovers, if any, reported above)")
+		}
+
 		// Show detailed deletion box
 		pterm.DefaultBasicText.Println()
 		boxContent := fmt.Sprintf(
@@ -277,7 +288,7 @@ func (ui *OperationsUI) ShowOperationSuccess(operation, clusterName string, clus
 			pterm.Bold.Sprint(clusterName),
 			strings.ToUpper(string(clusterType)),
 			pterm.Red("Deleted"),
-			pterm.Gray("Cleaned up"),
+			resources,
 		)
 
 		pterm.DefaultBox.

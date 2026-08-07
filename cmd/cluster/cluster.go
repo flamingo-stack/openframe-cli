@@ -25,7 +25,7 @@ This command group provides cluster lifecycle management functionality:
   • list - Show all managed clusters
   • status - Display detailed cluster information
   • use - Switch the kubectl context to a cluster
-  • cleanup - Remove unused images and resources
+  • cleanup - Prune unused container images from cluster nodes
 
 Supports K3d clusters for local development and Google GKE / AWS EKS for cloud deployments.
 

@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
+	"github.com/pterm/pterm"
 )
 
 func TestOperationsUI_SelectClusterForOperation(t *testing.T) {
@@ -148,6 +151,39 @@ func TestOperationsUI_ShowOperationSuccess(t *testing.T) {
 
 		ui.ShowOperationSuccess("unknown", "test-cluster", models.ClusterTypeK3d)
 	})
+}
+
+// TestShowOperationSuccess_ResourcesRowIsBackendHonest: a cloud delete's box
+// must not claim "Cleaned up" — PVC-provisioned disks live outside terraform
+// state, and the orphan sweep printed right above the box may just have
+// reported survivors. Only k3d, where delete removes everything the cluster
+// owned, keeps the unqualified claim.
+func TestShowOperationSuccess_ResourcesRowIsBackendHonest(t *testing.T) {
+	captureBox := func(fn func()) string {
+		var buf bytes.Buffer
+		box := pterm.DefaultBox
+		defer func() { pterm.DefaultBox = box }()
+		pterm.DefaultBox = *pterm.DefaultBox.WithWriter(&buf)
+		fn()
+		return buf.String()
+	}
+
+	gke := captureBox(func() {
+		NewOperationsUI().ShowOperationSuccess("delete", "dev", models.ClusterTypeGKE)
+	})
+	if strings.Contains(gke, "Cleaned up") {
+		t.Errorf("a cloud delete box must not claim full resource cleanup; got:\n%s", gke)
+	}
+	if !strings.Contains(gke, "reported above") {
+		t.Errorf("a cloud delete box must point at the sweep report; got:\n%s", gke)
+	}
+
+	k3d := captureBox(func() {
+		NewOperationsUI().ShowOperationSuccess("delete", "dev", models.ClusterTypeK3d)
+	})
+	if !strings.Contains(k3d, "Cleaned up") {
+		t.Errorf("a k3d delete box keeps the cleaned-up claim; got:\n%s", k3d)
+	}
 }
 
 func TestOperationsUI_ShowOperationError(t *testing.T) {
