@@ -52,7 +52,8 @@ The cluster is always a local k3d cluster.
 
 - `openframe cluster create|delete|list|status|cleanup` — cluster lifecycle.
   `create` **only creates the cluster**; it never installs the app. (Verb is
-  `create`; there is no `apply`.) `cleanup` removes unused cluster resources.
+  `create`; there is no `apply`.) `cleanup` only prunes unused container images
+  on the nodes; removing the platform is `app uninstall`'s job.
 - `openframe app install|upgrade|status|access|uninstall` — installs and operates
   the OpenFrame app on an existing, online cluster. `upgrade` re-deploys the
   app-of-apps at a new git ref (`--ref`) or forces an ArgoCD hard refresh + sync

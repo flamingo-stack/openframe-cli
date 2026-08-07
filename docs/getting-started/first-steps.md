@@ -66,7 +66,7 @@ openframe cluster create my-second-cluster
 # Delete a cluster
 openframe cluster delete my-second-cluster
 
-# Clean up leftover resources from a failed cluster
+# Reclaim disk space by pruning unused container images on cluster nodes
 openframe cluster cleanup
 ```
 

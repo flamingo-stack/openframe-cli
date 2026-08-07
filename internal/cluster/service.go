@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,13 +13,11 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/provider"
 	uiCluster "github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/k8s"
-	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 	"github.com/pterm/pterm"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -32,40 +29,12 @@ import (
 // a decision, not an accident (audit follow-up).
 const bootstrapNodeCount = 4
 
-// ApplicationCleaner removes the ArgoCD Application CRs that own the platform
-// workloads, and strips the resources-finalizer from any left in Terminating.
-//
-// Cleanup needs both, in that order around the Helm uninstall: Applications
-// must be deleted while the ArgoCD controller still runs (so it cascades the
-// workload cleanup), and the finalizers must be stripped afterwards, once the
-// controller — the only thing that could clear them — is gone. Otherwise the
-// CRs sit in Terminating forever and pin the argocd namespace.
-//
-// It is an interface because internal/cluster must not import internal/chart:
-// the ArgoCD-backed implementation is injected by the command layer, exactly
-// like ClusterAccess in the app subsystem.
-type ApplicationCleaner interface {
-	DeleteApplications(ctx context.Context) (int, error)
-	RemoveApplicationFinalizers(ctx context.Context) (int, error)
-}
-
 // ClusterService provides cluster configuration and management operations
 // This handles cluster lifecycle operations and configuration management
 type ClusterService struct {
 	manager    provider.Provider
 	executor   executor.CommandExecutor
 	suppressUI bool // Suppress interactive UI elements for automation
-	// appCleaner, when set, lets cleanup remove ArgoCD Applications before the
-	// Helm uninstall and strip their finalizers afterwards. Optional: nil means
-	// the Helm/namespace phases run as before (the CRs may then stay stuck).
-	appCleaner ApplicationCleaner
-}
-
-// WithApplicationCleaner injects the ArgoCD-backed application cleaner used by
-// the cleanup flow. Returns the service for chaining.
-func (s *ClusterService) WithApplicationCleaner(c ApplicationCleaner) *ClusterService {
-	s.appCleaner = c
-	return s
 }
 
 // isTerminalEnvironment checks if we're running in a proper terminal
@@ -332,12 +301,19 @@ func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, err
 }
 
 // CleanupCluster handles cluster cleanup business logic. The returned
-// CleanupResult reports what was actually removed and which phases failed; a
+// CleanupResult reports what was actually pruned and which phases failed; a
 // nil error with a non-empty Failures list is a partial cleanup.
-func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool, force bool) (models.CleanupResult, error) {
+//
+// Cleanup reclaims disk space and nothing else. It used to also delete every
+// ArgoCD Application, every Helm release and the argocd/openframe namespaces —
+// a full platform teardown hiding behind a "free disk space" help text, which
+// is how a routine cleanup destroyed a working install. Tearing the platform
+// down is `app uninstall`'s job; tearing the cluster down is `cluster
+// delete`'s.
+func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool) (models.CleanupResult, error) {
 	switch clusterType {
 	case models.ClusterTypeK3d:
-		return s.cleanupK3dCluster(ctx, name, verbose, force)
+		return s.cleanupK3dCluster(ctx, name, verbose)
 	case models.ClusterTypeEKS, models.ClusterTypeGKE:
 		return models.CleanupResult{}, fmt.Errorf("cleanup is not supported for cloud clusters; use 'openframe cluster delete %s' to tear the cluster down", name)
 	default:
@@ -345,70 +321,15 @@ func (s *ClusterService) CleanupCluster(ctx context.Context, name string, cluste
 	}
 }
 
-// cleanupK3dCluster handles K3d-specific cleanup.
-//
-// Every phase is best-effort: a failure is recorded and the next phase still
-// runs, because a partly-installed cluster must remain tearable-down. Failures
-// are surfaced (not just under --verbose) so "cleanup completed" never hides a
-// phase that did nothing.
-func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool, force bool) (models.CleanupResult, error) {
+// cleanupK3dCluster reclaims disk on a k3d cluster by pruning unused container
+// images inside each node. Failures are surfaced (not just under --verbose) so
+// "cleanup completed" never hides a phase that did nothing.
+func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName string, verbose bool) (models.CleanupResult, error) {
 	if verbose {
 		pterm.Info.Printf("Starting cleanup of cluster: %s\n", clusterName)
 	}
 	var result models.CleanupResult
 
-	// 1. Delete the ArgoCD Applications WHILE the ArgoCD controller is still
-	// running, so it cascades the workload cleanup itself. Best-effort: a
-	// cluster without OpenFrame installed simply has none.
-	if s.appCleaner != nil {
-		deleted, err := s.appCleaner.DeleteApplications(ctx)
-		switch {
-		case err != nil:
-			result.AddFailure("ArgoCD applications", err)
-		default:
-			result.ApplicationsDeleted = deleted
-			if deleted > 0 && verbose {
-				pterm.Info.Printf("Deleted %d ArgoCD application(s)\n", deleted)
-			}
-		}
-	}
-
-	// 2. Clean up Helm releases (including ArgoCD) — pinned to this cluster's
-	// kube-context. Without the pin helm operates on the kubeconfig's CURRENT
-	// context, which may be a different (even production) cluster.
-	kubeContext := k8s.ResolveContextForCluster(k8s.DefaultKubeconfigPath(), clusterName)
-	removed, err := s.cleanupHelmReleases(ctx, kubeContext, verbose, force)
-	result.ReleasesRemoved = removed
-	if err != nil {
-		result.AddFailure("Helm releases", err)
-	}
-
-	// 3. ArgoCD is gone now, so nothing is left to clear its resources-finalizer.
-	// Strip it from any Application still in Terminating — otherwise those CRs
-	// (and the argocd namespace deleted in the next phase) never get reaped.
-	if s.appCleaner != nil {
-		cleared, err := s.appCleaner.RemoveApplicationFinalizers(ctx)
-		switch {
-		case err != nil:
-			result.AddFailure("application finalizers", err)
-		default:
-			result.FinalizersCleared = cleared
-			if cleared > 0 && verbose {
-				pterm.Info.Printf("Cleared finalizers on %d stuck application(s)\n", cleared)
-			}
-		}
-	}
-
-	// 4. Clean up Kubernetes resources in common namespaces
-	deletedNS, err := s.cleanupKubernetesResources(ctx, clusterName, verbose, force)
-	result.NamespacesDeleted = deletedNS
-	if err != nil {
-		result.AddFailure("Kubernetes namespaces", err)
-	}
-
-	// 5. Reclaim disk by pruning unused container images inside each node.
-	// Not gated on force: removing images no container references is safe, and
-	// reclaiming disk is the whole point of `cluster cleanup`.
 	pruned, err := s.cleanupNodeImages(ctx, clusterName, verbose)
 	result.NodesPruned = pruned
 	if err != nil {
@@ -420,171 +341,6 @@ func (s *ClusterService) cleanupK3dCluster(ctx context.Context, clusterName stri
 	}
 
 	return result, nil
-}
-
-// helmRelease is the subset of `helm list --output json` we consume.
-type helmRelease struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-// cleanupHelmReleases removes all Helm releases from the cluster identified by
-// kubeContext. The explicit --kube-context on every helm call is what keeps
-// cleanup scoped to that cluster (T0-1): helm otherwise acts on the
-// kubeconfig's current context, whatever the user last switched to.
-// It returns the number of releases actually uninstalled. A release that fails
-// to uninstall is counted as a failure, not as removed.
-func (s *ClusterService) cleanupHelmReleases(ctx context.Context, kubeContext string, verbose bool, force bool) (int, error) {
-	if kubeContext == "" {
-		return 0, fmt.Errorf("refusing to cleanup Helm releases without an explicit kube-context")
-	}
-
-	result, err := s.executor.Execute(ctx, "helm", "list", "--all-namespaces", "--output", "json", "--kube-context", kubeContext)
-	if err != nil {
-		return 0, fmt.Errorf("failed to list Helm releases: %w", err)
-	}
-
-	var releases []helmRelease
-	if out := strings.TrimSpace(result.Stdout); out != "" {
-		if err := json.Unmarshal([]byte(out), &releases); err != nil {
-			return 0, fmt.Errorf("failed to parse helm list output: %w", err)
-		}
-	}
-	if len(releases) == 0 {
-		if verbose {
-			pterm.Info.Println("No Helm releases found to cleanup")
-		}
-		return 0, nil
-	}
-
-	var removed int
-	var failed []string
-	for _, release := range releases {
-		if release.Name == "" || release.Namespace == "" {
-			continue
-		}
-
-		if verbose {
-			pterm.Info.Printf("Uninstalling Helm release: %s (namespace %s)\n", release.Name, release.Namespace)
-		}
-
-		// Aggressive uninstall, deliberately WITHOUT --wait: the releases here
-		// include argo-cd and app-of-apps, whose Application CRs carry ArgoCD's
-		// resources-finalizer. Once the ArgoCD controller is being removed it
-		// can no longer clear that finalizer, so --wait would block for helm's
-		// default 5m PER RELEASE (see UninstallRelease in
-		// internal/chart/providers/helm for the same rationale).
-		//
-		// The Application CRs left in Terminating are reaped by the
-		// finalizer-stripping phase that runs right after this one (see
-		// cleanupK3dCluster step 3), mirroring `app uninstall`.
-		args := []string{"uninstall", release.Name, "--namespace", release.Namespace, "--kube-context", kubeContext, "--no-hooks"}
-		if force {
-			// Add even more aggressive flags when force is enabled
-			args = append(args, "--ignore-not-found")
-		}
-		if _, err := s.executor.Execute(ctx, "helm", args...); err != nil {
-			failed = append(failed, release.Name)
-			if verbose {
-				pterm.Warning.Printf("Failed to uninstall release %s: %v\n", release.Name, err)
-			}
-		} else {
-			removed++
-			if verbose {
-				pterm.Success.Printf("Uninstalled Helm release: %s\n", release.Name)
-			}
-		}
-	}
-
-	if len(failed) > 0 {
-		return removed, fmt.Errorf("%d of %d release(s) could not be uninstalled: %s",
-			len(failed), len(releases), strings.Join(failed, ", "))
-	}
-	return removed, nil
-}
-
-// protectedNamespaces must never be deleted by cleanup, regardless of --force.
-// Deleting any of these can render the cluster unrecoverable or destroy
-// unrelated workloads (audit I7/M3).
-var protectedNamespaces = map[string]struct{}{
-	"kube-system":     {},
-	"kube-public":     {},
-	"kube-node-lease": {},
-	"default":         {},
-}
-
-// isProtectedNamespace reports whether ns must never be deleted.
-func isProtectedNamespace(ns string) bool {
-	_, ok := protectedNamespaces[ns]
-	return ok
-}
-
-// filterProtectedNamespaces returns raw with every protected/system namespace
-// removed. It is the I7 defense-in-depth guard: even if a protected namespace is
-// added to a cleanup list by mistake, it can never be deleted.
-func filterProtectedNamespaces(raw []string) []string {
-	out := make([]string, 0, len(raw))
-	for _, ns := range raw {
-		if !isProtectedNamespace(ns) {
-			out = append(out, ns)
-		}
-	}
-	return out
-}
-
-// cleanupKubernetesResources removes namespaces created by OpenFrame components
-// via the native Kubernetes client (client-go). It never touches
-// protected/system namespaces.
-// It returns the number of namespaces whose deletion was accepted by the API
-// server.
-func (s *ClusterService) cleanupKubernetesResources(ctx context.Context, clusterName string, verbose bool, _ bool) (int, error) {
-	// On Windows the cluster lives in WSL and must be reached from inside WSL.
-	if err := platform.WSLClusterHint("clean up OpenFrame namespaces"); err != nil {
-		return 0, err
-	}
-
-	// TLS policy is the provider's mint-time decision: k3d marks its local
-	// rest.Config insecure itself (verify.go), and a future cloud provider's
-	// config must NOT be downgraded here.
-	restConfig, err := s.manager.GetRestConfig(ctx, clusterName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get cluster config for cleanup: %w", err)
-	}
-	client, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-
-	// Namespaces created by OpenFrame component installs. System namespaces are
-	// intentionally absent and are additionally filtered (I7 defense-in-depth).
-	var deleted int
-	var failed []string
-	for _, namespace := range filterProtectedNamespaces([]string{"argocd", "openframe"}) {
-		if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
-			continue // doesn't exist (or unreachable) — skip
-		}
-
-		if verbose {
-			pterm.Info.Printf("Cleaning up namespace: %s\n", namespace)
-		}
-
-		if err := client.CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
-			failed = append(failed, namespace)
-			if verbose {
-				pterm.Warning.Printf("Failed to delete namespace %s: %v\n", namespace, err)
-			}
-		} else {
-			deleted++
-			if verbose {
-				pterm.Success.Printf("Deleted namespace: %s\n", namespace)
-			}
-		}
-	}
-
-	if len(failed) > 0 {
-		return deleted, fmt.Errorf("could not delete namespace(s): %s", strings.Join(failed, ", "))
-	}
-	return deleted, nil
 }
 
 // cleanupNodeImages reclaims disk by removing unused container images inside

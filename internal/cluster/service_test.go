@@ -205,7 +205,7 @@ func TestClusterService_CleanupCluster(t *testing.T) {
 	exec := createTestExecutor()
 	service := NewClusterService(exec)
 
-	_, err := service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false, false)
+	_, err := service.CleanupCluster(context.Background(), "test-cluster", models.ClusterTypeK3d, false)
 	if err != nil {
 		t.Errorf("CleanupCluster should not error: %v", err)
 	}

@@ -196,10 +196,12 @@ func (ui *OperationsUI) SelectClusterForCleanup(clusters []models.ClusterInfo, a
 }
 
 // confirmCleanup asks for user confirmation before cleaning up a cluster.
+// The prompt says exactly what cleanup does — prune unused images — so nobody
+// confirms it expecting (or fearing) a platform teardown.
 // Non-interactive sessions fail fast with a --force hint instead of blocking.
 func (ui *OperationsUI) confirmCleanup(clusterName string) (bool, error) {
 	return sharedUI.RequireConfirmation(
-		fmt.Sprintf("Are you sure you want to cleanup cluster '%s'?", pterm.Cyan(clusterName)),
+		fmt.Sprintf("Prune unused container images on cluster '%s'? Installed apps are not touched.", pterm.Cyan(clusterName)),
 		"--force", false)
 }
 
@@ -242,23 +244,9 @@ func (ui *OperationsUI) ShowCleanupSummary(clusterName string, result models.Cle
 	// to stdout and survive --silent, whose contract is "errors only".
 	pterm.DefaultBasicText.Println()
 	if result.Removed() == 0 {
-		pterm.Info.Println("Nothing to remove: the cluster had no OpenFrame resources left.")
+		pterm.Info.Println("Nothing to prune: no cluster nodes had unused images.")
 	} else {
-		pterm.Info.Printf("Removed:\n")
-		for _, line := range []struct {
-			n     int
-			label string
-		}{
-			{result.ApplicationsDeleted, "ArgoCD application(s)"},
-			{result.FinalizersCleared, "stuck application finalizer(s) cleared"},
-			{result.ReleasesRemoved, "Helm release(s)"},
-			{result.NamespacesDeleted, "namespace(s)"},
-			{result.NodesPruned, "node(s) pruned of unused container images"},
-		} {
-			if line.n > 0 {
-				pterm.DefaultBasicText.Printf("  %d %s\n", line.n, line.label)
-			}
-		}
+		pterm.Info.Printf("Pruned unused container images on %d node(s)\n", result.NodesPruned)
 	}
 
 	if result.Partial() {

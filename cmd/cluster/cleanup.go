@@ -3,13 +3,10 @@ package cluster
 import (
 	"fmt"
 
-	"github.com/flamingo-stack/openframe-cli/internal/chart/providers/argocd"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/prerequisites"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
-	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
-	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -19,11 +16,13 @@ func getCleanupCmd() *cobra.Command {
 
 	cleanupCmd := &cobra.Command{
 		Use:   "cleanup [NAME]",
-		Short: "Clean up unused cluster resources",
-		Long: `Remove unused images and resources from cluster nodes.
+		Short: "Prune unused container images from cluster nodes",
+		Long: `Reclaim disk space by pruning unused container images inside each cluster node.
 
-Cleans up Docker images and resources, freeing disk space.
-Useful for development clusters with many builds.
+Only images no container references are removed. Installed applications, Helm
+releases and namespaces are never touched — to remove the OpenFrame platform
+use 'openframe app uninstall', to remove the whole cluster use
+'openframe cluster delete'.
 
 Examples:
   openframe cluster cleanup
@@ -90,24 +89,9 @@ func runCleanupCluster(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Inject the ArgoCD-backed application cleaner (composition root: only the
-	// command layer may import both the cluster and the chart subsystems).
-	// Without it, cleanup skips the Application delete/finalizer-strip phases and
-	// the argocd namespace can stay stuck in Terminating. Best-effort: a cluster
-	// that is unreachable or has no ArgoCD simply cleans up without it.
-	if cfg, cerr := service.GetRestConfig(clusterName); cerr == nil {
-		if mgr, merr := argocd.NewManagerWithConfig(executor.NewRealCommandExecutor(false, globalFlags.Global.Verbose), cfg); merr == nil {
-			service = service.WithApplicationCleaner(mgr)
-		} else if globalFlags.Global.Verbose {
-			pterm.Warning.Printf("ArgoCD cleanup unavailable: %v\n", merr)
-		}
-	} else if globalFlags.Global.Verbose {
-		pterm.Warning.Printf("Cluster not reachable for ArgoCD cleanup: %v\n", cerr)
-	}
-
 	// Execute cluster cleanup through service layer. A nil error with failed
 	// phases is a partial cleanup: the summary names what was left behind.
-	result, err := service.CleanupCluster(cmd.Context(), clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose, utils.GetGlobalFlags().Cleanup.Force)
+	result, err := service.CleanupCluster(cmd.Context(), clusterName, clusterType, utils.GetGlobalFlags().Global.Verbose)
 	if err != nil {
 		operationsUI.ShowOperationError("cleanup", clusterName, err)
 		return err
