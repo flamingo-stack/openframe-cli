@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/models"
@@ -35,14 +36,14 @@ func (s *Service) GetPathResolver() *PathResolver {
 func (s *Service) Initialize() error {
 	// Initialize shared system service
 	if err := s.systemService.Initialize(); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize system service: %w", err)
 	}
 
 	// Ensure certificate directory exists
 	certDir := s.GetCertificateDirectory()
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(certDir, 0750); err != nil {
-			return err
+			return fmt.Errorf("failed to create certificate directory %q: %w", certDir, err)
 		}
 	}
 
