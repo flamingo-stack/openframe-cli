@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/selfupdate"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/ui/spinner"
 )
@@ -114,7 +115,7 @@ func localInstallScript(windowsPath string) string {
 func installLocalBinaryInWSL(windowsPath string) error {
 	cmd := exec.Command("wsl", wslArgv("bash", "-lc", localInstallScript(windowsPath))...) // #nosec G204 -- path is single-quoted into a self-contained script
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("installing local openframe binary into WSL failed: %w\n%s", err, string(out))
+		return executor.NewCommandError(cmd, out, err, fmt.Sprintf("installing local openframe binary into WSL failed: %v", err))
 	}
 	return nil
 }
@@ -146,7 +147,7 @@ func installOpenframeInWSL(version, goarch string) error {
 	cmd.Stdin = bytes.NewReader(binary)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		sp.Fail("Installing openframe inside WSL failed")
-		return fmt.Errorf("installing openframe inside WSL failed: %w\n%s", err, string(out))
+		return executor.NewCommandError(cmd, out, err, fmt.Sprintf("installing openframe inside WSL failed: %v", err))
 	}
 	sp.Success("OpenFrame is installed inside WSL")
 	return nil
