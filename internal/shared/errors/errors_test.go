@@ -374,17 +374,12 @@ func TestErrorHandler_NilHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Even a nil handler should not panic - this tests defensive programming
-			if tt.handler == nil {
-				// In this case we're testing that a nil handler would be handled gracefully
-				// In practice, the caller should ensure handler is not nil
-				assert.NotPanics(t, func() {
-					// Simulate defensive handling if needed
-					if tt.handler != nil {
-						tt.handler.HandleError(errors.New("test"))
-					}
-				})
-			}
+			// A nil *ErrorHandler must not panic when HandleError is invoked on it,
+			// since HandleError only reads fields (e.g. h.verbose) and does not
+			// dereference the receiver unconditionally.
+			assert.NotPanics(t, func() {
+				tt.handler.HandleError(errors.New("test"))
+			})
 		})
 	}
 }
