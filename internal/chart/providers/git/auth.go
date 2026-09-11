@@ -39,13 +39,28 @@ func extractGitAuth(rawURL string) gitAuth {
 	// A single-field userinfo (e.g. https://<token>@host, a common GitHub PAT
 	// shorthand) carries the token as the username with no password. Treat it as
 	// the token so it is used for auth (and masked in output) rather than
-	// silently stripped from the URL and dropped.
+	// silently stripped from the URL and dropped. This is a heuristic: a
+	// legitimate plain username with no embedded secret (e.g.
+	// https://someuser@host with credentials supplied out-of-band) will also be
+	// reinterpreted as a token here. We only apply the heuristic when the
+	// userinfo looks like a plausible token (long enough / not a simple word),
+	// to reduce the chance of masking a real, non-secret username in output.
 	if !hasPassword {
-		token = username
-		username = ""
+		if looksLikeToken(username) {
+			token = username
+			username = ""
+		}
 	}
 	u.User = nil
 	return gitAuth{cleanURL: u.String(), username: username, token: token}
+}
+
+// looksLikeToken is a heuristic guard used by extractGitAuth to decide whether
+// a bare (password-less) userinfo value should be treated as a secret token
+// rather than a plain, non-secret username. Short, simple values are left as
+// usernames so they are not needlessly masked in log output.
+func looksLikeToken(s string) bool {
+	return len(s) >= 20
 }
 
 // buildAuth returns the in-memory HTTP auth method for a private repository, or

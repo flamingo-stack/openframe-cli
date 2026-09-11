@@ -100,6 +100,9 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func (a *annotationWriter) Write(p []byte) (int, error) {
 	n, err := a.inner.Write(p)
+	if err != nil {
+		return n, err
+	}
 	msg := strings.TrimSpace(ansiSeq.ReplaceAllString(string(p), ""))
 	// Drop the printer's own severity marker — the annotation level already
 	// carries it. Exactly ONE marker is stripped (the printed line always

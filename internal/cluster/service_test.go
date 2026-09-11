@@ -45,8 +45,14 @@ func TestNewClusterService(t *testing.T) {
 }
 
 func TestClusterService_CreateCluster(t *testing.T) {
-	exec := createTestExecutor()
-	service := NewClusterService(exec)
+	mock := executor.NewMockCommandExecutor()
+	mockJSON := `[{"name":"test-cluster","serversCount":1,"serversRunning":1,"agentsCount":0,"agentsRunning":0,"nodes":[{"name":"k3d-test-cluster-server-0","role":"server","created":"2024-01-01T00:00:00Z"}]}]`
+	mock.SetResponse("k3d cluster list", &executor.CommandResult{
+		ExitCode: 0,
+		Stdout:   mockJSON,
+		Duration: 100,
+	})
+	service := NewClusterService(mock)
 
 	// Use a unique cluster name to avoid conflicts with existing clusters
 	config := models.ClusterConfig{
@@ -57,9 +63,12 @@ func TestClusterService_CreateCluster(t *testing.T) {
 	}
 
 	_, err := service.CreateCluster(context.Background(), config)
-	// With mock executor, error can occur if cluster already exists or kubeconfig issues
-	// We just verify it doesn't panic
-	_ = err
+	if err != nil {
+		t.Fatalf("CreateCluster should succeed with mock executor, got error: %v", err)
+	}
+	if mock.GetCommandCount() == 0 {
+		t.Errorf("expected CreateCluster to execute at least one command, got: %v", mock.GetExecutedCommands())
+	}
 }
 
 func TestClusterService_CreateCluster_CloudWithoutRegionFailsBeforeAnyCommand(t *testing.T) {
