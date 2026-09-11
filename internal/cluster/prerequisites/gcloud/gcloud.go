@@ -4,6 +4,7 @@ package gcloud
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -18,7 +19,14 @@ var (
 	lookPath = exec.LookPath
 	runQuiet = func(name string, args ...string) error {
 		cmd := exec.Command(name, args...) // #nosec G204 -- explicit argv, no shell; command and args are internal, not untrusted input
-		return cmd.Run()
+		if err := cmd.Run(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return fmt.Errorf("command %q exited with code %d: %w", name, exitErr.ExitCode(), err)
+			}
+			return err
+		}
+		return nil
 	}
 )
 
