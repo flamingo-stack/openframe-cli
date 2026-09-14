@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 )
@@ -115,6 +116,9 @@ func printClusterStatus(info models.ClusterInfo, format string) error {
 	if err != nil {
 		return fmt.Errorf("encoding %s: %w", format, err)
 	}
-	fmt.Println(string(b))
+	if !pterm.PrintDebugMessages {
+		return nil
+	}
+	pterm.Println(string(b))
 	return nil
 }
