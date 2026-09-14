@@ -13,6 +13,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	tfjson "github.com/hashicorp/terraform-json"
+	"github.com/pterm/pterm"
 )
 
 // Runner is the subset of *tfexec.Terraform the engine uses; an interface so
@@ -145,16 +146,25 @@ const OpLogName = "terraform.log"
 // propagates a sink error: exec.Cmd returns a stdout-writer error from Wait,
 // so a disk filling up mid-apply would report the terraform run as FAILED
 // while terraform actually completed and changed resources. The log is a
-// record of the operation — it must never decide its outcome.
+// record of the operation — it must never decide its outcome. The first sink
+// write failure is still surfaced once, at WARN level, so a user relying on
+// OpLogName for post-mortem debugging isn't silently left with a truncated
+// log and no indication it happened.
 type bestEffortTee struct {
 	progress io.Writer
 	sink     io.Writer // nil once a write failed; never re-enabled
+	logPath  string    // used only for the one-time warning below
+	warned   bool
 }
 
 func (t *bestEffortTee) Write(p []byte) (int, error) {
 	if t.sink != nil {
 		if _, err := t.sink.Write(p); err != nil {
 			t.sink = nil
+			if !t.warned {
+				t.warned = true
+				pterm.Warning.Printfln("operation log %s stopped recording (write error: %v); the on-disk log will be incomplete", t.logPath, err)
+			}
 		}
 	}
 	return t.progress.Write(p)
@@ -164,7 +174,8 @@ func (t *bestEffortTee) Write(p []byte) (int, error) {
 // writer, teed into dir's terraform.log when it can be opened. Logging is
 // best-effort end to end — a directory that cannot take the log (read-only,
 // gone) skips it, and a write failure after opening only stops the mirroring
-// (bestEffortTee above); neither may ever fail the operation itself.
+// (bestEffortTee above, which also warns once); neither may ever fail the
+// operation itself.
 // The returned close is always safe to call; logPath is empty when no log is
 // being written.
 func (e *Engine) opSinks(dir, op string) (w io.Writer, close func(), logPath string) {
@@ -173,8 +184,12 @@ func (e *Engine) opSinks(dir, op string) (w io.Writer, close func(), logPath str
 	if err != nil {
 		return progress, func() {}, ""
 	}
-	fmt.Fprintf(f, "=== terraform %s — %s ===\n", op, time.Now().UTC().Format(time.RFC3339))
-	return &bestEffortTee{progress: progress, sink: f}, func() { _ = f.Close() }, f.Name()
+	if _, err := fmt.Fprintf(f, "=== terraform %s — %s ===\n", op, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		pterm.Warning.Printfln("operation log %s could not be written to (%v); the on-disk log will be incomplete", f.Name(), err)
+		_ = f.Close()
+		return progress, func() {}, ""
+	}
+	return &bestEffortTee{progress: progress, sink: f, logPath: f.Name()}, func() { _ = f.Close() }, f.Name()
 }
 
 // opFailure wraps a failed apply/destroy, pointing at the full log when one

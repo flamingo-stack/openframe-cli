@@ -74,6 +74,9 @@ func (d *GKEDiscoverer) configurations(ctx context.Context) ([]gcloudConfigurati
 	if err != nil {
 		return nil, fmt.Errorf("listing gcloud configurations: %w", err)
 	}
+	if result == nil {
+		return nil, nil
+	}
 	var configs []gcloudConfiguration
 	if err := json.Unmarshal([]byte(result.Stdout), &configs); err != nil {
 		return nil, fmt.Errorf("parsing gcloud configurations: %w", err)
