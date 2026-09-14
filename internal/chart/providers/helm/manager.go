@@ -313,7 +313,7 @@ func (h *HelmManager) InstallArgoCDWithProgress(ctx context.Context, config conf
 	var spinner *uispinner.Spinner
 	if !config.Silent && !config.NonInteractive {
 		spinner = uispinner.Start("Installing ArgoCD...")
-	} else {
+	} else if !config.Silent {
 		pterm.Info.Println("Installing ArgoCD...")
 	}
 
