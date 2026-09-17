@@ -1,0 +1,59 @@
+flowchart TD
+    subgraph Commands["cmd/ layer"]
+        C_Bootstrap["cmd/bootstrap"]
+        C_Cluster["cmd/cluster"]
+        C_App["cmd/app"]
+        C_Prereq["cmd/prerequisites"]
+    end
+
+    subgraph Services["internal service layer"]
+        S_Bootstrap["internal/bootstrap.Service"]
+        S_Cluster["internal/cluster.ClusterService"]
+        S_Chart["internal/chart/services.ChartService"]
+        S_Status["internal/app/status.Service"]
+        S_Uninstall["internal/app/uninstall.Service"]
+    end
+
+    subgraph Providers["Provider abstractions"]
+        P_Cluster["cluster/provider (k3d/EKS/GKE)"]
+        P_ArgoCD["chart/providers/argocd"]
+        P_Helm["chart/providers/helm"]
+        P_Git["chart/providers/git"]
+    end
+
+    subgraph SharedInfra["Shared infrastructure"]
+        K8sAccess["internal/k8s"]
+        Exec["shared/executor"]
+        PrereqFw["internal/prerequisites"]
+        Errors["shared/errors"]
+        UI["shared/ui"]
+    end
+
+    C_Bootstrap --> S_Bootstrap
+    S_Bootstrap --> S_Cluster
+    S_Bootstrap --> S_Chart
+
+    C_Cluster --> S_Cluster
+    S_Cluster --> P_Cluster
+    P_Cluster --> Exec
+
+    C_App --> S_Chart
+    C_App --> S_Status
+    C_App --> S_Uninstall
+    S_Chart --> P_ArgoCD
+    S_Chart --> P_Helm
+    S_Chart --> P_Git
+    S_Status --> P_ArgoCD
+    S_Status --> K8sAccess
+    S_Uninstall --> P_ArgoCD
+    S_Uninstall --> P_Helm
+
+    C_Prereq --> PrereqFw
+    S_Cluster --> PrereqFw
+
+    P_ArgoCD --> Exec
+    P_Helm --> Exec
+    K8sAccess -.->|"rest.Config"| P_ArgoCD
+
+    Commands --> Errors
+    Commands --> UI

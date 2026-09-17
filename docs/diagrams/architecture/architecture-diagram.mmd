@@ -1,0 +1,51 @@
+graph TB
+    subgraph CLI["cmd/ (Cobra commands)"]
+        Root["root.go"]
+        Bootstrap["bootstrap"]
+        Cluster["cluster"]
+        App["app"]
+        Prereq["prerequisites"]
+        Update["update"]
+    end
+
+    subgraph Domain["internal/ (domain services)"]
+        BootstrapSvc["bootstrap.Service"]
+        ClusterSvc["cluster.ClusterService"]
+        Provider["cluster/provider (k3d, EKS, GKE)"]
+        ChartSvc["chart/services (ArgoCD + app-of-apps)"]
+        AppStatus["app/status, app/uninstall"]
+        PrereqFw["prerequisites framework"]
+        K8s["k8s (Accessor, contexts, rest.Config)"]
+        SelfUpdate["shared/selfupdate"]
+    end
+
+    subgraph External["External tools & services"]
+        Docker["Docker"]
+        K3d["k3d CLI"]
+        Terraform["terraform (EKS/GKE)"]
+        Helm["Helm CLI"]
+        ArgoCDExt["ArgoCD (in-cluster)"]
+        GitHub["GitHub Releases / Chart repo"]
+        CloudAPI["AWS / GCP APIs"]
+    end
+
+    Root --> Bootstrap & Cluster & App & Prereq & Update
+    Bootstrap --> BootstrapSvc
+    BootstrapSvc --> ClusterSvc
+    BootstrapSvc --> ChartSvc
+    Cluster --> ClusterSvc
+    ClusterSvc --> Provider
+    App --> ChartSvc
+    App --> AppStatus
+    Prereq --> PrereqFw
+    Update --> SelfUpdate
+
+    Provider --> Docker & K3d
+    Provider --> Terraform
+    Terraform --> CloudAPI
+    ChartSvc --> Helm
+    ChartSvc --> GitHub
+    ChartSvc --> ArgoCDExt
+    AppStatus --> K8s
+    ChartSvc --> K8s
+    SelfUpdate --> GitHub

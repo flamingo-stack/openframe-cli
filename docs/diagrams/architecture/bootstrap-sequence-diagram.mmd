@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant User
+    participant CmdBootstrap as cmd/bootstrap
+    participant BootstrapSvc as bootstrap.Service
+    participant ClusterSvc as cluster.ClusterService
+    participant K3dProvider as k3d Provider
+    participant ChartSvc as chart/services
+    participant ArgoCD as ArgoCD Manager
+    participant GitRepo as Chart Git Repo
+    participant K8sAPI as Kubernetes API
+
+    User->>CmdBootstrap: openframe bootstrap [name]
+    CmdBootstrap->>BootstrapSvc: Execute(ctx, name, flags)
+    BootstrapSvc->>ChartSvc: ValidateHelmValuesFile()
+    Note over BootstrapSvc: Fails fast before cluster create
+    BootstrapSvc->>ClusterSvc: CreateCluster(ctx, config)
+    ClusterSvc->>K3dProvider: CreateCluster(ctx, config)
+    K3dProvider->>K8sAPI: create k3d cluster (Docker)
+    K8sAPI-->>K3dProvider: rest.Config
+    K3dProvider-->>ClusterSvc: rest.Config
+    ClusterSvc-->>BootstrapSvc: rest.Config
+
+    BootstrapSvc->>ChartSvc: InstallChartsWithConfigContext(req)
+    ChartSvc->>ArgoCD: Install(ctx, config)
+    ArgoCD->>K8sAPI: helm upgrade --install argocd
+    ChartSvc->>GitRepo: CloneChartRepository(appConfig)
+    GitRepo-->>ChartSvc: local chart path
+    ChartSvc->>ArgoCD: InstallAppOfAppsFromLocal(...)
+    ArgoCD->>K8sAPI: helm upgrade --install app-of-apps
+    ChartSvc->>ArgoCD: WaitForApplications(ctx, config)
+    loop until all apps Synced+Healthy or timeout
+        ArgoCD->>K8sAPI: list ArgoCD Application CRs
+        K8sAPI-->>ArgoCD: sync/health status
+    end
+    ArgoCD-->>ChartSvc: ready
+    ChartSvc-->>BootstrapSvc: success
+    BootstrapSvc-->>User: summary card (stages, timings, next steps)
