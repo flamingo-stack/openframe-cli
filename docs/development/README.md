@@ -1,104 +1,32 @@
 # Development Documentation
 
-Welcome to the OpenFrame CLI development documentation. This section covers everything you need to contribute to, extend, and understand the internals of the `openframe` CLI.
+This section covers everything you need to develop, test, and contribute to OpenFrame CLI — the Go-based command-line tool that provisions Kubernetes clusters and deploys the OpenFrame platform.
 
-OpenFrame CLI is written in **Go** and uses [Cobra](https://github.com/spf13/cobra) for command-line parsing. It orchestrates K3D clusters, ArgoCD GitOps deployments, and Helm chart management through a layered service/provider architecture.
+> OpenFrame CLI lives in [flamingo-stack/openframe-cli](https://github.com/flamingo-stack/openframe-cli). The platform it deploys (charts, services, app-of-apps) lives in the separate [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant) repository.
 
----
-
-## Documentation Index
+## Contents
 
 | Document | Description |
 |---|---|
-| [Environment Setup](setup/environment.md) | IDE configuration, Go toolchain, editor extensions |
-| [Local Development](setup/local-development.md) | Clone, build, run, and debug the CLI locally |
-| [Architecture Overview](architecture/README.md) | High-level design, component breakdown, data flows |
-| [Security Guidelines](security/README.md) | Auth patterns, secret handling, vulnerability mitigations |
-| [Testing Guide](testing/README.md) | Unit tests, integration tests, test utilities |
-| [Contributing Guidelines](contributing/guidelines.md) | Code style, PR process, commit messages |
+| [Environment Setup](setup/environment.md) | IDE recommendations, required tools, and editor configuration for Go development |
+| [Local Development](setup/local-development.md) | Cloning, building, running, and debugging the CLI locally |
+| [Architecture Overview](architecture/README.md) | High-level component map, data flow, and key design decisions |
+| [Security](security/README.md) | Secure-download, signing, secret-redaction, and self-update security model |
+| [Testing](testing/README.md) | Test structure, running unit/integration tests, and writing new tests |
+| [Contributing Guidelines](contributing/guidelines.md) | Code style, branching, commit conventions, and PR review checklist |
 
----
+## Quick Orientation
 
-## Quick Navigation
+OpenFrame CLI is organized as a [Cobra](https://github.com/spf13/cobra) command tree (`cmd/`) backed by domain services under `internal/`:
 
-### I want to...
-
-**Build and run the CLI locally**
-→ See [Local Development](setup/local-development.md)
-
-**Understand how the codebase is structured**
-→ See [Architecture Overview](architecture/README.md)
-
-**Add a new command or feature**
-→ Start with [Architecture Overview](architecture/README.md), then [Contributing Guidelines](contributing/guidelines.md)
-
-**Write or run tests**
-→ See [Testing Guide](testing/README.md)
-
-**Handle secrets or security concerns**
-→ See [Security Guidelines](security/README.md)
-
-**Set up my development environment**
-→ See [Environment Setup](setup/environment.md)
-
----
-
-## Repository Structure
-
-```text
-openframe-cli/
-├── cmd/                    # Cobra command definitions (entry points)
-│   ├── root.go             # Root command, wires all subcommands
-│   ├── bootstrap/          # openframe bootstrap
-│   ├── cluster/            # openframe cluster (create/delete/list/status/cleanup)
-│   ├── app/                # openframe app (install/upgrade/status/access/uninstall)
-│   ├── prerequisites/      # openframe prerequisites (check/install)
-│   └── update/             # openframe update (self-update/rollback)
-├── internal/               # All internal business logic
-│   ├── bootstrap/          # Bootstrap service (cluster + chart orchestration)
-│   ├── cluster/            # Cluster service + K3D provider
-│   ├── chart/              # Chart services, ArgoCD/Helm/Git providers
-│   ├── app/                # App status and uninstall services
-│   ├── k8s/                # Kubernetes client utilities
-│   ├── platform/           # OS detection and platform hints
-│   ├── prerequisites/      # Prerequisite framework
-│   └── shared/             # Cross-cutting: executor, UI, errors, config, selfupdate
-├── tests/
-│   ├── integration/        # Integration tests (requires running cluster)
-│   └── testutil/           # Shared test utilities and patterns
-├── scripts/
-│   └── sign-binary.sh      # Binary signing helper
-└── main.go                 # Entry point
+```mermaid
+graph LR
+    cmd["cmd/ (Cobra commands)"] --> internal["internal/ (domain services)"]
+    internal --> external["External tools: Docker, k3d, Terraform, Helm, ArgoCD"]
 ```
 
----
+- `cmd/` — thin command adapters (flags → service calls); one subpackage per command group (`bootstrap`, `cluster`, `app`, `prerequisites`, `update`).
+- `internal/` — all business logic: cluster provisioning, chart installation, status aggregation, self-update, shared UI/executor/error infrastructure.
+- `tests/` — `testutil` (shared unit-test helpers, mock executor, flag-contract testing) and `integration/common` (builds and drives the real `openframe` binary end-to-end).
 
-## Tech Stack
-
-| Technology | Role |
-|---|---|
-| **Go** | Primary language |
-| **Cobra** | CLI framework (command/flag parsing) |
-| **K3D** | Local Kubernetes cluster provider |
-| **ArgoCD** | GitOps deployment engine (via client-go dynamic client) |
-| **Helm** | Kubernetes package manager (CLI wrapper) |
-| **go-git** | Git operations (no `git` binary dependency) |
-| **client-go** | Kubernetes API client |
-| **pterm** | Terminal UI rendering (spinners, prompts, colors) |
-| **Sigstore/cosign** | Binary signature verification for self-updates |
-
----
-
-## External Dependencies
-
-The OpenFrame platform chart lives in a separate repository:
-
-- **openframe-oss-tenant:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
-- Documentation: [https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
-
----
-
-## Getting Help
-
-- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/)
-- **CLI Source:** [https://github.com/flamingo-stack/openframe-cli](https://github.com/flamingo-stack/openframe-cli)
+Start with [Environment Setup](setup/environment.md) if this is your first time working on the codebase, or jump straight to [Local Development](setup/local-development.md) if your Go toolchain is already configured.

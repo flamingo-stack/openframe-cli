@@ -1,204 +1,117 @@
-# Quick Start Guide
+# Quick Start
 
-Get OpenFrame up and running in under 5 minutes. This guide covers the fastest path to a working OpenFrame environment.
+This guide gets you from zero to a running OpenFrame platform on a local machine in a few commands.
 
----
+## 1. Install OpenFrame CLI
 
-## TL;DR — 5-Minute Setup
+### Windows
 
-```bash
-# 1. Download the CLI for your platform (see below)
-# 2. Check prerequisites
-openframe prerequisites check
+Download the pre-built binary:
 
-# 3. Bootstrap a full OpenFrame environment
-openframe bootstrap
-```
+- **Windows (amd64)**: [openframe-cli_windows_amd64.zip](https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip)
 
-That's it. The `bootstrap` command creates a local K3D cluster, installs ArgoCD, deploys the full OpenFrame platform, and waits for everything to become healthy.
+Extract the archive and run the `openframe` executable the same way you would on any other OS (see below). Because Docker/k3d and Kubernetes networking need to run in a Linux environment, OpenFrame CLI automatically forwards its execution into WSL2 on Windows — make sure WSL2 with an Ubuntu distro is installed and available.
 
----
+### macOS / Linux
 
-## Step 1: Download the OpenFrame CLI
+Grab the appropriate archive for your OS/architecture from the [OpenFrame CLI releases page](https://github.com/flamingo-stack/openframe-cli/releases), extract it, and place the `openframe` binary somewhere on your `$PATH` (for example `/usr/local/bin`).
 
-Choose your platform:
+### Build from source (all platforms)
 
-### macOS (Apple Silicon / Intel)
+If you have Go 1.26+ installed, you can build directly from the repository:
 
 ```bash
-# Apple Silicon (M1/M2/M3)
-curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_arm64.tar.gz | tar xz
-sudo mv openframe /usr/local/bin/
-
-# Intel
-curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_darwin_amd64.tar.gz | tar xz
-sudo mv openframe /usr/local/bin/
+git clone https://github.com/flamingo-stack/openframe-cli.git
+cd openframe-cli
+go build -o openframe .
+./openframe --version
 ```
 
-### Linux (amd64)
-
-```bash
-curl -L https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_linux_amd64.tar.gz | tar xz
-sudo mv openframe /usr/local/bin/
-```
-
-### Windows (amd64)
-
-Download: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
-
-Extract the ZIP archive and run the `openframe.exe` — it will automatically forward commands into WSL2.
-
-### Browse All Releases
-
-Visit [https://github.com/flamingo-stack/openframe-cli/releases](https://github.com/flamingo-stack/openframe-cli/releases) for all available platform binaries.
-
----
-
-## Step 2: Verify Installation
+## 2. Verify the Install
 
 ```bash
 openframe --version
 ```
 
-Expected output:
+This prints the CLI version along with the pinned versions of the external tools it manages (Terraform, Helm, k3d, mkcert, infracost, ArgoCD chart).
 
-```text
-openframe version v1.x.x (abc1234) built on 2024-xx-xx
-```
-
----
-
-## Step 3: Check Prerequisites
+## 3. Check Prerequisites
 
 ```bash
 openframe prerequisites check
 ```
 
-The CLI will inspect your environment and report the status of required tools:
-
-```text
-✓ Docker    - running
-✓ k3d       - v5.x.x
-✓ Helm      - v3.x.x
-```
-
-If any prerequisites are missing, install them automatically:
+If anything is missing (Docker, k3d, Helm for the default local cluster type), install it automatically on macOS/Linux:
 
 ```bash
 openframe prerequisites install
 ```
 
-> **Windows users:** Auto-install is not supported on native Windows. The CLI will display documentation links for each missing tool instead.
+## 4. Bootstrap a Cluster + Platform
 
----
-
-## Step 4: Bootstrap OpenFrame
-
-Run the interactive bootstrap wizard:
+The fastest path to a running OpenFrame platform is the `bootstrap` command, which creates a local `k3d` cluster and installs ArgoCD + the app-of-apps in one step:
 
 ```bash
-openframe bootstrap
+openframe bootstrap my-cluster
 ```
 
-The wizard will guide you through:
-
-1. **Cluster name** — the name for your local K3D cluster (default: `openframe-dev`)
-2. **Configuration mode** — default settings or interactive customization
-3. **Branch/version** — which OpenFrame release to deploy
-
-To use all defaults without prompts (e.g. in CI):
+This launches an interactive flow by default. For CI/automation, use `--non-interactive` together with an existing `openframe-helm-values.yaml` file in your working directory:
 
 ```bash
-openframe bootstrap --non-interactive
+openframe bootstrap my-cluster --non-interactive
 ```
 
 ### Expected Output
 
-```text
-  ___                  ___
- / _ \ _ __   ___ _ __|  _|_ __ __ _ _ __ ___   ___
-| | | | '_ \ / _ \ '_ \ |_| '__/ _` | '_ ` _ \ / _ \
-| |_| | |_) |  __/ | | |  _| | | (_| | | | | | |  __/
- \___/| .__/ \___|_| |_|_| |_|  \__,_|_| |_| |_|\___|
-      |_|
+Bootstrap runs through staged progress (cluster creation → ArgoCD install → app-of-apps install → application readiness wait) and finishes with a summary card showing stage timings and next-step suggestions. Internally, it:
 
-✓ Prerequisites validated
-✓ Creating cluster: openframe-dev
-✓ Cluster ready
-✓ Installing ArgoCD
-✓ ArgoCD ready
-✓ Deploying OpenFrame platform
-✓ Waiting for applications...
-✓ All applications Healthy + Synced
+1. Validates your Helm values file (fails fast, before touching your Docker daemon).
+2. Creates a k3d cluster via Docker.
+3. Installs ArgoCD via Helm.
+4. Clones the app-of-apps chart repository and installs it via Helm.
+5. Waits until all ArgoCD Applications report `Synced` + `Healthy`.
 
-Bootstrap complete! 🎉
+```mermaid
+sequenceDiagram
+    participant You
+    participant CLI as openframe bootstrap
+    participant Cluster as k3d cluster
+    participant ArgoCD
+
+    You->>CLI: openframe bootstrap my-cluster
+    CLI->>Cluster: create cluster (Docker)
+    CLI->>ArgoCD: helm install argocd
+    CLI->>ArgoCD: helm install app-of-apps
+    ArgoCD-->>CLI: applications Synced + Healthy
+    CLI-->>You: summary card + next steps
 ```
 
----
-
-## Step 5: Check Status
-
-After bootstrapping, verify everything is running:
+## 5. Check Platform Status
 
 ```bash
 openframe app status
 ```
 
+For a live-refreshing view:
+
 ```bash
-openframe cluster status
+openframe app status --watch
 ```
 
----
-
-## What Was Installed?
-
-After a successful `openframe bootstrap`, you have:
-
-| Component | Description |
-|---|---|
-| **K3D cluster** | A local lightweight Kubernetes cluster named `openframe-dev` |
-| **ArgoCD** | GitOps continuous delivery engine managing your platform |
-| **OpenFrame platform** | The full OSS tenant chart from [openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant) |
-
----
-
-## Common Next Actions
-
-After bootstrap completes, you may want to:
+Or a full interactive TUI:
 
 ```bash
-# View all available commands
-openframe --help
+openframe app status --interactive
+```
 
-# Check cluster list
-openframe cluster list
+## 6. Access the Platform
 
-# Get access information
+Retrieve ArgoCD admin credentials and port-forward instructions:
+
+```bash
 openframe app access
-
-# Upgrade to a new OpenFrame version
-openframe app upgrade
-
-# Keep the CLI itself up to date
-openframe update
 ```
-
----
-
-## Troubleshooting Quick Fixes
-
-| Problem | Solution |
-|---|---|
-| `docker: command not found` | Install Docker: `openframe prerequisites install` |
-| `connection refused` | Check `openframe cluster status` — the cluster may not be running |
-| `context deadline exceeded` | Network/resource issue; wait and retry, or check system resources |
-| Missing `openframe-helm-values.yaml` | The bootstrap wizard will create it for you in non-interactive mode |
-| Permission denied on binary | `chmod +x /usr/local/bin/openframe` |
-
----
 
 ## Next Steps
 
-- Read the [First Steps Guide](first-steps.md) for what to explore after your first bootstrap
-- Review the [Prerequisites Guide](prerequisites.md) if you encounter environment issues
-- Visit the [OpenMSP community](https://www.openmsp.ai/) for help and discussion
+Now that you have a running cluster and platform, continue to [First Steps](first-steps.md) to learn about day-2 operations like upgrading, switching clusters, and getting help. You can also revisit [Prerequisites](prerequisites.md) if you plan to target a cloud cluster type (EKS/GKE) instead of local `k3d`.

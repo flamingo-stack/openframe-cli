@@ -1,186 +1,72 @@
 # Prerequisites
 
-Before installing and using the OpenFrame CLI, ensure your environment meets the following requirements. The CLI can automatically check and install most prerequisites on macOS and Linux — on Windows, you will be guided to the relevant documentation.
+Before installing and using OpenFrame CLI, make sure your environment meets the requirements below. OpenFrame CLI can auto-install most missing tools for you on macOS and Linux (see [`openframe prerequisites`](#verifying-your-setup) below), but it's useful to know what's actually required.
 
----
+## Required Software
+
+The exact tool set depends on which cluster backend you plan to use.
+
+| Tool | Required For | Notes |
+|---|---|---|
+| **Docker** | Local `k3d` clusters | Must be installed and running; OpenFrame CLI checks daemon health via `docker ps` |
+| **k3d** | Local `k3d` clusters | Downloaded and checksum-verified automatically by the CLI if missing (macOS/Linux) |
+| **Helm** | All cluster types | Used to install ArgoCD and the app-of-apps chart |
+| **Terraform** | AWS `EKS` / GCP `GKE` clusters | Provisions cloud infrastructure |
+| **AWS CLI** | AWS `EKS` clusters | Used for identity/auth and discovery |
+| **gcloud CLI** + `gke-gcloud-auth-plugin` | GCP `GKE` clusters | Used for auth and cluster discovery |
+| **infracost** (optional) | Cloud clusters | Shows a monthly cost estimate before `cluster create --dry-run`; the CLI offers to install/login interactively if missing |
+| **mkcert** (optional) | Local TLS certificates | Downloaded automatically when local HTTPS certs are needed |
+| **Go 1.26+** | Building from source only | Only required if you're compiling the CLI yourself; not needed to run a released binary |
+| **WSL2 + Ubuntu distro** | Windows only | Required because Docker/k3d and Kubernetes networking run natively in WSL2, not on native Windows |
 
 ## System Requirements
 
 | Resource | Minimum | Recommended |
 |---|---|---|
-| **RAM** | 24 GB | 32 GB |
-| **CPU Cores** | 6 cores | 12 cores |
-| **Disk Space** | 50 GB free | 100 GB free |
-| **Operating System** | macOS, Linux, Windows (WSL2) | macOS or Linux |
+| RAM | 24 GB | 32 GB |
+| CPU Cores | 6 | 12 |
+| Disk Space | 50 GB | 100 GB |
 
-> **Windows users:** The OpenFrame CLI runs natively on Windows but automatically forwards all operations into WSL2 (Windows Subsystem for Linux). You must have WSL2 installed and a Linux distro configured. The CLI will auto-install itself inside WSL when first run.
+> **Note:** These figures reflect running the full OpenFrame platform (ArgoCD + app-of-apps + all platform services) on a local `k3d` cluster. Cloud (`EKS`/`GKE`) clusters shift most compute to the cloud provider but still require enough local resources to run Terraform, kubectl, and the CLI itself.
 
----
+## Account / Access Requirements
 
-## Required Software
-
-| Tool | Minimum Version | Purpose | Auto-Installed? |
-|---|---|---|---|
-| **Docker** | 24.x or newer | Container runtime for K3D clusters | ✅ macOS/Linux |
-| **k3d** | 5.x or newer | Lightweight K3D cluster manager | ✅ macOS/Linux |
-| **Helm** | 3.x or newer | Kubernetes package manager | ✅ macOS/Linux |
-| **kubectl** | 1.28+ | Kubernetes CLI (optional — CLI uses client-go directly) | ❌ Manual |
-| **WSL2** *(Windows only)* | Windows 10/11 | Linux environment on Windows | ❌ Manual |
-
-> **Note:** Docker, k3d, and Helm can be installed automatically by running `openframe prerequisites install`. On Windows, the CLI will display documentation links for each missing tool.
-
----
-
-## Operating System Details
-
-### macOS
-
-- macOS 12 (Monterey) or newer recommended
-- [Docker Desktop for Mac](https://docs.docker.com/desktop/mac/install/) or [OrbStack](https://orbstack.dev/) required
-- Homebrew is recommended for manual tool management
-
-### Linux
-
-- Ubuntu 20.04+, Debian 11+, Fedora 36+, or any modern distribution
-- Docker Engine (not just the CLI) must be running
-- User must be in the `docker` group or have `sudo` access
-
-### Windows (via WSL2)
-
-- Windows 10 version 2004+ or Windows 11
-- WSL2 enabled: run `wsl --install` in PowerShell as Administrator
-- A Linux distro installed (Ubuntu recommended): `wsl --install -d Ubuntu`
-- Docker Desktop for Windows with WSL2 backend enabled
-
----
-
-## Account & Access Requirements
-
-| Requirement | Details |
-|---|---|
-| **GitHub Access** | Required for downloading the `openframe-oss-tenant` chart and for self-updates |
-| **GitHub Token** *(optional)* | Set `OPENFRAME_GITHUB_TOKEN` or `GITHUB_TOKEN` to avoid rate limiting |
-| **Internet Access** | Required for downloading charts, container images, and updates |
-
----
+- **Local (`k3d`)**: No external account needed — everything runs on your machine via Docker.
+- **AWS EKS**: Valid AWS credentials with permissions to create EKS clusters, VPCs, IAM roles, and related resources (Terraform-managed). The CLI validates AWS identity via `openframe cluster create --type eks` flows.
+- **GCP GKE**: A GCP project and authenticated `gcloud` session with permissions to create GKE clusters and related networking resources.
+- **Self-update**: No account required; the CLI checks and downloads releases from the public [flamingo-stack/openframe-cli releases](https://github.com/flamingo-stack/openframe-cli/releases) page.
 
 ## Environment Variables
 
-The following environment variables are recognized by the CLI:
+These are optional and only relevant in specific scenarios:
 
-| Variable | Required | Description |
-|---|---|---|
-| `OPENFRAME_GITHUB_TOKEN` | Optional | GitHub personal access token (avoids API rate limits) |
-| `GITHUB_TOKEN` | Optional | Standard GitHub token (also accepted) |
-| `OPENFRAME_WSL_DISTRO` | Windows only | Target WSL distro name (default: WSL default distro) |
-| `OPENFRAME_NO_WSL_FORWARD` | Windows only | Disable WSL forwarding (unsupported; use at your own risk) |
-| `OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY` | Emergency only | Skip cosign signature verification during updates |
-| `KUBECONFIG` | Optional | Path to kubeconfig file (default: `~/.kube/config`) |
+| Variable | Purpose |
+|---|---|
+| `OPENFRAME_WSL_DISTRO` | Targets a specific WSL distro on Windows instead of the WSL default |
+| `OPENFRAME_NO_WSL_FORWARD` | Disables WSL forwarding on Windows and forces native execution (unsupported for cluster operations) |
+| `OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY` | Emergency escape hatch to skip cosign signature verification during self-update (not recommended) |
+| `GITHUB_TOKEN` / `OPENFRAME_GITHUB_TOKEN` | Forwarded into WSL for authenticated GitHub API access (e.g., higher rate limits when checking releases) |
 
----
+## Verifying Your Setup
 
-## Verification Commands
-
-Run these commands to verify your environment is ready before installing OpenFrame CLI:
-
-### Check Docker
+OpenFrame CLI ships a built-in prerequisites checker, scoped to the cluster type you intend to use:
 
 ```bash
-docker --version
-docker ps
-```
-
-Expected output: Docker version and an empty container list (confirms Docker is running).
-
-### Check k3d
-
-```bash
-k3d version
-```
-
-Expected output: `k3d version vX.Y.Z`
-
-### Check Helm
-
-```bash
-helm version
-```
-
-Expected output: `version.BuildInfo{Version:"vX.Y.Z", ...}`
-
-### Check available memory
-
-```bash
-# macOS
-sysctl -n hw.memsize | awk '{print $1/1024/1024/1024 " GB"}'
-
-# Linux
-free -h
-```
-
-Ensure at least 24 GB RAM is available.
-
-### Check disk space
-
-```bash
-df -h .
-```
-
-Ensure at least 50 GB free on the relevant partition.
-
-### Run CLI prerequisite check (after installing OpenFrame CLI)
-
-```bash
+# Check tools required for the default local (k3d) cluster type
 openframe prerequisites check
+
+# Check tools required for an EKS cluster
+openframe prerequisites check --type eks
+
+# Check tools required for a GKE cluster
+openframe prerequisites check --type gke
+
+# Attempt to auto-install missing tools (macOS/Linux only)
+openframe prerequisites install --type k3d
 ```
 
-This is the most comprehensive check — the CLI will display exactly what is missing and how to fix it.
-
----
-
-## Windows-Specific Setup
-
-<details>
-<summary>Expand Windows WSL2 Setup Steps</summary>
-
-**Step 1: Enable WSL2**
-
-Open PowerShell as Administrator and run:
-
-```bash
-wsl --install
-```
-
-**Step 2: Install Ubuntu distro**
-
-```bash
-wsl --install -d Ubuntu
-```
-
-**Step 3: Install Docker Desktop**
-
-Download and install [Docker Desktop for Windows](https://docs.docker.com/desktop/windows/install/). In Docker Desktop settings, enable:
-- **WSL2 backend** (Settings → General → Use WSL2 based engine)
-- **Ubuntu integration** (Settings → Resources → WSL Integration → Ubuntu)
-
-**Step 4: Set WSL2 as default (if needed)**
-
-```bash
-wsl --set-default-version 2
-wsl --set-default Ubuntu
-```
-
-**Step 5: Download the Windows CLI binary**
-
-Download from: https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
-
-Extract and run the `.exe` — the CLI will automatically forward into WSL2.
-
-</details>
-
----
+`openframe prerequisites check` reports which tools are satisfied, which are missing, and links to install docs. On Windows, `install` prints manual installation guidance rather than auto-installing, since local cluster tooling must run inside WSL2.
 
 ## Next Steps
 
-- Proceed to the [Quick Start Guide](quick-start.md) to install and run OpenFrame CLI
-- Return to the [Introduction](introduction.md) for a feature overview
+Once your environment is ready, continue to the [Quick Start](quick-start.md) guide to bootstrap your first OpenFrame cluster.

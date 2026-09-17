@@ -1,250 +1,94 @@
-# Security Guidelines
+# Security Best Practices
 
-This document describes the security patterns, practices, and mitigations built into the OpenFrame CLI, along with guidelines for contributors to maintain these standards.
+OpenFrame CLI shells out to powerful external tools (Docker, Terraform, Helm, cloud CLIs) and self-updates by downloading and executing new binaries. Its security model focuses on **supply-chain integrity of downloaded artifacts**, **avoiding shell injection**, and **not leaking secrets in logs** — rather than traditional web-app authn/authz, since the CLI itself has no server component.
 
----
+## Binary & Release Integrity
 
-## Authentication and Authorization
+### Signed, Checksum-Verified Downloads
 
-### Kubernetes Authentication
+External CLI tools (`k3d`, `helm`, `terraform`, `mkcert`, `infracost`) are **never** installed via unverified `curl | bash`. Instead, `internal/shared/download` pins an exact version and SHA256 checksum per `GOOS`/`GOARCH` platform for each tool (see `internal/shared/download/pins.go`), verifies the checksum after download, and only then installs the binary into `~/.openframe/bin`.
 
-The CLI authenticates to Kubernetes clusters using standard kubeconfig files. The `internal/k8s` package handles context loading and `rest.Config` construction:
+### Self-Update Signature Verification
 
-```go
-// Contexts are loaded from the standard kubeconfig path (~/.kube/config)
-// or from the KUBECONFIG environment variable.
-// rest.Config is constructed per-operation, not stored globally.
-```
+The `openframe update` command downloads new CLI releases from GitHub and verifies them with [Sigstore/cosign](https://www.sigstore.dev/) (`internal/shared/selfupdate/cosign.go`) before applying:
 
-**Guidelines:**
-- Never hardcode kubeconfig paths — always resolve via `clientcmd.BuildConfigFromFlags`
-- Use the `Accessor` type for cluster health checks rather than raw API calls
-- Always pass `rest.Config` through function arguments, not global variables
+- The OIDC issuer is pinned to `https://token.actions.githubusercontent.com`.
+- The certificate SAN is pinned to this repository's `release.yml` workflow (running on `main` or a tag ref).
+- Signatures from any other repository, workflow file, or OIDC issuer are **rejected**.
+- The Sigstore trust root is fetched via TUF and cached under `~/.openframe/state/tuf`.
 
-### GitHub API Authentication
+> **Escape hatch:** `OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY=1` bypasses signature verification. This exists only for emergency recovery scenarios and should never be used in normal operation or CI.
 
-The self-update and download subsystems authenticate with GitHub using tokens:
+### Signed Release Binaries
 
-| Variable | Priority | Description |
-|---|---|---|
-| `OPENFRAME_GITHUB_TOKEN` | High | OpenFrame-specific token (takes precedence) |
-| `GITHUB_TOKEN` | Standard | Standard GitHub Actions token |
+Release binaries are additionally signed at the OS level via `scripts/sign-binary.sh`, invoked by the GoReleaser build post-hook (only when `OPENFRAME_SIGN=1`, set exclusively by the release workflow — local builds and CI compile checks never sign):
 
-**Guidelines:**
-- Never log tokens, even at debug level — they are registered with `redact.RegisterSecret()` at startup
-- Always pass tokens through environment variables, never as command-line arguments (visible in `ps` output)
+| OS | Signing Mechanism |
+|---|---|
+| macOS | `codesign` (Developer ID, hardened runtime) + `notarytool` notarization |
+| Windows | Azure Trusted Signing via `jsign` (Authenticode) |
+| Linux | Unsigned; integrity is covered by `checksums.txt` + the cosign bundle |
 
-### ArgoCD Authentication
+## Avoiding Shell Injection
 
-ArgoCD is managed via the native Kubernetes dynamic client (client-go) rather than the ArgoCD HTTP API. This means:
-- No ArgoCD API tokens are ever stored or transmitted
-- All operations go through Kubernetes RBAC via the kubeconfig credentials
-- The CLI never calls ArgoCD's REST API directly
+All external command execution goes through `internal/shared/executor.CommandExecutor`, which invokes commands with **discrete argv arrays** (`os/exec`) rather than constructing shell strings — this prevents shell metacharacter injection (e.g., `$(...)`, backticks, `;`) from user-supplied input like cluster names or branch refs.
 
----
+The test suite enforces this: `MockCommandExecutor.Commands()` returns structured `RecordedCommand` values with discrete `Args []string`, specifically so tests can assert that no argument contains shell metacharacters — see `internal/shared/executor/mock.go`.
+
+Input that reaches shell-out boundaries is also validated early:
+
+- Cluster names are validated with `models.ValidateClusterName` (DNS-1123 rules: max 63 chars, alphanumeric/hyphen, must start/end alphanumeric) **before** any provider code runs.
+- `openframe bootstrap`'s cluster-name argument is validated at the command boundary specifically so "no unsafe input reaches downstream shell-outs."
 
 ## Secret Redaction
 
-All potentially sensitive values must be registered with the `redact` package before any logging or command execution:
+`internal/shared/redact` scrubs sensitive values from all log/debug output before it's printed:
 
-```go
-import "github.com/flamingo-stack/openframe-cli/internal/shared/redact"
+- `redact.RegisterSecret(value)` registers a runtime secret (e.g., a fetched ArgoCD admin password) for redaction; values shorter than 4 characters are ignored to avoid over-redacting common substrings.
+- `redact.Redact(s)` replaces all registered secrets with `***`, and unconditionally scrubs `user:pass@` patterns from URLs — catching credentials embedded in URLs that were never explicitly registered.
+- Longer secrets are redacted before shorter ones, so a secret that happens to be a substring of another isn't partially unmasked.
+- This is used whenever the CLI logs the exact external commands it runs (in `--verbose` mode), so credentials passed as CLI flags or embedded in URLs never leak into terminal output or CI logs.
 
-// Register a secret for automatic scrubbing
-redact.RegisterSecret(githubToken)
-redact.RegisterSecret(registryPassword)
+## Credential & Config Handling
 
-// All log output and command strings are automatically scrubbed
-// redact.Redact("helm upgrade --set auth.token=mysecret")
-// → "helm upgrade --set auth.token=***"
-```
+- **ArgoCD admin password**: retrieved on demand via `openframe app access` from the live cluster; never written to disk by the CLI.
+- **Helm values**: `openframe-helm-values.yaml` (resolved via `internal/chart/utils/config.PathResolver.GetHelmValuesFile()`) lives in your working directory — treat it as sensitive if it contains secrets, and exclude it from version control if so.
+- **TLS certificates**: local development certs (via `mkcert`) are stored under `~/.config/openframe/certs` with restrictive directory permissions (`0750`), falling back to a repo-relative path only if the user's home directory can't be resolved.
+- **Cloud credentials**: AWS/GCP credentials are never handled directly by the CLI — it delegates to the already-authenticated `aws`/`gcloud` CLIs and Terraform's native provider auth.
 
-**Key behaviors:**
-- Longer secrets are replaced before shorter ones to prevent partial unmasking
-- URL-embedded credentials (`user:pass@host`) are scrubbed unconditionally without explicit registration
-- The redaction is thread-safe via `sync.RWMutex`
-- In tests, call `redact.ClearSecrets()` in teardown to prevent cross-test contamination
+## Destructive Operation Confirmation
 
-**Contribution rule:** Any value read from environment variables, configuration files, or user prompts that could be a credential **must** be passed through `redact.RegisterSecret()` before being used in any executor call or log statement.
+Commands that delete resources (`app uninstall`, `cluster delete`) require interactive confirmation via `ui.RequireConfirmation` unless `--yes`/`--force` is passed. Confirmation-prompt errors are handled carefully (`internal/shared/errors/handler.go`):
 
----
+- A Ctrl-C interruption is preserved as-is so the top-level error handler can print a clean cancellation message and exit gracefully — it is never misreported as a generic failure.
+- In non-interactive/CI environments without a TTY, commands fail fast rather than hanging on a prompt that can never be answered.
 
-## Input Validation and Sanitization
+## Common Vulnerabilities & Mitigations
 
-### Cluster Name Validation
-
-Cluster names are validated against RFC1123 rules at the command boundary before reaching any shell-out:
-
-```go
-// Validation is enforced in cmd/bootstrap/bootstrap.go and cmd/cluster/create.go
-// before any subprocess execution — prevents injection via cluster names
-if err := clustermodels.ValidateClusterName(name); err != nil {
-    return err
-}
-```
-
-This ensures that a cluster name like `; rm -rf /` cannot reach the k3d subprocess.
-
-### Helm Values Validation
-
-The `openframe-helm-values.yaml` file is validated via a "preflight" check **before** cluster creation — the cheapest gate in the pipeline:
-
-```go
-// internal/chart/services/preflight.go
-if err := services.ValidateHelmValuesFile(); err != nil {
-    // Fails fast before any expensive cluster operations
-    return err
-}
-```
-
-**Guidelines:**
-- All user-supplied YAML/flag values must be validated before being passed to external processes
-- Use structured types with validation tags rather than raw string interpolation into shell commands
-- Never construct shell commands via string concatenation — use argv arrays via the `CommandExecutor` interface
-
-### Command Injection Prevention
-
-The `CommandExecutor` interface uses `os/exec` with argv arrays (not shell invocation):
-
-```go
-// SAFE: argv array — no shell injection possible
-result, err := exec.Execute(ctx, "k3d", "cluster", "list", "--output", "json")
-
-// NEVER do this — shell injection risk:
-// exec.Execute(ctx, "sh", "-c", "k3d cluster list --output " + userInput)
-```
-
-**Contribution rule:** Never pass user input to `sh -c` or any shell interpreter. Always use direct `os/exec` with separate argument lists.
-
----
-
-## Self-Update Security
-
-The self-update mechanism uses [Sigstore/cosign](https://docs.sigstore.dev/cosign/overview/) for supply chain security:
-
-```mermaid
-graph LR
-    A["openframe update"] --> B["Fetch latest release from GitHub"]
-    B --> C["Download checksums.txt + bundle.json"]
-    C --> D["Verify cosign signature"]
-    D --> E{"Signature valid?"}
-    E -->|Yes| F["Download binary archive"]
-    E -->|No| G["REJECT — abort update"]
-    F --> H["Verify SHA256 checksum"]
-    H --> I["Smoke-test new binary"]
-    I --> J["Atomic binary swap"]
-    J --> K[".bak rollback saved"]
-```
-
-**Pinned identity checks:**
-- OIDC Issuer: `https://token.actions.githubusercontent.com` (GitHub Actions only)
-- SAN Regex: Matches only `flamingo-stack/openframe-cli`'s `release.yml` workflow on `main` or tag refs
-- Signatures from any other repository, workflow, or issuer are **rejected**
-
-**Emergency escape hatch** (for testing/development only — never in production):
-
-```bash
-export OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY=1
-```
-
-> **Warning:** Setting `OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY=1` disables all cryptographic verification. Only use this in isolated development environments.
-
----
-
-## Binary Download Security
-
-All binary downloads (k3d, mkcert, Helm) use pinned versions and SHA256 checksum verification:
-
-```go
-// internal/shared/download/pins.go
-// Each tool has a pinned version and expected SHA256 checksum
-// Downloads are rejected if the checksum doesn't match
-```
-
-**Guidelines:**
-- Never download binaries without checksum verification
-- Pin versions explicitly — never download "latest" without verification
-- Use HTTPS for all downloads
-
----
-
-## WSL Security Considerations
-
-On Windows, the CLI forwards execution into WSL2:
-
-```go
-// Only forward if ShouldForward() returns true
-// ShouldForward() returns false if:
-// - running on Linux (prevents infinite recursion)
-// - OPENFRAME_NO_WSL_FORWARD=1 is set
-if wsllauncher.ShouldForward() {
-    code, err := wsllauncher.Forward(version, os.Args[1:])
-    os.Exit(code)
-}
-```
-
-Environment variables `GITHUB_TOKEN` and `OPENFRAME_GITHUB_TOKEN` are forwarded into WSL via `WSLENV` — ensure these are not set to high-privilege tokens in shared environments.
-
----
-
-## Environment Variables and Secrets Management
-
-### Principles
-
-1. **Never log secrets** — Register all credentials with `redact.RegisterSecret()` immediately on ingestion
-2. **Never pass secrets as CLI flags** — Flags appear in process lists (`ps aux`). Use environment variables
-3. **Never embed secrets in source code** — Use environment variables or external secret managers
-4. **Rotate regularly** — GitHub tokens used for `OPENFRAME_GITHUB_TOKEN` should be scoped to the minimum required permissions
-
-### Recommended Token Scopes
-
-For `OPENFRAME_GITHUB_TOKEN` / `GITHUB_TOKEN`:
-
-| Scope | Required? | Reason |
-|---|---|---|
-| `read:packages` | Optional | Accessing private container images |
-| `repo` (public read) | No | Public repos are accessible without auth |
-| No special scopes | Sufficient | For rate-limit bypass only (public repos) |
-
----
-
-## Common Vulnerabilities and Mitigations
-
-| Vulnerability | Mitigation |
+| Risk | Mitigation |
 |---|---|
-| **Command injection** | `os/exec` with argv arrays; cluster name RFC1123 validation |
-| **Secret leakage in logs** | `redact` package with automatic URL credential scrubbing |
-| **Malicious update binary** | Cosign signature verification against pinned GitHub Actions identity |
-| **Checksum bypass** | SHA256 verification before any binary execution |
-| **Stale kubeconfig** | Context validated before use; `Accessor.Reachable()` check |
-| **YAML injection** | Structured Helm values parsing, not raw string interpolation |
-| **Token exposure in env** | Tokens forwarded via `WSLENV` mechanism, not command arguments |
+| Shell injection via cluster names, refs, or flags | Argv-based execution (no shell string construction) + early input validation (`ValidateClusterName`) |
+| Supply-chain compromise of downloaded tools | Pinned versions + SHA256 checksum verification (`internal/shared/download`) |
+| Malicious/forged CLI update | Cosign signature verification pinned to this repo's release workflow OIDC identity |
+| Secrets leaking into `--verbose` logs or CI output | Centralized `redact.Redact()` applied to all command logging |
+| Destructive commands run accidentally in scripts | Explicit `--yes`/`--force` required to skip confirmation in non-interactive contexts |
+| Unsafe cluster names reaching shell-outs | RFC1123-style validation enforced at the command boundary, before provider dispatch |
 
----
+## Security Testing & Code Review Guidelines
 
-## Security Testing
+- When adding a new external command invocation, use `internal/shared/executor.CommandExecutor` — never call `os/exec` directly, and never build a shell string with user input.
+- When adding a new test around command execution, prefer asserting against `MockCommandExecutor.Commands()` (structured argv) over `GetExecutedCommands()` (flattened strings), since only the structured form can reliably catch injected shell metacharacters.
+- When adding a new prerequisite installer, use `internal/shared/download`'s pinned/verified download pattern rather than introducing a new unverified download or `curl | bash` step.
+- When logging anything that might contain a secret (passwords, tokens, credential-bearing URLs), route it through `redact.Redact()` first.
+- Any change to the self-update signing/verification flow (`internal/shared/selfupdate/cosign.go`) should be reviewed with extra scrutiny, since it is the CLI's primary supply-chain trust boundary.
 
-The `MockCommandExecutor` records all argv arrays for security assertions:
+## Environment Variables & Secrets Management
 
-```go
-mock := executor.MockCommandExecutor{}
-// After execution:
-calls := mock.RecordedCalls()
-for _, call := range calls {
-    // Assert no user input leaked into command args without validation
-    assert.NotContains(t, call.Args, userInput)
-}
-```
+| Variable | Sensitivity | Notes |
+|---|---|---|
+| `GITHUB_TOKEN` / `OPENFRAME_GITHUB_TOKEN` | Sensitive | Forwarded into WSL for authenticated GitHub API access; never logged in plain form |
+| `OPENFRAME_UPDATE_INSECURE_SKIP_VERIFY` | Security-relevant | Disables cosign verification — restrict to emergency/manual use only |
+| `OPENFRAME_NO_WSL_FORWARD` | Non-sensitive | Behavioral only |
+| `OPENFRAME_WSL_DISTRO` | Non-sensitive | Behavioral only |
 
-**Security test checklist for new commands:**
-- [ ] User-supplied cluster names are validated via `ValidateClusterName`
-- [ ] Any new credential/token is registered with `redact.RegisterSecret()`
-- [ ] External commands use argv arrays, not shell strings
-- [ ] New YAML/JSON input is validated via structured types before use
-- [ ] Sensitive flags are not printed in error messages
-
----
-
-## Reporting Security Issues
-
-Please report security vulnerabilities via the [OpenMSP Slack community](https://www.openmsp.ai/) using a direct message to the maintainers rather than public channels. Do not open public GitHub issues for security vulnerabilities.
+Cloud provider credentials (AWS/GCP) and Kubernetes credentials (kubeconfig) are managed entirely by the underlying `aws`, `gcloud`, and `kubectl`/client-go tooling already present on your machine — OpenFrame CLI does not introduce its own credential store.
