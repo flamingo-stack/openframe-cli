@@ -1,0 +1,47 @@
+sequenceDiagram
+    participant User
+    participant CLI as "openframe bootstrap"
+    participant BSvc as "bootstrap.Service"
+    participant CSvc as "cluster.Service"
+    participant K3D as "K3D Provider"
+    participant ChSvc as "chart/services"
+    participant Helm as "HelmManager"
+    participant Git as "git.Repository"
+    participant ArgoCD as "argocd.Manager"
+    participant K8s as "Kubernetes API"
+
+    User->>CLI: openframe bootstrap [name]
+    CLI->>BSvc: Execute(cmd, args)
+    BSvc->>ChSvc: ValidateHelmValuesFile()
+    ChSvc-->>BSvc: OK / error
+
+    BSvc->>CSvc: CreateClusterWithPrerequisites(ctx, name)
+    CSvc->>K3D: CreateCluster(ctx, config)
+    K3D-->>CSvc: rest.Config
+    CSvc-->>BSvc: rest.Config
+
+    BSvc->>ChSvc: InstallChartsWithConfigContext(ctx, req)
+    ChSvc->>ChSvc: CheckAndInstallPrerequisites()
+    ChSvc->>Helm: InstallArgoCDWithProgress(ctx, cfg)
+    Helm->>K8s: helm upgrade --install argo-cd
+    K8s-->>Helm: OK
+    Helm->>K8s: waitForArgoCDDeployments()
+    K8s-->>Helm: Deployments ready
+
+    ChSvc->>Git: CloneChartRepository(ctx, appConfig)
+    Git-->>ChSvc: CloneResult{tempDir, chartPath}
+
+    ChSvc->>Helm: InstallAppOfAppsFromLocal(ctx, cfg)
+    Helm->>K8s: helm upgrade --install app-of-apps
+    K8s-->>Helm: OK
+
+    ChSvc->>ArgoCD: WaitForApplications(ctx, cfg)
+    loop Every 2s until ready or timeout
+        ArgoCD->>K8s: List Applications (dynamic client)
+        K8s-->>ArgoCD: Application list
+        ArgoCD->>ArgoCD: assessApplications()
+    end
+    ArgoCD-->>ChSvc: All Healthy+Synced
+
+    ChSvc-->>BSvc: OK
+    BSvc-->>User: Bootstrap complete
