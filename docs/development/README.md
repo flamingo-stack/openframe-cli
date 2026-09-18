@@ -1,104 +1,27 @@
 # Development Documentation
 
-Welcome to the OpenFrame CLI development documentation. This section covers everything you need to contribute to, extend, and understand the internals of the `openframe` CLI.
+This section covers everything you need to contribute to and work on OpenFrame CLI itself — the Go-based command-line tool that provisions Kubernetes clusters and deploys the OpenFrame platform.
 
-OpenFrame CLI is written in **Go** and uses [Cobra](https://github.com/spf13/cobra) for command-line parsing. It orchestrates K3D clusters, ArgoCD GitOps deployments, and Helm chart management through a layered service/provider architecture.
+> If you're looking to **use** OpenFrame CLI rather than develop it, start with the [Getting Started](../getting-started/introduction.md) documentation instead.
 
----
+## Contents
 
-## Documentation Index
-
-| Document | Description |
+| Section | Description |
 |---|---|
-| [Environment Setup](setup/environment.md) | IDE configuration, Go toolchain, editor extensions |
-| [Local Development](setup/local-development.md) | Clone, build, run, and debug the CLI locally |
-| [Architecture Overview](architecture/README.md) | High-level design, component breakdown, data flows |
-| [Security Guidelines](security/README.md) | Auth patterns, secret handling, vulnerability mitigations |
-| [Testing Guide](testing/README.md) | Unit tests, integration tests, test utilities |
-| [Contributing Guidelines](contributing/guidelines.md) | Code style, PR process, commit messages |
-
----
+| [Environment Setup](setup/environment.md) | Toolchain, editor setup, and environment variables for development |
+| [Local Development](setup/local-development.md) | Cloning the repo, building, running, and debugging locally |
+| [Architecture](architecture/README.md) | High-level architecture, core components, and data flow |
+| [Security](security/README.md) | Security patterns, secret handling, and secure-by-default practices |
+| [Testing](testing/README.md) | Test structure, running tests, and coverage expectations |
+| [Contributing Guidelines](contributing/guidelines.md) | Code style, branching, commit conventions, and review checklist |
 
 ## Quick Navigation
 
-### I want to...
+- New to the codebase? Start with [Architecture](architecture/README.md) to understand how `cmd/`, `internal/cluster`, `internal/chart`, and `internal/shared` fit together.
+- Setting up your machine? See [Environment Setup](setup/environment.md) and [Local Development](setup/local-development.md).
+- Writing a change? Check [Testing](testing/README.md) and the [Contributing Guidelines](contributing/guidelines.md) before opening a PR.
+- Touching credentials, downloads, or self-update code? Read [Security](security/README.md) first.
 
-**Build and run the CLI locally**
-→ See [Local Development](setup/local-development.md)
+## Project at a Glance
 
-**Understand how the codebase is structured**
-→ See [Architecture Overview](architecture/README.md)
-
-**Add a new command or feature**
-→ Start with [Architecture Overview](architecture/README.md), then [Contributing Guidelines](contributing/guidelines.md)
-
-**Write or run tests**
-→ See [Testing Guide](testing/README.md)
-
-**Handle secrets or security concerns**
-→ See [Security Guidelines](security/README.md)
-
-**Set up my development environment**
-→ See [Environment Setup](setup/environment.md)
-
----
-
-## Repository Structure
-
-```text
-openframe-cli/
-├── cmd/                    # Cobra command definitions (entry points)
-│   ├── root.go             # Root command, wires all subcommands
-│   ├── bootstrap/          # openframe bootstrap
-│   ├── cluster/            # openframe cluster (create/delete/list/status/cleanup)
-│   ├── app/                # openframe app (install/upgrade/status/access/uninstall)
-│   ├── prerequisites/      # openframe prerequisites (check/install)
-│   └── update/             # openframe update (self-update/rollback)
-├── internal/               # All internal business logic
-│   ├── bootstrap/          # Bootstrap service (cluster + chart orchestration)
-│   ├── cluster/            # Cluster service + K3D provider
-│   ├── chart/              # Chart services, ArgoCD/Helm/Git providers
-│   ├── app/                # App status and uninstall services
-│   ├── k8s/                # Kubernetes client utilities
-│   ├── platform/           # OS detection and platform hints
-│   ├── prerequisites/      # Prerequisite framework
-│   └── shared/             # Cross-cutting: executor, UI, errors, config, selfupdate
-├── tests/
-│   ├── integration/        # Integration tests (requires running cluster)
-│   └── testutil/           # Shared test utilities and patterns
-├── scripts/
-│   └── sign-binary.sh      # Binary signing helper
-└── main.go                 # Entry point
-```
-
----
-
-## Tech Stack
-
-| Technology | Role |
-|---|---|
-| **Go** | Primary language |
-| **Cobra** | CLI framework (command/flag parsing) |
-| **K3D** | Local Kubernetes cluster provider |
-| **ArgoCD** | GitOps deployment engine (via client-go dynamic client) |
-| **Helm** | Kubernetes package manager (CLI wrapper) |
-| **go-git** | Git operations (no `git` binary dependency) |
-| **client-go** | Kubernetes API client |
-| **pterm** | Terminal UI rendering (spinners, prompts, colors) |
-| **Sigstore/cosign** | Binary signature verification for self-updates |
-
----
-
-## External Dependencies
-
-The OpenFrame platform chart lives in a separate repository:
-
-- **openframe-oss-tenant:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
-- Documentation: [https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
-
----
-
-## Getting Help
-
-- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/)
-- **CLI Source:** [https://github.com/flamingo-stack/openframe-cli](https://github.com/flamingo-stack/openframe-cli)
+OpenFrame CLI is a Go service (module `github.com/flamingo-stack/openframe-cli`) built with [Cobra](https://github.com/spf13/cobra) for command routing and `client-go` for native Kubernetes API access. It shells out to Docker, k3d, Helm, Terraform, gcloud, and the AWS CLI via a testable `CommandExecutor` abstraction, and renders its terminal UI with `pterm`, `huh`, and `bubbletea`.

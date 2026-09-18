@@ -1,224 +1,97 @@
 # First Steps
 
-You've successfully bootstrapped an OpenFrame environment. Here are the first 5 things to explore and configure to get the most out of your installation.
+You've installed OpenFrame CLI and completed the [quick start](quick-start.md). Here's what to do next to get comfortable with day-to-day usage.
 
----
+## 1. Check the platform's status
 
-## 1. Verify Your Environment
-
-Start by confirming the state of your cluster and platform:
+Get a snapshot of cluster health and ArgoCD application readiness:
 
 ```bash
-# Check cluster status
-openframe cluster status
-
-# Check application status
 openframe app status
 ```
 
-### Cluster Status Output
-
-```text
-NAME             STATUS    NODES    VERSION
-openframe-dev    running   3        v1.29.x
-```
-
-### App Status Output
-
-The app status command aggregates both Kubernetes cluster health and ArgoCD application sync state into a single unified report. You'll see each deployed application with its sync and health status.
+For a live-refreshing view that polls every few seconds:
 
 ```bash
-# For machine-readable output (e.g., in scripts)
-openframe cluster list --output json
-openframe cluster status --output yaml
+openframe app status --watch
 ```
 
----
+For an interactive, k9s-style dashboard where you can navigate applications, inspect details, and trigger syncs:
 
-## 2. Access the OpenFrame Platform
+```bash
+openframe app status --interactive
+```
 
-Get access information for the deployed OpenFrame services:
+> `--watch` and `--interactive` require an interactive terminal and cannot be combined with `--output`/`--plain` modes.
+
+## 2. Retrieve ArgoCD access credentials
+
+To sign in to the ArgoCD UI and manage the platform visually:
 
 ```bash
 openframe app access
 ```
 
-This command displays the URLs and connection details for the OpenFrame platform running in your local cluster.
+This prints the admin username/password and port-forward instructions, e.g.:
 
-> **Tip:** Bookmark the displayed URLs for quick access to the OpenFrame web interface and ArgoCD dashboard.
+```text
+ArgoCD access
+  Username: admin
+  Password: <redacted>
+Open the ArgoCD UI:
+  1. kubectl port-forward -n argocd svc/argocd-server 8080:443
+  2. open https://localhost:8080
+```
 
----
+## 3. Inspect your cluster(s)
 
-## 3. Explore the Cluster Commands
-
-The `cluster` command group (also aliased as `k`) manages your Kubernetes cluster lifecycle:
+List and inspect the clusters OpenFrame CLI manages:
 
 ```bash
 # List all managed clusters
 openframe cluster list
 
-# Get detailed status of a cluster
+# Include externally-discovered cloud clusters (GKE/EKS) not created via this CLI
+openframe cluster list --all
+
+# Detailed cluster status (nodes, health)
 openframe cluster status
 
-# Create an additional cluster with a custom name
-openframe cluster create my-second-cluster
-
-# Delete a cluster
-openframe cluster delete my-second-cluster
-
-# Reclaim disk space by pruning unused container images on cluster nodes
-openframe cluster cleanup
+# Switch kubectl context to a specific cluster
+openframe cluster use <cluster-name>
 ```
 
-> **Shorthand:** `openframe k list` is equivalent to `openframe cluster list`.
+## 4. Explore configuration options
 
----
-
-## 4. Explore the App Commands
-
-The `app` command group manages the OpenFrame platform deployment:
+If you skipped the interactive wizard during bootstrap, explore the flags available for a full cluster + install workflow:
 
 ```bash
-# Install OpenFrame on an existing cluster
-openframe app install
-
-# Check application status
-openframe app status
-
-# Upgrade to a different OpenFrame version/branch
-openframe app upgrade
-
-# Uninstall OpenFrame from a cluster
-openframe app uninstall
-
-# Show access details
-openframe app access
-```
-
-### Upgrading OpenFrame
-
-There are two upgrade modes:
-
-```bash
-# Mode 1: Switch to a different git ref (branch, tag, or commit)
-openframe app upgrade --ref v2.0.0
-
-# Mode 2: Force re-sync of the current ref
-openframe app upgrade --force-sync
-```
-
----
-
-## 5. Keep the CLI Up to Date
-
-OpenFrame CLI includes a built-in self-update mechanism with cryptographic verification:
-
-```bash
-# Check if an update is available
-openframe update --check
-
-# Apply the latest update
-openframe update
-
-# Roll back to the previous version if needed
-openframe update --rollback
-```
-
-> **Security note:** All updates are verified using [Sigstore/cosign](https://docs.sigstore.dev/cosign/overview/) against the official GitHub Actions release workflow. Only binaries produced by the `flamingo-stack/openframe-cli` release pipeline are accepted.
-
----
-
-## Initial Configuration: The Helm Values File
-
-When you ran `openframe bootstrap`, a configuration file called `openframe-helm-values.yaml` was created in your working directory. This file controls the OpenFrame platform deployment:
-
-```bash
-# View the generated configuration
-cat openframe-helm-values.yaml
-```
-
-Key configurable areas include:
-
-| Section | Description |
-|---|---|
-| `branch` | The OpenFrame git ref (branch, tag) to deploy |
-| `docker` | Container registry settings |
-| `ingress` | Ingress hostname and TLS configuration |
-| `argocd` | ArgoCD Helm value overrides |
-
-To apply changes to an existing deployment:
-
-```bash
-openframe app upgrade
-```
-
----
-
-## Verbose and Silent Modes
-
-Control the CLI's output verbosity:
-
-```bash
-# Show detailed debug output (ArgoCD sync events, Helm operations, etc.)
-openframe bootstrap --verbose
-
-# Suppress all non-error output (perfect for scripts)
-openframe bootstrap --silent
-
-# Machine-readable output for cluster commands
-openframe cluster list --output json
-```
-
----
-
-## Running in CI/CD
-
-For automated pipelines, use `--non-interactive` to skip all prompts:
-
-```bash
-# Full non-interactive bootstrap
-openframe bootstrap --non-interactive
-
-# With a specific cluster name
-openframe bootstrap --non-interactive my-ci-cluster
-```
-
-The CLI reads from an existing `openframe-helm-values.yaml` file in the current directory when running non-interactively.
-
----
-
-## Getting Help
-
-Every command has built-in help:
-
-```bash
-# General help
-openframe --help
-
-# Help for a specific command
-openframe bootstrap --help
 openframe cluster create --help
 openframe app install --help
-openframe update --help
 ```
 
----
+Key things worth trying:
 
-## Community & Support
+- `openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard` — provision a cloud cluster non-interactively.
+- `openframe app install --ref v1.4.0` — install a specific OpenFrame release ref instead of the default branch.
+- `openframe app upgrade --ref v1.4.1` — move an existing install to a different git ref, or `--sync` to force a re-sync at the current ref.
 
-- **OpenMSP Slack:** [https://www.openmsp.ai/](https://www.openmsp.ai/) — Join for help, discussions, and announcements
-- **Slack invite:** [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
-- **OpenFrame platform repo:** [https://github.com/flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
-- **CLI releases:** [https://github.com/flamingo-stack/openframe-cli/releases](https://github.com/flamingo-stack/openframe-cli/releases)
+## 5. Keep the CLI itself up to date
 
----
+```bash
+# Check for a newer CLI release without installing it
+openframe update check
 
-## Summary: First Steps Checklist
+# Update to the latest release
+openframe update
 
-- [ ] Verified cluster status with `openframe cluster status`
-- [ ] Checked app status with `openframe app status`
-- [ ] Accessed the platform with `openframe app access`
-- [ ] Explored `openframe cluster --help` and `openframe app --help`
-- [ ] Reviewed `openframe-helm-values.yaml` configuration file
-- [ ] Ran `openframe update --check` to see if a newer version is available
-- [ ] Joined the [OpenMSP Slack](https://www.openmsp.ai/) community
+# Roll back to the previously installed binary
+openframe update rollback
+```
+
+## Where to Get Help
+
+- Run `openframe --help` or `openframe <command> --help` at any point — every command has detailed built-in help text and usage examples.
+- Run `openframe prerequisites check --type <k3d|eks|gke>` if something isn't working — most failures are missing/misconfigured local tooling.
+- For questions, discussion, and support, the project is community-supported via the **OpenMSP Slack community**: [join here](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) or visit [openmsp.ai](https://www.openmsp.ai/).
+- The OpenFrame platform code that this CLI deploys lives in [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant); its documentation is at [github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs).

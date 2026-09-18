@@ -1,358 +1,134 @@
-# Testing Guide
+# Testing
 
-OpenFrame CLI uses a layered testing approach: fast unit tests with mock executors, integration tests against real CLI binaries, and shared test utilities that eliminate boilerplate.
-
----
+OpenFrame CLI has a layered testing strategy: fast, offline unit tests that mock all external tools, and integration tests that exercise the real, built binary (optionally against real Docker/k3d/kubectl/Helm).
 
 ## Test Structure and Organization
 
-```text
-tests/
-├── integration/
-│   ├── common/
-│   │   ├── cli_runner.go       # Build + execute CLI binary, capture output
-│   │   ├── cluster_management.go  # Helpers for cluster lifecycle in tests
-│   │   └── dependencies.go     # Dependency setup utilities
-│   └── ...                     # Integration test files
-└── testutil/
-    ├── setup.go                # Test mode init, mock executor, flag containers
-    ├── patterns.go             # Standard command test patterns (Structure/Flags/CLI/Execution)
-    ├── assertions.go           # Custom assertion helpers
-    ├── cluster.go              # Cluster-specific test helpers
-    ├── command_assertions.go   # CLI output assertion utilities
-    ├── flag_contract.go        # Flag contract validation helpers
-    └── utilities.go            # General test utilities
-```
+| Location | Purpose |
+|---|---|
+| `tests/testutil/` | Shared unit-test helpers: mock executors, flag containers, command-structure assertions, cluster fixtures |
+| `tests/integration/common/` | Integration-test harness: builds/runs the real CLI binary, checks for real external dependencies |
+| `*_test.go` files alongside source (e.g., `cmd/cluster/`, `internal/cluster/`) | Package-local unit tests |
 
-Unit tests live alongside the source code they test (e.g., `internal/cluster/service_test.go`).
+Key shared utilities:
 
----
+- **`testutil.InitializeTestMode()`** — enables test-safe UI rendering (`ui.TestMode = true`), avoiding TTY-dependent behavior in tests.
+- **`testutil.CreateStandardTestFlags()`** — builds a `*cluster.FlagContainer` pre-wired with a `MockCommandExecutor` and canned k3d responses (empty cluster list, "not found" on `k3d cluster get`) — the fastest path for unit-testing cluster command logic.
+- **`testutil.CreateIntegrationTestFlags()`** — builds a `FlagContainer` using real dependencies (the real k3d manager is resolved at runtime), for use in environments where k3d/Docker are actually installed.
+- **`testutil.TestClusterCommand(t, name, newCmdFn, setup, teardown)`** — a standardized pattern that runs four sub-tests automatically (`Structure`, `Flags`, `CLI`, `Execution`) against any cluster subcommand.
+- **`common.RequireClusterDependencies(t)` / `RequireK8sDependencies(t)` / `RequireAllDependencies(t)`** — gracefully skip (not fail) integration tests when Docker, k3d, kubectl, or Helm aren't available on the host.
+- **`common.InitializeCLI()` / `CleanupCLI()` / `RunCLI(args...)`** — build the real `openframe` binary into `build/openframe` (with mod-time caching) and execute it as a subprocess, capturing stdout/stderr/exit code for black-box assertions.
 
 ## Running Tests
 
-### Unit Tests
+Run all unit tests:
 
 ```bash
-# Run all unit tests
 go test ./...
+```
 
-# Run with verbose output
-go test -v ./...
+Run tests for a specific package:
 
-# Run with race detector (recommended)
-go test -race ./...
-
-# Run tests for a specific package
+```bash
 go test ./internal/cluster/...
-go test ./cmd/bootstrap/...
-
-# Run a specific test by name
-go test -run TestBootstrapService ./internal/bootstrap/...
+go test ./cmd/cluster/...
 ```
 
-### Integration Tests
-
-Integration tests require Docker, k3d, and Helm to be installed and running:
+Run with verbose output:
 
 ```bash
-# Run all integration tests (longer timeout required)
-go test ./tests/integration/... -v -timeout 30m
-
-# Run a specific integration test
-go test ./tests/integration/... -run TestClusterCreate -v -timeout 10m
+go test -v ./...
 ```
 
-> **Resource requirement:** Integration tests provision real K3D clusters. Ensure at least 24 GB RAM and 50 GB disk space are available.
-
-### Coverage
+Run integration tests (these build and execute the real binary, and may skip themselves if required tools like Docker/k3d aren't present):
 
 ```bash
-# Generate coverage profile
-go test -coverprofile=coverage.out ./...
-
-# View coverage in browser
-go tool cover -html=coverage.out
-
-# View coverage in terminal
-go tool cover -func=coverage.out | tail -1
+go test ./tests/integration/...
 ```
 
----
+> Integration tests use `common.RequireClusterDependencies(t)` and similar guards to skip gracefully rather than fail when Docker/k3d/kubectl/Helm aren't installed on the CI/dev machine — check the skip message if a test doesn't run as expected.
 
-## Test Utilities
+## Writing New Tests
 
-### Initializing Test Mode
+### Unit tests for command logic
 
-Always call `testutil.InitializeTestMode()` in test setups to enable safe UI rendering (prevents pterm from trying to write to a non-TTY):
+Prefer mocked execution so tests run fast and offline:
 
 ```go
-func TestMain(m *testing.M) {
+func TestClusterCreate(t *testing.T) {
     testutil.InitializeTestMode()
-    os.Exit(m.Run())
+    flags := testutil.CreateStandardTestFlags()
+
+    // flags.Executor is a MockCommandExecutor — no real Docker/k3d required
+    result, err := runCreate(flags)
+    // assert on result/err
 }
 ```
 
-### Mock Command Executor
+### Standardized command structure tests
 
-The `MockCommandExecutor` replaces real shell-outs with configurable stubs, enabling fully isolated unit tests:
-
-```go
-func TestCreateCluster(t *testing.T) {
-    testutil.InitializeTestMode()
-
-    mock := testutil.NewTestMockExecutor()
-    mock.SetResponse("k3d cluster create", &executor.CommandResult{
-        ExitCode: 0,
-        Stdout:   `{"name": "test-cluster"}`,
-    })
-
-    // Inject mock into the service under test
-    svc := cluster.NewClusterService(mock)
-    err := svc.CreateCluster(context.Background(), "test-cluster")
-    assert.NoError(t, err)
-
-    // Verify the right command was called
-    calls := mock.RecordedCalls()
-    assert.Contains(t, calls[0].Args, "create")
-}
-```
-
-### Standard Flag Containers
-
-Use `CreateStandardTestFlags()` for unit tests (mock dependencies) and `CreateIntegrationTestFlags()` for integration tests (real dependencies):
+For any new Cobra subcommand under `cmd/cluster/`, add a `TestClusterCommand` invocation to get structure/flags/CLI/execution coverage for free:
 
 ```go
-// Unit test — mock executor, no live cluster needed
-flags := testutil.CreateStandardTestFlags()
-
-// Integration test — real executor, requires k3d
-flags := testutil.CreateIntegrationTestFlags()
-```
-
-`CreateStandardTestFlags()` pre-configures common mock responses:
-- `k3d cluster list` → empty array `[]`
-- `k3d cluster get` → not found
-
----
-
-## Writing Unit Tests
-
-### Testing a Cobra Command
-
-Use `testutil.TestClusterCommand` to run the four standard sub-tests for any cluster command:
-
-```go
-package create_test
-
-import (
-    "testing"
-    "github.com/flamingo-stack/openframe-cli/tests/testutil"
-)
-
 func TestCreateCommand(t *testing.T) {
     testutil.TestClusterCommand(
         t,
-        "create",            // command name
-        NewCreateCommand,    // func() *cobra.Command
-        func() {             // setup
-            testutil.InitializeTestMode()
-        },
-        func() {},           // teardown
+        "create",
+        NewCreateCommand,
+        func() { /* setup mocks */ },
+        func() { /* teardown */ },
     )
 }
 ```
 
-This runs four sub-tests automatically:
+### Security-sensitive assertions
 
-| Sub-test | What it checks |
-|---|---|
-| `Structure` | Name, short/long descriptions, `RunE` presence |
-| `Flags` | `--help` succeeds, unknown flags return error |
-| `CLI` | Argument count validation via `cmd.Args` |
-| `Execution` | `--dry-run` behavior (if registered), `--help` always succeeds |
-
-### Testing Business Logic (Service Layer)
+When a change touches command construction (especially anything derived from user input), assert against the mock's structured argv rather than flattened strings, to catch shell-injection-style bugs:
 
 ```go
-func TestChartServiceInstall(t *testing.T) {
-    testutil.InitializeTestMode()
-
-    mock := testutil.NewTestMockExecutor()
-    // Configure mock responses for helm commands
-    mock.SetResponse("helm upgrade --install argo-cd", &executor.CommandResult{
-        ExitCode: 0,
-        Stdout:   "Release \"argo-cd\" has been upgraded.",
-    })
-
-    svc := chart.NewChartService(mock, fakeK8sClient)
-    err := svc.InstallArgoCD(context.Background(), cfg)
-    assert.NoError(t, err)
+exec := executor.NewMockCommandExecutor()
+// ... exercise code under test ...
+for _, cmd := range exec.Commands() {
+    for _, arg := range cmd.Args {
+        if strings.Contains(arg, "$(") {
+            t.Errorf("shell injection in argv: %q", arg)
+        }
+    }
 }
 ```
 
-### Testing Error Paths
+### Integration tests against the real binary
 
 ```go
-func TestClusterCreateFailure(t *testing.T) {
-    testutil.InitializeTestMode()
-    mock := testutil.NewTestMockExecutor()
-
-    // Simulate k3d failure
-    mock.SetResponse("k3d cluster create", &executor.CommandResult{
-        ExitCode: 1,
-        Stderr:   "cluster already exists",
-    })
-
-    svc := cluster.NewClusterService(mock)
-    err := svc.CreateCluster(context.Background(), "existing-cluster")
-
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "already exists")
-}
-```
-
----
-
-## Writing Integration Tests
-
-Integration tests use the `common.CLIRunner` to build and execute the real binary:
-
-```go
-package integration_test
-
-import (
-    "log"
-    "os"
-    "strings"
-    "testing"
-    "github.com/flamingo-stack/openframe-cli/tests/integration/common"
-)
-
 func TestMain(m *testing.M) {
     if err := common.InitializeCLI(); err != nil {
-        log.Fatalf("CLI build failed: %v", err)
+        log.Fatalf("setup failed: %v", err)
     }
     defer common.CleanupCLI()
     os.Exit(m.Run())
 }
 
 func TestClusterList(t *testing.T) {
-    result := common.RunCLI("cluster", "list", "--output", "json")
+    common.RequireClusterDependencies(t)
 
+    result := common.RunCLI("cluster", "list")
     if result.Failed() {
-        t.Fatalf("cluster list failed: %s", result.ErrorMessage())
-    }
-
-    // Verify JSON output
-    if !strings.HasPrefix(strings.TrimSpace(result.Stdout), "[") {
-        t.Errorf("expected JSON array output, got: %s", result.Stdout)
+        t.Fatalf("expected success, got: %s", result.ErrorMessage())
     }
 }
 ```
 
-### CLIResult Methods
+## Coverage Expectations
 
-| Method | Description |
-|---|---|
-| `result.Success()` | `true` when exit code is 0 and no error |
-| `result.Failed()` | Inverse of `Success()` |
-| `result.Output()` | Concatenates stdout + stderr |
-| `result.ErrorMessage()` | Extracts first `Error: ...` line from stderr |
-| `result.Stdout` | Raw stdout string |
-| `result.Stderr` | Raw stderr string |
-| `result.ExitCode` | Integer exit code |
+There is no single global coverage gate documented in the codebase; instead, the project relies on:
 
-### CLI Binary Caching
+- **Mocked unit tests** covering command structure, flag validation, and orchestration logic across `cmd/` and `internal/` packages (fast, run on every change).
+- **Integration tests** that exercise the actual compiled binary end-to-end, gated behind dependency checks so they only run where Docker/k3d/kubectl/Helm are genuinely available.
+- **Standardized per-command tests** (`TestClusterCommand`) ensure every cluster subcommand at minimum has consistent Structure/Flags/CLI/Execution coverage — new subcommands should adopt this pattern rather than hand-rolling equivalent checks.
 
-`InitializeCLI()` builds the binary to `build/openframe` and caches it by comparing mod times against `main.go`. Subsequent test runs skip the rebuild if the binary is newer than the source — significantly speeding up iterative testing.
+When adding a new command or provider, aim to cover:
 
----
-
-## Test Patterns and Conventions
-
-### Table-Driven Tests
-
-Prefer table-driven tests for commands with multiple argument/flag combinations:
-
-```go
-func TestClusterNameValidation(t *testing.T) {
-    tests := []struct {
-        name        string
-        clusterName string
-        wantError   bool
-    }{
-        {"valid name", "openframe-dev", false},
-        {"too short", "ab", true},
-        {"uppercase", "MyCluster", true},
-        {"injection attempt", "test;rm -rf /", true},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            err := models.ValidateClusterName(tt.clusterName)
-            if tt.wantError {
-                assert.Error(t, err)
-            } else {
-                assert.NoError(t, err)
-            }
-        })
-    }
-}
-```
-
-### Redaction Cleanup in Tests
-
-When testing code that uses `redact.RegisterSecret()`, always clean up in teardown:
-
-```go
-func TestWithSecret(t *testing.T) {
-    defer redact.ClearSecrets()
-
-    redact.RegisterSecret("test-token")
-    // ... test code
-}
-```
-
-### Non-Interactive Mode in Tests
-
-Set non-interactive mode to prevent tests from blocking on prompts:
-
-```go
-func TestNonInteractiveBehavior(t *testing.T) {
-    // Option 1: Use the --non-interactive flag in integration tests
-    result := common.RunCLI("bootstrap", "--non-interactive")
-
-    // Option 2: Set UI test mode (unit tests)
-    testutil.InitializeTestMode() // sets ui.TestMode = true
-}
-```
-
----
-
-## Coverage Requirements
-
-| Package Type | Target Coverage |
-|---|---|
-| Core services (`internal/`) | ≥ 80% |
-| Command layer (`cmd/`) | ≥ 70% |
-| Provider implementations | ≥ 75% |
-| Shared utilities | ≥ 85% |
-
-Run coverage and check targets:
-
-```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out | grep -v "100.0%"
-```
-
----
-
-## CI Test Environment
-
-The GitHub Actions CI pipeline runs:
-
-1. **Unit tests** with race detector on every push
-2. **Integration tests** on PRs targeting `main`
-3. **Coverage reporting** on every PR
-
-Integration tests in CI use a matrix of Go versions and operating systems. Ensure your tests pass on both Linux and macOS.
+1. Flag/argument validation (valid, invalid, and edge-case inputs).
+2. The mocked "happy path" orchestration logic.
+3. At least one error path (e.g., a failing mocked command) and how the CLI surfaces it.
+4. If touching shelled-out commands: an argv-level assertion that user input can't be interpreted as shell syntax.
