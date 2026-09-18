@@ -2,14 +2,12 @@ package helm
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/chart/utils/errors"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
 	"github.com/stretchr/testify/assert"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/rest"
 )
 
 // createTestHelmManager creates a HelmManager for testing with a fake clientset
@@ -23,89 +21,26 @@ func createTestHelmManager(exec executor.CommandExecutor) *HelmManager {
 	}
 }
 
-// testRestConfig returns a dummy rest.Config for use in tests
-// This is not used in actual tests since createTestHelmManager creates the struct directly
-var _ = &rest.Config{} // Used to ensure the import is not removed
-
-// MockExecutor implements CommandExecutor for testing
-type MockExecutor struct {
-	commands [][]string
-	results  map[string]*executor.CommandResult
-	errors   map[string]error
-}
-
-func NewMockExecutor() *MockExecutor {
-	return &MockExecutor{
-		commands: make([][]string, 0),
-		results:  make(map[string]*executor.CommandResult),
-		errors:   make(map[string]error),
-	}
-}
-
-func (m *MockExecutor) Execute(ctx context.Context, name string, args ...string) (*executor.CommandResult, error) {
-	command := append([]string{name}, args...)
-	m.commands = append(m.commands, command)
-
-	commandStr := name
-	for _, arg := range args {
-		commandStr += " " + arg
-	}
-
-	// Check for partial match for error handling (for complex commands)
-	for errKey, err := range m.errors {
-		if strings.Contains(commandStr, errKey) {
-			return nil, err
-		}
-	}
-
-	if result, exists := m.results[commandStr]; exists {
-		return result, nil
-	}
-
-	// Default success result
-	return &executor.CommandResult{
-		ExitCode: 0,
-		Stdout:   "",
-		Stderr:   "",
-	}, nil
-}
-
-func (m *MockExecutor) ExecuteWithOptions(ctx context.Context, options executor.ExecuteOptions) (*executor.CommandResult, error) {
-	return m.Execute(ctx, options.Command, options.Args...)
-}
-
-func (m *MockExecutor) SetResult(command string, result *executor.CommandResult) {
-	m.results[command] = result
-}
-
-func (m *MockExecutor) SetError(command string, err error) {
-	m.errors[command] = err
-}
-
-func (m *MockExecutor) GetCommands() [][]string {
-	return m.commands
-}
-
 func TestHelmManager_IsHelmInstalled(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupMock   func(*MockExecutor)
+		setupMock   func(*executor.MockCommandExecutor)
 		expectError bool
 	}{
 		{
 			name: "helm is installed",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult("helm version --short", &executor.CommandResult{
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse("helm version --short", &executor.CommandResult{
 					ExitCode: 0,
 					Stdout:   "v3.12.0+g4f11b4a",
-				})
+				}, nil)
 			},
 			expectError: false,
 		},
 		{
 			name: "helm is not installed",
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm version --short", assert.AnError)
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse("helm version --short", nil, assert.AnError)
 			},
 			expectError: true,
 		},
@@ -113,7 +48,7 @@ func TestHelmManager_IsHelmInstalled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockExec := NewMockExecutor()
+			mockExec := executor.NewMockCommandExecutor()
 			tt.setupMock(mockExec)
 
 			manager := createTestHelmManager(mockExec)
@@ -134,7 +69,7 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 		name         string
 		releaseName  string
 		namespace    string
-		setupMock    func(*MockExecutor)
+		setupMock    func(*executor.MockCommandExecutor)
 		expectResult bool
 		expectError  bool
 	}{
@@ -142,11 +77,11 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 			name:        "chart is installed",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult("helm list -q -n argocd -f argocd", &executor.CommandResult{
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse("helm list -q -n argocd -f argocd", &executor.CommandResult{
 					ExitCode: 0,
 					Stdout:   "argocd\n",
-				})
+				}, nil)
 			},
 			expectResult: true,
 			expectError:  false,
@@ -155,11 +90,11 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 			name:        "chart is not installed",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult("helm list -q -n argocd -f argocd", &executor.CommandResult{
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse("helm list -q -n argocd -f argocd", &executor.CommandResult{
 					ExitCode: 0,
 					Stdout:   "",
-				})
+				}, nil)
 			},
 			expectResult: false,
 			expectError:  false,
@@ -168,8 +103,8 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 			name:        "helm command fails",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetError("helm list -q -n argocd -f argocd", assert.AnError)
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse("helm list -q -n argocd -f argocd", nil, assert.AnError)
 			},
 			expectResult: false,
 			expectError:  true,
@@ -178,7 +113,7 @@ func TestHelmManager_IsChartInstalled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockExec := NewMockExecutor()
+			mockExec := executor.NewMockCommandExecutor()
 			tt.setupMock(mockExec)
 
 			manager := createTestHelmManager(mockExec)
@@ -205,7 +140,7 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 		name        string
 		releaseName string
 		namespace   string
-		setupMock   func(*MockExecutor)
+		setupMock   func(*executor.MockCommandExecutor)
 		expectError bool
 		wantStatus  string
 		wantVersion string
@@ -215,11 +150,11 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 			name:        "successful status retrieval",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult(metadataCmd, &executor.CommandResult{
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse(metadataCmd, &executor.CommandResult{
 					ExitCode: 0,
 					Stdout:   `{"name":"argocd","namespace":"argocd","status":"deployed","version":"7.7.5","appVersion":"v2.13.0","revision":3}`,
-				})
+				}, nil)
 			},
 			wantStatus:  "deployed",
 			wantVersion: "7.7.5",
@@ -232,11 +167,11 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 			name:        "a failed release is reported as failed",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult(metadataCmd, &executor.CommandResult{
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse(metadataCmd, &executor.CommandResult{
 					ExitCode: 0,
 					Stdout:   `{"name":"argocd","namespace":"argocd","status":"failed","version":"7.7.5","appVersion":"v2.13.0"}`,
-				})
+				}, nil)
 			},
 			wantStatus:  "failed",
 			wantVersion: "7.7.5",
@@ -246,8 +181,8 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 			name:        "status command fails",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetError(metadataCmd, assert.AnError)
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse(metadataCmd, nil, assert.AnError)
 			},
 			expectError: true,
 		},
@@ -255,8 +190,8 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 			name:        "unparseable output is an error, not a fabricated status",
 			releaseName: "argocd",
 			namespace:   "argocd",
-			setupMock: func(m *MockExecutor) {
-				m.SetResult(metadataCmd, &executor.CommandResult{ExitCode: 0, Stdout: `not json`})
+			setupMock: func(m *executor.MockCommandExecutor) {
+				m.SetResponse(metadataCmd, &executor.CommandResult{ExitCode: 0, Stdout: `not json`}, nil)
 			},
 			expectError: true,
 		},
@@ -264,7 +199,7 @@ func TestHelmManager_GetChartStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockExec := NewMockExecutor()
+			mockExec := executor.NewMockCommandExecutor()
 			tt.setupMock(mockExec)
 
 			manager := createTestHelmManager(mockExec)

@@ -140,7 +140,7 @@ func (k *K3dInstaller) installVerified() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Downloading verified k3d %s...\n", download.K3d.Version)
+	pterm.Info.Printf("Downloading verified k3d %s...\n", download.K3d.Version)
 	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.K3d, binDir)
 	if err != nil {
 		return fmt.Errorf("verified k3d install failed: %w", err)

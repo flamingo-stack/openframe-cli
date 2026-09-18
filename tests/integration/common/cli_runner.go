@@ -19,11 +19,12 @@ func InitializeCLI() error {
 	// If already initialized and binary exists, check if it's newer than source
 	if cliBinary != "" {
 		if stat, err := os.Stat(cliBinary); err == nil {
-			// Check if binary is newer than main.go (simple check)
+			// Check if binary is newer than all source files under the project
 			root := GetProjectRoot()
-			if mainStat, err := os.Stat(filepath.Join(root, "main.go")); err == nil {
-				if stat.ModTime().After(mainStat.ModTime()) {
-					return nil // Binary is newer than source, no rebuild needed
+			newest, err := latestSourceModTime(root)
+			if err == nil {
+				if stat.ModTime().After(newest) {
+					return nil // Binary is newer than all source, no rebuild needed
 				}
 			} else {
 				return nil // Can't check source, assume binary is good
@@ -55,6 +56,58 @@ func InitializeCLI() error {
 	}
 
 	return nil
+}
+
+// latestSourceModTime walks main.go plus the cmd/ and internal/ directories
+// (if present) and returns the most recent modification time found among all
+// .go files, so caching decisions account for changes anywhere in the module,
+// not just main.go.
+func latestSourceModTime(root string) (mostRecent time.Time, err error) {
+	checkFile := func(path string) error {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return statErr
+		}
+		if info.ModTime().After(mostRecent) {
+			mostRecent = info.ModTime()
+		}
+		return nil
+	}
+
+	mainPath := filepath.Join(root, "main.go")
+	if statErr := checkFile(mainPath); statErr != nil {
+		return mostRecent, statErr
+	}
+
+	dirs := []string{filepath.Join(root, "cmd"), filepath.Join(root, "internal")}
+	foundAny := false
+	for _, dir := range dirs {
+		if _, statErr := os.Stat(dir); statErr != nil {
+			continue
+		}
+		walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(info.Name(), ".go") {
+				return nil
+			}
+			foundAny = true
+			if info.ModTime().After(mostRecent) {
+				mostRecent = info.ModTime()
+			}
+			return nil
+		})
+		if walkErr != nil {
+			return mostRecent, walkErr
+		}
+	}
+	_ = foundAny
+
+	return mostRecent, nil
 }
 
 // CleanupCLI removes the test CLI binary
