@@ -74,93 +74,98 @@ func (w *ConfigWizard) Run() (ClusterConfig, error) {
 
 	steps := NewWizardSteps()
 
-	// Step 1: Cluster name
-	name, err := steps.PromptClusterName(w.config.Name)
-	if err != nil {
-		return ClusterConfig{}, err
-	}
-	w.config.Name = name
-
-	// Step 2: Cluster type
-	clusterType, err := steps.PromptClusterType()
-	if err != nil {
-		return ClusterConfig{}, err
-	}
-	w.config.Type = clusterType
-
-	// Step 3 (cloud only): project/region + instance type. The k3s version
-	// list below is meaningless for cloud clusters, whose version comes from
-	// the module default.
-	if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
-		if clusterType == models.ClusterTypeGKE {
-			project, err := steps.PromptProject()
-			if err != nil {
-				return ClusterConfig{}, err
-			}
-			w.config.Project = project
-
-			region, err := steps.PromptRegion("GCP Region", "us-central1", w.config.Project)
-			if err != nil {
-				return ClusterConfig{}, err
-			}
-			w.config.Region = region
-		} else {
-			profile, err := steps.PromptProfile()
-			if err != nil {
-				return ClusterConfig{}, err
-			}
-			w.config.Profile = profile
-
-			region, err := steps.PromptAWSRegion("AWS Region", "us-east-1", w.config.Profile)
-			if err != nil {
-				return ClusterConfig{}, err
-			}
-			w.config.Region = region
-		}
-
-		// Mirrors the template default: the Free-Tier-eligible drop-in for
-		// m6i.large, so the wizard's suggestion also works on a new AWS account.
-		defaultMachine := "m7i-flex.large"
-		if clusterType == models.ClusterTypeGKE {
-			defaultMachine = "e2-standard-4"
-		}
-		machineType, err := steps.PromptMachineType(defaultMachine)
+	// Loop instead of recursing so repeated "no" answers reuse the same
+	// stack frame and state rather than growing the call stack indefinitely.
+	for {
+		// Step 1: Cluster name
+		name, err := steps.PromptClusterName(w.config.Name)
 		if err != nil {
 			return ClusterConfig{}, err
 		}
-		w.config.MachineType = machineType
-		w.config.K8sVersion = ""
-	}
+		w.config.Name = name
 
-	// Step 4: Node count
-	nodeCount, err := steps.PromptNodeCount(w.config.NodeCount)
-	if err != nil {
-		return ClusterConfig{}, err
-	}
-	w.config.NodeCount = nodeCount
-
-	// Step 5 (k3d only): Kubernetes version
-	if clusterType == models.ClusterTypeK3d {
-		k8sVersion, err := steps.PromptK8sVersion()
+		// Step 2: Cluster type
+		clusterType, err := steps.PromptClusterType()
 		if err != nil {
 			return ClusterConfig{}, err
 		}
-		w.config.K8sVersion = k8sVersion
-	}
+		w.config.Type = clusterType
 
-	// Step 6: Confirmation
-	domainConfig := w.config.ToDomain()
-	confirmed, err := steps.ConfirmConfiguration(domainConfig)
-	if err != nil {
-		return ClusterConfig{}, err
-	}
+		// Step 3 (cloud only): project/region + instance type. The k3s version
+		// list below is meaningless for cloud clusters, whose version comes from
+		// the module default.
+		if clusterType == models.ClusterTypeEKS || clusterType == models.ClusterTypeGKE {
+			if clusterType == models.ClusterTypeGKE {
+				project, err := steps.PromptProject()
+				if err != nil {
+					return ClusterConfig{}, err
+				}
+				w.config.Project = project
 
-	if !confirmed {
-		// User wants to modify - restart wizard
-		return w.Run()
-	}
+				region, err := steps.PromptRegion("GCP Region", "us-central1", w.config.Project)
+				if err != nil {
+					return ClusterConfig{}, err
+				}
+				w.config.Region = region
+			} else {
+				profile, err := steps.PromptProfile()
+				if err != nil {
+					return ClusterConfig{}, err
+				}
+				w.config.Profile = profile
 
-	return w.config, nil
+				region, err := steps.PromptAWSRegion("AWS Region", "us-east-1", w.config.Profile)
+				if err != nil {
+					return ClusterConfig{}, err
+				}
+				w.config.Region = region
+			}
+
+			// Mirrors the template default: the Free-Tier-eligible drop-in for
+			// m6i.large, so the wizard's suggestion also works on a new AWS account.
+			defaultMachine := "m7i-flex.large"
+			if clusterType == models.ClusterTypeGKE {
+				defaultMachine = "e2-standard-4"
+			}
+			machineType, err := steps.PromptMachineType(defaultMachine)
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.MachineType = machineType
+			w.config.K8sVersion = ""
+		}
+
+		// Step 4: Node count
+		nodeCount, err := steps.PromptNodeCount(w.config.NodeCount)
+		if err != nil {
+			return ClusterConfig{}, err
+		}
+		w.config.NodeCount = nodeCount
+
+		// Step 5 (k3d only): Kubernetes version
+		if clusterType == models.ClusterTypeK3d {
+			k8sVersion, err := steps.PromptK8sVersion()
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			w.config.K8sVersion = k8sVersion
+		}
+
+		// Step 6: Confirmation
+		domainConfig := w.config.ToDomain()
+		confirmed, err := steps.ConfirmConfiguration(domainConfig)
+		if err != nil {
+			return ClusterConfig{}, err
+		}
+
+		if !confirmed {
+			// User wants to modify - restart wizard from step 1, reusing
+			// the current state instead of recursing.
+			continue
+		}
+
+		return w.config, nil
+	}
 }
 
 // ConfigurationHandler handles cluster configuration flows
