@@ -58,11 +58,11 @@ Examples:
 
 // runUpgradeCommand dispatches to change-ref (Mode 1) or force-sync (Mode 2).
 func runUpgradeCommand(cmd *cobra.Command, args []string) error {
+	verbose := getVerboseFlag(cmd)
 	flags, err := extractInstallFlags(cmd)
 	if err != nil {
-		return err
+		return sharedErrors.HandleGlobalError(err, verbose)
 	}
-	verbose := getVerboseFlag(cmd)
 	sync, _ := cmd.Flags().GetBool("sync")
 	refChanged := cmd.Flags().Changed("ref")
 
@@ -70,7 +70,7 @@ func runUpgradeCommand(cmd *cobra.Command, args []string) error {
 	// force-sync the CURRENT ref and discard an explicit --ref — the user
 	// believed they had deployed the new version (audit F5/T1-9).
 	if refChanged && sync {
-		return fmt.Errorf("--ref and --sync are mutually exclusive: --ref deploys a new ref (Mode 1), --sync re-syncs the current ref (Mode 2); drop one of them")
+		return sharedErrors.HandleGlobalError(fmt.Errorf("--ref and --sync are mutually exclusive: --ref deploys a new ref (Mode 1), --sync re-syncs the current ref (Mode 2); drop one of them"), verbose)
 	}
 
 	if upgradeIsChangeRef(refChanged, sync) {
