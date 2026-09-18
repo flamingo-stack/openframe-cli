@@ -1,0 +1,69 @@
+graph TB
+    subgraph cmd
+        CmdCluster[cmd/cluster]
+        CmdApp[cmd/app]
+        CmdBootstrap[cmd/bootstrap]
+        CmdPrereq[cmd/prerequisites]
+        CmdUpdate[cmd/update]
+    end
+
+    subgraph internal_cluster["internal/cluster"]
+        ClusterService[service.go]
+        ClusterProvider[provider]
+        ClusterModels[models]
+    end
+
+    subgraph internal_chart["internal/chart"]
+        ChartService[services]
+        ChartArgoCD[providers/argocd]
+        ChartHelm[providers/helm]
+        ChartGit[providers/git]
+    end
+
+    subgraph internal_app["internal/app"]
+        AppStatus[status]
+        AppUninstall[uninstall]
+    end
+
+    subgraph internal_shared["internal/shared"]
+        Executor[executor]
+        Errors[errors]
+        UI[ui]
+        Download[download]
+        SelfUpdate[selfupdate]
+    end
+
+    subgraph internal_k8s["internal/k8s"]
+        K8sAccess[accessor / restconfig / contexts]
+    end
+
+    CmdBootstrap --> ClusterService
+    CmdBootstrap --> ChartService
+    CmdCluster --> ClusterService
+    CmdApp --> ChartService
+    CmdApp --> AppStatus
+    CmdApp --> AppUninstall
+    CmdApp --> K8sAccess
+    CmdPrereq --> internal_cluster
+    CmdUpdate --> SelfUpdate
+
+    ClusterService --> ClusterProvider
+    ClusterService --> ClusterModels
+    ClusterProvider --> Executor
+
+    ChartService --> ChartArgoCD
+    ChartService --> ChartHelm
+    ChartService --> ChartGit
+    ChartArgoCD --> K8sAccess
+    ChartHelm --> K8sAccess
+
+    AppStatus --> ChartArgoCD
+    AppStatus --> K8sAccess
+    AppUninstall --> ChartArgoCD
+    AppUninstall --> ChartHelm
+
+    ClusterService --> Errors
+    ChartService --> Errors
+    CmdCluster --> UI
+    CmdApp --> UI
+    ClusterProvider --> Download
