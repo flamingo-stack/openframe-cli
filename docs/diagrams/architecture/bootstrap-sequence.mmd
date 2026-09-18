@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant User
+    participant CLI as cmd/bootstrap
+    participant Boot as internal/bootstrap.Service
+    participant Cluster as internal/cluster.ClusterService
+    participant K3d as k3d provider
+    participant Chart as chart/services (Installer)
+    participant ArgoCD as ArgoCD provider
+    participant K8s as Kubernetes API
+
+    User->>CLI: openframe bootstrap
+    CLI->>Boot: Execute(cmd, args)
+    Boot->>Chart: ValidateHelmValuesFile()
+    Boot->>Cluster: CreateCluster(config)
+    Cluster->>K3d: CreateCluster(ctx, config)
+    K3d->>K8s: provision cluster (Docker)
+    K3d-->>Cluster: rest.Config
+    Cluster-->>Boot: rest.Config
+    Boot->>Chart: InstallChartsWithConfigContext(req)
+    Chart->>ArgoCD: Install(ctx, config)
+    ArgoCD->>K8s: helm install argocd
+    Chart->>Chart: AppOfApps.Install (git clone + helm)
+    Chart->>ArgoCD: WaitForApplications(ctx, config)
+    ArgoCD->>K8s: poll Application CRs
+    K8s-->>ArgoCD: sync/health status
+    ArgoCD-->>Chart: ready
+    Chart-->>Boot: success
+    Boot-->>User: summary card (stages, timings, access hints)
