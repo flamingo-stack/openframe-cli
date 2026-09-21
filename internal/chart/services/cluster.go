@@ -29,11 +29,8 @@ func NewClusterSelector(clusterService types.ClusterLister, operationsUI *chartU
 func (c *ClusterSelector) SelectCluster(args []string, nonInteractive, verbose bool) (string, error) {
 	clusters, err := c.clusterService.ListClusters()
 	if err != nil {
-		if verbose {
-			pterm.Error.Printf("Failed to list clusters: %v\n", err)
-		}
-		c.operationsUI.ShowNoClusterMessage()
-		return "", nil
+		pterm.Error.Printf("Failed to list clusters: %v\n", err)
+		return "", fmt.Errorf("failed to list clusters: %w", err)
 	}
 
 	if len(clusters) == 0 {
