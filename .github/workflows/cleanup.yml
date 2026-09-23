@@ -40,8 +40,10 @@ jobs:
           OWNER="${REPO%%/*}"
           echo "Deleting branches with no commit since $CUTOFF"
 
+          BRANCH_LIST=$(mktemp)
           gh api --paginate "repos/$REPO/branches?protected=false&per_page=100" \
-            --jq '.[].name' |
+            --jq '.[].name' > "$BRANCH_LIST"
+
           while read -r br; do
             # The long-lived branches are non-negotiable, protected or not.
             case "$br" in main|develop) continue ;; esac
@@ -64,4 +66,6 @@ jobs:
 
             echo "Deleting $br (last commit $last)"
             gh api --silent -X DELETE "repos/$REPO/git/refs/heads/$br" || echo "Failed to delete $br (continuing)"
-          done
+          done < "$BRANCH_LIST"
+          rm -f "$BRANCH_LIST"
+
