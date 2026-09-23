@@ -247,7 +247,7 @@ func ExecuteWithVersion(versionInfo VersionInfo) error {
 	// Initialize configuration using service layer
 	service := config.NewSystemService()
 	if err := service.Initialize(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: initialization failed: %v\n", err)
+		pterm.Warning.WithWriter(os.Stderr).Printf("initialization failed: %v\n", err)
 	}
 
 	// Ensure the CLI-managed bin dir (where verified tool binaries are
