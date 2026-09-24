@@ -36,8 +36,9 @@ sign_darwin() {
 
   # Bare binaries can't be stapled; notarization is still recorded online and
   # checked by Gatekeeper on first run (same flow as openframe-oss-tenant).
-  local zip
-  zip="$(mktemp -d)/openframe-${OS}-${ARCH}.zip"
+  local zipdir zip
+  zipdir="$(mktemp -d)"
+  zip="${zipdir}/openframe-${OS}-${ARCH}.zip"
   zip -j "$zip" "$BINARY"
   xcrun notarytool submit "$zip" \
     --apple-id "$APPLE_ID_USERNAME" \
@@ -45,7 +46,7 @@ sign_darwin() {
     --team-id "$APPLE_TEAM_ID" \
     --wait \
     --timeout 30m
-  rm -f "$zip"
+  rm -rf "$zipdir"
 
   echo "sign-binary: ${OS}/${ARCH} signed and notarized"
 }
@@ -91,3 +92,4 @@ case "$OS" in
   windows) sign_windows ;;
   *)       echo "sign-binary: ${OS}/${ARCH} not signed (by design)" ;;
 esac
+
