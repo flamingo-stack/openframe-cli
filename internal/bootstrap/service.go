@@ -22,11 +22,21 @@ import (
 const defaultClusterName = "openframe-dev"
 
 // Service provides bootstrap functionality
-type Service struct{}
+type Service struct {
+	clusterService cluster.ServiceInterface
+}
 
 // NewService creates a new bootstrap service
 func NewService() *Service {
 	return &Service{}
+}
+
+// NewServiceWithDependencies creates a new bootstrap service with an
+// injected cluster service, following the constructor-injection pattern
+// used by ClusterService. When clusterService is nil, it is lazily
+// constructed with a real command executor at the point of use.
+func NewServiceWithDependencies(clusterService cluster.ServiceInterface) *Service {
+	return &Service{clusterService: clusterService}
 }
 
 // Execute handles the bootstrap command execution
@@ -166,7 +176,7 @@ func (s *Service) createClusterSuppressed(ctx context.Context, clusterName strin
 
 // installChart installs charts on the created cluster
 func (s *Service) installChart(ctx context.Context, clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) error {
-	return chartServices.InstallChartsWithConfigContext(ctx, bootstrapInstallRequest(clusterName, nonInteractive, verbose, kubeConfig))
+	return chartServices.InstallChartsWithConfigContext(ctx, s.bootstrapInstallRequest(clusterName, nonInteractive, verbose, kubeConfig))
 }
 
 // bootstrapInstallRequest builds the chart-install request for the cluster the
@@ -176,7 +186,14 @@ func (s *Service) installChart(ctx context.Context, clusterName string, nonInter
 // "install OpenFrame chart on ”?" and every helm call ran WITHOUT
 // --kube-context, silently targeting the kubeconfig's current context instead
 // of the cluster the native client was pointed at.
-func bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) utilTypes.InstallationRequest {
+func (s *Service) bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, kubeConfig *rest.Config) utilTypes.InstallationRequest {
+	// Prefer the injected cluster service (constructor injection); fall back
+	// to constructing one with a real command executor if the Service was
+	// created via the zero-dependency NewService() constructor.
+	clusterAccess := s.clusterService
+	if clusterAccess == nil {
+		clusterAccess = cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose))
+	}
 	return utilTypes.InstallationRequest{
 		Args:           []string{clusterName},
 		Force:          false,
@@ -196,6 +213,7 @@ func bootstrapInstallRequest(clusterName string, nonInteractive, verbose bool, k
 		KubeContext: "k3d-" + clusterName,
 		// Inject cluster access from the orchestrator (composition root) so the
 		// app subsystem stays isolated from cluster-creation code (req 18/19).
-		ClusterAccess: cluster.NewClusterService(executor.NewRealCommandExecutor(false, verbose)),
+		ClusterAccess: clusterAccess,
 	}
 }
+
