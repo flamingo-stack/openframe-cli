@@ -44,7 +44,20 @@ func NewAuthFlow(exec executor.CommandExecutor) *AuthFlow {
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			return cmd.Run()
+			if err := cmd.Run(); err != nil {
+				exitCode := -1
+				var exitErr *osexec.ExitError
+				if errorsAsExitError(err, &exitErr) {
+					exitCode = exitErr.ExitCode()
+				}
+				return &executor.CommandError{
+					Command:  "gcloud",
+					Args:     args,
+					ExitCode: exitCode,
+					Err:      err,
+				}
+			}
+			return nil
 		},
 	}
 }
@@ -125,6 +138,10 @@ func (f *AuthFlow) login(ctx context.Context, prompt string, args []string, veri
 		return fmt.Errorf("%s", manualHint)
 	}
 	if err := f.runLogin(ctx, args...); err != nil {
+		var cmdErr *executor.CommandError
+		if errorsAsExitError(err, &cmdErr) {
+			return err
+		}
 		return fmt.Errorf("gcloud %s failed: %w", strings.Join(args, " "), err)
 	}
 	if !verified() {
@@ -132,4 +149,11 @@ func (f *AuthFlow) login(ctx context.Context, prompt string, args []string, veri
 	}
 	pterm.Success.Println("Google Cloud authentication complete")
 	return nil
+}
+
+// errorsAsExitError is a small wrapper around errors.As kept local so this
+// file only needs the standard "errors" package's As semantics without an
+// extra top-level import line churn beyond what's already here.
+func errorsAsExitError(err error, target interface{}) bool {
+	return errorsAs(err, target)
 }
