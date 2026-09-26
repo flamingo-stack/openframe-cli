@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pterm/pterm"
+
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
@@ -71,7 +73,7 @@ func (h *HelmInstaller) installMacOS() error {
 		return fmt.Errorf("automatic helm installation on macOS requires Homebrew. Please install brew first: https://brew.sh")
 	}
 
-	fmt.Println("Installing helm via Homebrew...")
+	pterm.Info.Println("Installing helm via Homebrew...")
 	cmd := exec.Command("brew", "install", "helm")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -99,12 +101,12 @@ func (h *HelmInstaller) installVerified() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Downloading verified helm %s...\n", download.Helm.Version)
+	pterm.Info.Printfln("Downloading verified helm %s...", download.Helm.Version)
 	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Helm, binDir)
 	if err != nil {
 		return fmt.Errorf("verified helm install failed: %w", err)
 	}
 	download.PrependToPath(binDir)
-	fmt.Printf("Installed verified helm %s to %s\n", download.Helm.Version, path)
+	pterm.Success.Printfln("Installed verified helm %s to %s", download.Helm.Version, path)
 	return nil
 }

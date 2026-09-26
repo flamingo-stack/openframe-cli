@@ -12,6 +12,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
 
@@ -233,7 +234,7 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 			id = strings.TrimSpace(id)
 			if id != "" {
 				if _, rerr := m.executor.Execute(ctx, "docker", "rm", "-f", id); rerr != nil && m.verbose {
-					fmt.Printf("Warning: failed to remove container %s: %v\n", id, rerr)
+					pterm.Warning.Printf("failed to remove container %s: %v\n", id, rerr)
 				}
 			}
 		}
@@ -241,7 +242,7 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 
 	// Also remove the network
 	if _, nerr := m.executor.Execute(ctx, "docker", "network", "rm", fmt.Sprintf("k3d-%s", clusterName)); nerr != nil && m.verbose {
-		fmt.Printf("Warning: failed to remove k3d network for %s: %v\n", clusterName, nerr)
+		pterm.Warning.Printf("failed to remove k3d network for %s: %v\n", clusterName, nerr)
 	}
 
 	return nil
@@ -574,3 +575,4 @@ func (m *K3dManager) inotifyLimitsSufficient(ctx context.Context, wantWatches, w
 	}
 	return true
 }
+
