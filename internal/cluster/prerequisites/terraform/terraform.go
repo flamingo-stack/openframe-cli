@@ -105,7 +105,7 @@ func (t *TerraformInstaller) installVerified() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Downloading verified terraform %s...\n", download.Terraform.Version)
+	pterm.Info.Printf("Downloading verified terraform %s...\n", download.Terraform.Version)
 	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Terraform, binDir)
 	if err != nil {
 		return fmt.Errorf("verified terraform install failed: %w", err)

@@ -64,7 +64,7 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 
 		// Check Deployments
 		for _, name := range expectedDeployments {
-			_, err := h.kubeClient.AppsV1().Deployments("argocd").Get(ctx, name, metav1.GetOptions{})
+			_, err := h.kubeClient.AppsV1().Deployments(argocd.ArgoCDNamespace).Get(ctx, name, metav1.GetOptions{})
 
 			if k8serrors.IsNotFound(err) {
 				missingWorkloads = append(missingWorkloads, "deployment/"+name)
@@ -77,7 +77,7 @@ func (h *HelmManager) waitForArgoCDDeployments(ctx context.Context, verbose bool
 
 		// Check StatefulSets (application-controller in ArgoCD v3.x)
 		for _, name := range expectedStatefulSets {
-			_, err := h.kubeClient.AppsV1().StatefulSets("argocd").Get(ctx, name, metav1.GetOptions{})
+			_, err := h.kubeClient.AppsV1().StatefulSets(argocd.ArgoCDNamespace).Get(ctx, name, metav1.GetOptions{})
 
 			if k8serrors.IsNotFound(err) {
 				missingWorkloads = append(missingWorkloads, "statefulset/"+name)
@@ -345,3 +345,4 @@ func (h *HelmManager) verifyClusterConnectivity(ctx context.Context, config conf
 	}
 	return fmt.Errorf("cluster not reachable after retries: %w", lastErr)
 }
+

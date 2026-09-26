@@ -27,7 +27,7 @@ func expandShortPath(path string) (string, error) {
 	}
 
 	// First call to get required buffer size
-	n, _, _ := procGetLongPathNameW.Call(
+	n, _, callErr := procGetLongPathNameW.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		0,
 		0,
@@ -35,21 +35,21 @@ func expandShortPath(path string) (string, error) {
 
 	if n == 0 {
 		// GetLongPathNameW failed - path might not exist or other error
-		// Return original path as fallback
-		return path, nil
+		// Return original path as fallback, but surface the error for diagnostics
+		return path, callErr
 	}
 
 	// Allocate buffer and get the long path
 	buf := make([]uint16, n)
-	n, _, _ = procGetLongPathNameW.Call(
+	n, _, callErr = procGetLongPathNameW.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(n),
 	)
 
 	if n == 0 {
-		// Failed to get long path, return original
-		return path, nil
+		// Failed to get long path, return original path but surface the error
+		return path, callErr
 	}
 
 	return syscall.UTF16ToString(buf[:n]), nil

@@ -56,14 +56,14 @@ func (fc *FileCleanup) restoreFilesForced(verbose bool, success bool) error {
 
 	restoredCount := 0
 	var restoreErrs []error
-	restoreFailed := make(map[string]bool)
-	for _, backup := range fc.backups {
+	restoreFailed := make(map[int]bool)
+	for i, backup := range fc.backups {
 		if err := fc.restoreFile(backup, verbose); err != nil {
 			if verbose {
 				pterm.Warning.Printf("Failed to restore %s: %v\n", backup.OriginalPath, err)
 			}
 			restoreErrs = append(restoreErrs, fmt.Errorf("restoring %s: %w", backup.OriginalPath, err))
-			restoreFailed[backup.OriginalPath] = true
+			restoreFailed[i] = true
 			continue
 		}
 		restoredCount++
@@ -97,8 +97,8 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 
 	restoredCount := 0
 	var restoreErrs []error
-	restoreFailed := make(map[string]bool)
-	for _, backup := range fc.backups {
+	restoreFailed := make(map[int]bool)
+	for i, backup := range fc.backups {
 		// For temporary files registered for success-only cleanup
 		if fc.cleanupOnSuccess && !backup.FileExisted && !success {
 			if verbose {
@@ -112,7 +112,7 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 				pterm.Warning.Printf("Failed to restore %s: %v\n", backup.OriginalPath, err)
 			}
 			restoreErrs = append(restoreErrs, fmt.Errorf("restoring %s: %w", backup.OriginalPath, err))
-			restoreFailed[backup.OriginalPath] = true
+			restoreFailed[i] = true
 			continue
 		}
 		restoredCount++
@@ -166,11 +166,13 @@ func (fc *FileCleanup) restoreFile(backup FileBackup, verbose bool) error {
 }
 
 // cleanupBackupFiles removes physical backup files. restoreFailed (keyed by
-// OriginalPath) lists backups whose restore did NOT succeed: deleting those
-// would destroy the only remaining copy of the original file.
-func (fc *FileCleanup) cleanupBackupFiles(verbose bool, restoreFailed map[string]bool) {
-	for _, backup := range fc.backups {
-		if restoreFailed[backup.OriginalPath] {
+// the index of the backup in fc.backups) lists backups whose restore did NOT
+// succeed: deleting those would destroy the only remaining copy of the
+// original file. Keying by index (rather than OriginalPath) avoids ambiguity
+// when multiple FileBackup entries share the same OriginalPath.
+func (fc *FileCleanup) cleanupBackupFiles(verbose bool, restoreFailed map[int]bool) {
+	for i, backup := range fc.backups {
+		if restoreFailed[i] {
 			continue
 		}
 		if !backup.ContentOnly && backup.BackupPath != "" {

@@ -99,8 +99,8 @@ func testCommandCLI(t *testing.T, commandName string, cmdFunc func() *cobra.Comm
 
 		// Test too many arguments should fail
 		err = cmd.Args(cmd, []string{"arg1", "arg2", "arg3"})
-		if err == nil && commandName != "list" { // list command typically accepts no args
-			t.Logf("Command %s accepts multiple arguments", commandName)
+		if commandName == "list" { // list command typically accepts no args
+			assert.Error(t, err, "Command %s should reject multiple arguments", commandName)
 		}
 	}
 }
