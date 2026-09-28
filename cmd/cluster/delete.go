@@ -100,7 +100,7 @@ func runDeleteCluster(cmd *cobra.Command, args []string) error {
 	clusterType, err := service.DetectClusterType(clusterName)
 	if err != nil {
 		operationsUI.ShowOperationError("delete", clusterName, err)
-		return fmt.Errorf("failed to detect cluster type: %w", err)
+		return sharedErrors.HandleGlobalError(fmt.Errorf("failed to detect cluster type: %w", err), globalFlags.Global.Verbose)
 	}
 
 	// Destroying a cloud cluster deletes billed infrastructure irreversibly,
