@@ -80,9 +80,3 @@ func isLocalAPIServer(serverURL string) bool {
 	}
 	return false
 }
-
-// ApplyInsecureTransport is an alias for ApplyInsecureTLSConfig for backward compatibility.
-// Deprecated: Use ApplyInsecureTLSConfig instead.
-func ApplyInsecureTransport(config *rest.Config) *rest.Config {
-	return ApplyInsecureTLSConfig(config)
-}
