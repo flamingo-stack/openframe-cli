@@ -97,14 +97,20 @@ func AddStatusFlags(cmd *cobra.Command, flags *StatusFlags) {
 	cmd.Flags().BoolVar(&flags.NoApps, "no-apps", false, "Skip application status checking")
 }
 
+// addForceFlag adds the shared --force/-f confirmation-skip flag used by
+// both the delete and cleanup commands.
+func addForceFlag(cmd *cobra.Command, force *bool) {
+	cmd.Flags().BoolVarP(force, "force", "f", false, "Skip confirmation prompt")
+}
+
 // AddDeleteFlags adds delete-specific flags to a command
 func AddDeleteFlags(cmd *cobra.Command, flags *DeleteFlags) {
-	cmd.Flags().BoolVarP(&flags.Force, "force", "f", false, "Skip confirmation prompt")
+	addForceFlag(cmd, &flags.Force)
 }
 
 // AddCleanupFlags adds cleanup-specific flags to a command
 func AddCleanupFlags(cmd *cobra.Command, flags *CleanupFlags) {
-	cmd.Flags().BoolVarP(&flags.Force, "force", "f", false, "Skip confirmation prompt")
+	addForceFlag(cmd, &flags.Force)
 }
 
 // ValidateClusterName validates cluster name according to Kubernetes naming conventions

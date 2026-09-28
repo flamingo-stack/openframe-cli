@@ -83,6 +83,8 @@ func NewEKSPrerequisiteChecker() *PrerequisiteChecker {
 	}
 }
 
+// CheckAll reports whether every requirement in the set is satisfied,
+// returning the names of any that are missing.
 func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
 	var missing []string
 	allPresent := true
