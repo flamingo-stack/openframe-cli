@@ -131,7 +131,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Function to stop spinner safely
 	stopSpinner := func() {
-		dash.Stop()
+		if dash != nil {
+			dash.Stop()
+		}
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil {
@@ -290,7 +292,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		case <-ticker.C:
 			// Check timeout
 			if time.Since(startTime) > timeout {
-				dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				if dash != nil {
+					dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				}
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
