@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/common"
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
@@ -16,18 +17,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// systemNamespaces and systemNamespacePrefixes are never deleted during
-// teardown. They are the cluster's own control-plane/system namespaces (torn
-// down with the cluster anyway) and — critically — kube-system hosts the GKE PD
-// CSI controller that must keep running to delete the Persistent Disks as their
-// PVCs go away.
-var systemNamespaces = map[string]struct{}{
-	"default":         {},
-	"kube-system":     {},
-	"kube-public":     {},
-	"kube-node-lease": {},
-}
-
+// systemNamespacePrefixes are never deleted during teardown, together with the
+// common system namespaces. They are the cluster's own control-plane/system
+// namespaces (torn down with the cluster anyway) and — critically — kube-system
+// hosts the GKE PD CSI controller that must keep running to delete the
+// Persistent Disks as their PVCs go away.
 var systemNamespacePrefixes = []string{"kube-", "gke-", "gmp-"}
 
 const (
@@ -44,15 +38,7 @@ const (
 // isSystemNamespace reports whether ns is a cluster/system namespace that
 // teardown must never delete.
 func isSystemNamespace(ns string) bool {
-	if _, ok := systemNamespaces[ns]; ok {
-		return true
-	}
-	for _, p := range systemNamespacePrefixes {
-		if strings.HasPrefix(ns, p) {
-			return true
-		}
-	}
-	return false
+	return common.IsSystemNamespace(ns, systemNamespacePrefixes)
 }
 
 // appNamespacesToDelete returns the application namespaces (everything that is
@@ -64,19 +50,7 @@ func isSystemNamespace(ns string) bool {
 // deleted, otherwise self-heal could recreate a StatefulSet (and its PVC)
 // mid-teardown.
 func appNamespacesToDelete(all []string) []string {
-	var argocd []string
-	var rest []string
-	for _, ns := range all {
-		if isSystemNamespace(ns) {
-			continue
-		}
-		if ns == "argocd" {
-			argocd = append(argocd, ns)
-		} else {
-			rest = append(rest, ns)
-		}
-	}
-	return append(argocd, rest...)
+	return common.AppNamespacesToDelete(all, systemNamespacePrefixes)
 }
 
 // countDeletablePVs counts PersistentVolumes whose reclaim policy is Delete.
@@ -85,13 +59,7 @@ func appNamespacesToDelete(all []string) []string {
 // Retain-policy PVs are excluded on purpose — their disks are meant to survive,
 // and the post-destroy sweep reports (never silently drops) them.
 func countDeletablePVs(pvs []corev1.PersistentVolume) int {
-	var n int
-	for _, pv := range pvs {
-		if pv.Spec.PersistentVolumeReclaimPolicy == corev1.PersistentVolumeReclaimDelete {
-			n++
-		}
-	}
-	return n
+	return common.CountDeletablePVs(pvs)
 }
 
 // releaseWorkloadDisks deletes every application namespace on the cluster and

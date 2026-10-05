@@ -73,7 +73,7 @@ func (i *Installer) Install() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Downloading verified infracost %s...\n", download.Infracost.Version)
+	pterm.Info.Printf("Downloading verified infracost %s...\n", download.Infracost.Version)
 	if err := (download.Downloader{}).InstallVerifiedTarGz(ctx, asset, member, dest, 0o750); err != nil {
 		return fmt.Errorf("verified infracost install failed: %w", err)
 	}

@@ -7,6 +7,53 @@ import (
 	"time"
 )
 
+// testResourcePatterns is the shared list of substrings used to identify
+// Docker resources (networks/containers) created by integration tests, so
+// cleanup logic does not drift between the different cleanup helpers.
+var testResourcePatterns = []string{
+	"test",
+	"collision",
+	"interrupt",
+	"stress",
+	"multi",
+	"integration",
+}
+
+// matchesTestResourcePattern reports whether name contains one of the known
+// test-name substrings.
+func matchesTestResourcePattern(name string) bool {
+	for _, pattern := range testResourcePatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// removeDockerResourcesByFilter lists docker resources of the given kind
+// (e.g. "network" or "container") using the provided list/format args and a
+// docker filter, then removes each listed resource whose name matches the
+// known test-name substrings (unless requireMatch is false, in which case
+// all listed resources are removed).
+func removeDockerResourcesByFilter(listArgs []string, removeArgs func(name string) []string, requireMatch bool) {
+	cmd := exec.Command("docker", listArgs...) // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	names := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if requireMatch && !matchesTestResourcePattern(name) {
+			continue
+		}
+		args := removeArgs(name)
+		_ = exec.Command("docker", args...).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
+	}
+}
+
 // GenerateTestClusterName creates a unique cluster name for testing
 func GenerateTestClusterName() string {
 	return fmt.Sprintf("integration-test-%d", time.Now().Unix())
@@ -96,50 +143,31 @@ func CleanupAllTestClusters() {
 	cleanupDockerResources()
 }
 
-// cleanupDockerResources removes leftover k3d Docker networks and containers
+// cleanupDockerResources removes leftover k3d Docker networks, containers,
+// and registries that match known test-name substrings.
 func cleanupDockerResources() {
 	// Clean up leftover k3d networks
-	cmd := exec.Command("docker", "network", "ls", "--filter", "name=k3d-", "--format", "{{.Name}}")
-	if output, err := cmd.Output(); err == nil {
-		networks := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, network := range networks {
-			if network != "" && (strings.Contains(network, "test") ||
-				strings.Contains(network, "collision") ||
-				strings.Contains(network, "interrupt") ||
-				strings.Contains(network, "stress") ||
-				strings.Contains(network, "multi") ||
-				strings.Contains(network, "integration")) {
-				_ = exec.Command("docker", "network", "rm", network).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-			}
-		}
-	}
+	removeDockerResourcesByFilter(
+		[]string{"network", "ls", "--filter", "name=k3d-", "--format", "{{.Name}}"},
+		func(name string) []string { return []string{"network", "rm", name} },
+		true,
+	)
 
 	// Clean up leftover k3d containers
-	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-", "--format", "{{.Names}}")
-	if output, err := cmd.Output(); err == nil {
-		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, container := range containers {
-			if container != "" && (strings.Contains(container, "test") ||
-				strings.Contains(container, "collision") ||
-				strings.Contains(container, "interrupt") ||
-				strings.Contains(container, "stress") ||
-				strings.Contains(container, "multi") ||
-				strings.Contains(container, "integration")) {
-				_ = exec.Command("docker", "rm", "-f", container).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-			}
-		}
-	}
+	removeDockerResourcesByFilter(
+		[]string{"ps", "-a", "--filter", "name=k3d-", "--format", "{{.Names}}"},
+		func(name string) []string { return []string{"rm", "-f", name} },
+		true,
+	)
 
-	// Clean up any leftover k3d registries that might conflict
-	cmd = exec.Command("docker", "ps", "-a", "--filter", "name=k3d-.*-registry", "--format", "{{.Names}}")
-	if output, err := cmd.Output(); err == nil {
-		registries := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, registry := range registries {
-			if registry != "" {
-				_ = exec.Command("docker", "rm", "-f", registry).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-			}
-		}
-	}
+	// Clean up any leftover k3d registries that might conflict, restricted
+	// to registries matching known test-name substrings to avoid deleting
+	// unrelated k3d registries.
+	removeDockerResourcesByFilter(
+		[]string{"ps", "-a", "--filter", "name=k3d-.*-registry", "--format", "{{.Names}}"},
+		func(name string) []string { return []string{"rm", "-f", name} },
+		true,
+	)
 }
 
 // cleanupClusterSpecificResources removes Docker resources for a specific cluster
@@ -149,13 +177,9 @@ func cleanupClusterSpecificResources(clusterName string) {
 	_ = exec.Command("docker", "network", "rm", networkName).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
 
 	// Remove specific cluster containers
-	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}") // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-	if output, err := cmd.Output(); err == nil {
-		containers := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, container := range containers {
-			if container != "" {
-				_ = exec.Command("docker", "rm", "-f", container).Run() // #nosec G204 -- integration test harness runs the built CLI/tools with controlled args
-			}
-		}
-	}
+	removeDockerResourcesByFilter(
+		[]string{"ps", "-a", "--filter", fmt.Sprintf("name=k3d-%s", clusterName), "--format", "{{.Names}}"},
+		func(name string) []string { return []string{"rm", "-f", name} },
+		false,
+	)
 }

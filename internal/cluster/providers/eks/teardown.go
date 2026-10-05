@@ -197,16 +197,26 @@ func releaseWorkloadResources(ctx context.Context, rec tfengine.Record) {
 	})
 }
 
+// volumeClusterARNTagKey is the tag the EBS CSI driver stamps with the full
+// EKS cluster ARN (extraVolumeTags in templates/main.tf). Unlike the cluster
+// name, the ARN embeds the account and is unique per cluster instance, so it
+// disambiguates a same-named EKS cluster re-created (or recorded stale) in the
+// same region — the counterpart of GKE's disksInLocation scoping.
+const volumeClusterARNTagKey = "openframe:cluster-arn"
+
 // sweepOrphanedVolumes finds EBS volumes still tagged for this cluster after
 // the destroy. Post-destroy they are unambiguous orphans of a cluster that no
 // longer exists (describe-volumes is region-scoped, so a same-named cluster in
 // another region is out of reach by construction; the status=available filter
-// additionally refuses anything still attached). It deletes them when the
-// operator consents — standing consent via --force, or an interactive yes to
-// the prompt — so the cluster leaves zero billable leftovers; otherwise it
-// reports them with the exact cleanup command and never deletes cloud data
-// without consent. Best-effort throughout. (The GKE twin sweeps Persistent
-// Disks by label.)
+// additionally refuses anything still attached). To also guard against a
+// same-named cluster reusing the same region (e.g. a rename or a stale
+// record), matches are additionally filtered by the cluster ARN tag, when
+// available, which is unique per cluster instance — the counterpart of GKE's
+// disksInLocation scoping. It deletes them when the operator consents —
+// standing consent via --force, or an interactive yes to the prompt — so the
+// cluster leaves zero billable leftovers; otherwise it reports them with the
+// exact cleanup command and never deletes cloud data without consent.
+// Best-effort throughout. (The GKE twin sweeps Persistent Disks by label.)
 func (p *Provider) sweepOrphanedVolumes(ctx context.Context, rec tfengine.Record, force bool) {
 	if rec.Region == "" {
 		return
@@ -216,7 +226,7 @@ func (p *Provider) sweepOrphanedVolumes(ctx context.Context, rec tfengine.Record
 		"--filters",
 		fmt.Sprintf("Name=tag:%s,Values=%s", orphanVolumeTagKey, rec.Name),
 		"Name=status,Values=available",
-		"--query", "Volumes[].VolumeId", "--output", "text"}
+		"--query", "Volumes[].{Id:VolumeId,ARN:Tags[?Key=='" + volumeClusterARNTagKey + "']|[0].Value}", "--output", "json"}
 	if rec.Profile != "" {
 		args = append(args, "--profile", rec.Profile)
 	}
@@ -224,7 +234,7 @@ func (p *Provider) sweepOrphanedVolumes(ctx context.Context, rec tfengine.Record
 	if err != nil || res == nil {
 		return
 	}
-	volumes := parseVolumeIDs(res.Stdout)
+	volumes := parseVolumesInCluster(res.Stdout, rec.ClusterARN)
 	if len(volumes) == 0 {
 		return
 	}
@@ -296,6 +306,46 @@ func parseVolumeIDs(out string) []string {
 			continue
 		}
 		ids = append(ids, field)
+	}
+	return ids
+}
+
+// volumeEntry mirrors one element of the Volumes[].{Id,ARN} JSON projection
+// produced by describe-volumes' --query in sweepOrphanedVolumes.
+type volumeEntry struct {
+	Id  string `json:"Id"`
+	ARN string `json:"ARN"`
+}
+
+// parseVolumesInCluster parses the JSON volume/ARN pairs from describe-volumes
+// and returns only the volume ids that belong to wantARN. This is the EKS
+// counterpart of GKE's disksInLocation: the tag-based name filter alone can
+// match a same-named cluster re-created (or recorded stale) in the same
+// region, so any volume whose ARN tag is present must match the just-destroyed
+// cluster's ARN to be considered an orphan of it. When wantARN is empty (ARN
+// unavailable on the record) or a volume has no ARN tag (older clusters
+// provisioned before the tag existed), the volume is kept — preserving prior
+// behavior rather than silently hiding orphans this scoping cannot confirm.
+func parseVolumesInCluster(out string, wantARN string) []string {
+	out = strings.TrimSpace(out)
+	if out == "" || out == "None" {
+		return nil
+	}
+	var entries []volumeEntry
+	if err := jsonUnmarshal([]byte(out), &entries); err != nil {
+		// Fall back to treating the output as the plain volume-id text format,
+		// preserving prior behavior if --query/--output ever mismatch.
+		return parseVolumeIDs(out)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.Id == "" {
+			continue
+		}
+		if wantARN != "" && e.ARN != "" && e.ARN != wantARN {
+			continue
+		}
+		ids = append(ids, e.Id)
 	}
 	return ids
 }

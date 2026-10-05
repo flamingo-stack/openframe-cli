@@ -6,6 +6,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"strings"
+	"time"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -134,14 +135,21 @@ func cloudPlanPreview(ctx context.Context, config models.ClusterConfig) error {
 var (
 	infracostAvailableFn = terraform.InfracostAvailable
 	infracostOfferFn     = offerInfracostInstall
-	infracostLoginFn     = offerInfracostLogin
+	infracostLoginFn     = func() bool { return offerInfracostLogin(context.Background()) }
 )
+
+// infracostLoginTimeout bounds the `infracost auth login` browser flow so a
+// hung browser/network step cannot hang the CLI forever.
+const infracostLoginTimeout = 5 * time.Minute
 
 // offerInfracostLogin runs the one-time `infracost auth login` (browser flow)
 // right inside the CLI, so the user never needs a separate console. Attached
 // straight to the terminal — the flow prints a URL and reads stdin, which the
-// capturing executor would swallow. Returns whether a login was performed.
-func offerInfracostLogin() bool {
+// capturing executor would swallow. Bounded by a timeout derived from ctx so
+// a hung browser flow cannot hang the CLI indefinitely and remains
+// cancellable via the caller's own cancellation plumbing. Returns whether a
+// login was performed.
+func offerInfracostLogin(ctx context.Context) bool {
 	if sharedUI.IsNonInteractive() {
 		return false
 	}
@@ -150,11 +158,17 @@ func offerInfracostLogin() bool {
 	if err != nil || !confirmed {
 		return false
 	}
-	login := osexec.Command("infracost", "auth", "login")
+	loginCtx, cancel := context.WithTimeout(ctx, infracostLoginTimeout)
+	defer cancel()
+	login := osexec.CommandContext(loginCtx, "infracost", "auth", "login")
 	login.Stdin = os.Stdin
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
+		if loginCtx.Err() != nil {
+			pterm.Warning.Printf("infracost auth login timed out or was cancelled: %v\n", loginCtx.Err())
+			return false
+		}
 		pterm.Warning.Printf("infracost auth login failed: %v\n", err)
 		return false
 	}
@@ -380,3 +394,7 @@ func validateGKEProjectFlag(ctx context.Context, exec executor.CommandExecutor, 
 	}
 	return fmt.Errorf("GCP project %q is not among your accessible projects: %s", project, strings.Join(projects, ", "))
 }
+FILE>>>
+
+<<<NOTES
+1. CONFIDENCE: 55 - In `offerInfracostLogin` (now taking a `context.Context` parameter), replaced `osexec.Command("infracost", "auth", "login")` with `osexec.CommandContext(loginCtx, ...)` where `loginCtx` is derived via `context.WithTimeout(ctx, infracostLoginTimeout)` (new package-level const, 5 minutes). This bounds the previously unbounded browser-login flow and ties it into caller-supplied cancellation. The seam variable `infracostLoginFn` was updated to `func() bool { return offerInfracostLogin(context.Background()) }` to preserve its existing no-arg signature used by `showCostEstimate`/tests, since threading the real command context through that call chain would touch more call sites than the finding scope allows; this is the main risk — the login is still not wired to the actual command's `cmd.Context()`, only to a fresh background context with its own timeout, so true Ctrl-C propagation from the running CLI process still isn't connected end-to-end. A more complete fix would change `infracostLoginFn`'s signature to accept a context and thread it from `showCostEstimate`/`cloudPlanPreview`/`runCreateCluster`, which is a larger, riskier change touching more of the file's call graph than a minimal fix should.

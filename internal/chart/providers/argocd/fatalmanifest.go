@@ -74,6 +74,10 @@ const fatalManifestMinChecks = 5
 // fatalManifestTracker records, per application, how long a deterministic
 // manifest error has persisted. Mirrors stallTracker's shape: reset on change,
 // forget on disappearance.
+//
+// Not concurrency-safe: entries is a plain map and observe() must only ever be
+// called from a single goroutine (the wait loop's polling ticker). If callers
+// are ever parallelized, this tracker needs a mutex or per-goroutine instances.
 type fatalManifestTracker struct {
 	entries map[string]fatalManifestEntry
 }
@@ -91,6 +95,9 @@ func newFatalManifestTracker() *fatalManifestTracker {
 // deterministic manifest error has persisted past both thresholds. An app that
 // stops showing the error (or becomes ready) is forgotten, so its clock starts
 // fresh if the error ever returns.
+//
+// Not concurrency-safe: must be called from a single goroutine only (see
+// fatalManifestTracker doc comment).
 func (t *fatalManifestTracker) observe(apps []Application, now time.Time) []Application {
 	var fatal []Application
 	seen := make(map[string]bool, len(apps))
@@ -134,7 +141,7 @@ func fatalManifestError(requestedRef string, apps []Application) error {
 	for _, app := range apps {
 		cond := app.Condition
 		if len(cond) > maxConditionInError {
-			cond = cond[:maxConditionInError] + "..."
+			cond = strings.ToValidUTF8(cond[:maxConditionInError], "") + "..."
 		}
 		fmt.Fprintf(&b, "  - %s: %s\n", app.Name, cond)
 	}

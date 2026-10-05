@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,18 +111,15 @@ func TestWizardValidation(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				// Simulate the validation function from the wizard
+				// This mirrors the actual validation logic in promptNodeCount:
+				// parse the input as an integer and check it falls within [1, 10].
 				validate := func(input string) error {
-					// This mimics the validation logic in promptNodeCount
-					if input == "abc" || input == "3.5" {
+					n, err := strconv.Atoi(input)
+					if err != nil {
 						return assert.AnError
 					}
-					if input == "0" || input == "-1" || input == "11" {
+					if n < 1 || n > 10 {
 						return assert.AnError
-					}
-					// For valid numeric inputs, parse and validate range
-					if input == "1" || input == "3" || input == "10" {
-						return nil
 					}
 					return nil
 				}

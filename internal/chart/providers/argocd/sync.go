@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,6 +134,14 @@ const trackingInstanceLabel = "app.kubernetes.io/instance"
 // e.g. "argocd-apps:argoproj.io/Application:argocd/openframe-api".
 const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 
+// syncUnrelatedAppsEnvVar is the explicit opt-in required before
+// syncChildApplications is allowed to fall back to syncing every Application in
+// the namespace when neither tracking marker is present. Unset (or any value
+// other than "true") means the fallback is refused rather than silently
+// force-syncing Applications that may not belong to OpenFrame at all — see the
+// fallback's warning for the risk this guards against.
+const syncUnrelatedAppsEnvVar = "OPENFRAME_ALLOW_SYNC_UNRELATED_APPS"
+
 // trackingOwner returns the owning Application name encoded in either tracking
 // marker, or "" if neither is present. The label wins when set; otherwise the
 // annotation's owner is the segment before the first ":". Splitting (rather
@@ -155,10 +164,12 @@ func trackingOwner(labels, annotations map[string]string) string {
 // methods leave the label empty — the case the verification run hit, where the
 // primary selector matched nothing and the fallback synced everything.
 //
-// Only when NEITHER marker is present on any Application does it fall back to
-// every Application except the root, rather than silently syncing nothing —
-// but that may touch Applications that are not OpenFrame-owned (a real risk on
-// a shared cluster), which the fallback warning makes visible.
+// Only when NEITHER marker is present on any Application does it consider
+// falling back to every Application except the root — but on a shared ArgoCD
+// instance that may touch Applications that are not OpenFrame-owned at all, so
+// the fallback is refused unless explicitly opted into via
+// OPENFRAME_ALLOW_SYNC_UNRELATED_APPS=true; otherwise it errors instead of
+// silently force-syncing unrelated Applications.
 //
 // Children carrying the SyncGroupLabel are synced group-by-group (lowest
 // first), each group gated on the previous one converging to Healthy+Synced
@@ -188,14 +199,22 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 		}
 	}
 	if children == nil {
+		var untracked []unstructured.Unstructured
 		for i := range list.Items {
 			if list.Items[i].GetName() != AppOfAppsName {
-				children = append(children, list.Items[i])
+				untracked = append(untracked, list.Items[i])
 			}
 		}
-		if len(children) > 0 {
-			pterm.Warning.Printf("No applications carry the %s=%s tracking label; syncing all %d applications in %q\n",
-				trackingInstanceLabel, AppOfAppsName, len(children), ArgoCDNamespace)
+		if len(untracked) > 0 {
+			if os.Getenv(syncUnrelatedAppsEnvVar) != "true" {
+				return fmt.Errorf("no applications carry the %s=%s tracking label or %s tracking-id in namespace %q; "+
+					"refusing to sync %d application(s) that cannot be confirmed as OpenFrame-owned "+
+					"(set %s=true to opt in)",
+					trackingInstanceLabel, AppOfAppsName, trackingIDAnnotation, ArgoCDNamespace, len(untracked), syncUnrelatedAppsEnvVar)
+			}
+			pterm.Warning.Printf("No applications carry the %s=%s tracking label; syncing all %d applications in %q (opted in via %s)\n",
+				trackingInstanceLabel, AppOfAppsName, len(untracked), ArgoCDNamespace, syncUnrelatedAppsEnvVar)
+			children = untracked
 		}
 	}
 

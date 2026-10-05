@@ -2,6 +2,8 @@ package prerequisites
 
 import (
 	"testing"
+
+	"github.com/shipyard-run/shipyard/internal/shared/testutil"
 )
 
 func TestNewInstaller(t *testing.T) {
@@ -35,7 +37,7 @@ func TestInstallTool(t *testing.T) {
 			}
 
 			for _, invalidError := range invalidErrors {
-				if containsSubstring(errorStr, invalidError) {
+				if testutil.ContainsSubstring(errorStr, invalidError) {
 					t.Errorf("Tool %s returned unexpected error: %v", tool, err)
 				}
 			}
@@ -52,19 +54,6 @@ func TestInstallTool(t *testing.T) {
 	if err.Error() != expectedError {
 		t.Errorf("Expected error '%s', got '%s'", expectedError, err.Error())
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsSubstring(str, substr string) bool {
-	return len(str) >= len(substr) &&
-		func() bool {
-			for i := 0; i <= len(str)-len(substr); i++ {
-				if str[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}()
 }
 
 // TestContainsTool covers the case-insensitive membership check used to detect
