@@ -1,53 +1,69 @@
 # OpenFrame CLI Documentation
 
-`openframe` is an interactive command-line tool for standing up and managing OpenFrame Kubernetes environments. It provisions local k3d clusters, deploys the OpenFrame platform via an ArgoCD app-of-apps GitOps workflow, and keeps itself up to date.
+Welcome to the documentation for **OpenFrame CLI** — the command-line tool for provisioning Kubernetes clusters (local k3d, or cloud GKE/EKS via Terraform) and deploying the [OpenFrame](https://openframe.ai) platform onto them via ArgoCD's app-of-apps pattern.
 
-This repository (`flamingo-stack/openframe-cli`) is the CLI. The platform and application manifests it deploys live in [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant).
+## 📚 Table of Contents
 
-## Getting Started
+### Getting Started
 
-- [Introduction](./getting-started/introduction.md) — Overview and key concepts
-- [Prerequisites](./getting-started/prerequisites.md) — System requirements and dependencies
-- [Quick Start](./getting-started/quick-start.md) — Install and bootstrap in a few minutes
-- [First Steps](./getting-started/first-steps.md) — Core commands and workflows
-- [Cloud Clusters](./getting-started/cloud-clusters.md) — Provision EKS/GKE clusters with Terraform (reference)
-- [GKE Workflow](./getting-started/gke-workflow.md) — Step-by-step: from zero to a running GKE cluster
+- [Introduction](./getting-started/introduction.md) — What OpenFrame CLI is, key features, and who it's for
+- [Prerequisites](./getting-started/prerequisites.md) — Required tools, hardware requirements, and environment variables
+- [Quick Start](./getting-started/quick-start.md) — From zero to a running local OpenFrame platform in ~5 minutes
+- [First Steps](./getting-started/first-steps.md) — Day-to-day commands after your first bootstrap
+- [GKE Workflow](./getting-started/gke-workflow.md) — Step-by-step walkthrough for provisioning a GKE cluster
+- [Cloud Clusters (EKS / GKE)](./getting-started/cloud-clusters.md) — Reference for cloud cluster flags, state model, and troubleshooting
 
-## Reference
+### Development
 
-- [Terminal Output](./reference/terminal-output.md) — Live dashboards, sequential/CI mode, `--plain`/`--silent`/`--verbose`, color and glyph controls, GitHub Actions integration
+- [Development Overview](./development/README.md) — Where to start, project at a glance
+- [Environment Setup](./development/setup/environment.md) — Toolchain and editor setup
+- [Local Development](./development/setup/local-development.md) — Cloning, building, running, and debugging
+- [Architecture](./development/architecture/README.md) — Core components, data flow, and key design decisions
+- [Security](./development/security/README.md) — Secure-by-default patterns, secret handling, and code review checklist
+- [Testing](./development/testing/README.md) — Test structure, running tests, and coverage expectations
+- [Contributing Guidelines](./development/contributing/guidelines.md) — Code style, branching, commits, and PR process
+- [Releasing](./development/releasing.md) — Semantic-release flow and release invariants
+- [Release Signing](./development/release-signing.md) — macOS/Windows binary signing and verification
 
-## Commands
+### Reference
 
-- `openframe bootstrap` — Create a cluster and install the platform in one step
-- `openframe cluster {create,delete,list,status,cleanup}` — Manage k3d and cloud (EKS/GKE) clusters
-- `openframe app {install,upgrade,status,access,uninstall}` — Manage the OpenFrame app-of-apps deployment (`status` also has `--watch` and `--interactive` live views)
-- `openframe prerequisites {check,install}` — Check and install required tools
-- `openframe update` (`check`, `rollback`, `update <version>`) — Self-update the CLI
-- `openframe completion` — Generate shell completion scripts
+Technical reference documentation generated from the codebase:
 
-## System Requirements
+- [OpenFrame CLI Overview](./reference/architecture/overview.md) — Architecture, core components, dependency diagram, data flow, and CLI command reference
+- [Ecosystem](./reference/architecture/ecosystem.md) — Published artifacts, upstream/downstream dependency graph
 
-A full local platform is demanding. Recommended host:
+### Diagrams
 
-| Resource | Recommended |
-|----------|-------------|
-| RAM | 24 GB |
-| CPU | 6 cores |
-| Disk | 50 GB free |
+Visual documentation — Mermaid diagrams available in `./diagrams/architecture/`:
 
-## Dependencies
+- `architecture-diagram.mmd` — High-level CLI layer, domain services, and provider architecture
+- `dependency-diagram.mmd` — Component dependency graph across `cmd/` and `internal/`
+- `bootstrap-sequence.mmd` — Sequence diagram of the `openframe bootstrap` flow
+- `app-status-aggregation.mmd` — Sequence diagram of `openframe app status` aggregation logic
 
-**Docker is the only tool you install and run yourself.** The CLI auto-installs pinned, verified copies of `kubectl`, `k3d`, and `helm` into `~/.openframe/bin`. `mkcert` is used to issue a locally-trusted certificate for the HTTPS ingress. See [Prerequisites](./getting-started/prerequisites.md).
+See also the [diagrams README](./diagrams/architecture/README.md) for context on each diagram.
 
-## Community and Support
+### CLI Tools
 
-- **Slack**: [OpenMSP community](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA) (primary support channel)
-- **Website**: [https://flamingo.run](https://flamingo.run)
-- **Platform**: [https://openframe.ai](https://openframe.ai)
+The OpenFrame platform that this CLI deploys is maintained in a separate repository:
 
-We don't monitor GitHub Issues for support — use Slack.
+- **Repository**: [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant)
+- **Documentation**: [OpenFrame Documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
 
-## License
+**Note**: The OpenFrame platform source code is NOT located in this repository. This repository contains only the CLI that provisions clusters and installs that platform. Always refer to the external repository for platform-specific documentation.
 
-See [LICENSE.md](../LICENSE.md).
+## 📖 Quick Links
+
+- [Project README](../README.md) — Main project README
+- [Contributing](../CONTRIBUTING.md) — How to contribute
+- [License](../LICENSE.md) — License information
+
+## Community
+
+There are no GitHub Issues or Discussions for this project. All discussions, questions, and support happen in the **OpenMSP Slack community**:
+
+- Join: [https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)
+- Visit: [https://www.openmsp.ai/](https://www.openmsp.ai/)
+
+---
+*Documentation generated by [🦩 Flamingo Code Documentation](https://flamingo.run)*

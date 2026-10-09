@@ -1,3 +1,4 @@
+// Package app holds the "openframe app" commands.
 package app
 
 import (

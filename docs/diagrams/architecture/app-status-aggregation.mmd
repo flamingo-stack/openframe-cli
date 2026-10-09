@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant User
+    participant CLI as cmd/app.status
+    participant Svc as app/status.Service
+    participant Accessor as k8s.Accessor
+    participant ArgoCDMgr as argocd.Manager
+    participant K8s as Kubernetes API
+
+    User->>CLI: openframe app status --watch
+    CLI->>Svc: Report(ctx, verbose)
+    Svc->>Accessor: CheckHealth(ctx)
+    Accessor->>K8s: list nodes
+    K8s-->>Accessor: node conditions
+    Svc->>ArgoCDMgr: ListApplications(ctx, verbose)
+    ArgoCDMgr->>K8s: list Application CRs
+    K8s-->>ArgoCDMgr: applications
+    Svc->>ArgoCDMgr: AdminPassword(ctx)
+    ArgoCDMgr->>K8s: read argocd-initial-admin-secret
+    Svc-->>CLI: Report{Health, Apps, Synced, Healthy}
+    CLI-->>User: table + readiness summary
