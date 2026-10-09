@@ -11,8 +11,17 @@ permissions:
 on:
   pull_request:
     branches: [main, develop]
+    paths:
+      # Bot PRs that only touch .github (~30 of 49) burn the paid e2e runners for nothing.
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/test.yml'
   push:
     branches: [main, develop]
+    paths:
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/test.yml'
   workflow_dispatch:
 
 concurrency:
