@@ -147,5 +147,5 @@ func fatalManifestError(requestedRef string, apps []Application) error {
 		b.WriteString("The chart path does not exist at the deployed revision. " +
 			"Inspect the application source with: kubectl describe application " + apps[0].Name + " -n argocd")
 	}
-	return fmt.Errorf("%s", b.String())
+	return selfDiagnosedError(b.String())
 }
