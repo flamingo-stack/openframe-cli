@@ -31,16 +31,7 @@ func InitGlobalFlags() {
 
 // GetCommandService creates a command service for business logic operations
 func GetCommandService() *cluster.ClusterService {
-	// Use injected executor if available (for testing)
-	if globalFlags != nil && globalFlags.Executor != nil {
-		return cluster.NewClusterService(globalFlags.Executor)
-	}
-
-	// Create real executor with current flags
-	dryRun := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.DryRun
-	verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
-	exec := executor.NewRealCommandExecutor(dryRun, verbose)
-	return cluster.NewClusterService(exec)
+	return cluster.NewClusterService(CommandExecutor())
 }
 
 // CommandExecutor returns the executor commands should shell through: the

@@ -200,6 +200,9 @@ func (d *EKSDiscoverer) describe(ctx context.Context, profile, region, name stri
 	if err != nil {
 		return models.ClusterInfo{}, "", fmt.Errorf("describing cluster %s: %w", name, err)
 	}
+	if result == nil {
+		return models.ClusterInfo{}, "", fmt.Errorf("unparseable describe-cluster for %s", name)
+	}
 	var c eksCluster
 	if err := json.Unmarshal([]byte(result.Stdout), &c); err != nil {
 		return models.ClusterInfo{}, "", fmt.Errorf("unparseable describe-cluster for %s", name)

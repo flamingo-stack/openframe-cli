@@ -246,6 +246,8 @@ type syncGroup struct {
 // (legacy manifests → caller keeps the ungated single-pass behaviour). A child
 // missing the label — or carrying a non-numeric value — on an otherwise
 // labeled install falls into defaultSyncGroup, mirroring the template default.
+// A non-numeric value (e.g. a typo like "1a") is surfaced with a warning
+// rather than silently absorbed, since it is likely a misconfiguration.
 func groupChildren(children []unstructured.Unstructured) (groups []syncGroup, labeled bool) {
 	byNumber := map[int][]string{}
 	var all []string
@@ -257,6 +259,9 @@ func groupChildren(children []unstructured.Unstructured) (groups []syncGroup, la
 			labeled = true
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 				group = n
+			} else {
+				pterm.Warning.Printf("Application %q has a non-numeric %s label (%q); defaulting to sync group %d\n",
+					name, SyncGroupLabel, v, defaultSyncGroup)
 			}
 		}
 		byNumber[group] = append(byNumber[group], name)

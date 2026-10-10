@@ -28,9 +28,7 @@ func TestCreateTestCluster(t *testing.T) {
 	defer CleanupTestCluster(name)
 
 	err := CreateTestCluster(name)
-	if err != nil {
-		t.Logf("Failed to create cluster (may be expected): %v", err)
-	}
+	assert.NoError(t, err, "Failed to create cluster")
 }
 
 func TestClusterExists(t *testing.T) {

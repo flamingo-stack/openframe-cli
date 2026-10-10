@@ -131,7 +131,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 
 	// Function to stop spinner safely
 	stopSpinner := func() {
-		dash.Stop()
+		if dash != nil {
+			dash.Stop()
+		}
 		spinnerMutex.Lock()
 		defer spinnerMutex.Unlock()
 		if !spinnerStopped && spinner != nil {
@@ -290,7 +292,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		case <-ticker.C:
 			// Check timeout
 			if time.Since(startTime) > timeout {
-				dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				if dash != nil {
+					dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				}
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
@@ -467,7 +471,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// staleness checks use the same tick.
 			now := time.Now()
 			if fatal := fatalManifest.observe(apps, now); len(fatal) > 0 {
-				dash.Fail("Applications cannot render manifests from the deployed revision")
+				if dash != nil {
+					dash.Fail("Applications cannot render manifests from the deployed revision")
+				}
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail("Applications cannot render manifests from the deployed revision")
@@ -489,7 +495,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// events, so it says WHY, not just that it hung.
 			if cand := degraded.observe(apps, now); len(cand) > 0 {
 				if diag, stuck := m.diagnoseFailingApps(localCtx, cand); len(stuck) > 0 {
-					dash.Fail("An application is Degraded with a workload that will not recover")
+					if dash != nil {
+						dash.Fail("An application is Degraded with a workload that will not recover")
+					}
 					spinnerMutex.Lock()
 					if !spinnerStopped && spinner != nil {
 						spinner.Fail("An application is Degraded with a workload that will not recover")
@@ -541,7 +549,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 			// this the default experience was a static "Installing ArgoCD
 			// applications..." for up to the full 60m timeout, with no way to tell
 			// a working install from a wedged one.
-			dash.Update(currentlyReady, totalApps, apps)
+			if dash != nil {
+				dash.Update(currentlyReady, totalApps, apps)
+			}
 			if totalApps > 0 {
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
@@ -724,7 +734,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 					spinnerMutex.Unlock()
 
 					if len(mm) > 0 {
-						dash.Fail("Deployed ref does not match the requested ref")
+						if dash != nil {
+							dash.Fail("Deployed ref does not match the requested ref")
+						}
 						return refMismatchError(config.AppOfApps.GitHubBranch, mm)
 					}
 
