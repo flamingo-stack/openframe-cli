@@ -48,7 +48,13 @@ func isTerminalEnvironment() bool {
 
 // NewClusterService creates a new cluster service with default configuration
 func NewClusterService(exec executor.CommandExecutor) *ClusterService {
-	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
+	manager, err := provider.New(models.ClusterTypeK3d, exec)
+	if err != nil {
+		// k3d is expected to never fail to construct; if this invariant is
+		// ever violated, fail loudly here rather than leaving manager nil and
+		// panicking later inside every method that dereferences it.
+		panic(fmt.Sprintf("cluster: failed to construct k3d provider: %v", err))
+	}
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -58,7 +64,13 @@ func NewClusterService(exec executor.CommandExecutor) *ClusterService {
 
 // NewClusterServiceSuppressed creates a cluster service with UI suppression
 func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService {
-	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
+	manager, err := provider.New(models.ClusterTypeK3d, exec)
+	if err != nil {
+		// k3d is expected to never fail to construct; if this invariant is
+		// ever violated, fail loudly here rather than leaving manager nil and
+		// panicking later inside every method that dereferences it.
+		panic(fmt.Sprintf("cluster: failed to construct k3d provider: %v", err))
+	}
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -241,9 +253,14 @@ func (s *ClusterService) cloudProviders() []provider.Provider {
 }
 
 // ListClusters merges the local k3d clusters with the cloud clusters recorded
-// in the workspace registry.
+// in the workspace registry. If any backend fails to list, the failure is
+// warned to stderr and a wrapped error is returned alongside whatever
+// clusters were successfully gathered, so machine consumers (e.g. `-o json`)
+// can detect a degraded/partial result instead of silently receiving an
+// incomplete list.
 func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	ctx := context.Background()
+	var errs []error
 	// k3d enumeration shells out to `k3d cluster list`, which needs a running
 	// Docker daemon. Treat its failure as best-effort (like the cloud loop
 	// below): a stopped Docker must not hide the cloud clusters. The warning
@@ -252,16 +269,26 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	if err != nil {
 		pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
 		clusters = nil
+		errs = append(errs, fmt.Errorf("local (k3d) clusters could not be listed: %w", err))
 	}
 	for _, cloud := range s.cloudProviders() {
 		cloudClusters, err := cloud.ListAllClusters(ctx)
 		if err != nil {
 			// A broken cloud registry (local file damage) must not hide the
-			// local clusters or the other provider's results.
-			pterm.Debug.Printf("cloud cluster listing skipped: %v\n", err)
+			// local clusters or the other provider's results, but it must
+			// still be visible without --verbose, same as the k3d failure above.
+			pterm.Warning.WithWriter(os.Stderr).Printf("cloud cluster listing skipped: %v\n", err)
+			errs = append(errs, fmt.Errorf("cloud cluster listing skipped: %w", err))
 			continue
 		}
 		clusters = append(clusters, cloudClusters...)
+	}
+	if len(errs) > 0 {
+		combined := make([]string, len(errs))
+		for i, e := range errs {
+			combined[i] = e.Error()
+		}
+		return clusters, fmt.Errorf("partial cluster listing: %s", strings.Join(combined, "; "))
 	}
 	return clusters, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/discovery"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
@@ -203,12 +204,21 @@ func clustersToJSON(clusters []models.ClusterInfo) []clusterJSON {
 	return out
 }
 
+// writeStructuredOutput writes raw machine-readable output (JSON/YAML)
+// directly to stdout. Structured output must remain unadorned for piping and
+// is intentionally exempt from the pterm/ui presentation layer; this helper
+// is the single, explicit funnel point for that exemption so future changes
+// to the sink (e.g. respecting a --silent flag) only need to happen here.
+func writeStructuredOutput(b []byte) {
+	fmt.Fprint(os.Stdout, string(b))
+}
+
 func printClustersJSON(clusters []models.ClusterInfo) error {
 	b, err := json.MarshalIndent(clustersToJSON(clusters), "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding JSON: %w", err)
 	}
-	fmt.Println(string(b))
+	writeStructuredOutput(append(b, '\n'))
 	return nil
 }
 
@@ -219,6 +229,6 @@ func printClustersYAML(clusters []models.ClusterInfo) error {
 	if err != nil {
 		return fmt.Errorf("encoding YAML: %w", err)
 	}
-	fmt.Print(string(b)) // yaml.Marshal already terminates with a newline
+	writeStructuredOutput(b) // yaml.Marshal already terminates with a newline
 	return nil
 }
