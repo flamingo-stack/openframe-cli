@@ -48,7 +48,13 @@ func isTerminalEnvironment() bool {
 
 // NewClusterService creates a new cluster service with default configuration
 func NewClusterService(exec executor.CommandExecutor) *ClusterService {
-	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
+	manager, err := provider.New(models.ClusterTypeK3d, exec)
+	if err != nil {
+		// k3d is expected to always construct successfully; if this
+		// invariant is ever violated, fail loudly here instead of leaving a
+		// nil manager that panics on first use.
+		panic(fmt.Sprintf("failed to construct k3d provider: %v", err))
+	}
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -58,7 +64,11 @@ func NewClusterService(exec executor.CommandExecutor) *ClusterService {
 
 // NewClusterServiceSuppressed creates a cluster service with UI suppression
 func NewClusterServiceSuppressed(exec executor.CommandExecutor) *ClusterService {
-	manager, _ := provider.New(models.ClusterTypeK3d, exec) // k3d never fails to construct
+	manager, err := provider.New(models.ClusterTypeK3d, exec)
+	if err != nil {
+		// See NewClusterService: same invariant, same fail-fast handling.
+		panic(fmt.Sprintf("failed to construct k3d provider: %v", err))
+	}
 	return &ClusterService{
 		manager:    manager,
 		executor:   exec,
@@ -247,10 +257,13 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	// k3d enumeration shells out to `k3d cluster list`, which needs a running
 	// Docker daemon. Treat its failure as best-effort (like the cloud loop
 	// below): a stopped Docker must not hide the cloud clusters. The warning
-	// goes to stderr so json/yaml output on stdout stays machine-clean.
+	// goes to stderr so json/yaml output on stdout stays machine-clean, and it
+	// honors --silent like every other status message in this file.
 	clusters, err := s.manager.ListAllClusters(ctx)
 	if err != nil {
-		pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
+		if !s.suppressUI {
+			pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
+		}
 		clusters = nil
 	}
 	for _, cloud := range s.cloudProviders() {
@@ -310,6 +323,13 @@ func (s *ClusterService) DetectClusterType(name string) (models.ClusterType, err
 // is how a routine cleanup destroyed a working install. Tearing the platform
 // down is `app uninstall`'s job; tearing the cluster down is `cluster
 // delete`'s.
+//
+// The cloud/unsupported-type errors below are returned plain (not wrapped in
+// AlreadyHandledError): they have not been displayed to the user anywhere in
+// this path, so the command layer's single print path (via
+// sharedErrors.HandleGlobalError in cmd/cluster/cleanup.go) is expected to
+// print them exactly once — the same contract CreateCluster/DeleteCluster
+// rely on for their provider errors.
 func (s *ClusterService) CleanupCluster(ctx context.Context, name string, clusterType models.ClusterType, verbose bool) (models.CleanupResult, error) {
 	switch clusterType {
 	case models.ClusterTypeK3d:
@@ -371,6 +391,9 @@ func (s *ClusterService) cleanupNodeImages(ctx context.Context, clusterName stri
 	nodeNames, err := s.getK3dClusterNodes(ctx, clusterName)
 	if err != nil {
 		// Not fatal: a cluster whose nodes are already gone still cleans up.
+		// Wrap with %w so any underlying *executor.CommandError (and its exit
+		// code) survives the wrap for main.exitCode() to inspect, rather than
+		// being discarded.
 		return 0, fmt.Errorf("could not discover cluster nodes: %w", err)
 	}
 
