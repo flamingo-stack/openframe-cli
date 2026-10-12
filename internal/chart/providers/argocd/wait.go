@@ -290,7 +290,9 @@ func (m *Manager) WaitForApplications(ctx context.Context, config config.ChartIn
 		case <-ticker.C:
 			// Check timeout
 			if time.Since(startTime) > timeout {
-				dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				if dash != nil {
+					dash.Fail(fmt.Sprintf("Timeout after %v", timeout))
+				}
 				spinnerMutex.Lock()
 				if !spinnerStopped && spinner != nil {
 					spinner.Fail(fmt.Sprintf("Timeout after %v", timeout))
