@@ -118,13 +118,16 @@ type ValidationError struct {
 	Constraint string
 }
 
-// Error implements error interface for ValidationError
+// Error implements error interface for ValidationError. It delegates the
+// generic "no field" case to the embedded ChartError.Error implementation
+// instead of duplicating its formatting, keeping only the field-specific
+// message here.
 func (e *ValidationError) Error() string {
 	if e.Field != "" {
 		return fmt.Sprintf("validation failed for field '%s': %s (value: '%s')",
 			e.Field, e.Constraint, e.Value)
 	}
-	return fmt.Sprintf("validation failed: %v", e.Cause)
+	return e.ChartError.Error()
 }
 
 // NewValidationError creates a new validation error

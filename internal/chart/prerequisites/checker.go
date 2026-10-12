@@ -42,16 +42,19 @@ func NewPrerequisiteChecker() *PrerequisiteChecker {
 	}
 }
 
+// CheckAll verifies whether all registered requirements are installed.
+// It returns true along with a nil slice if everything is present, or
+// false along with the names of the missing requirements otherwise.
 func (pc *PrerequisiteChecker) CheckAll() (bool, []string) {
-	var missing []string
-	allPresent := true
-
+	missing := make([]string, 0, len(pc.requirements))
 	for _, req := range pc.requirements {
 		if !req.IsInstalled() {
 			missing = append(missing, req.Name)
-			allPresent = false
 		}
 	}
 
-	return allPresent, missing
+	if len(missing) == 0 {
+		return true, nil
+	}
+	return false, missing
 }
