@@ -209,7 +209,7 @@ func (d *GKEDiscoverer) Discover(ctx context.Context) (Result, error) {
 		}
 		var clusters []gkeCluster
 		if err := json.Unmarshal([]byte(result.Stdout), &clusters); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: unparseable clusters list", project))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: unparseable clusters list: %v", project, err))
 			continue
 		}
 		for _, c := range clusters {

@@ -154,7 +154,7 @@ func (h *HelmManager) IsChartInstalled(ctx context.Context, releaseName, namespa
 		Env:     h.getHelmEnv(),
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("checking install status of release %s in namespace %s: %w", releaseName, namespace, err)
 	}
 
 	releases := strings.Split(strings.TrimSpace(result.Stdout), "\n")
@@ -842,3 +842,4 @@ func (h *HelmManager) convertWindowsPathToWSL(windowsPath string) (string, error
 
 	return path, nil
 }
+

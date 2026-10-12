@@ -41,7 +41,11 @@ func ParseBackendURL(raw string) (BackendConfig, error) {
 // the rendered HCL for their provider's backend type.
 func (w *Workspace) WriteBackend(backendTF []byte) error {
 	if err := os.MkdirAll(w.TerraformDir(), 0o750); err != nil {
-		return err
+		return fmt.Errorf("creating terraform dir: %w", err)
 	}
-	return os.WriteFile(filepath.Join(w.TerraformDir(), "backend.tf"), backendTF, 0o600)
+	if err := os.WriteFile(filepath.Join(w.TerraformDir(), "backend.tf"), backendTF, 0o600); err != nil {
+		return fmt.Errorf("writing backend.tf: %w", err)
+	}
+	return nil
 }
+
