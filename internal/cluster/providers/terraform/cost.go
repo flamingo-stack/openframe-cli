@@ -50,12 +50,12 @@ func EstimateMonthlyCost(ctx context.Context, execer sharedexec.CommandExecutor,
 	}
 	tmp, err := os.MkdirTemp("", "openframe-infracost-*")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	planPath := filepath.Join(tmp, "plan.json")
 	if err := os.WriteFile(planPath, planJSON, 0o600); err != nil {
-		return "", err
+		return "", fmt.Errorf("writing plan json: %w", err)
 	}
 
 	// A local bound: infracost calls its pricing API over the network, and a
