@@ -268,11 +268,11 @@ func writeFileAtomic(body []byte, destPath string, perm os.FileMode) error {
 	if _, err := tmp.Write(body); err != nil {
 		_ = tmp.Close()
 		cleanup()
-		return err
+		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
-		return err
+		return fmt.Errorf("closing temp file: %w", err)
 	}
 	if err := os.Chmod(tmpName, perm); err != nil {
 		cleanup()
