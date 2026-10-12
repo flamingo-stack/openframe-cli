@@ -157,12 +157,6 @@ func RunCLI(args ...string) *CLIResult {
 		Error:    err,
 	}
 
-	// Debug: If we have an empty output but no error, something is wrong
-	if result.Stdout == "" && result.Stderr == "" && result.Error == nil {
-		result.Error = fmt.Errorf("command executed but produced no output")
-		result.Stderr = "command executed but produced no output"
-	}
-
 	return result
 }
 
