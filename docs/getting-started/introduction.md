@@ -1,160 +1,91 @@
-## Introduction
+## What is OpenFrame CLI?
 
-**OpenFrame CLI** is the command-line tool that provisions Kubernetes clusters and deploys the [OpenFrame](https://openframe.ai) platform onto them. It is a single Go binary — no separate installer — that takes you from "nothing" to a running OpenFrame control plane in one command, and then gives you the day-to-day tools (`status`, `upgrade`, `uninstall`, `access`) to operate that platform going forward.
+OpenFrame CLI is the command-line tool for provisioning Kubernetes clusters and deploying the [OpenFrame](https://openframe.ai) platform onto them. In a single command it can stand up a local k3d cluster (or a cloud GKE/EKS cluster via Terraform) and then install OpenFrame — ArgoCD plus the app-of-apps bundle — using ArgoCD's app-of-apps pattern. It manages the full lifecycle: checking prerequisites, creating clusters, installing charts, reporting status, upgrading deployments, and tearing everything down again.
 
-OpenFrame itself is the unified, AI-driven platform from [Flamingo](https://flamingo.run) that brings multiple MSP (Managed Service Provider) tools together behind a single interface, automating IT support operations across the stack. This CLI is how you stand up and manage the Kubernetes environment that OpenFrame runs on — whether that's a local development cluster or a cloud-hosted one.
+OpenFrame itself is the unified, AI-driven platform from [Flamingo](https://flamingo.run) that brings together multiple MSP (Managed Service Provider) tools into a single interface, automating IT support operations across the stack. This CLI is how you get OpenFrame running on your own infrastructure.
 
-> The CLI's source lives in this repository, **flamingo-stack/openframe-cli**. The platform it deploys (ArgoCD applications, Helm charts, the app-of-apps manifests) is published from the separate **flamingo-stack/openframe-oss-tenant** repository — see [its documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs) for platform-side details. Do not expect that repository's code to live in a subdirectory here; the CLI only *consumes* it (by git ref) at install time.
+The CLI is written in Go, built around [Cobra](https://github.com/spf13/cobra) for command routing, and talks to Kubernetes natively via `client-go` — shelling out to Helm, k3d, Terraform, and cloud provider CLIs (`gcloud`, `aws`) only where a real external tool is required.
 
-### What it does
+> The application platform that this CLI installs (OpenFrame itself) lives in a separate, external repository: [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant). This `openframe-cli` repository contains only the CLI tool — it is not a subdirectory of that platform repository.
 
-Under the hood, OpenFrame CLI is organized around three core jobs:
+## Key features and benefits
 
-- **Cluster provisioning** — create, inspect, and tear down Kubernetes clusters: a local `k3d` cluster backed by Docker, or cloud clusters on GKE/EKS provisioned through Terraform.
-- **Platform deployment** — install ArgoCD and the OpenFrame app-of-apps onto any reachable cluster, following ArgoCD's app-of-apps pattern, then monitor and upgrade that deployment over time.
-- **Prerequisites management** — verify (and, on macOS/Linux, auto-install) the tools each operation needs: Docker, k3d, Helm, Terraform, cloud CLIs (`gcloud`, `aws`), and certificate tooling.
-
-Both fully interactive wizards (with sensible prompts and defaults) and non-interactive flags (for CI/automation) are supported throughout.
-
-## Key Features and Benefits
-
-| Feature | Benefit |
+| Feature | What it gives you |
 |---|---|
-| One-command bootstrap (`openframe bootstrap`) | Creates a local k3d cluster **and** installs the OpenFrame platform in a single step — the fastest path to a running environment |
-| Multi-provider clusters | Same CLI and commands for local (`k3d`) and cloud (`GKE`, `EKS`) clusters, provisioned via pinned Terraform modules |
-| App lifecycle commands | `app install`, `app upgrade`, `app status`, `app access`, and `app uninstall` manage the OpenFrame deployment independently of cluster creation |
-| Two upgrade modes | `app upgrade --ref <ref>` deploys a new git ref; `app upgrade --sync` force-resyncs the currently deployed ref via ArgoCD |
-| Interactive status TUI | `app status --interactive` gives a k9s-style view for navigating ArgoCD applications, inspecting details, and triggering syncs |
-| Machine-readable output | `--output json`/`yaml` on read commands (`status`, `access`, `cluster status`) for scripting and CI |
-| Prerequisite checks | `openframe prerequisites check|install --type k3d|eks|gke` verifies/installs required tooling before you hit a failure mid-operation |
-| Self-update with signature verification | `openframe update` checks and applies CLI updates, verified via cosign and checksums, with rollback support |
-| Safe-by-default destructive commands | `app uninstall` and `cluster delete` require confirmation (or an explicit `--yes`/typed-name flag) before removing anything |
-| Exit-code fidelity | Failed external commands (Helm, Terraform, etc.) propagate their real exit code, so CI pipelines can react correctly |
+| **One-command bootstrap** | `openframe bootstrap` creates a local k3d cluster and installs the full OpenFrame platform in a single staged, progress-tracked flow |
+| **Multiple cluster backends** | Local clusters via k3d (Docker-based), or cloud clusters on GKE and EKS, provisioned through pinned Terraform modules |
+| **Interactive and scriptable** | Full interactive wizards for cluster creation and chart configuration, or `--non-interactive` / explicit flags for CI and automation |
+| **App-of-apps deployment** | Installs ArgoCD and the OpenFrame app-of-apps bundle, then waits for every child Application to become synced and healthy |
+| **Status visibility** | `openframe app status` reports cluster reachability and ArgoCD application health in one-shot, `--watch`, or an interactive k9s-style `--interactive` TUI |
+| **Safe lifecycle operations** | `openframe app uninstall` removes ArgoCD and the apps while leaving the cluster intact; `openframe cluster delete` removes the cluster itself, with typed-name confirmation for cloud clusters |
+| **Self-updating** | `openframe update` checks for and applies CLI updates, verifying cosign signatures and checksums, with rollback support |
+| **Machine-readable output** | `--output json` / `--output yaml` on status, access, and other commands for scripting and CI pipelines |
 
-## Target Audience
+## Who is this for?
 
-OpenFrame CLI is built for:
+OpenFrame CLI is intended for:
 
-- **Platform operators and MSP technicians** standing up or maintaining an OpenFrame deployment, locally or in the cloud.
-- **DevOps / infrastructure engineers** who need repeatable, scriptable cluster provisioning (k3d for local dev, GKE/EKS for cloud) with Terraform underneath.
-- **Contributors to the OpenFrame platform** who need a disposable local cluster to develop and test against.
-- **CI/automation authors** who need non-interactive flags, JSON/YAML output, and faithful exit codes to drive OpenFrame deployments from pipelines.
+- **MSP technicians and administrators** who need to stand up and operate the OpenFrame platform without hand-rolling Kubernetes manifests or Helm charts.
+- **Platform/DevOps engineers** provisioning OpenFrame on cloud infrastructure (GKE or EKS) with repeatable, pinned Terraform configurations.
+- **Developers** working locally against a disposable k3d cluster to test OpenFrame changes.
+- **CI/CD pipelines** that need non-interactive, scriptable cluster and app lifecycle commands with predictable exit codes and JSON/YAML output.
 
-## Quick Overview
-
-The CLI's `cmd/` layer routes to domain services in `internal/`, which in turn drive providers (k3d, EKS/GKE via Terraform, ArgoCD, Helm, Git) against external systems:
+## How it fits together
 
 ```mermaid
-graph TB
-    subgraph "CLI Layer"
-        Bootstrap["cmd/bootstrap"]
-        Cluster["cmd/cluster"]
-        App["cmd/app"]
-        Prereq["cmd/prerequisites"]
-        Update["cmd/update"]
-    end
+flowchart TB
+    User["Operator / CI pipeline"]
+    CLI["OpenFrame CLI"]
+    K3d["k3d / Docker (local cluster)"]
+    EKS["AWS EKS (via Terraform)"]
+    GKE["GCP GKE (via Terraform)"]
+    K8s["Kubernetes API"]
+    ArgoCD["ArgoCD"]
+    Apps["OpenFrame app-of-apps"]
 
-    subgraph "Domain Services"
-        ClusterSvc["cluster.ClusterService"]
-        ChartSvc["chart/services.ChartService"]
-        AppStatus["app/status.Service"]
-        AppUninstall["app/uninstall.Service"]
-        PrereqFw["prerequisites.Runner"]
-        SelfUpdate["selfupdate.Updater"]
-    end
-
-    subgraph "Providers"
-        K3d["k3d provider"]
-        EKS["EKS provider (terraform)"]
-        GKE["GKE provider (terraform)"]
-        ArgoCD["argocd provider"]
-        Helm["helm provider"]
-        Git["git provider"]
-    end
-
-    subgraph "External Systems"
-        Docker[("Docker")]
-        K8sAPI[("Kubernetes API")]
-        CloudAPI[("GCP / AWS APIs")]
-        GitHubRel[("GitHub Releases")]
-    end
-
-    Bootstrap --> ClusterSvc
-    Bootstrap --> ChartSvc
-    Cluster --> ClusterSvc
-    App --> ChartSvc
-    App --> AppStatus
-    App --> AppUninstall
-    Prereq --> PrereqFw
-    Update --> SelfUpdate
-
-    ClusterSvc --> K3d
-    ClusterSvc --> EKS
-    ClusterSvc --> GKE
-    ChartSvc --> ArgoCD
-    ChartSvc --> Helm
-    ChartSvc --> Git
-    AppStatus --> ArgoCD
-
-    K3d --> Docker
-    EKS --> CloudAPI
-    GKE --> CloudAPI
-    ArgoCD --> K8sAPI
-    Helm --> K8sAPI
-    SelfUpdate --> GitHubRel
+    User -->|"openframe bootstrap / cluster create / app install"| CLI
+    CLI -->|"local"| K3d
+    CLI -->|"cloud"| EKS
+    CLI -->|"cloud"| GKE
+    K3d --> K8s
+    EKS --> K8s
+    GKE --> K8s
+    CLI -->|"installs"| ArgoCD
+    ArgoCD -->|"syncs"| Apps
+    ArgoCD --> K8s
+    CLI -->|"openframe app status / access"| K8s
 ```
 
-A typical first run looks like this:
+As a repository, OpenFrame CLI is published to the Go ecosystem as `github.com/flamingo-stack/openframe-cli`. It has no recorded upstream dependencies on other repositories in the organization's graph and no recorded downstream consumers — its `internal/` packages are private implementation detail with no public Go API intended for import elsewhere. Its functional dependencies are third-party Go modules and external CLI tools (Cobra, `client-go`, pterm, huh/bubbletea, sigstore-go) and external binaries it shells out to (Docker, k3d, Helm, Terraform, `gcloud`, `aws`).
 
-```bash
-# Create a local k3d cluster and install OpenFrame in one step
-openframe bootstrap
+## Hardware requirements
 
-# Check that the platform came up healthy
-openframe app status
+OpenFrame is a multi-service platform, so the cluster it runs on needs real resources:
 
-# Get ArgoCD admin credentials and UI access instructions
-openframe app access
-```
+| | CPU cores | RAM | Disk |
+|---|---|---|---|
+| Minimum | 6 | 24GB | 50GB |
+| Recommended | 12 | 32GB | 100GB |
 
-OpenFrame CLI is published to the Go ecosystem as `github.com/flamingo-stack/openframe-cli`. According to the organization's dependency graph, it has no recorded upstream dependencies on other repositories in this ecosystem and no recorded downstream consumers — its functional dependencies are third-party Go modules (Cobra for commands, `client-go` for native Kubernetes access, `pterm`/`huh`/`bubbletea` for terminal UI, `sigstore-go` for update-signature verification) and external CLI tools it shells out to (Docker, k3d, Helm, Terraform, `gcloud`, `aws`).
+The `openframe app install` interactive flow checks the target cluster against these recommendations and warns (without blocking) if it falls short.
 
-## Hardware Requirements
+## Where to go next
 
-Running a cluster and installing the full OpenFrame platform on it needs real local resources:
-
-| | Minimum | Recommended |
-|---|---|---|
-| RAM | 24GB | 32GB |
-| CPU cores | 6 | 12 |
-| Disk | 50GB | 100GB |
-
-The interactive `app install` wizard warns (but does not block) if the target cluster is smaller than the recommended capacity.
-
-## Where to Go Next
-
-This introduction is the starting point for the OpenFrame CLI documentation set. From here:
-
-- [Prerequisites](./prerequisites.md) — tools and accounts you need before installing
-- [Quick Start](./quick-start.md) — the fastest path to a running cluster and platform
+- [Prerequisites](./prerequisites.md) — what needs to be installed and verified before running the CLI
+- [Quick Start](./quick-start.md) — get a cluster and OpenFrame running quickly
 - [First Steps](./first-steps.md) — what to do right after your first install
-- [Create a Kubernetes Cluster with OpenFrame CLI](./how-to/create-a-kubernetes-cluster-with-openframe-cli.md)
-- [Install the OpenFrame Platform onto a Cluster](./how-to/install-the-openframe-platform-onto-a-cluster.md)
-- [Check the Status of Your OpenFrame Cluster and App](./how-to/check-the-status-of-your-openframe-cluster-and-app.md)
-- [Update the OpenFrame CLI to the Latest Version](./how-to/update-the-openframe-cli-to-the-latest-version.md)
-- [Uninstall OpenFrame and Delete a Cluster](./how-to/uninstall-openframe-and-delete-a-cluster.md)
+- [Create a Kubernetes cluster with OpenFrame CLI](./how-to/create-a-kubernetes-cluster-with-openframe-cli.md)
+- [Install the OpenFrame platform onto a cluster](./how-to/install-the-openframe-platform-onto-a-cluster.md)
+- [Check the status of your OpenFrame cluster and app](./how-to/check-the-status-of-your-openframe-cluster-and-app.md)
+- [Update the OpenFrame CLI to the latest version](./how-to/update-the-openframe-cli-to-the-latest-version.md)
+- [Uninstall OpenFrame and delete a cluster](./how-to/uninstall-openframe-and-delete-a-cluster.md)
 
-For contributors and deeper technical reference:
-
-- [Development Overview](../development/README.md), [Environment Setup](../development/setup/environment.md), [Local Development](../development/setup/local-development.md)
-- [Architecture Overview](../development/architecture/README.md) and the [reference architecture document](../reference/architecture/overview.md)
-- [Testing](../development/testing/README.md), [Security](../development/security/README.md), [Contributing Guidelines](../development/contributing/guidelines.md)
-- [Ecosystem graph](../reference/architecture/ecosystem.md) and [architecture diagrams](../diagrams/architecture/README.md)
+For deeper technical material, see the [development overview](../development/README.md), the [architecture overview](../reference/architecture/overview.md) and [ecosystem graph](../reference/architecture/ecosystem.md), and the [architecture diagrams](../diagrams/architecture/README.md).
 
 ## Community
 
-This project does not use GitHub Issues or GitHub Discussions. All support, questions, and community discussion happen on the [OpenMSP](https://www.openmsp.ai/) Slack community — join via the [OpenMSP Slack invite](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA).
+This project does not use GitHub Issues or GitHub Discussions. Community support and discussion happen on the [OpenMSP Slack community](https://www.openmsp.ai/).
 
 ## License
 
-This project is licensed under **The Flamingo AI Unified License v1.0** (© 2025 Flamingo AI, Inc.), as stated in the repository's `LICENSE.md`. The license covers Flamingo AI's own contributions; upstream components incorporated into Flamingo Software (such as Fleet, Osquery, and the MeshCentral Agent, per the license's appendix) remain under their own original licenses. See `LICENSE.md` in the repository root for the full terms, including copyleft, contribution-back, and acceptable-use provisions.
+This repository is licensed under **The Flamingo AI Unified License v1.0** (© 2025 Flamingo AI, Inc.), as stated in its `LICENSE.md`. Upstream components incorporated elsewhere in the OpenFrame platform (such as Fleet, Osquery, and the MeshCentral Agent) remain under their own original licenses as listed in that file's appendix; this CLI repository's own code is governed by the Flamingo AI Unified License v1.0.

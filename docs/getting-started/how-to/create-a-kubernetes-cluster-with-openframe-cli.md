@@ -1,55 +1,52 @@
 # How to create a Kubernetes cluster with OpenFrame CLI
 
-This guide shows the person setting up OpenFrame (a developer, operator, or evaluator) how to provision a Kubernetes cluster — locally with k3d, or in the cloud on GKE or EKS — using the `openframe cluster create` command.
+This guide shows the person installing OpenFrame (an administrator or operator at a terminal) how to use the `openframe` command to provision a new Kubernetes cluster — a local `k3d` cluster, or a cloud GKE or EKS cluster — ready for the OpenFrame platform to be installed onto it.
 
 ## Prerequisites
 
-- The OpenFrame CLI binary (`openframe`) is installed and runs when you type `openframe` in your terminal. See `../prerequisites.md` for setup details.
-- For a **local cluster** (the default): Docker is installed and running on your machine. The CLI can install `k3d` and `helm` for you automatically when they are missing — it prompts before doing so.
-- For a **cloud cluster**:
-  - **GKE**: you have a Google Cloud project you can access, and `gcloud` is installed (the CLI can prompt you to run `gcloud auth login` and set up application-default credentials when needed).
-  - **EKS**: you have working AWS credentials (a default profile or a named profile) that can pass `aws sts get-caller-identity`.
-  - `terraform` is required for cloud clusters — the CLI installs it automatically if it's missing.
-  - Cloud clusters create billed resources in your account. Review the pricing of the provider before proceeding.
-- You are in a terminal with enough free resources on the machine running the cluster — for a local cluster, the hardware should have at least 24GB RAM, 6 CPU cores, and 50GB disk free (32GB RAM / 12 CPU cores / 100GB disk recommended).
-- You know the name you want to give the cluster (or you're fine with the default name `openframe-dev`).
+- The OpenFrame CLI binary is installed and runs as `openframe` from a terminal (check with `openframe --help`).
+- For a local cluster: Docker is installed and running, since the `k3d` backend provisions the cluster inside Docker.
+- For a cloud cluster:
+  - On GKE: you have (or can log into) a Google Cloud account and know the GCP project and region you want to use.
+  - On EKS: you have (or can configure) AWS credentials/profile and know the AWS region you want to use.
+  - Terraform is required for cloud clusters; the CLI installs it automatically as part of the type-aware prerequisite check if it is missing.
+- You know what you want to name the cluster, or are prepared to accept the default name `openframe-dev`.
+- You understand that a GKE or EKS cluster creates real cloud resources that incur costs, and that these costs are only estimated, not charged, during a dry run.
 
 ## Steps
 
-1. Open a terminal and run `openframe cluster create` to start cluster creation. Add a name as an argument if you want one other than the default, for example `openframe cluster create my-cluster`.
-2. At the selection menu that appears, choose how to configure the cluster:
-   - Press Enter to accept **Quick start with defaults**, which creates the cluster immediately with default settings, or
-   - Select the **interactive configuration wizard** option to step through cluster customization (cluster type, node count, Kubernetes version, and — for cloud types — region/project/machine type) one screen at a time.
-3. If you want to skip the menu entirely and create the cluster directly from flags, run `openframe cluster create` with the `--skip-wizard` flag instead, combined with any of the following flags as needed:
-   - `--nodes <N>` to set the number of nodes (default 3)
-   - `--type k3d|gke|eks` to choose the backend (default `k3d`)
-   - `--region <region>` and `--project <project>` for GKE, or `--region <region>` and `--profile <aws-profile>` for EKS
-   - `--min-nodes` / `--max-nodes` to bound autoscaling for cloud clusters
-   - `--spot` to use spot/preemptible instances on a cloud cluster
-4. If you want to preview what would happen without creating anything, add `--dry-run` to the command. For a cloud cluster this runs a real Terraform plan and shows the resources it would create and (when available) an estimated monthly cost, without provisioning anything.
-5. When prompted, confirm any tool installation the CLI offers (for example installing `k3d`, `helm`, or `terraform`) by answering the interactive yes/no prompt, or let it proceed automatically if you ran with `--skip-wizard`.
-6. For a **GKE** cluster, if you are not already authenticated, follow the prompt offering to run `gcloud auth login` (and the application-default login) right from the CLI.
-7. For an **EKS** cluster, confirm the AWS identity shown when the CLI asks you to verify which AWS account/profile will be billed before it provisions anything.
-8. For a cloud cluster that isn't a dry run, review the Terraform plan diff and cost information the CLI prints, then confirm the apply when prompted (the CLI only provisions what you approve).
-9. Wait for cluster creation to finish. A local k3d cluster finishes in under a minute; a cloud cluster (GKE/EKS) takes several minutes while Terraform provisions networking and node infrastructure.
-10. After creation succeeds, run `openframe cluster status` (optionally `openframe cluster status <name>`) to confirm the cluster is healthy and check its nodes before installing the OpenFrame platform on it.
+1. Open a terminal and confirm the CLI is on your `$PATH` by running `openframe --help`.
+2. Run `openframe cluster create` with no arguments to see the cluster creation selection menu, which offers **Quick start with defaults** (press Enter) or the **interactive configuration wizard**.
+3. To create a cluster with a specific name, run `openframe cluster create my-cluster` instead, replacing `my-cluster` with the name you want; the CLI validates the name before continuing.
+4. If you want full control over cluster type, provider, and sizing without the menu, run `openframe cluster create` with `--skip-wizard` and the relevant flags, for example:
+   - `openframe cluster create --nodes 3 --type k3d --skip-wizard` for a local cluster.
+   - `openframe cluster create my-gke --type gke --project my-project --region us-central1 --skip-wizard` for a GKE cluster.
+   - `openframe cluster create my-eks --type eks --region us-east-1 --skip-wizard` for an EKS cluster (add `--profile staging` to use a named AWS profile).
+5. If you chose a cloud cluster type (GKE or EKS), review the configuration summary the CLI prints when `--skip-wizard` or `--dry-run` is used, which shows the settings before anything is created.
+6. Optionally, add `--dry-run` to any cloud cluster command first to preview the Terraform plan and an estimated monthly cost without creating anything; re-run the same command without `--dry-run` once you are satisfied.
+7. For a GKE cluster, complete any `gcloud auth login` (and application-default login) prompt the CLI offers, so Terraform can authenticate against your Google Cloud project.
+8. For an EKS cluster, confirm the AWS identity the CLI announces (the account `aws sts get-caller-identity` resolves) before it proceeds, so you are provisioning in the expected AWS account.
+9. Wait while the CLI runs the prerequisite checks for the chosen cluster type, then provisions the cluster — for `k3d` this happens through Docker; for `gke`/`eks` this runs Terraform `init`, `plan`, and `apply` against the generated Terraform workspace.
+10. If prompted to approve the Terraform apply plan during a cloud cluster create, review the plan summary shown and confirm to proceed.
+11. Once creation finishes, run `openframe cluster status my-cluster` (or `openframe cluster status` for the default name) to confirm the cluster is healthy and ready for the next step, installing the OpenFrame platform.
 
 ## Expected result
 
-- On success, the CLI merges the new cluster's access into your default kubeconfig and switches your current `kubectl` context to it, so you don't need any extra configuration step to reach the cluster afterward.
-- For a `--skip-wizard` or `--dry-run` run (or with `--verbose`), the CLI first prints a configuration summary showing the chosen cluster type, name, node count, and other settings before proceeding.
-- Running `--dry-run` on a cloud cluster either prints `Plan: no changes — the cluster already matches this configuration`, or a plan diff listing the resources Terraform would create, followed by a cost estimate line such as `Estimated monthly cost (infracost): ...` when the `infracost` tool is available, or a cost warning with a link to the provider's pricing page when it is not.
-- After a real (non-dry-run) create finishes, `openframe cluster status` reports the cluster as healthy with its node list — this is your signal the cluster is ready for `openframe app install` (see `./install-the-openframe-platform-onto-a-cluster.md`).
+- For `openframe cluster create` run with no arguments, you see a selection menu offering a quick-start default option and an interactive wizard option.
+- For a non-interactive create (`--skip-wizard`), the CLI prints a configuration summary showing the cluster type, name, node count, and (for cloud types) region/project before creating anything.
+- For a cloud cluster create with `--dry-run`, the CLI prints a Terraform plan diff and, where available, an estimated monthly cost (through `infracost`); it reports "Plan: no changes — the cluster already matches this configuration" if nothing would change.
+- After a successful create, the cluster's context is merged into your kubeconfig and set as the current context automatically, and `openframe cluster status` reports the cluster as healthy.
+- If a cluster with the chosen name already exists, the CLI leaves it untouched and reuses it rather than recreating it.
 
 ## Troubleshooting
 
-- **"node count must be at least 1: `<N>`"** — you explicitly passed `--nodes` with a value of zero or a negative number; pass a positive node count or omit the flag to use the default of 3.
-- **"--min-nodes must be at least 1 (a zero-node floor is not supported; omit the flag for the default of 1)"** or **"--max-nodes must be at least 1 (omit the flag for the default of 4)"** — you passed one of these flags explicitly set to `0`; either give it a positive value or remove the flag.
-- **"cluster '`<name>`' already exists in region/project '`<x>`' but is not managed by openframe — refusing to touch it; pick another cluster name"** — a cluster with that name already exists in the target cloud account outside OpenFrame's tracking; choose a different name.
-- **"AWS `<profile>` cannot authenticate (aws sts get-caller-identity failed)"** — your AWS credentials for that profile aren't valid; fix your AWS CLI configuration and re-run.
-- **"gcloud is not authenticated (run 'gcloud auth login' and 'gcloud auth application-default login')"** — accept the CLI's offer to run these commands for you, or run them yourself first.
-- **"GCP project `<project>` is not among your accessible projects"** — the `--project` value doesn't match a project your gcloud identity can access; the message lists the valid options (or tells you to run `gcloud projects list` when there are many).
-- **"kubeconfig context '`<name>`' already exists and points at `<server>` — refusing to overwrite it; rename the existing context or pick another cluster name"** — a different cluster or tool already owns that context name in your kubeconfig; pick a different cluster name.
-- **"cluster creation cancelled — no changes were applied"** — you answered no to the apply confirmation prompt; re-run the command and confirm when you're ready to proceed.
-- If a cloud create is interrupted (for example with Ctrl+C) partway through, the CLI prints a hint that the Terraform state is kept locally and that you can simply re-run `openframe cluster create` with the same name to resume, or run `openframe cluster delete` to tear down what was created so far — see `./uninstall-openframe-and-delete-a-cluster.md`.
-- If a resource already exists in the cloud provider but Terraform isn't tracking it (shown as a "ResourceInUseException"/"AlreadyExists" or GCP 409-style error), the CLI's message explains this happens when a create was interrupted after the cloud resource was made but before its state was saved, and gives you two options: delete the orphaned resource in the provider's console, or import it into the cluster's Terraform state with the `terraform import` command shown in the message.
+- **"node count must be at least 1: `<n>`"** — you explicitly passed `--nodes` with a value of zero or less; omit the flag (default is 3) or pass a positive integer.
+- **"--min-nodes must be at least 1 (a zero-node floor is not supported; omit the flag for the default of 1)"** or **"--max-nodes must be at least 1 (omit the flag for the default of 4)"** — you explicitly set one of these flags to `0`; omit the flag instead to use the default.
+- **"GCP project `<project>` is not among your accessible projects"** (or, with more than 15 accessible projects, a message pointing you to run `gcloud projects list`) — the `--project` value for a GKE create does not match a project your current gcloud identity can access; pick one of the listed projects or re-authenticate.
+- **"cluster '`<name>`' already exists in region/project '`<region-or-project>`' but is not managed by openframe — refusing to touch it; pick another cluster name"** — a cluster with that name already exists in the cloud account outside of OpenFrame's tracking; choose a different name.
+- **"AWS `<profile/identity>` cannot authenticate (aws sts get-caller-identity failed)"** — your AWS credentials or named profile are not usable; fix your AWS CLI configuration and re-run.
+- **"gcloud is not authenticated (run 'gcloud auth login' and 'gcloud auth application-default login')"** — complete both gcloud login steps before retrying.
+- **"kubeconfig context '`<name>`' already exists and points at `<server>` — refusing to overwrite it; rename the existing context or pick another cluster name"** — an unrelated kubeconfig context already uses that cluster name; rename it or choose a different cluster name for the new create.
+- **A cloud create fails partway through** — the CLI reports that the Terraform state is kept in the cluster's workspace directory, and that re-running `openframe cluster create` with the same name resumes the attempt, or `openframe cluster delete` tears it down; if the failure message mentions a resource that "already exists" in AWS or GCP but is not tracked by Terraform, follow the CLI's remediation steps (delete the orphaned resource in the cloud console, or import it into the Terraform state as shown in the message) before retrying.
+- **Terraform is not installed** — for a `--dry-run` on a cloud cluster the CLI simply skips the plan preview and tells you so; for a real (non-dry-run) create, the CLI installs Terraform automatically as part of its prerequisite check.
+- If none of these messages match what you see, the material available does not document that specific failure; check the exact error text printed by the CLI for further guidance.
