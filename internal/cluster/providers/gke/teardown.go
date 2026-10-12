@@ -239,17 +239,27 @@ func (p *Provider) sweepOrphanedDisks(ctx context.Context, project, name, locati
 	pterm.Info.Printf("Cleaning up %d orphaned Persistent Disk(s) from cluster %q...\n", len(disks), name)
 	var failed []string
 	for _, d := range disks {
+		var delErr error
 		if d.zone == "" {
-			failed = append(failed, d.name+" (regional — delete manually)")
-			continue
+			// Regional disk: attempt deletion via --region, mirroring the
+			// uniform deletion done for zonal disks instead of silently
+			// skipping it and leaving it as a surprise billable orphan.
+			_, delErr = p.executor.Execute(ctx, "gcloud", "compute", "disks", "delete", d.name,
+				"--region", d.region, "--project", project, "--quiet")
+		} else {
+			_, delErr = p.executor.Execute(ctx, "gcloud", "compute", "disks", "delete", d.name,
+				"--zone", d.zone, "--project", project, "--quiet")
 		}
-		if _, err := p.executor.Execute(ctx, "gcloud", "compute", "disks", "delete", d.name,
-			"--zone", d.zone, "--project", project, "--quiet"); err != nil {
-			failed = append(failed, d.name)
+		if delErr != nil {
+			if d.zone == "" {
+				failed = append(failed, d.name+" (regional)")
+			} else {
+				failed = append(failed, d.name)
+			}
 		}
 	}
 	if len(failed) > 0 {
-		pterm.Warning.Printf("Could not delete %d disk(s): %s\n  Remove manually: gcloud compute disks delete <name> --zone <zone> --project %s\n",
+		pterm.Warning.Printf("Could not delete %d disk(s): %s\n  Remove manually: gcloud compute disks delete <name> --zone <zone>|--region <region> --project %s\n",
 			len(failed), strings.Join(failed, ", "), project)
 		return
 	}
