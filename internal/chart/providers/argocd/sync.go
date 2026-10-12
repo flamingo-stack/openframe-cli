@@ -54,7 +54,7 @@ func syncOperationPatch(prune bool) string {
 func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	if m.dynamicClient == nil {
 		if err := m.initKubernetesClients(); err != nil {
-			return err
+			return fmt.Errorf("initializing kubernetes clients: %w", err)
 		}
 	}
 	if m.dynamicClient == nil {
@@ -85,7 +85,7 @@ func (m *Manager) RefreshAndSync(ctx context.Context, prune bool) error {
 	// 2) Don't clobber an operation already in flight — setting .operation over a
 	// running one is racy; wait briefly, then refuse rather than stomp it.
 	if err := m.ensureNoRunningOperation(ctx, budget); err != nil {
-		return err
+		return fmt.Errorf("waiting for in-flight operation to clear: %w", err)
 	}
 
 	// 3) Trigger the sync via the top-level .operation field.
@@ -327,7 +327,7 @@ func (m *Manager) SyncApplications(ctx context.Context, names []string) error {
 func (m *Manager) syncApplicationsByName(ctx context.Context, names []string, prune bool) (patched, failed int, firstErr error) {
 	if m.dynamicClient == nil {
 		if err := m.initKubernetesClients(); err != nil {
-			return 0, len(names), err
+			return 0, len(names), fmt.Errorf("initializing kubernetes clients: %w", err)
 		}
 	}
 	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
