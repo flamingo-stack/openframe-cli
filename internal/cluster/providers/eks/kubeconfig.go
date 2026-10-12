@@ -4,9 +4,9 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/kubeconfigmerge"
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
@@ -78,51 +78,26 @@ func restConfigFor(rec tfengine.Record) (*rest.Config, error) {
 // kubeconfig (honoring $KUBECONFIG) and switches the current context to it —
 // the same post-create behavior the k3d provider gets from k3d itself.
 // It refuses to overwrite a same-named context that points at a DIFFERENT
-// server (see the GKE twin for rationale).
+// server (see the GKE twin for rationale). The actual merge/no-clobber logic
+// lives in the shared kubeconfigmerge package so EKS and GKE can't drift.
 func mergeIntoDefaultKubeconfig(rec tfengine.Record) error {
-	pathOpts := clientcmd.NewDefaultPathOptions()
-	existing, err := pathOpts.GetStartingConfig()
-	if err != nil {
-		return fmt.Errorf("loading kubeconfig: %w", err)
-	}
-	if prior, ok := existing.Contexts[rec.Name]; ok {
-		if cluster, ok := existing.Clusters[prior.Cluster]; ok && cluster.Server != rec.Endpoint {
-			return fmt.Errorf("kubeconfig context '%s' already exists and points at %s — refusing to overwrite it; rename the existing context or pick another cluster name", rec.Name, cluster.Server)
-		}
-	}
 	generated, err := kubeconfigFor(rec)
 	if err != nil {
 		return err
 	}
-	existing.Clusters[rec.Name] = generated.Clusters[rec.Name]
-	existing.AuthInfos[rec.Name] = generated.AuthInfos[rec.Name]
-	existing.Contexts[rec.Name] = generated.Contexts[rec.Name]
-	existing.CurrentContext = rec.Name
-	if err := clientcmd.ModifyConfig(pathOpts, *existing, true); err != nil {
-		return fmt.Errorf("writing kubeconfig: %w", err)
-	}
-	return nil
+	return kubeconfigmerge.MergeIntoDefault(kubeconfigmerge.Entry{
+		Name:     rec.Name,
+		Endpoint: rec.Endpoint,
+		Cluster:  generated.Clusters[rec.Name],
+		AuthInfo: generated.AuthInfos[rec.Name],
+		Context:  generated.Contexts[rec.Name],
+	})
 }
 
 // removeFromDefaultKubeconfig drops the cluster's context after a destroy —
 // but ONLY when the entry still points at OUR endpoint (see the GKE twin).
-// Best-effort: a missing entry is not an error.
+// Best-effort: a missing entry is not an error. Delegates to the shared
+// kubeconfigmerge package so the removal semantics can't diverge from GKE.
 func removeFromDefaultKubeconfig(rec tfengine.Record) error {
-	pathOpts := clientcmd.NewDefaultPathOptions()
-	existing, err := pathOpts.GetStartingConfig()
-	if err != nil {
-		return err
-	}
-	if prior, ok := existing.Contexts[rec.Name]; ok {
-		if cluster, ok := existing.Clusters[prior.Cluster]; ok && cluster.Server != rec.Endpoint {
-			return nil // same name, different server — not ours anymore
-		}
-	}
-	delete(existing.Clusters, rec.Name)
-	delete(existing.AuthInfos, rec.Name)
-	delete(existing.Contexts, rec.Name)
-	if existing.CurrentContext == rec.Name {
-		existing.CurrentContext = ""
-	}
-	return clientcmd.ModifyConfig(pathOpts, *existing, true)
+	return kubeconfigmerge.RemoveFromDefault(rec.Name, rec.Endpoint)
 }
