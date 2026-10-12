@@ -1,135 +1,177 @@
 ## Development Environment Setup
 
-This guide walks through setting up a local development environment for **OpenFrame CLI** — the Go-based command-line tool that provisions Kubernetes clusters (k3d, GKE, EKS) and deploys the OpenFrame platform onto them via ArgoCD's app-of-apps pattern.
+This guide covers how to set up a local development environment for the OpenFrame CLI (`openframe-cli`), a Go-based command-line tool that provisions Kubernetes clusters (local k3d, or cloud GKE/EKS via Terraform) and deploys the OpenFrame platform onto them via ArgoCD's app-of-apps pattern.
 
-> OpenFrame CLI is a **service** repository published to the `go` ecosystem as `github.com/flamingo-stack/openframe-cli`. Per the organization's repository graph, it has no recorded upstream dependencies on other internal repositories and no recorded downstream consumers — its `internal/` packages are private implementation detail, not a published API surface for other modules to import.
+> **Note:** The OpenFrame platform itself (the services the CLI deploys) lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository. This document covers setup for developing the CLI tool in **this** repository (`flamingo-stack/openframe-cli`) only — do not assume platform source lives in a subdirectory here.
 
-If you are looking to set up the broader OpenFrame platform (the Kubernetes workloads this CLI installs), see the external repository **flamingo-stack/openframe-oss-tenant** at `https://github.com/flamingo-stack/openframe-oss-tenant` — this document covers only the CLI codebase itself.
+### Scope
+
+According to the repository ecosystem graph, `openframe-cli` is a **service** published to the `go` ecosystem as `github.com/flamingo-stack/openframe-cli`. It has no recorded upstream dependencies on other internal repositories and no recorded downstream consumers in the graph — its functional dependencies are entirely external, third-party Go modules and CLI tools (Docker, k3d, Helm, Terraform, gcloud, aws) invoked through its own executor abstraction.
 
 ---
 
-### 1. Required Development Tools
+## Required Development Tools
 
-The CLI is a single Go module (`github.com/flamingo-stack/openframe-cli`, see `go.mod`). The tools below are required to build, lint, and exercise it locally.
+The CLI is a single Go module (see `go.mod`). The toolchain and the external binaries it shells out to must both be present locally.
 
-| Tool | Why it's needed | Notes |
+### Go toolchain
+
+| Requirement | Value | Source |
 |---|---|---|
-| **Go** | Compiles and runs the CLI | `go.mod` pins `go 1.26.0` with `toolchain go1.26.5`. The toolchain line exists specifically to avoid a GC-related crash on windows-amd64 present in 1.26.0/1.26.1 (fixed in 1.26.2) — `go build`/`go test` will auto-select `go1.26.5` via the toolchain directive, so install at least Go 1.26.0 and let the toolchain mechanism do the rest. |
-| **git** | Source control, and used at runtime by `internal/chart/providers/git` to clone the app-of-apps chart repository | Required dependency of `go-git/go-git/v5`, but a native `git` binary is also expected on `$PATH` for everyday repo work. |
-| **Docker** | Backs local `k3d` clusters created by `openframe cluster create` / `openframe bootstrap` | Exercised through `internal/cluster/prerequisites/docker` and the k3d provider in `internal/cluster/providers/k3d`. Needed if you intend to run end-to-end flows locally rather than only unit tests. |
-| **Helm** | Installs ArgoCD and the app-of-apps chart | Shelled out to via `internal/chart/providers/helm`; also checked/installed via `internal/chart/prerequisites/helm` and `internal/cluster/prerequisites/helm`. |
-| **k3d** | Creates local Kubernetes clusters | Managed by `internal/cluster/providers/k3d`; the CLI downloads a pinned, checksum-verified binary through `internal/shared/download` if not already present. |
-| **Terraform** | Provisions cloud clusters (EKS/GKE) | Used via `hashicorp/terraform-exec`/`terraform-json` (see `go.mod`) and the Terraform root modules in `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf`. Only required if you work on the cloud-provider code paths. |
-| **gcloud** / **aws** CLIs | Cloud provider authentication and cluster discovery | Used by `internal/cluster/prerequisites/gcloud`, `internal/cluster/prerequisites/aws`, and the discovery logic in `internal/cluster/discovery/{eks,gke}.go`. Only required for GKE/EKS work. |
-| **golangci-lint (v2)** | Static analysis gate used in CI and locally before pushing | Configuration lives in `.golangci.yml` at the repo root. See below for what it enforces. |
+| Go module path | `github.com/flamingo-stack/openframe-cli` | `go.mod` |
+| Minimum Go version | `go 1.26.0` | `go.mod` |
+| Pinned toolchain | `go1.26.5` | `go.mod` |
 
-All of the CLI-managed binaries (k3d, Helm, mkcert, Terraform, infracost) are downloaded and SHA256-verified by the CLI itself at runtime via `internal/shared/download/verify.go` and pinned in `internal/shared/download/pins.go` — you do not need to pre-install these system-wide for the CLI to function, though having them already on `$PATH` speeds up iteration.
+> **Important:** `go.mod` pins the toolchain to `go1.26.5` deliberately. Go `1.26.0`/`1.26.1` crash intermittently on `windows-amd64` due to return addresses being corrupted during GC stack scanning (a known upstream Go issue), fixed in `1.26.2`. CI and release builds resolve the toolchain from this file, so do not downgrade or remove the `toolchain` directive — it is what keeps shipped Windows binaries off the buggy runtimes. If your local Go installation is older than `1.26.5`, Go's own toolchain management will download the pinned version automatically when you build.
 
-#### Cloning the repository
+Install Go from your platform's standard distribution channel, then verify:
 
 ```bash
-git clone https://github.com/flamingo-stack/openframe-cli.git
-cd openframe-cli
+go version
 ```
 
-#### Building and running
+### External CLI tools invoked by the binary
+
+The CLI does not link these as libraries — it shells out to them through `internal/shared/executor`. Having them installed (or letting the CLI's own `prerequisites` command install them) is required to actually *run* cluster/app commands end-to-end during development, though they are not required to compile the Go module itself:
+
+| Tool | Used for |
+|---|---|
+| Docker | Backing runtime for local k3d clusters |
+| k3d | Local Kubernetes cluster provisioning |
+| Helm | Installing ArgoCD and chart releases |
+| Terraform | Provisioning EKS/GKE clusters |
+| gcloud CLI | GKE cluster discovery and auth |
+| aws CLI | EKS cluster discovery, auth (`aws eks get-token`) |
+| mkcert / certificates tooling | Local TLS certificates for ingress |
+| infracost | Cost estimation for cloud cluster plans |
+
+The CLI's own `openframe prerequisites check` and `openframe prerequisites install` commands (see `cmd/prerequisites/prerequisites.go`, `internal/prerequisites/runner.go`) can verify or auto-install most of these per OS — auto-install is supported on macOS/Linux, with docs-only guidance on Windows (see `internal/platform/platform.go`). Binaries managed this way are pinned and checksum-verified via `internal/shared/download` (see `internal/shared/download/pins.go`, `internal/shared/download/verify.go`) rather than fetched ad hoc.
+
+### Linting
+
+This repository is linted with `golangci-lint` v2, configured in `.golangci.yml`. The configuration:
+
+- Uses the `standard` default linter set (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`)
+- Additionally enables `gosec` (security — subprocess execution, file paths/perms, unverified downloads), `bodyclose`, `errorlint`, and `misspell`
+- Runs `govet` with `enable-all: true`, disabling only `fieldalignment` (noise) and `shadow` (too noisy for this codebase currently)
+- Excludes `errcheck` and `gosec` findings in `_test.go` files, since tests legitimately ignore some errors and use weak fixtures
+- Reports every issue (`max-issues-per-linter: 0`, `max-same-issues: 0`) rather than capping output
+
+Install `golangci-lint` locally and run it before opening a pull request:
 
 ```bash
+golangci-lint run ./...
+```
+
+> `gosec`'s rule set is intentionally kept complete (`excludes: []`) because its findings map directly to real remediation items in this codebase — subprocess construction (G204), file path/permission handling (G304/G306), and unverified downloads (G107). Do not silently add exclusions when a finding looks noisy; fix the underlying code or get the exclusion reviewed.
+
+### Code signing tooling (release-adjacent)
+
+`scripts/sign-binary.sh` is the one shell script present in this repository, used for signing release binaries. It is not part of day-to-day `go build`/`go test` work but is worth knowing about if you touch the release pipeline.
+
+---
+
+## IDE Recommendations and Setup
+
+The codebase is pure Go (plus a small amount of embedded Terraform under `internal/cluster/providers/{eks,gke}/templates/`), so any editor with solid Go tooling works well. The two most common choices in Go ecosystems:
+
+- **GoLand** — full-featured Go IDE with built-in debugging, test runners, and refactoring support out of the box.
+- **Visual Studio Code** with the Go extension — lightweight, widely used, and the easiest to align with the extensions list below.
+
+Whichever editor you choose, make sure it is configured to use `gofmt`/`goimports` on save and can invoke `go vet` and `golangci-lint`, since those are the checks this repository is actually linted against (see `.golangci.yml`).
+
+### Recommended editor configuration
+
+- Enable format-on-save using `gofmt` (or `goimports`, which is a superset that also manages import grouping).
+- Point your editor's Go language server at the module root (where `go.mod` lives) so package resolution for `github.com/flamingo-stack/openframe-cli/...` imports works correctly.
+- Configure your editor to surface `golangci-lint` diagnostics inline, using the repository's `.golangci.yml` rather than each tool's built-in defaults — the project enables `gosec`, `bodyclose`, `errorlint`, and `misspell` on top of the standard set, and disables `fieldalignment`/`shadow` from `govet`'s `enable-all`. An editor using only its own defaults will show a different (looser) set of warnings than CI enforces.
+- If your editor supports Terraform syntax highlighting, enable it for `*.tf` files under `internal/cluster/providers/eks/templates/` and `internal/cluster/providers/gke/templates/` — these are real Terraform root modules the CLI generates and manages, not throwaway examples.
+
+### Editor extensions / plugins
+
+For VS Code specifically:
+
+| Extension | Purpose |
+|---|---|
+| Go (`golang.go`) | Official Go extension — language server (`gopls`), debugging (`delve`), test lens, formatting |
+| golangci-lint integration (via the Go extension's lint settings) | Surfaces the same linter configuration enforced by `.golangci.yml` |
+| YAML | Useful for editing Helm values templates referenced by `internal/chart/ui/templates` and `internal/chart/utils/config` |
+| HashiCorp Terraform | Syntax/validation support for the embedded `main.tf` files under the EKS/GKE provider template directories |
+
+For GoLand, the equivalent capabilities (Go language support, linter integration, Terraform plugin) are available as built-in or JetBrains-marketplace plugins; no repository-specific GoLand configuration is checked in.
+
+> This repository does not ship a committed editor configuration directory (no `.vscode/` or `.idea/` settings are part of the material covered here) — the recommendations above are tooling choices to align with the lint rules actually enforced, not a mandated project-level setting.
+
+---
+
+## Environment Variables for Development
+
+The CLI is designed to run without requiring custom environment variables for a basic build/test cycle (`go build`, `go test` need none beyond a working Go toolchain). The environment variables below become relevant depending on which commands you are exercising during development:
+
+| Variable | Relevance |
+|---|---|
+| `KUBECONFIG` | Honored when merging or removing cluster contexts (see `internal/cluster/providers/eks/kubeconfig.go`, which merges EKS cluster access into the default kubeconfig and refuses to overwrite an existing context pointing at a different server). Point this at a scratch kubeconfig file while testing cluster lifecycle commands if you do not want your real kubeconfig touched. |
+| AWS credentials (via the `aws` CLI's standard resolution: environment variables, profiles, SSO) | Needed only when exercising the EKS provider path (`internal/cluster/providers/eks`) or `cmd/cluster/aws_identity.go`. Kubeconfig auth for EKS clusters goes through the `aws eks get-token` exec plugin rather than static tokens, so no long-lived EKS token needs to be exported. |
+| `gcloud` application-default credentials | Needed only when exercising the GKE provider path (`internal/cluster/providers/gke`). |
+| Docker daemon availability (no single env var, but `DOCKER_HOST` if you use a non-default socket) | Needed for the k3d provider path (`internal/cluster/providers/k3d`), since k3d clusters run as Docker containers. |
+
+Secrets collected interactively during chart configuration (Docker registry password, Ngrok API key/auth token — see `internal/chart/ui/configuration/docker.go` and `internal/chart/ui/configuration/ingress.go`) are registered with the redaction helper (`internal/shared/redact`) immediately after input, specifically so they never leak into verbose logs or error output. When developing or debugging around these code paths, be aware that any new secret-collecting prompt should follow the same `redact.RegisterSecret(...)` pattern rather than introducing an unredacted log line.
+
+> Refer to your environment configuration for any cluster-specific credentials (cloud project IDs, regions, registry credentials) — none are hardcoded or defaulted in this repository, and no default credentials are shipped.
+
+### Global CLI flags relevant during development
+
+While not environment variables, the root command (`cmd/root.go`) exposes global flags that are useful while developing and debugging:
+
+- `--verbose` — enables debug-level output across commands.
+- `--silent` — suppresses interactive UI elements, useful when scripting repeated test runs.
+- `--plain` — disables colored/decorated terminal output, useful when piping CLI output to logs or files during test iteration.
+
+These are applied consistently via `ui.ApplyGlobalOutputFlags(cmd)`, including inside command groups like `app` (see `cmd/app/app.go`) that define their own `PersistentPreRunE` and must therefore re-apply the global flag contract explicitly.
+
+---
+
+## Building and Running Locally
+
+From the module root (where `go.mod` lives):
+
+```bash
+# Build the binary
 go build -o openframe .
-./openframe --help
-```
 
-Because `main.go` is the single entry point (see `main.go`), `go run .` also works for quick iteration:
+# Run directly without building a binary
+go run . --help
 
-```bash
-go run . cluster list
-```
-
-#### Running the linter
-
-`.golangci.yml` configures `golangci-lint` v2 with the standard default linter set (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`) plus `gosec`, `bodyclose`, and `errorlint` enabled explicitly. `gosec`'s full default rule set is kept (no exclusions) because it catches the classes of issue the project specifically watches for: subprocess construction (G204), file path handling (G304), file permissions (G306), and unverified downloads (G107) — all relevant given how much of this CLI shells out to external tools and downloads binaries.
-
-```bash
-golangci-lint run
-```
-
-Test files (`_test.go`) are exempted from `errcheck` and `gosec` findings, since they legitimately ignore errors and use weak fixtures — see the `issues.exclusions.rules` block in `.golangci.yml`.
-
-#### Running tests
-
-The repository has dedicated test-support packages worth knowing about before writing or running tests:
-
-- `tests/testutil/` — shared assertions, cluster test helpers, command-assertion helpers, flag-contract checks, and setup utilities (`tests/testutil/assertions.go`, `tests/testutil/cluster.go`, `tests/testutil/command_assertions.go`, `tests/testutil/flag_contract.go`, `tests/testutil/setup.go`, `tests/testutil/utilities.go`, `tests/testutil/patterns.go`).
-- `tests/integration/common/` — a CLI runner, cluster-management helpers, and dependency helpers for integration-style tests (`tests/integration/common/cli_runner.go`, `tests/integration/common/cluster_management.go`, `tests/integration/common/dependencies.go`).
-- `internal/shared/executor/mock.go` — a mock `CommandExecutor`, used so unit tests don't need Docker/Helm/Terraform actually installed to exercise command-construction logic.
-
-```bash
+# Run the test suite
 go test ./...
 ```
 
----
+The entry point is `main.go`, which wires `cmd.Execute()` and preserves a failed external command's exit code for automation (so CI scripts calling `openframe` see the same exit code the underlying `helm`/`terraform`/`k3d` call produced, when applicable).
 
-### 2. IDE Recommendations and Setup
-
-The codebase has no IDE-specific configuration committed (no `.vscode/`, `.idea/`, or editor config files were found in the repository), so any editor with solid Go tooling works. Given the module is plain Go with no frontend or JVM build, the practical requirement is: an editor that can run `gopls` (the Go language server) and invoke `golangci-lint`.
-
-**Recommended setup, in order of how directly it maps to this codebase:**
-
-- **GoLand / IntelliJ with the Go plugin** — strong support for Go modules, built-in test runner integration for `go test ./...`, and native `go.mod`/toolchain awareness that matches the pinned `toolchain go1.26.5` directive.
-- **VS Code with the official Go extension** — lightweight, uses `gopls` under the hood, and can be configured to run `golangci-lint` as the linter backend (matching `.golangci.yml` exactly, rather than VS Code's bundled default linters).
-- **Vim/Neovim with `gopls` via an LSP client** — viable for contributors already in a terminal-first workflow; pairs well with the CLI's own terminal-UI-heavy codebase (`internal/shared/ui`, `internal/app/status/tui`).
-
-Whichever editor you choose, point its linter integration at `.golangci.yml` rather than relying on default settings, since the project intentionally diverges from golangci-lint's defaults (e.g., `govet.disable: [fieldalignment, shadow]`, full `gosec` with no excludes).
-
-#### Editor extensions/plugins
-
-| Editor | Extension/Plugin | Purpose |
-|---|---|---|
-| VS Code | Go (`golang.go`) | `gopls` integration, go-to-definition, inline diagnostics, test lens |
-| VS Code | YAML | Editing Helm values files and GitHub Actions workflows cleanly |
-| VS Code | HashiCorp Terraform | Syntax highlighting/validation for `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf` |
-| GoLand/IntelliJ | Go plugin (bundled in GoLand) | Same role as above, built in |
-| Any | golangci-lint integration (via LSP or extension) | Surfaces the same findings `golangci-lint run` reports, inline |
-
-> No `.editorconfig` or formatting-tool configuration beyond standard `gofmt`/`goimports` conventions was found in the repository. Rely on `gofmt`-on-save (most Go tooling defaults to this) to keep formatting consistent with the existing codebase.
-
----
-
-### 3. Environment Variables for Development
-
-The CLI reads a handful of environment variables at runtime, primarily to control output mode and to interoperate with the ambient kubeconfig. None are required simply to build or unit-test the project — they matter when you exercise real commands against a cluster.
-
-| Variable | Purpose |
-|---|---|
-| `$KUBECONFIG` | Standard Kubernetes convention honored by `internal/cluster/providers/eks/kubeconfig.go` when merging a newly created EKS cluster's context into your default kubeconfig (`mergeIntoDefaultKubeconfig`) and when removing it on teardown (`removeFromDefaultKubeconfig`). If unset, the usual `~/.kube/config` default applies. |
-| `$HOME` | Used to resolve the certificate directory. `internal/chart/utils/config/paths.go` (`GetCertificateDirectory`) stores generated certificates under `~/.config/openframe/certs`, falling back to a path under the working directory if `$HOME` cannot be resolved. |
-
-Beyond these, most "configuration" is passed through CLI flags rather than environment variables — for example, `--context` to target a specific kube-context (see `cmd/app/app.go`'s `noPositionalArgs` helper, which explicitly rejects positional cluster-name arguments in favor of `--context`), `--silent`/`--verbose`/`--plain` as global output flags applied via `ui.ApplyGlobalOutputFlags`, and `--type k3d|eks|gke` for prerequisite checks.
-
-When working on code that touches `internal/shared/config/envbool.go`, note that the pattern for any new boolean environment-variable toggle in this codebase goes through that shared helper rather than ad hoc `os.Getenv` checks — look there before adding a new one.
-
-> Do not commit real Docker registry credentials, Ngrok auth tokens/API keys, or any other secret into a Helm values file or environment file. The interactive configuration flow (`internal/chart/ui/configuration/docker.go`, `internal/chart/ui/configuration/ingress.go`) deliberately masks these inputs and registers them with `internal/shared/redact` so they never leak into verbose logs — treat your local shell environment and `openframe-helm-values.yaml` with the same care.
-
----
-
-### 4. Working With the Codebase: Structure You'll Touch Most
-
-For day-to-day development, the areas you are most likely to be editing are:
-
-- `cmd/` — Cobra command definitions and flag wiring (`cmd/root.go`, `cmd/cluster/`, `cmd/app/`, `cmd/bootstrap/`, `cmd/prerequisites/`, `cmd/update/`).
-- `internal/cluster/` — cluster lifecycle logic, provider dispatch (k3d/EKS/GKE), and the prerequisite checkers per cluster type.
-- `internal/chart/` — ArgoCD/Helm/Git providers, the chart installation service, and the interactive configuration wizard (`internal/chart/ui/configuration/`).
-- `internal/shared/` — cross-cutting infrastructure: command execution (`internal/shared/executor`), error handling (`internal/shared/errors`), terminal UI (`internal/shared/ui`), download/verification (`internal/shared/download`), and self-update (`internal/shared/selfupdate`).
-- `internal/k8s/` — kubeconfig/context resolution and cluster health checks, deliberately separated from `internal/cluster` (creation) so `app install` can target any reachable cluster, not just ones the CLI created.
-
-A quick sanity-check command once your environment is set up:
+Typical local development loop commands, once built:
 
 ```bash
-go build -o openframe . && ./openframe prerequisites check --type k3d
-```
+# Local k3d cluster + platform in one step
+openframe bootstrap
 
-This exercises the Cobra command tree, the prerequisites framework (`internal/prerequisites/runner.go`), and the terminal UI output path without requiring a live cluster.
+# Check cluster status
+openframe cluster status
+
+# Verify or install required external tools for a given provider type
+openframe prerequisites check --type k3d
+```
 
 ---
 
-For first contact with the CLI's commands and a working cluster, see the introduction and quick-start guides; for the wider system this CLI deploys onto, see the architecture overview and ecosystem documentation. For local day-to-day workflow details beyond environment setup (running against a live cluster, iterating on chart installs, etc.), see the local development guide. Contribution conventions are documented separately in the contributing guidelines.
+## Where to Go Next
+
+For day-to-day local development workflow details (running the CLI against a local cluster, iterating on chart configuration, etc.), see the local development guide. For the broader architecture this CLI implements — command groups, domain services, and providers — see the architecture overview and the ecosystem/dependency diagrams. For contribution conventions, see the contributing guidelines.
+
+- Local development workflow: [`./local-development.md`](./local-development.md)
+- Architecture overview: [`../architecture/README.md`](../architecture/README.md)
+- Reference architecture (components, data flow, dependencies): [`../../reference/architecture/overview.md`](../../reference/architecture/overview.md)
+- Ecosystem graph (published artifacts, consumers): [`../../reference/architecture/ecosystem.md`](../../reference/architecture/ecosystem.md)
+- Architecture diagrams index: [`../../diagrams/architecture/README.md`](../../diagrams/architecture/README.md)
+- Contribution guidelines: [`../contributing/guidelines.md`](../contributing/guidelines.md)
+- Security practices: [`../security/README.md`](../security/README.md)
+- Testing practices: [`../testing/README.md`](../testing/README.md)
