@@ -37,7 +37,7 @@ func NewFileCleanup() *FileCleanup {
 // This method is used for error conditions and interruptions, so it always cleans up
 func (fc *FileCleanup) RestoreFiles(verbose bool) error {
 	// Force cleanup regardless of success-only mode for error/interruption scenarios
-	return fc.restoreFilesForced(verbose, false)
+	return fc.restoreFilesWithResult(verbose, false, true)
 }
 
 // RestoreFilesOnSuccess restores files only after successful completion
@@ -45,49 +45,16 @@ func (fc *FileCleanup) RestoreFilesOnSuccess(verbose bool) error {
 	return fc.RestoreFilesWithResult(verbose, true)
 }
 
-// restoreFilesForced restores files ignoring the success-only setting (used for errors/interruptions)
-func (fc *FileCleanup) restoreFilesForced(verbose bool, success bool) error {
-	if len(fc.backups) == 0 {
-		if verbose {
-			pterm.Info.Println("No files to restore")
-		}
-		return nil
-	}
-
-	restoredCount := 0
-	var restoreErrs []error
-	restoreFailed := make(map[string]bool)
-	for _, backup := range fc.backups {
-		if err := fc.restoreFile(backup, verbose); err != nil {
-			if verbose {
-				pterm.Warning.Printf("Failed to restore %s: %v\n", backup.OriginalPath, err)
-			}
-			restoreErrs = append(restoreErrs, fmt.Errorf("restoring %s: %w", backup.OriginalPath, err))
-			restoreFailed[backup.OriginalPath] = true
-			continue
-		}
-		restoredCount++
-	}
-
-	if restoredCount > 0 && verbose {
-		if success {
-			pterm.Success.Printf("✅ Cleaned up %d temporary file(s) after successful operation\n", restoredCount)
-		} else {
-			pterm.Success.Printf("✅ Cleaned up %d file(s) after interruption\n", restoredCount)
-		}
-	}
-
-	// Clean up physical backup files — except for failed restores, whose
-	// backup is the only remaining copy of the original.
-	fc.cleanupBackupFiles(verbose, restoreFailed)
-
-	// Restore failures must reach the caller: a swallowed error here means the
-	// user's file silently stays in its modified state.
-	return errors.Join(restoreErrs...)
-}
-
 // RestoreFilesWithResult restores files based on success state
 func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error {
+	return fc.restoreFilesWithResult(verbose, success, false)
+}
+
+// restoreFilesWithResult restores files based on success state. When force is
+// true, the success-only skip branch for temporary files is bypassed
+// (used for error/interruption scenarios where all files must be restored
+// regardless of the cleanupOnSuccess setting).
+func (fc *FileCleanup) restoreFilesWithResult(verbose bool, success bool, force bool) error {
 	if len(fc.backups) == 0 {
 		if verbose {
 			pterm.Info.Println("No files to restore")
@@ -100,7 +67,7 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 	restoreFailed := make(map[string]bool)
 	for _, backup := range fc.backups {
 		// For temporary files registered for success-only cleanup
-		if fc.cleanupOnSuccess && !backup.FileExisted && !success {
+		if !force && fc.cleanupOnSuccess && !backup.FileExisted && !success {
 			if verbose {
 				pterm.Info.Printf("⏳ Keeping temporary file until successful completion: %s\n", backup.OriginalPath)
 			}
@@ -121,6 +88,8 @@ func (fc *FileCleanup) RestoreFilesWithResult(verbose bool, success bool) error 
 	if restoredCount > 0 && verbose {
 		if success {
 			pterm.Success.Printf("✅ Cleaned up %d temporary file(s) after successful operation\n", restoredCount)
+		} else if force {
+			pterm.Success.Printf("✅ Cleaned up %d file(s) after interruption\n", restoredCount)
 		} else {
 			pterm.Success.Printf("✅ Cleaned up %d file(s) after failed operation\n", restoredCount)
 		}

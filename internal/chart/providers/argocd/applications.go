@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,13 +188,17 @@ func (m *Manager) initKubernetesClients() error {
 	// Uses custom HTTP transport to bypass TLS at the deepest level.
 	config = sharedconfig.ApplyInsecureTransport(config)
 
-	// On Windows, normalize the host to 127.0.0.1 if needed
+	// On Windows, normalize the host to 127.0.0.1 if needed. Parse the URL
+	// instead of splitting on ':' so a host without an explicit port (relying
+	// on the scheme's default port) is still rewritten correctly.
 	if runtime.GOOS == "windows" && strings.Contains(config.Host, "host.docker.internal") {
-		// Extract port and use 127.0.0.1
-		parts := strings.Split(config.Host, ":")
-		if len(parts) >= 3 {
-			port := parts[len(parts)-1]
-			config.Host = fmt.Sprintf("https://127.0.0.1:%s", port)
+		if parsedURL, perr := url.Parse(config.Host); perr == nil {
+			port := parsedURL.Port()
+			if port != "" {
+				config.Host = fmt.Sprintf("https://127.0.0.1:%s", port)
+			} else {
+				config.Host = "https://127.0.0.1"
+			}
 		}
 	}
 
@@ -628,3 +633,4 @@ func (m *Manager) parseApplications(ctx context.Context, verbose bool) ([]Applic
 
 	return apps, nil
 }
+
