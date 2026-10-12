@@ -112,9 +112,12 @@ func WriteModule(dir string, mainTF []byte, tfvars any) error {
 		return fmt.Errorf("encoding tfvars: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), mainTF, 0o600); err != nil {
-		return err
+		return fmt.Errorf("writing main.tf to %s: %w", dir, err)
 	}
-	return os.WriteFile(filepath.Join(dir, "terraform.tfvars.json"), varsJSON, 0o600)
+	if err := os.WriteFile(filepath.Join(dir, "terraform.tfvars.json"), varsJSON, 0o600); err != nil {
+		return fmt.Errorf("writing terraform.tfvars.json to %s: %w", dir, err)
+	}
+	return nil
 }
 
 // Scaffold creates the workspace directories and writes the generated root
@@ -130,9 +133,12 @@ func (w *Workspace) Scaffold(record Record, mainTF []byte, tfvars any) error {
 		return fmt.Errorf("refusing to scaffold over existing terraform state %s: resume or destroy that cluster first", statePath)
 	}
 	if err := WriteModule(w.TerraformDir(), mainTF, tfvars); err != nil {
-		return err
+		return fmt.Errorf("scaffolding terraform module in %s: %w", w.TerraformDir(), err)
 	}
-	return w.WriteRecord(record)
+	if err := w.WriteRecord(record); err != nil {
+		return fmt.Errorf("writing initial cluster record in %s: %w", w.dir, err)
+	}
+	return nil
 }
 
 // ReadRecord loads cluster.json; a missing record maps to fs.ErrNotExist.
@@ -154,29 +160,29 @@ func (w *Workspace) ReadRecord() (Record, error) {
 func (w *Workspace) WriteRecord(r Record) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encoding record for %s: %w", w.dir, err)
 	}
 	tmp, err := os.CreateTemp(w.dir, ".record-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("creating temp record file in %s: %w", w.dir, err)
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("writing temp record file %s: %w", tmpName, err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("closing temp record file %s: %w", tmpName, err)
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
 		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("setting permissions on temp record file %s: %w", tmpName, err)
 	}
 	if err := os.Rename(tmpName, filepath.Join(w.dir, recordFile)); err != nil {
 		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("renaming temp record file %s to %s: %w", tmpName, filepath.Join(w.dir, recordFile), err)
 	}
 	return nil
 }
