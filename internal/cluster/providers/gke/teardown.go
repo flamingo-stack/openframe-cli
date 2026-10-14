@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flamingo-stack/openframe-cli/internal/cluster/providers/shared"
 	tfengine "github.com/flamingo-stack/openframe-cli/internal/cluster/providers/terraform"
 	sharedUI "github.com/flamingo-stack/openframe-cli/internal/shared/ui"
 	"github.com/pterm/pterm"
@@ -16,19 +17,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// systemNamespaces and systemNamespacePrefixes are never deleted during
+// systemNamespacePrefixes lists the GKE-specific system namespace prefixes
+// (in addition to the shared "kube-" prefix) that are never deleted during
 // teardown. They are the cluster's own control-plane/system namespaces (torn
 // down with the cluster anyway) and — critically — kube-system hosts the GKE PD
 // CSI controller that must keep running to delete the Persistent Disks as their
 // PVCs go away.
-var systemNamespaces = map[string]struct{}{
-	"default":         {},
-	"kube-system":     {},
-	"kube-public":     {},
-	"kube-node-lease": {},
-}
-
-var systemNamespacePrefixes = []string{"kube-", "gke-", "gmp-"}
+var systemNamespacePrefixes = []string{"gke-", "gmp-"}
 
 const (
 	// diskDrainTimeout bounds how long a delete waits for PVC-backed disks to be
@@ -40,59 +35,6 @@ const (
 	// fails fast instead of hanging the whole delete.
 	kubeCallTimeout = 20 * time.Second
 )
-
-// isSystemNamespace reports whether ns is a cluster/system namespace that
-// teardown must never delete.
-func isSystemNamespace(ns string) bool {
-	if _, ok := systemNamespaces[ns]; ok {
-		return true
-	}
-	for _, p := range systemNamespacePrefixes {
-		if strings.HasPrefix(ns, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// appNamespacesToDelete returns the application namespaces (everything that is
-// not a system namespace), with argocd first. OpenFrame's stateful services
-// (Kafka, MongoDB, Cassandra, Pinot, … in the 'datasources' namespace) hold the
-// PVCs whose backing disks must be released; deleting by discovery rather than a
-// hardcoded list keeps this correct as the platform layout changes. argocd goes
-// first so its controller stops re-syncing before the workloads it manages are
-// deleted, otherwise self-heal could recreate a StatefulSet (and its PVC)
-// mid-teardown.
-func appNamespacesToDelete(all []string) []string {
-	var argocd []string
-	var rest []string
-	for _, ns := range all {
-		if isSystemNamespace(ns) {
-			continue
-		}
-		if ns == "argocd" {
-			argocd = append(argocd, ns)
-		} else {
-			rest = append(rest, ns)
-		}
-	}
-	return append(argocd, rest...)
-}
-
-// countDeletablePVs counts PersistentVolumes whose reclaim policy is Delete.
-// These are the volumes whose backing cloud disk the CSI driver removes once
-// their PVC is gone, so the release step waits for this to reach zero.
-// Retain-policy PVs are excluded on purpose — their disks are meant to survive,
-// and the post-destroy sweep reports (never silently drops) them.
-func countDeletablePVs(pvs []corev1.PersistentVolume) int {
-	var n int
-	for _, pv := range pvs {
-		if pv.Spec.PersistentVolumeReclaimPolicy == corev1.PersistentVolumeReclaimDelete {
-			n++
-		}
-	}
-	return n
-}
 
 // releaseWorkloadDisks deletes every application namespace on the cluster and
 // waits (bounded) for the Delete-reclaim PersistentVolumes to drain, so the GKE
@@ -130,7 +72,7 @@ func releaseWorkloadDisks(ctx context.Context, rec tfengine.Record) {
 	for _, ns := range nsList.Items {
 		names = append(names, ns.Name)
 	}
-	targets := appNamespacesToDelete(names)
+	targets := shared.AppNamespacesToDelete(names, systemNamespacePrefixes)
 	if len(targets) == 0 {
 		return // no application namespaces — nothing to release
 	}
@@ -155,7 +97,7 @@ func releaseWorkloadDisks(ctx context.Context, rec tfengine.Record) {
 		if err != nil {
 			return false, nil // transient — keep polling until the outer timeout
 		}
-		return countDeletablePVs(pvs.Items) == 0, nil
+		return shared.CountDeletablePVs(pvs.Items) == 0, nil
 	})
 }
 

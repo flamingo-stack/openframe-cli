@@ -2,6 +2,7 @@ package k3d
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
@@ -25,15 +26,15 @@ func TestK3dInstaller_GetInstallHelp(t *testing.T) {
 
 	switch runtime.GOOS {
 	case "darwin":
-		if !containsSubstring(help, "brew") && !containsSubstring(help, "https://") {
+		if !strings.Contains(help, "brew") && !strings.Contains(help, "https://") {
 			t.Errorf("macOS help should contain brew or https reference: %s", help)
 		}
 	case "linux":
-		if !containsSubstring(help, "curl") && !containsSubstring(help, "https://") {
+		if !strings.Contains(help, "curl") && !strings.Contains(help, "https://") {
 			t.Errorf("Linux help should contain curl or https reference: %s", help)
 		}
 	case "windows":
-		if !containsSubstring(help, "https://") && !containsSubstring(help, "chocolatey") {
+		if !strings.Contains(help, "https://") && !strings.Contains(help, "chocolatey") {
 			t.Errorf("Windows help should contain https or chocolatey reference: %s", help)
 		}
 	}
@@ -59,7 +60,7 @@ func TestK3dInstaller_Install(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when no install tooling is available")
 	}
-	if !containsSubstring(err.Error(), "Homebrew") {
+	if !strings.Contains(err.Error(), "Homebrew") {
 		t.Errorf("expected a Homebrew hint, got: %v", err)
 	}
 }
@@ -88,17 +89,4 @@ func TestVerifiedInstallHasPinnedAsset(t *testing.T) {
 	if _, ok := download.K3d.Asset(runtime.GOOS, runtime.GOARCH); !ok {
 		t.Errorf("no pinned k3d asset for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsSubstring(str, substr string) bool {
-	return len(str) >= len(substr) &&
-		func() bool {
-			for i := 0; i <= len(str)-len(substr); i++ {
-				if str[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}()
 }
