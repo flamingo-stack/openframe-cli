@@ -101,5 +101,6 @@ func refMismatchError(requestedRef string, m []refMismatch) error {
 		fmt.Fprintf(&b, "  - %s is on %q, not %q\n", x.App, x.Got, x.Want)
 	}
 	b.WriteString("Use a branch whose chart reads repository.branch, or pin these applications' targetRevision by hand.")
-	return fmt.Errorf("%s", b.String())
+	return selfDiagnosedError{msg: b.String()}
 }
+

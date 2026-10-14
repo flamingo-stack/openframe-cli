@@ -26,6 +26,13 @@ import (
 // out of a terraform 409 error so an orphan can be named concretely.
 var gcpResourcePathRE = regexp.MustCompile(`projects/[^'"\s]+`)
 
+// safeClusterNameRE matches GKE's own cluster-name constraints (lowercase
+// alphanumeric and hyphens, starting with a letter). Any name that fails this
+// check cannot be a valid GKE cluster name anyway, so rejecting it here also
+// guarantees it can never be used to inject syntax into a gcloud --filter
+// expression (spaces, "OR", parentheses, quotes, etc.).
+var safeClusterNameRE = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
+
 // orphanFromInterruptedCreate detects the specific failure where terraform
 // tries to create a resource that already exists in GCP (HTTP 409 /
 // alreadyExists). This is the signature of a create interrupted (SIGINT) after
@@ -153,7 +160,17 @@ func (p *Provider) ensureProjectServices(ctx context.Context, project string) er
 // line equal to the cluster name. Anything else — non-zero exit, empty or
 // unrelated output — is treated as "does not exist"; a genuinely broken API
 // call fails later with a clearer terraform error anyway.
+//
+// config.Name is rejected up front unless it matches GKE's own cluster-name
+// character set (lowercase alphanumeric and hyphens). This is not just
+// defense in depth: it also guarantees the name cannot contain characters
+// meaningful to gcloud's --filter expression syntax (spaces, "OR",
+// parentheses, quotes), so it cannot alter the filter's semantics and bypass
+// this collision guard.
 func (p *Provider) preflightNameCollision(ctx context.Context, config models.ClusterConfig) error {
+	if !safeClusterNameRE.MatchString(config.Name) {
+		return fmt.Errorf("cluster name %q is not a valid GKE cluster name (must match %s)", config.Name, safeClusterNameRE.String())
+	}
 	result, err := p.executor.Execute(ctx, "gcloud", "container", "clusters", "list",
 		"--project", config.Cloud.Project, "--filter=name="+config.Name, "--format=value(name)")
 	if err != nil || result == nil {

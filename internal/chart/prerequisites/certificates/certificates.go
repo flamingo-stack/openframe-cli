@@ -177,11 +177,11 @@ func (c *CertificateInstaller) generateCertificates() error {
 			if commandExists("apt-get") {
 				updateCmd := exec.Command("sudo", "apt-get", "update", "-y")
 				if err := updateCmd.Run(); err != nil {
-					pterm.Debug.Printf("apt-get update failed (certutil install is optional): %v\n", err)
+					pterm.Warning.Printf("apt-get update failed (certutil install is optional, NSS trust for Firefox/Chrome will not be configured): %v\n", err)
 				}
 				installCmd := exec.Command("sudo", "apt-get", "install", "-y", "libnss3-tools", "ca-certificates")
 				if err := installCmd.Run(); err != nil {
-					pterm.Debug.Printf("apt-get install of certutil/ca-certificates failed (optional): %v\n", err)
+					pterm.Warning.Printf("apt-get install of certutil/ca-certificates failed (optional, NSS trust for Firefox/Chrome will not be configured): %v\n", err)
 				}
 			}
 		}

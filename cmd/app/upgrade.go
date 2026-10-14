@@ -106,7 +106,9 @@ func runUpgradeChangeRef(cmd *cobra.Command, args []string, flags *InstallFlags,
 	// let the wait sync them once progress stalls instead of timing out (N3).
 	req.SyncStragglersOnStall = true
 
-	pterm.Info.Printf("Upgrading OpenFrame to ref %q\n", flags.resolvedRef())
+	if !flags.Silent {
+		pterm.Info.Printf("Upgrading OpenFrame to ref %q\n", flags.resolvedRef())
+	}
 	if err := services.InstallChartsWithConfigContext(cmd.Context(), req); err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
@@ -135,10 +137,12 @@ func runUpgradeForceSync(cmd *cobra.Command, args []string, flags *InstallFlags,
 		return sharedErrors.HandleGlobalError(previewOutOfSync(cmd.Context(), manager, verbose, prune), verbose)
 	}
 
-	if prune {
+	if prune && !flags.Silent {
 		pterm.Warning.Println("Refreshing and syncing with --prune: resources removed from git will be DELETED.")
 	}
-	pterm.Info.Println("Refreshing and syncing the OpenFrame platform...")
+	if !flags.Silent {
+		pterm.Info.Println("Refreshing and syncing the OpenFrame platform...")
+	}
 	if err := manager.RefreshAndSync(cmd.Context(), prune); err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
@@ -157,7 +161,9 @@ func runUpgradeForceSync(cmd *cobra.Command, args []string, flags *InstallFlags,
 	if err := manager.WaitForApplications(cmd.Context(), waitCfg); err != nil {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
-	pterm.Success.Println("OpenFrame platform re-synced.")
+	if !flags.Silent {
+		pterm.Success.Println("OpenFrame platform re-synced.")
+	}
 	return nil
 }
 
@@ -203,7 +209,16 @@ func resolveUpgradeTarget(cmd *cobra.Command, args []string, flags *InstallFlags
 		if err != nil {
 			return nil, "", fmt.Errorf("could not use context %q: %w", contextName, err)
 		}
-		return cfg, clusterNameArg(args), nil
+		// A positional cluster name, if also given, is only a label for this
+		// --context-resolved config (it does not re-resolve the context), so
+		// only use it when the two cannot conflict: no --context-derived name
+		// of its own exists. Otherwise prefer contextName itself so the
+		// ClusterName reported in wait/status output matches the config that
+		// was actually resolved.
+		if name := clusterNameArg(args); name != "" {
+			return cfg, name, nil
+		}
+		return cfg, contextName, nil
 	}
 
 	if name := clusterNameArg(args); name != "" {
