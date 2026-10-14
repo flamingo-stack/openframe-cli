@@ -51,7 +51,9 @@ func (a *AppOfApps) Install(ctx context.Context, config config.ChartInstallConfi
 	// wording read as if it reflected the cluster's current ref, which made a
 	// dry-run against a cluster on another ref confusing (verification report,
 	// minor observation).
-	pterm.Info.Printf("Deploying ref '%s'...\n", appConfig.GitHubBranch)
+	if !config.Silent {
+		pterm.Info.Printf("Deploying ref '%s'...\n", appConfig.GitHubBranch)
+	}
 
 	// Clone the repository to a temporary directory. On a cold cache this is a
 	// full clone over the network and used to run without any indicator.
@@ -120,3 +122,4 @@ func (a *AppOfApps) IsInstalled(ctx context.Context, namespace string) (bool, er
 func (a *AppOfApps) GetStatus(ctx context.Context, namespace string) (models.ChartInfo, error) {
 	return a.helmManager.GetChartStatus(ctx, "app-of-apps", namespace)
 }
+

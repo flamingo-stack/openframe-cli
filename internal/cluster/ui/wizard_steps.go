@@ -274,7 +274,7 @@ func (ws *WizardSteps) ConfirmConfiguration(config models.ClusterConfig) (bool, 
 			if i == 0 {
 				continue // Skip header
 			}
-			println(row[0] + ": " + row[1])
+			pterm.Info.Printf("%s: %s\n", row[0], row[1])
 		}
 	}
 
