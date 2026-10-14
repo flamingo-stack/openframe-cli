@@ -49,10 +49,10 @@ func runStatusCommand(cmd *cobra.Command, _ []string) error {
 		return sharedErrors.HandleGlobalError(err, verbose)
 	}
 	if (watch || interactive) && format != "text" {
-		return fmt.Errorf("--watch/--interactive are live terminal views and cannot combine with --output %s", format)
+		return sharedErrors.HandleGlobalError(fmt.Errorf("--watch/--interactive are live terminal views and cannot combine with --output %s", format), verbose)
 	}
 	if (watch || interactive) && (!ui.IsTerminal() || ui.IsPlain()) {
-		return fmt.Errorf("--watch/--interactive need an interactive terminal (and cannot combine with --plain)")
+		return sharedErrors.HandleGlobalError(fmt.Errorf("--watch/--interactive need an interactive terminal (and cannot combine with --plain)"), verbose)
 	}
 
 	cfg, err := resolveRestConfig(contextName)
