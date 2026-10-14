@@ -96,7 +96,7 @@ type Updater struct {
 	// through the progress callback: callers wire that to a spinner's
 	// UpdateText, so the next step overwrites the line within one frame — the
 	// "signature verification skipped" and "no rollback point" warnings were
-	// effectively invisible. nil → stderr.
+	// effectively invisible. nil → stderr via pterm.
 	Warn func(string)
 }
 
@@ -122,7 +122,7 @@ func (u Updater) warn(format string, args ...any) {
 		u.Warn(msg)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "WARNING: "+msg)
+	pterm.Warning.Println(msg)
 }
 
 // Check queries a release and compares it to the running version. When tag is
@@ -237,7 +237,10 @@ func swapExecutable(ctx context.Context, exePath, newPath string, log func(strin
 		return "", fmt.Errorf("backing up the current binary: %w", err)
 	}
 	if err := os.Rename(newPath, exePath); err != nil {
-		_ = os.Rename(backup, exePath) // roll back
+		if restoreErr := os.Rename(backup, exePath); restoreErr != nil {
+			return "", fmt.Errorf("installing the new binary failed (%w), AND restoring the original binary from backup also failed (%v); "+
+				"the executable at %s may be missing — the previous binary can still be recovered from %s", err, restoreErr, exePath, backup)
+		}
 		return "", fmt.Errorf("installing the new binary (rolled back): %w", err)
 	}
 	return backup, nil

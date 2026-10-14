@@ -176,10 +176,12 @@ func (d *EKSDiscoverer) Discover(ctx context.Context) (Result, error) {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %v", label, err))
 				continue
 			}
-			if arn != "" && seen[arn] {
-				continue // same cluster through another profile
+			if arn != "" {
+				if seen[arn] {
+					continue // same cluster through another profile
+				}
+				seen[arn] = true
 			}
-			seen[arn] = true
 			info.Context = matchEKSContext(contexts, arn, name)
 			res.Clusters = append(res.Clusters, info)
 		}

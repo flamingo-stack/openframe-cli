@@ -95,6 +95,7 @@ func (a *AwsInstaller) installLinux() error {
 		{"yum", []string{"yum", "install", "-y", "awscli2"}},
 		{"pacman", []string{"pacman", "-S", "--noconfirm", "aws-cli-v2"}},
 	}
+	var attemptErrs []string
 	for _, m := range managers {
 		if !commandExists(m.name) {
 			continue
@@ -108,7 +109,12 @@ func (a *AwsInstaller) installLinux() error {
 			// Older repos (e.g. Ubuntu 22.04) ship legacy v1, whose
 			// `aws eks get-token` emits an auth API kubectl no longer accepts.
 			return fmt.Errorf("the distro package installed AWS CLI v1, but the EKS flow needs v2. %s", a.GetInstallHelp())
+		} else {
+			attemptErrs = append(attemptErrs, fmt.Sprintf("%s: %v", m.name, err))
 		}
+	}
+	if len(attemptErrs) > 0 {
+		return fmt.Errorf("could not install the AWS CLI automatically (%s). %s", strings.Join(attemptErrs, "; "), a.GetInstallHelp())
 	}
 	return fmt.Errorf("could not install the AWS CLI automatically. %s", a.GetInstallHelp())
 }
