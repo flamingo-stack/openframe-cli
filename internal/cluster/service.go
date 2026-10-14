@@ -92,6 +92,11 @@ func shouldResumeCloudCreate(clusterType models.ClusterType, status string) bool
 // box used to hardcode a green "Running" and a "k3d-<name>" network line for
 // every type, which was wrong for cloud clusters.
 func (s *ClusterService) showExistingClusterReuse(name string, info models.ClusterInfo) {
+	// Suppress all decorative output for automation (e.g. --silent).
+	if s.suppressUI {
+		return
+	}
+
 	pterm.Warning.Printf("Cluster '%s' already exists!\n", pterm.Cyan(name))
 	pterm.DefaultBasicText.Println()
 
@@ -115,14 +120,11 @@ func (s *ClusterService) showExistingClusterReuse(name string, info models.Clust
 		WithTitleTopCenter().
 		Println(boxContent)
 
-	// Show what user can do (suppress for automation)
-	if !s.suppressUI {
-		pterm.DefaultBasicText.Println()
-		pterm.Info.Printf("What would you like to do?\n")
-		pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", name)
-		pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", name)
-		pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
-	}
+	pterm.DefaultBasicText.Println()
+	pterm.Info.Printf("What would you like to do?\n")
+	pterm.DefaultBasicText.Printf("  • Check status: openframe cluster status %s\n", name)
+	pterm.DefaultBasicText.Printf("  • Delete first: openframe cluster delete %s\n", name)
+	pterm.DefaultBasicText.Printf("  • Use different name: openframe cluster create my-new-cluster\n")
 }
 
 // CreateCluster handles cluster creation operations
@@ -247,10 +249,13 @@ func (s *ClusterService) ListClusters() ([]models.ClusterInfo, error) {
 	// k3d enumeration shells out to `k3d cluster list`, which needs a running
 	// Docker daemon. Treat its failure as best-effort (like the cloud loop
 	// below): a stopped Docker must not hide the cloud clusters. The warning
-	// goes to stderr so json/yaml output on stdout stays machine-clean.
+	// goes to stderr so json/yaml output on stdout stays machine-clean, and is
+	// suppressed entirely for automation (e.g. --silent).
 	clusters, err := s.manager.ListAllClusters(ctx)
 	if err != nil {
-		pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
+		if !s.suppressUI {
+			pterm.Warning.WithWriter(os.Stderr).Printf("local (k3d) clusters could not be listed (is Docker running?): %v\n", err)
+		}
 		clusters = nil
 	}
 	for _, cloud := range s.cloudProviders() {
