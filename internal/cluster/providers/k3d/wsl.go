@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/pterm/pterm"
 )
 
 // k3dClusterInfo represents the JSON structure returned by k3d cluster list
@@ -44,7 +46,7 @@ func (m *K3dManager) prepareKubeconfigDirectory(ctx context.Context) error {
 	}
 
 	if m.verbose {
-		fmt.Println("✓ Prepared kubeconfig directory")
+		pterm.Success.Println("Prepared kubeconfig directory")
 	}
 
 	return nil
@@ -64,7 +66,7 @@ func (m *K3dManager) fixKubeconfigPermissions(ctx context.Context) error {
 	}
 
 	if m.verbose {
-		fmt.Println("✓ Fixed kubeconfig permissions")
+		pterm.Success.Println("Fixed kubeconfig permissions")
 	}
 
 	return nil

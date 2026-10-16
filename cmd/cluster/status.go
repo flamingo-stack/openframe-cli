@@ -7,6 +7,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/ui"
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/utils"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 )
@@ -87,6 +88,10 @@ func runClusterStatus(cmd *cobra.Command, args []string) error {
 
 	switch output {
 	case "json", "yaml":
+		globalFlags := utils.GetGlobalFlags()
+		if globalFlags.Status.Detailed {
+			return fmt.Errorf("--output %s does not support --detailed; the machine-readable payload always reflects the non-detailed shape", output)
+		}
 		info, serr := service.GetClusterStatus(clusterName)
 		if serr != nil {
 			return fmt.Errorf("failed to get cluster status: %w", serr)
@@ -115,6 +120,6 @@ func printClusterStatus(info models.ClusterInfo, format string) error {
 	if err != nil {
 		return fmt.Errorf("encoding %s: %w", format, err)
 	}
-	fmt.Println(string(b))
+	pterm.DefaultBasicText.Println(string(b))
 	return nil
 }
