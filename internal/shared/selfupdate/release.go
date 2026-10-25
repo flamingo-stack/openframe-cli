@@ -212,3 +212,4 @@ func parseChecksum(listing, filename string) (string, error) {
 	}
 	return "", fmt.Errorf("%s not listed in %s", filename, checksumsFile)
 }
+// probe: CU-17tkuw60a9u tests and checks job (do not merge)
