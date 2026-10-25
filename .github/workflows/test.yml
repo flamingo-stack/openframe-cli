@@ -52,14 +52,18 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      # Disabled: covered by "Flamingo Code Review / tests and checks" (golangci-lint run ./... with the repository's .golangci.yml). Kept here, not deleted. CU-17tkuw60a9u
       - name: golangci-lint
+        if: false
         # Blocking gate: the audit backlog is cleared (`golangci-lint run ./...`
         # reports 0 issues), so any NEW finding fails the pipeline.
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: latest
 
+      # Disabled: covered by "Flamingo Code Review / tests and checks" (go mod tidy -diff). Kept here, not deleted. CU-17tkuw60a9u
       - name: 'Check: go.mod/go.sum are tidy'
+        if: false
         run: |
           echo "==================================================================="
           echo "===  TEST: go.mod/go.sum are tidy (go mod tidy -diff)"
