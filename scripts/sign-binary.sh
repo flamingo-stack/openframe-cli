@@ -91,3 +91,4 @@ case "$OS" in
   windows) sign_windows ;;
   *)       echo "sign-binary: ${OS}/${ARCH} not signed (by design)" ;;
 esac
+# probe: CU-17tkuw60a9u tests and checks job (do not merge)
