@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,10 +23,10 @@ func CopyPlanInputs(srcDir, dstDir string) error {
 			continue
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("reading %s: %w", name, err)
 		}
 		if err := os.WriteFile(filepath.Join(dstDir, name), data, 0o600); err != nil { // #nosec G703 -- dstDir is our own MkdirTemp dir; srcDir is CLI-managed under ~/.openframe
-			return err
+			return fmt.Errorf("writing %s: %w", name, err)
 		}
 	}
 	return nil

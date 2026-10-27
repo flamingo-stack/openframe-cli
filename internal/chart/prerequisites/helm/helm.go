@@ -10,6 +10,7 @@ import (
 	"github.com/flamingo-stack/openframe-cli/internal/platform"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/download"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/wsllauncher"
+	"github.com/pterm/pterm"
 )
 
 type HelmInstaller struct{}
@@ -89,18 +90,18 @@ func (h *HelmInstaller) installLinux() error {
 func (h *HelmInstaller) installVerified() error {
 	binDir, err := download.UserBinDir()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolving user bin dir: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Downloading verified helm %s...\n", download.Helm.Version)
+	pterm.Info.Printf("Downloading verified helm %s...\n", download.Helm.Version)
 	path, err := (download.Downloader{}).InstallPinnedTool(ctx, download.Helm, binDir)
 	if err != nil {
 		return fmt.Errorf("verified helm install failed: %w", err)
 	}
 	download.PrependToPath(binDir)
-	fmt.Printf("Installed verified helm %s to %s\n", download.Helm.Version, path)
+	pterm.Success.Printf("Installed verified helm %s to %s\n", download.Helm.Version, path)
 	return nil
 }
