@@ -167,7 +167,7 @@ func (d *EKSDiscoverer) Discover(ctx context.Context) (Result, error) {
 		}
 		var list eksListClusters
 		if err := json.Unmarshal([]byte(result.Stdout), &list); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: unparseable clusters list", label))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: unparseable clusters list: %v", label, err))
 			continue
 		}
 		for _, name := range list.Clusters {
