@@ -12,6 +12,7 @@ import (
 
 	"github.com/flamingo-stack/openframe-cli/internal/cluster/models"
 	"github.com/flamingo-stack/openframe-cli/internal/shared/executor"
+	"github.com/pterm/pterm"
 	"k8s.io/client-go/rest"
 )
 
@@ -68,7 +69,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	// This must be done before cluster creation as it affects the Docker/WSL host
 	if err := m.increaseInotifyLimits(ctx); err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not increase inotify limits: %v\n", err)
+			pterm.Warning.Printf("Could not increase inotify limits: %v\n", err)
 		}
 		// Don't fail - cluster might still work if limits are already sufficient
 	}
@@ -89,7 +90,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	// Prepare kubeconfig directory before k3d operations (Windows/WSL and Linux CI)
 	if err := m.prepareKubeconfigDirectory(ctx); err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not prepare kubeconfig directory: %v\n", err)
+			pterm.Warning.Printf("Could not prepare kubeconfig directory: %v\n", err)
 		}
 		// Don't fail - k3d will create it, but log the warning
 	}
@@ -97,7 +98,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	// Clean up any stale lock files that might prevent k3d from updating kubeconfig
 	if err := m.cleanupStaleLockFiles(ctx); err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not cleanup stale lock files: %v\n", err)
+			pterm.Warning.Printf("Could not cleanup stale lock files: %v\n", err)
 		}
 		// Don't fail - this is not critical
 	}
@@ -122,7 +123,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	// This is necessary because k3d creates ~/.kube/config with root ownership when run with sudo
 	if err := m.fixKubeconfigPermissions(ctx); err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not fix kubeconfig permissions: %v\n", err)
+			pterm.Warning.Printf("Could not fix kubeconfig permissions: %v\n", err)
 		}
 		// Don't fail - this is not critical, just log the warning
 	}
@@ -131,7 +132,7 @@ func (m *K3dManager) CreateCluster(ctx context.Context, config models.ClusterCon
 	// This is critical because lock files may have been created with root ownership
 	if err := m.cleanupStaleLockFiles(ctx); err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not cleanup lock files after permission fix: %v\n", err)
+			pterm.Warning.Printf("Could not cleanup lock files after permission fix: %v\n", err)
 		}
 		// Don't fail - this is not critical
 	}
@@ -233,7 +234,7 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 			id = strings.TrimSpace(id)
 			if id != "" {
 				if _, rerr := m.executor.Execute(ctx, "docker", "rm", "-f", id); rerr != nil && m.verbose {
-					fmt.Printf("Warning: failed to remove container %s: %v\n", id, rerr)
+					pterm.Warning.Printf("failed to remove container %s: %v\n", id, rerr)
 				}
 			}
 		}
@@ -241,7 +242,7 @@ func (m *K3dManager) forceCleanupDockerContainers(ctx context.Context, clusterNa
 
 	// Also remove the network
 	if _, nerr := m.executor.Execute(ctx, "docker", "network", "rm", fmt.Sprintf("k3d-%s", clusterName)); nerr != nil && m.verbose {
-		fmt.Printf("Warning: failed to remove k3d network for %s: %v\n", clusterName, nerr)
+		pterm.Warning.Printf("failed to remove k3d network for %s: %v\n", clusterName, nerr)
 	}
 
 	return nil
