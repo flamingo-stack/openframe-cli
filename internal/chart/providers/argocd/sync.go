@@ -217,7 +217,11 @@ func (m *Manager) syncChildApplications(ctx context.Context, prune bool) error {
 			if i == len(groups)-1 {
 				break
 			}
-			if notReady := m.waitGroupReady(ctx, g.names); len(notReady) > 0 {
+			notReady, gateFailed := m.waitGroupReady(ctx, g.names)
+			if gateFailed {
+				pterm.Warning.Printf("Sync group %d readiness could not be checked (status read failed); continuing with the next group without confirming convergence\n",
+					g.number)
+			} else if len(notReady) > 0 {
 				pterm.Warning.Printf("Sync group %d not fully ready after %s (waiting on: %s); continuing with the next group\n",
 					g.number, m.groupWaitBudget(), strings.Join(notReady, ", "))
 			}
@@ -245,7 +249,9 @@ type syncGroup struct {
 // label. When labeled is false the single returned group holds every child
 // (legacy manifests → caller keeps the ungated single-pass behaviour). A child
 // missing the label — or carrying a non-numeric value — on an otherwise
-// labeled install falls into defaultSyncGroup, mirroring the template default.
+// labeled install falls into defaultSyncGroup, mirroring the template default;
+// a non-numeric value is also warned about, since sync-group ordering is
+// safety-relevant (dependency layering).
 func groupChildren(children []unstructured.Unstructured) (groups []syncGroup, labeled bool) {
 	byNumber := map[int][]string{}
 	var all []string
@@ -257,6 +263,9 @@ func groupChildren(children []unstructured.Unstructured) (groups []syncGroup, la
 			labeled = true
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 				group = n
+			} else {
+				pterm.Warning.Printf("Application %s has an unparseable %s label value %q; defaulting to sync group %d\n",
+					name, SyncGroupLabel, v, defaultSyncGroup)
 			}
 		}
 		byNumber[group] = append(byNumber[group], name)
@@ -282,15 +291,18 @@ func (m *Manager) groupWaitBudget() time.Duration {
 
 // waitGroupReady polls until every named Application is Healthy+Synced or the
 // group budget elapses, returning the names still not ready (nil when the
-// group converged). Read errors abort the wait rather than block the rollout —
-// the gate is an ordering optimization, not a correctness barrier.
-func (m *Manager) waitGroupReady(ctx context.Context, names []string) []string {
+// group converged) and whether the wait was abandoned because status could not
+// be read. Read errors abort the wait rather than block the rollout — the gate
+// is an ordering optimization, not a correctness barrier — but the caller is
+// told the gate did not actually run, rather than being handed an empty
+// not-ready list that looks identical to full convergence.
+func (m *Manager) waitGroupReady(ctx context.Context, names []string) (notReady []string, readFailed bool) {
 	apps := m.dynamicClient.Resource(applicationGVR).Namespace(ArgoCDNamespace)
-	var notReady []string
 	pollUntil(ctx, m.groupWaitBudget(), func() bool {
 		list, err := apps.List(ctx, metav1.ListOptions{})
 		if err != nil {
 			notReady = nil // can't read — stop gating, let the sync proceed
+			readFailed = true
 			return true
 		}
 		status := make(map[string]bool, len(list.Items))
@@ -308,7 +320,7 @@ func (m *Manager) waitGroupReady(ctx context.Context, names []string) []string {
 		}
 		return len(notReady) == 0
 	})
-	return notReady
+	return notReady, readFailed
 }
 
 // SyncApplications triggers a sync (no prune) of the named applications —

@@ -470,7 +470,9 @@ func TestComprehensiveFunctionCoverage(t *testing.T) {
 				tc.setup()
 				err := ValidateGlobalFlags()
 				if tc.expectError {
-					// WrapCommandWithCommonSetup returns nil after handling the error to prevent double error messages
+					// WrapCommandWithCommonSetup returns a non-nil handled
+					// sentinel error after handling and displaying the error,
+					// so the process exits non-zero (it no longer returns nil).
 					assert.Nil(t, err)
 				} else {
 					assert.NoError(t, err)
@@ -527,3 +529,4 @@ func TestBoundaryConditions(t *testing.T) {
 	})
 
 }
+
