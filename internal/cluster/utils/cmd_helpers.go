@@ -31,6 +31,9 @@ func InitGlobalFlags() {
 
 // GetCommandService creates a command service for business logic operations
 func GetCommandService() *cluster.ClusterService {
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
+
 	// Use injected executor if available (for testing)
 	if globalFlags != nil && globalFlags.Executor != nil {
 		return cluster.NewClusterService(globalFlags.Executor)
@@ -47,6 +50,9 @@ func GetCommandService() *cluster.ClusterService {
 // injected test executor when present (hermetic cmd-layer tests), otherwise a
 // real one honoring the global --dry-run/--verbose flags.
 func CommandExecutor() executor.CommandExecutor {
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
+
 	if globalFlags != nil && globalFlags.Executor != nil {
 		return globalFlags.Executor
 	}
@@ -77,7 +83,9 @@ func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) 
 		// now yields a non-zero exit code (previously only string-matched errors
 		// did, so genuine failures could exit 0) — the root has SilenceErrors, so
 		// cobra will not re-print, and main.go skips the sentinel.
+		globalFlagsMutex.Lock()
 		verbose := globalFlags != nil && globalFlags.Global != nil && globalFlags.Global.Verbose
+		globalFlagsMutex.Unlock()
 		errors.NewErrorHandler(verbose).HandleError(err)
 		return &errors.AlreadyHandledError{OriginalError: err}
 	}
@@ -85,6 +93,8 @@ func WrapCommandWithCommonSetup(runFunc func(cmd *cobra.Command, args []string) 
 
 // SyncGlobalFlags synchronizes global flags to all command flags
 func SyncGlobalFlags() {
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
 	if globalFlags != nil && globalFlags.Global != nil {
 		globalFlags.SyncGlobalFlags()
 	}
@@ -92,6 +102,8 @@ func SyncGlobalFlags() {
 
 // ValidateGlobalFlags validates global flags
 func ValidateGlobalFlags() error {
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
 	if globalFlags != nil && globalFlags.Global != nil {
 		return models.ValidateGlobalFlags(globalFlags.Global)
 	}
@@ -101,6 +113,8 @@ func ValidateGlobalFlags() error {
 // GetGlobalFlags returns the current global flags instance
 func GetGlobalFlags() *cluster.FlagContainer {
 	InitGlobalFlags()
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
 	return globalFlags
 }
 
@@ -109,6 +123,8 @@ func GetGlobalFlags() *cluster.FlagContainer {
 // production never calls it.
 func SetTestExecutor(exec executor.CommandExecutor) {
 	InitGlobalFlags()
+	globalFlagsMutex.Lock()
+	defer globalFlagsMutex.Unlock()
 	globalFlags.Executor = exec
 }
 
@@ -118,3 +134,4 @@ func ResetGlobalFlags() {
 	defer globalFlagsMutex.Unlock()
 	globalFlags = nil
 }
+
