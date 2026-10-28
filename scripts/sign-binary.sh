@@ -73,15 +73,19 @@ sign_windows() {
     exit 1
   fi
 
-  java -jar "$JSIGN_JAR" \
+  # Pass the token via env var rather than --storepass on the CLI, so it is
+  # not visible to other processes on the runner via `ps`/`/proc/<pid>/cmdline`
+  # for the duration of the jsign process. jsign falls back to the
+  # JSIGN_STOREPASS environment variable when --storepass is omitted.
+  JSIGN_STOREPASS="$token" java -jar "$JSIGN_JAR" \
     --storetype TRUSTEDSIGNING \
     --keystore "${AZURE_SIGNING_ENDPOINT#https://}" \
-    --storepass "$token" \
     --alias "${AZURE_CODE_SIGNING_ACCOUNT_NAME}/${AZURE_CERTIFICATE_PROFILE_NAME}" \
     --alg SHA-256 \
     --tsaurl http://timestamp.acs.microsoft.com \
     --tsmode RFC3161 \
     "$BINARY"
+  unset token
 
   echo "sign-binary: ${OS}/${ARCH} Authenticode-signed via Azure Trusted Signing"
 }
@@ -91,3 +95,4 @@ case "$OS" in
   windows) sign_windows ;;
   *)       echo "sign-binary: ${OS}/${ARCH} not signed (by design)" ;;
 esac
+
