@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sharedconfig "github.com/flamingo-stack/openframe-cli/internal/shared/config"
+	"github.com/pterm/pterm"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -46,7 +47,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	}
 
 	if m.verbose {
-		fmt.Printf("✓ Switched kubectl context to %s\n", contextName)
+		pterm.Debug.Printfln("✓ Switched kubectl context to %s", contextName)
 	}
 
 	// Build rest.Config from the loaded Kubeconfig
@@ -66,7 +67,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	restConfig = sharedconfig.ApplyInsecureTLSConfig(restConfig)
 
 	if m.verbose {
-		fmt.Println("✓ TLS verification bypassed for local k3d cluster (Insecure=true, auth preserved)")
+		pterm.Debug.Println("✓ TLS verification bypassed for local k3d cluster (Insecure=true, auth preserved)")
 	}
 
 	// --- PHASE 2: Verify Network Connectivity and Update Endpoint ---
@@ -75,7 +76,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	host, port, err := extractHostPort(restConfig.Host)
 	if err != nil {
 		if m.verbose {
-			fmt.Printf("Warning: Could not extract host:port from %s: %v\n", restConfig.Host, err)
+			pterm.Debug.Printfln("Warning: Could not extract host:port from %s: %v", restConfig.Host, err)
 		}
 		// Default to 127.0.0.1:6550 for k3d
 		host = "127.0.0.1"
@@ -105,7 +106,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 	var lastErr error
 
 	if m.verbose {
-		fmt.Println("Waiting for cluster API and nodes to be reachable...")
+		pterm.Debug.Println("Waiting for cluster API and nodes to be reachable...")
 	}
 
 	for i := 0; i < maxRetries; i++ {
@@ -123,7 +124,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 			if isTemporaryError(err) {
 				lastErr = err
 				if m.verbose {
-					fmt.Printf("  Cluster not ready yet (attempt %d/%d): %v\n", i+1, maxRetries, err)
+					pterm.Debug.Printfln("  Cluster not ready yet (attempt %d/%d): %v", i+1, maxRetries, err)
 				}
 				time.Sleep(retryDelay)
 				continue
@@ -136,7 +137,7 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		if len(nodes.Items) == 0 {
 			lastErr = fmt.Errorf("no nodes found in cluster")
 			if m.verbose {
-				fmt.Printf("  No nodes found yet (attempt %d/%d), waiting...\n", i+1, maxRetries)
+				pterm.Debug.Printfln("  No nodes found yet (attempt %d/%d), waiting...", i+1, maxRetries)
 			}
 			time.Sleep(retryDelay)
 			continue
@@ -157,15 +158,15 @@ func (m *K3dManager) verifyClusterReachable(ctx context.Context, clusterName str
 		// Success condition: Nodes exist and at least one is ready
 		if readyCount > 0 {
 			if m.verbose {
-				fmt.Printf("  Found %d ready node(s) out of %d total\n", readyCount, len(nodes.Items))
-				fmt.Println("✓ Cluster API and nodes are ready.")
+				pterm.Debug.Printfln("  Found %d ready node(s) out of %d total", readyCount, len(nodes.Items))
+				pterm.Debug.Println("✓ Cluster API and nodes are ready.")
 			}
 			return restConfig, nil
 		}
 
 		lastErr = fmt.Errorf("no nodes in Ready state (found %d nodes, 0 ready)", len(nodes.Items))
 		if m.verbose {
-			fmt.Printf("  Nodes exist but none are Ready yet (attempt %d/%d), waiting...\n", i+1, maxRetries)
+			pterm.Debug.Printfln("  Nodes exist but none are Ready yet (attempt %d/%d), waiting...", i+1, maxRetries)
 		}
 		time.Sleep(retryDelay)
 	}
@@ -194,7 +195,7 @@ func (m *K3dManager) waitForTCPPort(ctx context.Context, host string, port strin
 	address := net.JoinHostPort(host, port)
 
 	if m.verbose {
-		fmt.Printf("Waiting for TCP port %s to be available...\n", address)
+		pterm.Debug.Printfln("Waiting for TCP port %s to be available...", address)
 	}
 
 	var lastErr error
@@ -212,14 +213,14 @@ func (m *K3dManager) waitForTCPPort(ctx context.Context, host string, port strin
 		if err == nil {
 			_ = conn.Close()
 			if m.verbose {
-				fmt.Printf("✓ TCP port %s is open\n", address)
+				pterm.Debug.Printfln("✓ TCP port %s is open", address)
 			}
 			return nil
 		}
 
 		lastErr = err
 		if m.verbose {
-			fmt.Printf("  TCP port not ready yet (attempt %d/%d): %v\n", i+1, maxRetries, err)
+			pterm.Debug.Printfln("  TCP port not ready yet (attempt %d/%d): %v", i+1, maxRetries, err)
 		}
 		time.Sleep(retryDelay)
 	}
@@ -301,7 +302,7 @@ func (m *K3dManager) cleanupStaleLockFiles(ctx context.Context) error {
 	}
 
 	if m.verbose {
-		fmt.Println("✓ Cleaned up stale kubeconfig lock files")
+		pterm.Debug.Println("✓ Cleaned up stale kubeconfig lock files")
 	}
 
 	return nil
