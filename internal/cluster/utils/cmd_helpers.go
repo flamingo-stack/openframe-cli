@@ -134,4 +134,3 @@ func ResetGlobalFlags() {
 	defer globalFlagsMutex.Unlock()
 	globalFlags = nil
 }
-
