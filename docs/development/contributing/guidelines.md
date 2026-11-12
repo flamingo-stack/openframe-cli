@@ -1,119 +1,157 @@
+
 # Contributing Guidelines
 
-OpenFrame CLI is the Go command-line tool that provisions Kubernetes clusters (local k3d, or cloud GKE/EKS via Terraform) and deploys the OpenFrame platform onto them via ArgoCD's app-of-apps pattern. This document covers the conventions, branch/PR process, commit format, and review checklist for contributing to this repository, `flamingo-stack/openframe-cli`.
+OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is the bootstrap and lifecycle-management tool for the [OpenFrame](https://openframe.ai) platform built by [Flamingo](https://flamingo.run). It is a standalone Go binary — per the organization's dependency graph (coverage: **full**), it has no recorded upstream dependencies on other managed repositories and no recorded downstream consumers. It deploys the platform whose source lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository, but that relationship is operational (cloning the app-of-apps chart at install time), not a code dependency. Keep that boundary in mind: changes here affect the CLI only, never the platform's own code.
 
-> This repository does not use GitHub Issues or GitHub Discussions. Questions, proposals, and coordination happen on the OpenMSP Slack community (https://www.openmsp.ai/, invite: https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA). Pull requests on `flamingo-stack/openframe-cli` (https://github.com/flamingo-stack/openframe-cli/pulls) remain the mechanism for proposing code changes.
+This guide covers code style, branching, commits, the PR process, and the review checklist enforced on this repository. For environment setup and local workflows, see [Local Development](../setup/local-development.md) and [Environment Setup](../setup/environment.md). For how the codebase is organized, see [Architecture Overview](../architecture/README.md) and the [reference architecture overview](../../reference/architecture/overview.md).
 
-For environment setup before you start contributing, see `../setup/environment.md` and `../setup/local-development.md`. For how the codebase is organized, see `../architecture/README.md` and `../../reference/architecture/overview.md`.
+> **No GitHub Issues or Discussions.** This project does not use GitHub Issues or GitHub Discussions for planning or support. Discussion happens on the OpenMSP Slack community: [openmsp.ai](https://www.openmsp.ai/) ([join the Slack](https://join.slack.com/t/openmsp/shared_invite/zt-36bl7mx0h-3~U2nFH6nqHqoTPXMaHEHA)). Pull requests on [flamingo-stack/openframe-cli](https://github.com/flamingo-stack/openframe-cli/pulls) are still the mechanism for proposing code changes.
 
-## Before you start
+## Table of Contents
 
-OpenFrame CLI has no `package.json` or `pom.xml` — it is a single Go module (`go.mod`) declaring `module github.com/flamingo-stack/openframe-cli`, built with Go 1.26 (toolchain `go1.26.5`, pinned because 1.26.0/1.26.1 have a Windows-amd64 GC crash). The ecosystem graph records no upstream dependencies on other internal repositories and no downstream consumers inside this organization's graph — the CLI is a terminal artifact whose dependencies are third-party Go modules (Cobra, client-go, pterm, huh/bubbletea, sigstore-go) and external CLI tools it shells out to (Docker, k3d, Helm, Terraform, gcloud, aws).
+- [Code Style and Conventions](#code-style-and-conventions)
+- [Branch Naming](#branch-naming)
+- [Commit Message Format](#commit-message-format)
+- [Pull Request Process](#pull-request-process)
+- [Review Checklist](#review-checklist)
 
-This is distinct from the main platform code, which lives in the separate **flamingo-stack/openframe-oss-tenant** repository (https://github.com/flamingo-stack/openframe-oss-tenant). Do not look for platform services inside this CLI repository's subdirectories — they are maintained externally.
+## Code Style and Conventions
 
-## Code style and conventions
-
-The repository enforces a set of structural and stylistic rules through `golangci-lint` (configured in `.golangci.yml`) and through the automated code reviewer's active rule catalog. Key conventions to follow:
+The repository is organized around `cmd/` (thin Cobra command wrappers) and `internal/` (domain services: `cluster`, `chart`, `app`, `prerequisites`, `k8s`, `shared`). New code should follow the same layering: a command under `cmd/` should delegate immediately into a service under `internal/`, never embed business logic itself.
 
 ### Linting
 
-`.golangci.yml` builds on golangci-lint v2's `standard` default set (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`) and additionally enables:
+Static analysis is the primary drift detector for this codebase. The configuration lives in `.golangci.yml` (golangci-lint v2). It enables the standard default set (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`) plus:
 
-- **`gosec`** — security findings (G204 subprocess construction, G304 file paths, G306 file permissions, G107 unverified downloads). The full default rule set is kept; nothing is excluded.
-- **`bodyclose`** — flags unclosed HTTP response bodies.
-- **`errorlint`** — flags non-wrapping error comparisons.
-- **`misspell`** — catches common misspellings.
+- `gosec` — security findings (subprocess construction, file paths, file permissions, unverified downloads). The full default rule set is kept; nothing is silently excluded.
+- `bodyclose`, `errorlint`, `misspell`
 
-`govet` runs with `enable-all: true`, excluding only `fieldalignment` (noise) and `shadow` (too noisy for this codebase currently). Test files (`_test.go`) are exempted from `errcheck` and `gosec`, since tests legitimately ignore errors and use weak fixtures. `max-issues-per-linter` and `max-same-issues` are both set to `0` — every finding is shown, nothing is silently capped.
+`govet` runs with `enable-all: true`, excluding only `fieldalignment` (noise) and `shadow` (too noisy for this codebase currently). Test files (`_test.go`) are exempted from `errcheck` and `gosec`, since they legitimately ignore errors and use weak fixtures. `issues.max-issues-per-linter` and `max-same-issues` are both set to `0` — every finding is shown, nothing is capped.
 
 Run the linter locally before opening a PR:
 
 ```bash
-golangci-lint run ./...
+golangci-lint run
 ```
 
-Also keep `go.mod`/`go.sum` tidy — CI checks this explicitly:
+### Conventions enforced by the active code-review rules
 
-```bash
-go mod tidy -diff
-```
+These are the organization's actively enforced rules for this repository (Go-specific); a PR that violates one of the `error`-severity rules will be flagged in review.
 
-### Structural conventions (enforced by the code reviewer)
+**Import aliasing.** When importing multiple packages from within `github.com/flamingo-stack/openframe-cli` that would otherwise collide on their last path segment (two packages both named `config`, `ui`, `errors`, etc.), each import must carry a camelCase alias encoding the owning subsystem — e.g. `sharedErrors`, `chartServices`, `uiCluster`, `utilTypes`. A bare last-segment name is only acceptable when there is no ambiguity in the file.
 
-These are active, judged rules specific to this repository. Follow them in any new or changed code:
+**Service construction.** Every service type is an unexported-fields struct exposed only through a `New<Name>` (or `New<Name>Service`) constructor returning a pointer — e.g. `Service`, `ClusterService`. Direct struct literals of service types must not appear outside the constructor. Business logic lives on methods of that struct; free functions are acceptable only as package-private helpers or thin delegators. The constructor must not accept configuration it can derive internally — external dependencies (executors, sub-services) are injected as constructor parameters.
 
-- **Command wiring**: every Cobra command group must be returned by a `Get<Group>Cmd()` (exported) or `get<Sub>Cmd()` (unexported, leaf) factory function. The root command (`cmd/root.go`) only calls these factories — it never constructs `cobra.Command` literals for subcommands directly. A command group that defines its own `PersistentPreRunE` must call `ui.ApplyGlobalOutputFlags(cmd)` as its first action, because Cobra only runs the closest parent's hook; omitting this silently breaks `--verbose` and `--silent` for that whole subtree.
-- **Service types**: every service type is an unexported struct, instantiated only through a `New<Name>` (or `New<Name>Service`) constructor returning a pointer. Struct fields stay unexported; business logic lives on methods of that struct, not free functions (free functions are acceptable only as package-private helpers or thin delegating wrappers). The constructor must not accept configuration it can derive internally — dependencies like executors or sub-services are injected as parameters.
-- **Import aliasing**: when importing multiple internal packages that collide on their last path segment (e.g. two packages both named `config`, `ui`, or `errors`), each import must carry a camelCase alias encoding the owning subsystem — e.g. `sharedErrors`, `chartServices`, `uiCluster`, `utilTypes`. Bare last-segment names are fine only when there's no ambiguity in the file.
-- **Error wrapping**: every error returned from a called function is wrapped with a short, lowercase context string via `fmt.Errorf("<context>: %w", err)`. Bare `return err` at a call boundary loses context and is not acceptable.
-- **Already-displayed errors**: when a command's `Execute` method calls `sharedErrors.HandleGlobalError` (which prints the error to the terminal), it must return that call's result, which is (or wraps) `*sharederrors.AlreadyHandledError`. `main` checks for this sentinel with `errors.As` and suppresses a second print. Any new error-display path that skips this sentinel will double-print on stderr.
-- **External command exit codes**: when an external binary (helm, k3d, terraform, etc.) fails, the error must be returned as, or be wrappable to, `*executor.CommandError`, which carries the original exit code. `main.exitCode()` unwraps this type to propagate the exact code to the OS — never collapse an external failure to a generic error string.
-- **User-facing output**: all user-visible output (progress, success, warnings, summaries) goes through `pterm` printers (`pterm.Success`, `pterm.Info`, `pterm.Warning`, `pterm.DefaultBasicText`, `pterm.DefaultBox`) or helpers in `internal/shared/ui`. Raw `fmt.Println`/`fmt.Printf` to stdout is forbidden for user-facing output because it bypasses `--silent`, `--plain`, and the pterm writer-redirection used in tests. `fmt.Fprintf(os.Stderr, ...)` is acceptable only in `main`'s error path and the post-command self-update notice.
-- **Root command flags**: the root `cobra.Command` in `cmd/root.go` must set `SilenceErrors: true` and `SilenceUsage: true`, since error display is handled explicitly by `sharedErrors.HandleGlobalError` and the `main` sentinel check.
-- **Version metadata**: build-time version variables (`version`, `commit`, `date`) in `cmd/root.go` must be package-level `string` vars, never struct fields — the linker's `-ldflags -X` flag can only target package-level string vars, and a struct field will silently no-op the injection, shipping every release binary reporting `"dev"` and disabling self-update.
-- **Spinners vs. cloud operations**: spinners are only started for k3d operations. Cloud operations (EKS/GKE) stream per-resource progress lines from the Terraform engine, and a spinner's in-place redraws would garble that output — use `pterm.Info.Printf` for cloud flows instead. Any method wrapping a potentially long-running provider call must guard on `config.Type == models.ClusterTypeK3d` before starting a spinner.
-- **Positional-argument safety**: commands that target a cluster via a flag (e.g. `--context`) must reject stray positional arguments using a validator like `noPositionalArgs` that names the correct flag in the error — otherwise Cobra's default `ArbitraryArgs` silently ignores them, which is especially dangerous for destructive commands like `app uninstall`.
-- **Production build flags**: all production builds use `CGO_ENABLED=0 go build -trimpath` for static, reproducible binaries. The only sanctioned exception is the race-detector target, which sets `CGO_ENABLED=1`.
-- **Integration tests**: any test creating real k3d clusters or running real external binaries must start with the `//go:build integration` build tag and live under `tests/integration/`. The Makefile's unit-test target excludes that directory; the integration target adds `-tags integration`.
+**Cobra command wiring.** Each command group is returned by a `Get<Group>Cmd()` factory function (exported) or `get<Sub>Cmd()` (unexported, for leaf commands). The root command (`cmd/root.go`) calls only these factories — it never constructs `cobra.Command` literals inline for subcommands. A command group that defines its own `PersistentPreRunE` must call `ui.ApplyGlobalOutputFlags(cmd)` as its first action, because Cobra only runs the closest parent's hook; omitting this silently breaks `--verbose` and `--silent` for that entire subtree.
 
-Two deterministic, organization-wide checks also apply to every PR:
+**Error handling.**
+- Errors already displayed to the user (via `sharedErrors.HandleGlobalError` or equivalent) must be returned as, or wrapping, `*sharederrors.AlreadyHandledError`. `main` checks for this sentinel with `errors.As` and suppresses re-printing; any display path that returns a plain error instead causes double-printing on stderr.
+- External-command failures (helm, k3d, terraform, etc.) must be returned as, or wrappable to, `*executor.CommandError`, carrying the original exit code, so `main`'s exit-code logic can propagate it to the OS exactly. Don't swallow or replace the exit code with a generic error string.
+- Root `cobra.Command` must set `SilenceErrors: true` and `SilenceUsage: true` — error display is handled explicitly by `sharedErrors.HandleGlobalError` and the `main` sentinel check.
 
-- **No duplicate definitions** (`DUP-001`, warn): a new or changed exported definition whose normalized structure matches an existing one elsewhere in the org is flagged. Reuse the existing definition, extract a shared helper, or explain in the PR why a second copy is needed.
-- **New exports need a test** (`TEST-001`, info): a new or changed exported definition that no test file references is flagged as shipped unverified.
+**Output.** All user-facing terminal output must go through pterm printers (`pterm.Success`, `pterm.Info`, `pterm.Warning`, `pterm.DefaultBasicText`, `pterm.DefaultBox`) or helpers in `internal/shared/ui` — never raw `fmt.Println`/`fmt.Printf` to stdout, since that bypasses `--silent`, `--plain`, and the writer-redirection tests rely on. `fmt.Fprintf(os.Stderr, ...)` is acceptable only in `main`'s error path and the post-command self-update notice.
 
-Before writing new code, you can check the live rule set that applies to the files you're touching — `get_code_rules` (scoped by `languages`/`files`) returns the active, enforced catalog rather than a static snapshot.
+**Spinners.** Spinners are only started for k3d operations. Cloud operations (EKS/GKE) stream per-resource progress lines from the Terraform engine, and a spinner's in-place redraws garble that output; use `pterm.Info.Printf` for cloud flows instead. The guard checked is `config.Type == models.ClusterTypeK3d` (and, where applicable, `!s.suppressUI`) before starting a spinner.
 
-## Branch naming and PR process
+**Build-time version metadata.** `version`, `commit`, and `date` in `cmd/root.go` must remain package-level `string` vars, never struct fields — the linker's `-ldflags -X` flag can only set package-level string variables, and a struct field would silently no-op the injection, shipping every release binary reporting `"dev"` and disabling self-update.
 
-- Default/base branches are `main` and `develop`. The test workflow (`.github/workflows/test.yml`) runs its cheap gates (lint, cross-compile matrix, unit tests) against pull requests targeting **either** branch, since `develop` is where most work actually merges. The heavier end-to-end lifecycle job (`test-cli`) is restricted to pull requests whose base is `main`, or pushes to `main`, to avoid monopolizing self-hosted runners on `develop` traffic.
-- Releases are cut **only** from `main` via a manual `workflow_dispatch` of `.github/workflows/release.yml` — there is no automatic release on push. The release workflow also has a hard guard that fails if dispatched from anything other than `refs/heads/main`, because the self-updater's cosign signing identity is pinned to `release.yml@refs/heads/main` (`internal/shared/selfupdate/cosign.go`). Do not rename `release.yml` or remove that guard.
-- Stale branches are swept automatically: `.github/workflows/cleanup.yml` deletes non-protected branches with no commits for 60 days, skipping `main`, `develop`, and any branch with an open pull request.
-- Open a pull request against `flamingo-stack/openframe-cli` (https://github.com/flamingo-stack/openframe-cli/pulls) once your branch is ready. CODEOWNERS (`.github/CODEOWNERS`) assigns `@flamingo-stack/devops-engineers` as the default reviewer for the whole repository, and specifically for `.github/CODEOWNERS` itself.
-- Before merge, CI (`.github/workflows/test.yml`) must pass: `lint` (golangci-lint + `go mod tidy -diff`), `release-build-matrix` (compile-only check across all six GoReleaser GOOS/GOARCH combinations: linux/amd64, linux/arm64, windows/amd64, windows/arm64, darwin/amd64, darwin/arm64), `unit` (unit tests on Linux/Windows/macOS, plus `-race` on Linux), and — for PRs targeting `main` from this repository itself — `test-cli` (full e2e cluster lifecycle across all three OSes).
-- An automated review pass is also available on pull requests via the `🦩 Flamingo Code Review` workflow (`.github/workflows/flamingo-code-review.yml`). It does not run automatically on every event: a draft or freshly opened PR gets an invitation comment, and a review is actually triggered by checking a box in that comment, adding the `flamingo-review` label, or commenting `@flamingo-review` (optionally `@flamingo-review full` to re-review the whole cumulative diff instead of just the incremental delta).
-- PRs are squash-merged. Because the PR **title** becomes the squashed commit subject that `semantic-release` analyzes on `main`, the title itself must be a valid Conventional Commit — this is enforced by `.github/workflows/pr-title.yml`, which lints the PR title with `commitlint` against `@commitlint/config-conventional` on every `opened`, `edited`, `reopened`, or `synchronize` event. A free-form title contributes nothing to any future release version bump and will fail this check.
+**Positional-argument guards.** Commands that target a cluster via a flag (e.g. `--context`) must explicitly reject positional arguments with a validator that names the correct flag in the error message, instead of relying on Cobra's default `ArbitraryArgs` (which silently ignores stray positional arguments — risky for a destructive command like uninstall).
 
-## Commit message format
+**Integration tests.** Any test that creates real k3d clusters, runs real external binaries, or otherwise needs Docker/k3d must carry `//go:build integration` as the first line of the file and live under `tests/integration/`. The `test-unit` Make target excludes `./tests/integration/...`; `test-integration` adds `-tags integration`.
 
-This repository follows **Conventional Commits**, enforced at the PR-title level (not necessarily on every individual commit, since the repo squash-merges). The format is:
+## Branch Naming
+
+The repository has no issue tracker to reference in branch names (see the Slack note above), so branch names should be short, descriptive, and scoped by purpose. Keep them lowercase, hyphen-separated, and prefixed by the kind of change, mirroring the Conventional Commit types used for commit messages:
 
 ```text
-type(scope)?: subject
+feat/cluster-status-json-output
+fix/eks-teardown-orphan-cleanup
+docs/contributing-guidelines
+chore/golangci-lint-bump
 ```
 
-Examples straight from the release workflow's own comments:
+Two automated workflows interact with branches directly, which shapes a few practical rules:
+
+- **Stale-branch cleanup.** `.github/workflows/cleanup.yml` runs daily and deletes branches with no commits in the last 60 days, except `main` and `develop`, and except any branch with an open pull request. Don't let a long-lived feature branch go quiet for two months if you intend to keep it — either push a commit or keep the PR open.
+- **Documentation branches.** Automated documentation PRs use the `code-documentation/` branch prefix (`DOCS_BRANCH_PREFIX` in `.github/workflows/code-documentation.yml`). Avoid naming a human-authored branch with that prefix.
+
+Releases are cut from `main` only — `.github/workflows/release.yml` is manually dispatched (`workflow_dispatch`) and explicitly guards that the triggering ref is `refs/heads/main`, because the self-update signing identity (`internal/shared/selfupdate/cosign.go`) is pinned to `release.yml@refs/heads/main`. Feature and fix branches should be based on, and merged back into, `main`.
+
+## Commit Message Format
+
+Versioning is fully automatic: `.releaserc.yml`-driven `semantic-release` computes the next version from **Conventional Commits** since the last release tag. There is no manual version bump — the commit messages *are* the release mechanism, so the format matters functionally, not just stylistically.
 
 ```text
-fix(k3d): tolerate KUBECONFIG lists
-feat!: drop v1 config
+<type>[optional scope]: <short summary>
+
+[optional body]
+
+[optional footer(s)]
 ```
 
-- `type` is one of the conventional types (`fix`, `feat`, `chore`, `docs`, `refactor`, `test`, `ci`, etc.) recognized by `@commitlint/config-conventional`.
-- `scope` is optional and parenthesized, naming the affected area (e.g. `k3d`, `cluster`, `app`).
-- A `!` after the type/scope (e.g. `feat!:`) marks a breaking change, which `semantic-release` maps to a major version bump.
-- `fix` commits map to a patch release, `feat` to a minor release, and a `BREAKING CHANGE` footer or `!` marker to a major release — this is how `.releaserc.yml`-driven `semantic-release` computes the next version with no manual version input.
+| Type | Effect on version | Use for |
+|---|---|---|
+| `fix:` | patch bump | Bug fixes |
+| `feat:` | minor bump | New functionality |
+| `feat!:` / footer `BREAKING CHANGE:` | major bump | Breaking changes |
+| `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `build:` | no release triggered alone | Non-release-worthy changes |
 
-Write your PR title (which becomes the merged commit subject) in this format from the start — the `pr-title.yml` workflow lints it on every title edit, and a non-conforming title fails the check.
+Examples, consistent with the style already used in this repository's own workflow history:
 
-## Review checklist
+```text
+fix: skip stale-branch deletion when the commit-date API call fails
 
-Before requesting review, and while reviewing someone else's PR against this repository, verify:
+feat(cluster): add --spot flag for EKS node groups
 
-- [ ] `golangci-lint run ./...` passes locally with no new findings (the gate is blocking in CI; the audit backlog is already clean, so any new issue fails the pipeline).
-- [ ] `go mod tidy -diff` reports no drift.
-- [ ] Unit tests pass: `make test-unit` covers the root, `cmd/`, `internal/`, and `tests/testutil/` packages. On Linux, also run the race-detector variant (`make test-race`).
-- [ ] Any new test that touches a real k3d cluster or shells out to external binaries is gated with `//go:build integration` and lives under `tests/integration/` — it must not run as part of `go test ./...` or `make test-unit`.
-- [ ] New or changed Cobra commands are wired through a `Get<Group>Cmd()`/`get<Sub>Cmd()` factory, not an inline `cobra.Command{}` literal, and any custom `PersistentPreRunE` calls `ui.ApplyGlobalOutputFlags(cmd)`.
-- [ ] New service logic lives on an unexported struct behind a `New<Name>Service` constructor, with dependencies injected rather than derived internally.
-- [ ] Errors are wrapped with context (`fmt.Errorf("...: %w", err)`) at each call boundary, exit codes from external tools are preserved via `*executor.CommandError`, and errors already shown to the user are returned as `*sharederrors.AlreadyHandledError` to avoid double-printing.
-- [ ] No raw `fmt.Println`/`fmt.Printf` was added for user-facing output — it goes through `pterm` or `internal/shared/ui`.
-- [ ] Spinners are used only for k3d flows, never for EKS/GKE operations that stream Terraform progress.
-- [ ] Commands that accept a `--context`/cluster-targeting flag reject stray positional arguments with a named-flag hint, especially for destructive commands.
-- [ ] The change does not duplicate an existing exported definition elsewhere in the organization's codebase (the `dup-scan` check); if a near-duplicate is intentional, the PR explains why.
-- [ ] Any new or changed exported definition is exercised by at least one test.
-- [ ] The PR title is a valid Conventional Commit (`type(scope)?: subject`), since it becomes the squashed commit message `semantic-release` reads from `main`.
-- [ ] If the change touches `.github/workflows/release.yml`, the `refs/heads/main`-only guard and the `release.yml` filename are both left intact — both are load-bearing for the self-update cosign trust chain.
-- [ ] If the change touches a GitHub Actions workflow that downloads a script from the Flamingo hub, the download goes through the shared `download_and_verify` function after `load_script_manifest`, verified against the hub's manifest digest — never a hash pinned in the workflow YAML, and never `curl | bash`.
+docs: add contributing guidelines covering branch and commit conventions
+```
 
-For guidance on setting up a local build and test environment before you start, see `../setup/environment.md` and `../setup/local-development.md`. For a deeper look at package responsibilities and how commands route into services and providers, see `../architecture/README.md` and `../../reference/architecture/overview.md`.
+A dispatch of the release workflow with no release-worthy commits since the last tag is a clean no-op — the plan job resolves no version and the release job is skipped. This means a PR consisting only of `docs:`/`chore:` commits will never trigger a version bump on its own, which is expected.
+
+## Pull Request Process
+
+1. **Branch from `main`**, following the naming convention above.
+2. **Make focused changes.** Keep a PR scoped to one logical change; this keeps the Conventional Commit history meaningful for `semantic-release` and keeps review tractable.
+3. **Run the local gates before pushing:**
+   ```bash
+   golangci-lint run
+   make test-unit
+   ```
+   `make test-unit` is the same gate the release workflow runs (`.github/workflows/release.yml`, job `release`, step "Gate: unit tests") before any tag is cut.
+4. **Open the PR** against `main` at [flamingo-stack/openframe-cli/pulls](https://github.com/flamingo-stack/openframe-cli/pulls). Use Conventional Commit style in the PR title as well, since squash-merge titles typically become the commit `semantic-release` reads.
+5. **Automated checks run on the PR:**
+   - `flamingo-code-graph`/`code-graph` (from `.github/workflows/code-documentation.yml`) re-indexes the code graph used by code review and documentation tooling. It runs on pushes to the default branch and on PR-related change-set events; it ignores `docs/**` and `**.md` changes.
+   - `🦩 Flamingo Code Review` (`.github/workflows/flamingo-code-review.yml`) reviews pull requests on demand. It does **not** run automatically the moment a PR is opened or marked ready — it posts an invitation comment with a checkbox instead. To trigger a review pass, either:
+     - Check the box in the bot's invitation/summary comment, or
+     - Comment `@flamingo-review` (incremental, since the last reviewed commit) or `@flamingo-review full` (re-reads the whole cumulative diff) on the PR, or
+     - Apply the `flamingo-review` label (consumed immediately by the `consume-review-request` job, so it can be re-applied to ask again), or
+     - Apply `flamingo-review-always` to subscribe the PR to review on every push.
+   - Review only runs on PRs from the same repository (not forks) due to the token/secrets model described in the workflow.
+6. **Address findings.** Review findings are keyed to the active rule catalog (see Review Checklist below); `error`-severity findings should be resolved before merge.
+7. **Merge.** Once checks pass and review findings are addressed, merge to `main`. A release is a separate, manual step — see `.github/workflows/release.yml` — dispatched when the team decides to ship, not automatically on merge.
+
+### CODEOWNERS
+
+Per `.github/CODEOWNERS`, `@flamingo-stack/devops-engineers` owns the entire repository (`*`) and specifically `.github/CODEOWNERS` itself. Expect review from that team on every PR.
+
+## Review Checklist
+
+Use this checklist before requesting review, mirroring the rules the automated reviewer enforces on this repository:
+
+- [ ] **Imports**: Any import of a same-module package whose last path segment collides with another import (e.g. two `config` packages) carries a disambiguating camelCase alias (`sharedErrors`, `chartServices`, etc.).
+- [ ] **Services**: New service types are unexported-field structs built only via a `New<Name>`/`New<Name>Service` constructor; no bare struct literals outside that constructor.
+- [ ] **Commands**: New Cobra subcommands are wired through a `Get<Group>Cmd()`/`get<Sub>Cmd()` factory, not constructed inline in the root command.
+- [ ] **PersistentPreRunE**: Any command group defining its own `PersistentPreRunE` calls `ui.ApplyGlobalOutputFlags(cmd)` first.
+- [ ] **Error display**: Errors already printed to the user are returned as/wrapped in `*sharederrors.AlreadyHandledError` so `main` does not double-print.
+- [ ] **Exit codes**: External-command failures preserve their original exit code via `*executor.CommandError`, not a generic error.
+- [ ] **Output**: User-facing output goes through `pterm` printers or `internal/shared/ui`, never raw `fmt.Println`/`fmt.Printf` to stdout.
+- [ ] **Spinners**: Spinners are gated to k3d operations only; cloud (EKS/GKE) flows use `pterm.Info.Printf` instead.
+- [ ] **Version vars**: `cmd/root.go`'s `version`/`commit`/`date` remain package-level string vars (never struct fields), so `-ldflags -X` injection keeps working.
+- [ ] **Positional args**: Flag-targeted commands (`--context`, etc.) reject stray positional arguments with a named-flag error rather than silently ignoring them.
+- [ ] **Integration tests**: Any test touching real Docker/k3d/external binaries has `//go:build integration` as its first line and lives under `tests/integration/`.
+- [ ] **Lint clean**: `golangci-lint run` passes with no new findings (gosec's default rule set is never silently excluded).
+- [ ] **Unit tests pass**: `make test-unit` passes locally — the same gate the release workflow enforces before tagging.
+- [ ] **Commit messages**: Follow Conventional Commits (`fix:`, `feat:`, `feat!:`/`BREAKING CHANGE:`, `docs:`, `chore:`, etc.) so `semantic-release` computes the correct next version.
+- [ ] **Scope boundary**: Changes stay within this repository's responsibility — cluster provisioning, platform install/upgrade/uninstall, prerequisite management, self-update — and do not attempt to modify the platform code that lives in the separate `flamingo-stack/openframe-oss-tenant` repository.
+
+For the full, current rule catalog (including severities and exact file-path scoping), consult the organization's active code-review rules for this repository; the points above reflect the Go-language rules in force at the time of writing.

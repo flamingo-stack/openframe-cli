@@ -1,52 +1,44 @@
 ## Local Development
 
-This guide covers cloning and building the OpenFrame CLI, running it against a local cluster, iterating with fast rebuild/watch loops, and configuring a debugger — all from the Go toolchain and `Makefile` in this repository.
+This guide covers cloning OpenFrame CLI, building and running it locally, iterating with watch/rebuild workflows, and debugging the Go binary. OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is a standalone Go service — a bootstrap and lifecycle-management tool for the OpenFrame platform. It is not a library imported by other repositories: per the organization's dependency graph (coverage: full), it has no recorded upstream dependencies on other managed repositories and no recorded downstream consumers. It depends only on third-party Go modules and shells out to external CLI tools (Docker, k3d, Helm, Terraform, gcloud, aws).
 
-OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is a Go `service`-role artifact with no recorded upstream dependencies on other repositories in the organization's graph and no recorded downstream consumers — per the ecosystem graph it is a leaf/terminal artifact whose dependencies are exclusively third-party Go modules and external CLI tools (Docker, k3d, Helm, Terraform, gcloud, aws). This document only covers developing the CLI binary itself. It does not cover the OpenFrame platform (ArgoCD, backing services) that the CLI deploys — that lives in the separate **flamingo-stack/openframe-oss-tenant** repository.
-
-> **Note:** This repository has no `package.json`, no Docker Compose files, and no CLI-bootstrap scaffolding of its own — it ships one Go module built with a standard `Makefile`. "Running locally" here means running the compiled `openframe` binary against a Kubernetes cluster, not running a web server.
+> The platform this CLI deploys lives in a separate repository, [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant). This document covers only the `openframe-cli` codebase itself — cloning its app-of-apps chart at install time is a runtime operation (see `internal/chart/models/repos.go`'s `RepoOSSTenant` constant), not a local development dependency.
 
 ### Prerequisites
 
-Before cloning, confirm your machine meets the hardware and tooling baseline described in `../../getting-started/prerequisites.md`. At minimum, developing this CLI requires:
+Before working on this repository, see `../../getting-started/prerequisites.md` for the full hardware and tool requirements. In short, you need:
 
-- **Go** — the version pinned in `go.mod` (`go 1.26.0`, toolchain `go1.26.5`). The toolchain directive matters: `go.mod` pins `go1.26.5` specifically because Go `1.26.0`/`1.26.1` crash intermittently on `windows-amd64` during GC stack scanning; running `go build`/`go test` with an unpinned toolchain on Windows risks hitting that bug.
-- **golangci-lint** — only needed for `make lint`.
-- **Docker** and **k3d** — only needed if you intend to actually create a local cluster and install the OpenFrame platform (`openframe bootstrap` / `openframe cluster create`), not to build or unit-test the CLI itself.
-- **Terraform** — only needed for the `test-tfvalidate` target or for exercising the EKS/GKE cloud-provider code paths.
+- **Go 1.26.5** — the `go.mod` pins `go 1.26.0` with `toolchain go1.26.5`. The toolchain pin matters: Go 1.26.0/1.26.1 crash intermittently on windows-amd64 during GC stack scanning, and 1.26.5 is the first release with the fix. Let `go` resolve the toolchain automatically rather than overriding it.
+- **Docker** — required to run local k3d clusters exercised by `openframe cluster create` and the integration tests.
+- **git** — for cloning and for the CLI's own use of `go-git` when fetching the app-of-apps chart repository.
+- Optional, only if you touch specific areas: `golangci-lint` (lint target), `k3d`/`helm`/`terraform` (integration tests and `test-tfvalidate`), `gcloud`/`aws` CLIs (cloud provider code paths).
 
 ### Clone and setup
 
-Clone the repository from its canonical location:
+Clone the fork, not an upstream or placeholder URL:
 
 ```bash
 git clone https://github.com/flamingo-stack/openframe-cli.git
 cd openframe-cli
 ```
 
-Verify your module graph is tidy and fetch dependencies (this also happens implicitly on first build/test):
+Download the module dependencies (this also respects the `toolchain` directive in `go.mod` and fetches Go 1.26.5 if your local toolchain is older):
 
 ```bash
 go mod download
+```
+
+Verify `go.mod`/`go.sum` are tidy before you start (the same check CI performs):
+
+```bash
 make tidy
 ```
 
-`make tidy` runs `go mod tidy -diff`, which fails if running `go mod tidy` for real would change `go.mod`/`go.sum` — use it as a pre-commit sanity check rather than a command that mutates files.
-
-Format and vet the source before making changes:
-
-```bash
-make fmt   # gofmt -l -w . — formats Go source in place
-make vet   # go vet ./...
-```
-
-If `golangci-lint` is installed, run the full lint suite (govet, staticcheck, errcheck, gosec, ineffassign):
-
-```bash
-make lint
-```
+`make tidy` runs `go mod tidy -diff` and fails if `go mod tidy` would change the files — use it after adding or removing imports.
 
 ### Building
+
+The `Makefile` is the primary entry point for local builds. It defines a `CGO_ENABLED=0 go build -trimpath` base (`GO_BUILD`), matching the reproducible release build in the project's GoReleaser configuration.
 
 Build a binary for your current platform into `build/`:
 
@@ -54,33 +46,25 @@ Build a binary for your current platform into `build/`:
 make build
 ```
 
-This resolves `GOOS`/`GOARCH` via `go env` and runs:
+This produces `build/openframe-$(GOOS)-$(GOARCH)` (with a `.exe` suffix added automatically on Windows), where `GOOS`/`GOARCH` are detected from `go env`.
 
-```bash
-CGO_ENABLED=0 go build -trimpath -o build/openframe-<os>-<arch> .
-```
-
-`CGO_ENABLED=0` and `-trimpath` are not incidental — they are required for every production build in this repository (matching the release pipeline in `.goreleaser.yml`), so local builds already mirror what ships. `CGO_ENABLED=0` produces a fully static binary that runs without a libc on the target, and `-trimpath` strips the build machine's absolute paths for reproducibility.
-
-The only sanctioned exception is the race-detector test target, which explicitly re-enables cgo (see Testing, below).
-
-To cross-compile every release platform at once (useful before verifying platform-specific behavior, e.g. the WSL launcher or Windows signing):
+To cross-compile every release platform at once (matches `.goreleaser.yml`):
 
 ```bash
 make build-all
 ```
 
-This produces `build/openframe-linux-amd64`, `build/openframe-linux-arm64`, `build/openframe-darwin-amd64`, `build/openframe-darwin-arm64`, `build/openframe-windows-amd64.exe`, and `build/openframe-windows-arm64.exe`.
+This builds `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, and `windows/arm64` binaries into `build/`.
 
-Clean build artifacts with:
+Remove build artifacts when you need a clean slate:
 
 ```bash
 make clean
 ```
 
-This only removes the platform-suffixed binaries (`openframe-linux-*`, `openframe-darwin-*`, `openframe-windows-*`, and anything under `build/`) — it deliberately does not use a broad `openframe-*` glob, since that previously also matched and deleted tracked files like `openframe-helm-values.example.yaml`.
+`make clean` is scoped to only match platform-suffixed binaries (`openframe-linux-*`, `openframe-darwin-*`, `openframe-windows-*`, plus the bare `openframe` and anything already in `build/`), so it does not touch other tracked files such as example Helm values files.
 
-List all available Make targets with inline descriptions:
+List every available target with descriptions:
 
 ```bash
 make help
@@ -88,113 +72,113 @@ make help
 
 ### Running locally
 
-Once built, invoke the binary directly from `build/` (or `go run .` for a quick one-off without a persisted binary):
+Once built, run the binary directly:
 
 ```bash
-# Build then run
-make build
-./build/openframe-<os>-<arch> --help
+./build/openframe-$(go env GOOS)-$(go env GOARCH) --help
+```
 
-# Or run without building a persisted binary
+Or run straight from source without a separate build step, which is the fastest loop while iterating on command logic:
+
+```bash
 go run . --help
+go run . bootstrap my-cluster --non-interactive
 ```
 
-The root command and its subcommand groups are wired in `cmd/root.go`, with each command group under its own `cmd/` subpackage: `cmd/bootstrap`, `cmd/cluster`, `cmd/app`, `cmd/prerequisites`, `cmd/update`.
+`main.go` is the process entrypoint. It calls `cmd.Execute()` (the root Cobra command defined in `cmd/root.go`) and, on error, decides what to print and what exit code to return:
 
-Common local workflows while developing:
+- If the returned error wraps `sharederrors.AlreadyHandledError`, `main` does **not** re-print it — the message was already shown to the user by the command's own error handler (see `internal/shared/errors/`).
+- Otherwise it prints `Error: <err>` to stderr.
+- `exitCode(err)` preserves a failed external command's real exit code via `executor.CommandError` (when it is a valid, non-zero code under 256), so automation wrapping the CLI sees the same exit code a raw `helm`/`k3d`/`terraform` invocation would have produced, not a generic `1`.
+
+Representative top-level commands you can exercise locally (see `docs/reference/architecture/overview.md` for the full architecture and command table):
 
 ```bash
-# Check which prerequisite tools (Docker, k3d, helm, etc.) are present
-go run . prerequisites check
-
-# Create a local k3d cluster and install the platform in one step
-go run . bootstrap
-
-# Or do it in two steps
-go run . cluster create
-go run . app install
-
-# Inspect what you just created
-go run . cluster status
-go run . app status
+openframe bootstrap [cluster-name]         # create a local k3d cluster + install the platform
+openframe cluster create [NAME]            # create a k3d/GKE/EKS cluster
+openframe cluster status [NAME]            # cluster health/resource info
+openframe app install [cluster-name]       # install ArgoCD + app-of-apps onto a cluster
+openframe app status [--watch|--interactive]
+openframe prerequisites check|install
 ```
 
-Every command respects global `--silent`, `--verbose`, and `--plain` flags, plus a `--output json|yaml` flag on read-only subcommands (`app status`, `app access`) for machine-readable output during scripting. `cmd/app/app.go`'s `PersistentPreRunE` shows the CLI logo and current kube-context before most `app` subcommands run, except when machine-readable output is requested — that path is kept clean for scripts.
+For the k3d-based local flow end-to-end (creating a cluster and installing the platform with this CLI), see `../../getting-started/how-to/create-a-kubernetes-cluster-with-openframe-cli.md` and `../../getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md`.
 
-For full walkthroughs of cluster creation, platform installation, status checks, and teardown, see `../../getting-started/how-to/create-a-kubernetes-cluster-with-openframe-cli.md`, `../../getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md`, `../../getting-started/how-to/check-the-status-of-your-openframe-cluster-and-app.md`, and `../../getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md`.
+> **Note on scope:** commands like `cluster create` for cloud types (EKS/GKE) shell out to Terraform and cloud CLIs, and will attempt to provision real, billed infrastructure. For local development, prefer the k3d path (`openframe cluster create` with the default/`k3d` type, or `openframe bootstrap`) so you are not charged for cloud resources while iterating.
 
 ### Hot reload / watch mode
 
-This repository ships no file-watcher or hot-reload tooling (no `air`, no `nodemon`-equivalent, no watch target in the `Makefile`). The practical "watch mode" loop for Go CLI development here is:
+OpenFrame CLI is a Go CLI binary, not a web server with a dev server — there is no bundler-style hot-module-reload here. The fastest edit-run loop the Makefile and `go` toolchain give you is:
 
 ```bash
-go run . <command> --verbose
+go run . <subcommand> [flags]
 ```
 
-`go run .` recompiles the module from source on every invocation, so there is no separate "rebuild" step to remember — edit a file under `cmd/` or `internal/`, then re-run the same `go run . ...` command to pick up the change immediately. This is the fastest iteration loop for exercising a single subcommand's flags or output formatting.
+`go run .` recompiles on every invocation, so each change to `cmd/` or `internal/` is picked up immediately without a separate `make build` step. This is the recommended loop for iterating on a single command's logic (flag parsing, prompts, output formatting).
 
-For iterating on logic covered by unit tests, re-run the relevant package's tests after each change rather than exercising the full CLI:
+For a tighter loop while touching a specific package, run only that package's tests instead of the whole binary — see `make test-unit` below, and scope it with `go test ./internal/chart/services/...` (or any other package path from the source tree) while developing.
+
+There is no file-watcher integration (e.g. `gow`, `air`, `reflex`) configured in this repository's `Makefile` or `go.mod`; if you want automatic re-run on save, wrap `go run .` or `make test-unit` in your own watch loop using whichever tool you already have installed — nothing here requires a specific one.
+
+### Testing during development
+
+The `Makefile` defines several test targets with different scopes and costs — understanding the split matters for fast local iteration:
 
 ```bash
-# Fast inner loop: an iterative unit-test suite is the closest the project
-# comes to continuous feedback while editing.
-go test -count=1 ./internal/chart/... 
-go test -count=1 ./internal/cluster/...
+make test-unit        # fast: root + cmd/... + internal/... + tests/testutil/... + tests/scripts/...
+make test-race        # same unit set, with -race (needs CGO_ENABLED=1)
+make test-integration # slow: real k3d clusters via docker + k3d (tests/integration/...)
+make test-tfvalidate  # slow: terraform init + validate against generated EKS/GKE templates (needs network)
+make test             # test-unit + test-integration
 ```
 
-`make test-unit` (described under Testing) runs the whole unit-test package set at once and is a good checkpoint before committing, but for the tightest edit/test loop target individual packages directly with `go test`.
+`test-unit` runs against the explicit package set `. ./cmd/... ./internal/... ./tests/testutil/... ./tests/scripts/...` — this deliberately includes the root package (whose `main_test.go` is the only place exit-code fidelity is tested) and excludes `./tests/integration/...`, which creates real clusters and must never run by accident from a bare `go test ./...`.
 
-> Since the CLI shells out to real tools (Docker, k3d, Helm, Terraform, cloud CLIs) via the `CommandExecutor` abstraction in `internal/shared/executor`, most of the "watch" value comes from unit tests that use the mock executor (`internal/shared/executor/mock.go`) rather than from re-running `go run .` against a live cluster on every keystroke.
+`test-integration` and `test-tfvalidate` are opt-in via Go build tags (`integration`, `tfvalidate` respectively) for exactly this reason — they are not part of the default test run. The integration harness builds its own CLI binary (see `tests/integration/common/cli_runner.go`), so `make build` is not a prerequisite for `make test-integration`, but Docker and k3d must be installed.
 
-### Testing
-
-The `Makefile` defines several test targets, each scoped differently:
+Other code-quality targets:
 
 ```bash
-make test-unit         # Unit tests only (fast, no external services)
-make test-race         # Unit tests with the race detector (needs CGO_ENABLED=1)
-make test-integration  # Real k3d clusters — needs docker + k3d installed
-make test-tfvalidate   # Validates generated Terraform templates — needs terraform + network
-make test              # test-unit + test-integration together
+make lint   # golangci-lint run ./... (govet, staticcheck, errcheck, gosec, ineffassign)
+make fmt    # gofmt -l -w . — formats in place
+make vet    # go vet ./...
 ```
 
-`test-unit` runs against the package set `. ./cmd/... ./internal/... ./tests/testutil/... ./tests/scripts/...` — this deliberately includes the root package (`main_test.go`, which is the only place exit-code fidelity is tested) and `tests/testutil`, both of which a bare `go test ./cmd/... ./internal/...` would silently skip. It deliberately excludes `./tests/integration/...`.
-
-`test-race` re-enables cgo (`CGO_ENABLED=1 go test -race -count=1 ...`) — the one sanctioned exception to the CGO_ENABLED=0 rule that otherwise governs all builds in this repository.
-
-`test-integration` is opt-in via the `integration` build tag and creates **real k3d clusters**, running a full bootstrap end-to-end. It builds its own CLI binary internally (see `tests/integration/common/cli_runner.go`), so `make build` is not a prerequisite, but Docker and k3d must be installed and will incur real local resource usage.
-
-`test-tfvalidate` is opt-in via the `tfvalidate` build tag and runs a real `terraform init` (downloading the pinned EKS/GKE modules and providers over the network) followed by `terraform validate` against the generated root modules in `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf`. No cloud credentials are required, but it does need network access and the `terraform` binary.
-
-Testing conventions, patterns, and shared assertions are covered in `../testing/README.md`.
+`make lint` requires `golangci-lint` to be installed locally; the Makefile fails fast with an install link if it is missing.
 
 ### Debug configuration
 
-There is no committed IDE launch configuration (no `.vscode/launch.json` or similar) in this repository, so debugging relies on the Go toolchain directly plus the CLI's own verbosity flags.
+There is no committed IDE launch configuration (for example, no VS Code `.vscode/launch.json` or GoLand run configuration) in this repository's file tree — debugging is driven directly through the `go` toolchain and standard Go tooling.
 
-**Verbose output first.** Before reaching for a debugger, most issues in this CLI are diagnosable with the built-in `--verbose` flag, which most command groups thread through to surface detailed logs — including ArgoCD sync progress during `app install`/`app upgrade`/`bootstrap`:
-
-```bash
-go run . bootstrap --verbose
-go run . app status --watch --verbose
-```
-
-**Debugging with Delve.** Since this is a standard Cobra-based Go binary, attach [Delve](https://github.com/go-delve/delve) directly to a `go run`/`go build` invocation or to the compiled binary in `build/`:
+**Debugging with `delve`:** since this is a plain Go module (no special build constraints beyond the opt-in test tags), you can attach `dlv` directly to any command:
 
 ```bash
-# Debug a specific subcommand invocation
-dlv debug . -- bootstrap --non-interactive
-
-# Debug an already-built binary
-dlv exec ./build/openframe-<os>-<arch> -- cluster status
+dlv debug . -- bootstrap my-cluster --non-interactive
+dlv debug . -- app install --context k3d-my-cluster
+dlv test ./internal/chart/services/... -- -run TestInstallCharts
 ```
 
-Because every external command this CLI shells out to (Docker, k3d, Helm, Terraform, cloud CLIs) goes through the `CommandExecutor` abstraction in `internal/shared/executor`, you can set breakpoints at that boundary (e.g. in the executor's `Execute` method) to inspect exactly which command, arguments, and environment are about to run before they hit a real subprocess — this is often more useful than stepping through the higher-level orchestration code in `internal/cluster` or `internal/chart`.
+**Verbose/debug output built into the CLI itself:** most commands accept a root-level `-v`/`--verbose` flag that surfaces detailed logs, including ArgoCD sync progress during install/upgrade/bootstrap flows:
 
-**Debugging without live infrastructure.** `internal/shared/executor/mock.go` provides a mock `CommandExecutor` used throughout the unit-test suite. When debugging logic that would otherwise require a real cluster, cloud credentials, or Docker, write or run a focused unit test that injects the mock executor instead of attaching a debugger to a live `cluster create`/`app install` run — it is both faster and avoids provisioning real (potentially billed, for GKE/EKS) resources while you iterate.
+```bash
+openframe bootstrap --verbose
+openframe app install --non-interactive --verbose
+```
 
-**Exit codes matter for debugging automation failures.** `main.go`'s `exitCode()` function unwraps `*executor.CommandError` to propagate a failed external command's real exit code (when it is a valid, non-zero code under 256) rather than collapsing every failure to a generic `1`. Errors that have already been printed to the user carry the `*sharederrors.AlreadyHandledError` sentinel (checked via `errors.As` in `main.go`) so they are not printed twice — if you are debugging "why did this error print twice" or "why did this print nothing", check whether the failing code path is using `sharedErrors.HandleGlobalError` correctly before it returns.
+Several command groups also apply their own output-mode contract on top of `--verbose`:
+
+- `--silent` suppresses interactive/decorative output.
+- `--plain` disables ANSI/color rendering (useful when piping output or debugging in a non-TTY context).
+- `--output json|yaml` switches to machine-readable output and disables the logo/prompts entirely — useful when scripting a debug session around the CLI (see `cmd/app/output.go`'s `outputFormat`/`isMachineOutput` helpers, shared across the `app` subcommands).
+
+Note that `app`'s own `PersistentPreRunE` re-applies the global `--silent`/`--verbose` contract explicitly (see `cmd/app/app.go`) because Cobra only runs the closest parent's `PersistentPreRunE` — defining one on a command group shadows the root's. If you add a new command group and need consistent `--verbose` behavior, follow the same pattern rather than assuming the root hook fires.
+
+**Mock-based debugging for business logic:** rather than exercising real external tools while debugging, the executor abstraction (`internal/shared/executor`) lets you substitute a `MockCommandExecutor` for the real one in tests, so you can step through orchestration logic (chart install sequencing, ArgoCD wait loops, cluster provider dispatch) without needing Docker, k3d, Terraform, or cloud credentials present. This is the same seam the test suite uses — look at how a given package's tests construct their executor to reuse the pattern in a debug session.
+
+**Error visibility while debugging:** be aware of the `AlreadyHandledError` sentinel (`internal/shared/errors`) when stepping through error paths — an error that has already been printed to the user by `sharedErrors.HandleGlobalError` is wrapped in this sentinel before returning to `main`, which checks for it via `errors.As` and deliberately does not print it again. If you are debugging "why didn't my error message show up twice," this is why; conversely, any new error-handling path you add should preserve this convention to avoid double-printing.
+
+**Exit codes while debugging automation:** when debugging why a wrapping script received an unexpected exit code, check whether the failing path returns an `*executor.CommandError` — `main.exitCode()` only propagates the original external command's exit code when the error can be unwrapped to that type (and the code is in `1`-`255`); any other error path reports a generic `1`.
 
 ### Where to go next
 
-For the broader system this CLI provisions and installs — ArgoCD, the app-of-apps chart, and the services it deploys — see the separate `flamingo-stack/openframe-oss-tenant` repository and its own documentation tree. For this repository's internal architecture (command/service/provider layering, bootstrap and status-aggregation sequences), see `../../reference/architecture/overview.md` and `../../reference/architecture/ecosystem.md`. For contribution conventions and review expectations, see `../contributing/guidelines.md`. For environment-variable and configuration details beyond what this guide covers, see `./environment.md`.
+For an overview of the module layout and how commands route into domain services and providers, see `../architecture/README.md` and `../../reference/architecture/overview.md`. For environment-specific configuration details beyond local setup, see `./environment.md`. Contribution conventions (commit style, review expectations) are in `../contributing/guidelines.md`, and the full test suite's structure is covered in `../testing/README.md`.

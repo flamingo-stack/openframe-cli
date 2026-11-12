@@ -1,12 +1,14 @@
-## Quick Start
+﻿# Quick Start
 
-OpenFrame CLI is a Go command-line tool that provisions a Kubernetes cluster (local k3d, or cloud GKE/EKS via Terraform) and deploys the OpenFrame platform onto it through ArgoCD's app-of-apps pattern. This page gets you from zero to a running OpenFrame platform in a single command.
+OpenFrame CLI (`openframe`) is the bootstrap and lifecycle-management tool for the [OpenFrame](https://openframe.ai) platform built by [Flamingo](https://flamingo.run). It provisions a Kubernetes cluster — locally via k3d, or in the cloud via GKE/EKS through Terraform — and installs the OpenFrame platform onto it using ArgoCD's app-of-apps pattern.
 
-> **Note on scope:** OpenFrame CLI (`flamingo-stack/openframe-cli`) drives the deployment process. The platform it installs — the services, charts, and application code that end up running on your cluster — lives in the separate **openframe-oss-tenant** repository (https://github.com/flamingo-stack/openframe-oss-tenant). This quick start only covers installing and running the CLI itself.
+The platform the CLI deploys lives in a separate repository, [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant). This repository (`flamingo-stack/openframe-cli`) owns only cluster provisioning, platform install/upgrade/uninstall, prerequisite management, and self-update — it clones the app-of-apps chart from `openframe-oss-tenant` at install time rather than embedding its source.
 
-### Hardware requirements
+> For a deeper architectural tour (components, data flow, dependency graph), see [Introduction](./introduction.md) and the [architecture overview](../reference/architecture/overview.md).
 
-Before you start, make sure your machine (or the target cluster) meets these requirements:
+## Hardware requirements
+
+Before you start, make sure the machine (or VM) you'll run the cluster on meets these minimums:
 
 | | Minimum | Recommended |
 |---|---|---|
@@ -14,167 +16,159 @@ Before you start, make sure your machine (or the target cluster) meets these req
 | CPU cores | 6 | 12 |
 | Disk | 50 GB | 100 GB |
 
-The `openframe app install` command also warns (without blocking) if the target cluster reports less than roughly 6 CPU cores / 24GB RAM.
-
----
+The install wizard advises (but does not block) if your cluster looks smaller than this.
 
 ## TL;DR: 5-minute setup
 
-### 1. Install the CLI
+### 1. Download the CLI binary
 
-**Windows:**
+Grab the prebuilt binary for your platform from the [latest release](https://github.com/flamingo-stack/openframe-cli/releases/latest).
 
-Download the latest release archive and run the extracted binary:
+On Windows, download the amd64 archive directly:
 
 ```text
 https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
 ```
 
-**macOS / Linux:**
+Unzip it and run the installer the same way as on other platforms (see the per-OS unzip/extract step below, then place `openframe` on your `$PATH`).
 
-Grab the matching archive for your platform from the releases page:
+For macOS, Linux, and other platforms, download the matching archive from the same [Releases](https://github.com/flamingo-stack/openframe-cli/releases) page and extract it.
 
-```text
-https://github.com/flamingo-stack/openframe-cli/releases
-```
-
-Each release ships signed binaries: macOS binaries are codesigned and notarized, and Windows binaries are Authenticode-signed (see `scripts/sign-binary.sh`). Extract the archive and place the `openframe` binary on your `$PATH`.
-
-Once installed, you can always check for a newer release and apply it in place:
+Alternatively, if you have a Go toolchain installed, you can build/install directly from source:
 
 ```bash
-openframe update check
-openframe update
+go install github.com/flamingo-stack/openframe-cli@latest
 ```
 
-### 2. Run bootstrap
+> `go.mod` pins this module to Go 1.26, with a toolchain directive forcing `go1.26.5` — a known crash in Go 1.26.0/1.26.1 on `windows/amd64` (corrupted return addresses during GC stack scanning) was fixed in 1.26.2. If you build from source, let Go resolve the toolchain from `go.mod` rather than overriding it.
 
-A single command creates a local k3d cluster and installs the full OpenFrame platform on it:
+### 2. Verify prerequisites
+
+OpenFrame CLI shells out to a handful of external tools depending on the cluster type you choose (local k3d vs. cloud GKE/EKS): Docker and k3d for local clusters, Terraform plus `gcloud`/`aws` for cloud clusters, and Helm either way. Rather than guessing which ones you need, ask the CLI itself:
+
+```bash
+openframe prerequisites check
+```
+
+This reports what's missing. You can also install what's needed directly:
+
+```bash
+openframe prerequisites install
+```
+
+Or narrow either command to a specific cluster type (`k3d`, `eks`, or `gke`):
+
+```bash
+openframe prerequisites check --type k3d
+```
+
+### 3. Bootstrap a cluster and install the platform
+
+The fastest path from zero to a running OpenFrame platform is the `bootstrap` command — it creates a local k3d cluster and installs ArgoCD + the app-of-apps in one step:
 
 ```bash
 openframe bootstrap
 ```
 
-This is equivalent to running `openframe cluster create` followed by `openframe app install`, but streamlined into one interactive flow (see `cmd/bootstrap/bootstrap.go` and `internal/bootstrap/service.go`).
+Running it with no arguments launches the interactive wizard (cluster sizing, ingress, etc.). To give the cluster a name up front:
 
 ```bash
-# Give the cluster a specific name
 openframe bootstrap my-cluster
-
-# Non-interactive (CI/CD): reuses an existing openframe-helm-values.yaml
-openframe bootstrap --non-interactive
-
-# See everything happening under the hood, including ArgoCD sync progress
-openframe bootstrap --verbose
 ```
 
-### 3. Check status
+For CI/CD or any scripted environment, skip all prompts and reuse an existing `openframe-helm-values.yaml`:
+
+```bash
+openframe bootstrap --non-interactive
+```
+
+Add `--verbose` to any of the above to see detailed logs, including ArgoCD sync progress, while it runs.
+
+### 4. Check it's working
 
 ```bash
 openframe app status
 ```
 
-That's it — you have a cluster with ArgoCD and the OpenFrame app-of-apps running.
+That's the whole 5-minute path: download the binary, confirm prerequisites, run `bootstrap`, check `status`.
 
----
+## Basic "Hello World" example
 
-## "Hello World": step by step
-
-If you'd rather see each stage explicitly instead of running `bootstrap`, here is the same flow broken into its two underlying commands.
-
-### Step 1 — Create a cluster
+The closest thing to a "Hello World" for this CLI is confirming the binary runs and seeing the command tree. From a terminal with `openframe` on your `$PATH`:
 
 ```bash
-openframe cluster create
+openframe --help
 ```
 
-Run without flags, this opens an interactive wizard where you choose a cluster type (local k3d, or cloud GKE/EKS). Add `--skip-wizard` to create a cluster directly from flags and defaults, useful for scripting:
+This prints the root command's help, listing the top-level command groups (`bootstrap`, `cluster`, `app`, `prerequisites`, `update`). Running any command group with no subcommand (for example, `openframe cluster` or `openframe app`) also shows the logo and that group's own help text instead of erroring out.
+
+A slightly more concrete "first real command" is listing your clusters — safe to run even before you've created one:
 
 ```bash
-openframe cluster create --skip-wizard
+openframe cluster list
 ```
 
-The cluster command group also supports `list`, `status`, `use`, `delete`, and `cleanup` (see `cmd/cluster/cluster.go`). For local development, k3d is the fastest path since it runs entirely on Docker with no cloud billing involved.
-
-### Step 2 — Install the OpenFrame platform
-
-Once a cluster exists and is reachable, install ArgoCD and the app-of-apps onto it:
+And to discover clusters you created outside the CLI (an existing GKE or EKS cluster reachable via your kubeconfig):
 
 ```bash
-openframe app install
+openframe cluster list --all
 ```
 
-Run interactively (no arguments), this lets you pick which kube-context to target. You can also target a specific cluster directly:
+## Expected output and results
 
-```bash
-openframe app install my-cluster
-openframe app install --context k3d-my-cluster
-```
+### `openframe prerequisites check`
 
-Under the hood, `app install` (`cmd/app/install.go`) resolves a `rest.Config` for the target cluster, then calls `services.InstallChartsWithConfigContext`, which installs ArgoCD with pinned chart values and then the app-of-apps from the configured GitHub repository/ref (`chartmodels.RepoOSSTenant` by default, overridable with `--ref`).
-
-```bash
-# Deploy a specific release tag instead of the default branch
-openframe app install --ref 1.0.48
-```
-
-### Step 3 — Watch it come up
-
-```bash
-openframe app status --watch
-```
-
-`--watch` re-renders the status every few seconds until the platform's ArgoCD applications are Synced and Healthy (`cmd/app/status.go`). Press Ctrl+C to stop watching.
-
----
-
-## Expected output
+Reports, tool by tool, whether each required dependency (Docker, k3d, Helm, Terraform, cloud CLIs, certificates) is present and at a usable version, without installing anything.
 
 ### `openframe bootstrap`
 
-A successful bootstrap prints a summary card listing the stages completed (cluster creation, ArgoCD install, app-of-apps sync), their timings, and access hints for the platform once everything is ready. Internally this follows the sequence described in `docs/diagrams/architecture/bootstrap-sequence.mmd`: cluster creation → ArgoCD Helm install → app-of-apps clone and install → wait for every ArgoCD `Application` to report Synced/Healthy.
+A full run walks through staged progress: cluster creation, then ArgoCD install, then the app-of-apps install, then waiting for ArgoCD Applications to reach `Synced`/`Healthy`. According to the bootstrap sequence, the flow is:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CmdBootstrap as cmd/bootstrap
+    participant BootstrapSvc as internal/bootstrap.Service
+    participant ClusterSvc as cluster.ClusterService
+    participant K3dProvider as providers/k3d
+    participant ChartSvc as chart/services
+    participant ArgoCD as providers/argocd
+    participant K8sAPI as Kubernetes API
+
+    User->>CmdBootstrap: openframe bootstrap my-cluster
+    CmdBootstrap->>BootstrapSvc: Execute(cmd, args)
+    BootstrapSvc->>ChartSvc: ValidateHelmValuesFile()
+    BootstrapSvc->>ClusterSvc: CreateCluster(ctx, config)
+    ClusterSvc->>K3dProvider: CreateCluster(ctx, config)
+    K3dProvider-->>ClusterSvc: rest.Config
+    ClusterSvc-->>BootstrapSvc: rest.Config
+    BootstrapSvc->>ChartSvc: InstallChartsWithConfigContext(ctx, req)
+    ChartSvc->>ArgoCD: Install (Helm upgrade --install)
+    ArgoCD->>K8sAPI: apply ArgoCD manifests
+    ChartSvc->>ChartSvc: clone app-of-apps repo, install chart
+    ChartSvc->>ArgoCD: WaitForApplications(ctx, config)
+    ArgoCD->>K8sAPI: poll Application sync/health
+    K8sAPI-->>ArgoCD: synced/healthy
+    ArgoCD-->>ChartSvc: ready
+    ChartSvc-->>BootstrapSvc: success
+    BootstrapSvc-->>User: summary card (cluster, stages, status/access hints)
+```
+
+When it finishes successfully, you get a closing summary card naming the cluster, the stages that ran, and hints for checking status/accessing the platform.
 
 ### `openframe app status`
 
+Reports cluster reachability (node count ready/total), then a table of ArgoCD applications with their `SYNC` and `HEALTH` columns, and a readiness summary line. If the platform is fully up, it also prints ArgoCD admin sign-in details (equivalent to running `openframe app access` separately). Example shape of a healthy report:
+
 ```text
 Cluster reachable (3/3 nodes ready)
+
 APPLICATION          SYNC      HEALTH
-argocd               Synced    Healthy
 app-of-apps          Synced    Healthy
 ...
-All applications are Synced and Healthy.
-```
 
-If the platform is not yet installed, you'll instead see:
+All applications Synced and Healthy.
 
-```text
-No OpenFrame applications found — is it installed? Run: openframe app install
-```
-
-You can also request machine-readable output for scripting:
-
-```bash
-openframe app status --output json
-openframe app status --output yaml
-```
-
-And drive an interactive terminal dashboard (k9s-style) to navigate applications and trigger syncs:
-
-```bash
-openframe app status --interactive
-```
-
-### `openframe app access`
-
-Once the platform is installed, retrieve the ArgoCD sign-in details:
-
-```bash
-openframe app access
-```
-
-Expected output:
-
-```text
 ArgoCD access
   Username: admin
   Password: <redacted>
@@ -183,61 +177,24 @@ Open the ArgoCD UI:
   2. open https://localhost:8080
 ```
 
----
+Pass `--watch` for an auto-refreshing view (every 3 seconds, until Ctrl+C), `--interactive`/`-i` for a k9s-style TUI to navigate apps and trigger syncs, or `--output json`/`--output yaml` for machine-readable output suited to scripts.
 
-## Command reference at a glance
+### `openframe app access`
 
-| Command | Purpose |
-|---|---|
-| `openframe bootstrap [cluster-name]` | Create a cluster and install OpenFrame in one step |
-| `openframe cluster create [NAME]` | Create a k3d, GKE, or EKS cluster |
-| `openframe cluster list` | List managed clusters |
-| `openframe cluster status [NAME]` | Show cluster health and nodes |
-| `openframe cluster use [NAME]` | Switch kube-context (and gcloud config for GKE) to a cluster |
-| `openframe cluster delete [NAME]` | Delete a cluster |
-| `openframe cluster cleanup [NAME]` | Prune unused container images from cluster nodes |
-| `openframe app install [cluster-name]` | Install ArgoCD and the app-of-apps |
-| `openframe app upgrade [cluster-name]` | Change the deployed git ref, or force a re-sync |
-| `openframe app status` | Report platform readiness |
-| `openframe app access` | Print ArgoCD admin credentials and UI access steps |
-| `openframe app uninstall` | Remove ArgoCD + apps, keeping the cluster |
-| `openframe prerequisites check\|install` | Verify or install required local tools |
-| `openframe update [version]` | Update the CLI itself (`check`, `rollback` subcommands) |
-
-A full architecture walkthrough — including the command-to-service dependency diagram and the app-status aggregation sequence — is available in `docs/reference/architecture/overview.md` and `docs/diagrams/architecture/README.md`.
-
----
-
-## How this fits together
-
-```mermaid
-flowchart LR
-  CLI["OpenFrame CLI"]
-  Cluster["cluster create / k3d, GKE, EKS"]
-  ArgoCD["ArgoCD install"]
-  AppOfApps["app-of-apps (openframe-oss-tenant)"]
-  K8s[("Kubernetes API")]
-
-  CLI --> Cluster
-  Cluster --> K8s
-  CLI --> ArgoCD
-  ArgoCD --> K8s
-  ArgoCD --> AppOfApps
-  AppOfApps --> K8s
-```
-
-The CLI itself has no recorded upstream dependencies on other internal repositories and no recorded downstream consumers in the organization's dependency graph — it is a standalone, leaf artifact published as the Go module `github.com/flamingo-stack/openframe-cli`. The platform it deploys (charts, services, application code) is sourced from the separate `openframe-oss-tenant` repository at install time, via the git ref you pass with `--ref` (default branch otherwise).
-
----
+Prints the ArgoCD admin username and password, plus the `kubectl port-forward` command to reach the UI locally — the same block shown above.
 
 ## Next steps
 
-Now that you have a cluster and the platform running:
+Once your first cluster and platform install are up, these guides walk through the individual pieces `bootstrap` combines, plus the commands for day-two operations:
 
-- Work through the detailed how-to guides for each stage of the lifecycle: creating a cluster, installing the platform, checking status, updating the CLI, and uninstalling — see [Create a Kubernetes cluster with OpenFrame CLI](./how-to/create-a-kubernetes-cluster-with-openframe-cli.md), [Install the OpenFrame platform onto a cluster](./how-to/install-the-openframe-platform-onto-a-cluster.md), [Check the status of your OpenFrame cluster and app](./how-to/check-the-status-of-your-openframe-cluster-and-app.md), [Update the OpenFrame CLI to the latest version](./how-to/update-the-openframe-cli-to-the-latest-version.md), and [Uninstall OpenFrame and delete a cluster](./how-to/uninstall-openframe-and-delete-a-cluster.md).
-- Read the [Introduction](./introduction.md) and [Prerequisites](./prerequisites.md) pages for background and tool requirements before diving deeper.
-- Continue to [First Steps](./first-steps.md) for a guided walkthrough beyond the initial bootstrap.
-- For contributors, see the [Development overview](../development/README.md), [environment setup](../development/setup/environment.md), [local development guide](../development/setup/local-development.md), [architecture docs](../development/architecture/README.md), [security notes](../development/security/README.md), [testing guide](../development/testing/README.md), and [contributing guidelines](../development/contributing/guidelines.md).
-- For a deeper architectural reference, see [Architecture overview](../reference/architecture/overview.md), the [ecosystem graph](../reference/architecture/ecosystem.md), and the [architecture diagrams](../diagrams/architecture/README.md).
+- [Create a Kubernetes cluster with OpenFrame CLI](./how-to/create-a-kubernetes-cluster-with-openframe-cli.md) — using `openframe cluster create` directly, including the interactive wizard and cloud (GKE/EKS) options.
+- [Install the OpenFrame platform onto a cluster](./how-to/install-the-openframe-platform-onto-a-cluster.md) — `openframe app install` against an existing cluster, including `--ref` to pin a branch or release tag.
+- [Check the status of your OpenFrame cluster and app](./how-to/check-the-status-of-your-openframe-cluster-and-app.md) — deeper coverage of `openframe cluster status` and `openframe app status`.
+- [Uninstall OpenFrame and delete a cluster](./how-to/uninstall-openframe-and-delete-a-cluster.md) — `openframe app uninstall` (keeps the cluster) versus `openframe cluster delete` (removes everything), plus `openframe cluster cleanup` for pruning unused images.
+- [Update the OpenFrame CLI to the latest version](./how-to/update-the-openframe-cli-to-the-latest-version.md) — `openframe update`, including signature verification and rollback.
 
-For community support and discussion, OpenFrame does not use GitHub Issues or Discussions — join the OpenMSP Slack community at https://www.openmsp.ai/.
+For a broader orientation before diving in, see [Introduction](./introduction.md) and [Prerequisites](./prerequisites.md). Once you're comfortable with the CLI commands, [First Steps](./first-steps.md) covers the next layer of day-to-day usage. If you plan to contribute to the CLI itself rather than just run it, start with [Development](../development/README.md), the [local development setup](../development/setup/local-development.md), and the [contributing guidelines](../development/contributing/guidelines.md).
+
+For architectural background — how `cmd/`, `internal/cluster`, `internal/chart`, and the provider packages fit together — see the [architecture overview](../reference/architecture/overview.md), the [ecosystem reference](../reference/architecture/ecosystem.md), and the [architecture diagrams](../diagrams/architecture/README.md).
+
+> This project does not use GitHub Issues or Discussions. Questions and community support happen on the [OpenMSP Slack community](https://www.openmsp.ai/).
