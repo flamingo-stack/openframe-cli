@@ -1,0 +1,52 @@
+graph TB
+    subgraph cliLayer["CLI Layer (cmd/)"]
+        Bootstrap[bootstrap]
+        Cluster[cluster]
+        App[app]
+        Prereq[prerequisites]
+        Update[update]
+    end
+
+    subgraph domainLayer["Domain Services (internal/)"]
+        ClusterSvc["cluster.ClusterService"]
+        ChartSvc["chart/services.ChartService"]
+        AppStatus["app/status.Service"]
+        PrereqFw["prerequisites.Runner"]
+        SelfUpdate["shared/selfupdate.Updater"]
+    end
+
+    subgraph providerLayer["Providers"]
+        K3d["k3d provider"]
+        EKS["EKS provider (terraform)"]
+        GKE["GKE provider (terraform)"]
+        ArgoCD["ArgoCD provider"]
+        Helm["Helm provider"]
+    end
+
+    subgraph externalLayer["External Systems"]
+        Docker[("Docker")]
+        K8sAPI[("Kubernetes API")]
+        CloudAPI[("GCP / AWS APIs")]
+        GitHubRel[("GitHub Releases")]
+    end
+
+    Bootstrap --> ClusterSvc
+    Bootstrap --> ChartSvc
+    Cluster --> ClusterSvc
+    App --> ChartSvc
+    App --> AppStatus
+    Prereq --> PrereqFw
+    Update --> SelfUpdate
+
+    ClusterSvc --> K3d
+    ClusterSvc --> EKS
+    ClusterSvc --> GKE
+    ChartSvc --> ArgoCD
+    ChartSvc --> Helm
+
+    K3d --> Docker
+    EKS --> CloudAPI
+    GKE --> CloudAPI
+    ArgoCD --> K8sAPI
+    Helm --> K8sAPI
+    SelfUpdate --> GitHubRel
