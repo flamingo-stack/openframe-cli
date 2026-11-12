@@ -1,5 +1,5 @@
 graph TB
-    subgraph "CLI Layer (cmd/)"
+    subgraph cliLayer["CLI Layer (cmd/)"]
         Bootstrap[bootstrap]
         Cluster[cluster]
         App[app]
@@ -7,29 +7,27 @@ graph TB
         Update[update]
     end
 
-    subgraph "Domain Services (internal/)"
+    subgraph domainLayer["Domain Services (internal/)"]
         ClusterSvc["cluster.ClusterService"]
         ChartSvc["chart/services.ChartService"]
         AppStatus["app/status.Service"]
-        AppUninstall["app/uninstall.Service"]
         PrereqFw["prerequisites.Runner"]
-        SelfUpdate["selfupdate.Updater"]
+        SelfUpdate["shared/selfupdate.Updater"]
     end
 
-    subgraph "Providers"
-        K3d["cluster/providers/k3d"]
-        EKS["cluster/providers/eks (terraform)"]
-        GKE["cluster/providers/gke (terraform)"]
-        ArgoCD["chart/providers/argocd"]
-        Helm["chart/providers/helm"]
-        Git["chart/providers/git"]
+    subgraph providerLayer["Providers"]
+        K3d["k3d provider"]
+        EKS["EKS provider (terraform)"]
+        GKE["GKE provider (terraform)"]
+        ArgoCD["ArgoCD provider"]
+        Helm["Helm provider"]
     end
 
-    subgraph "External Systems"
-        Docker[(Docker)]
-        K8sAPI[(Kubernetes API)]
-        CloudAPI[(GCP / AWS APIs)]
-        GitHub[(GitHub Releases)]
+    subgraph externalLayer["External Systems"]
+        Docker[("Docker")]
+        K8sAPI[("Kubernetes API")]
+        CloudAPI[("GCP / AWS APIs")]
+        GitHubRel[("GitHub Releases")]
     end
 
     Bootstrap --> ClusterSvc
@@ -37,7 +35,6 @@ graph TB
     Cluster --> ClusterSvc
     App --> ChartSvc
     App --> AppStatus
-    App --> AppUninstall
     Prereq --> PrereqFw
     Update --> SelfUpdate
 
@@ -46,12 +43,10 @@ graph TB
     ClusterSvc --> GKE
     ChartSvc --> ArgoCD
     ChartSvc --> Helm
-    ChartSvc --> Git
-    AppStatus --> ArgoCD
 
     K3d --> Docker
     EKS --> CloudAPI
     GKE --> CloudAPI
     ArgoCD --> K8sAPI
     Helm --> K8sAPI
-    SelfUpdate --> GitHub
+    SelfUpdate --> GitHubRel

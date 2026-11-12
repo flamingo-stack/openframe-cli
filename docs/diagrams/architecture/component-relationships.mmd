@@ -1,0 +1,34 @@
+graph LR
+    cmdApp["cmd/app"] --> chartServices["internal/chart/services"]
+    cmdApp --> appStatus["internal/app/status"]
+    cmdApp --> appUninstall["internal/app/uninstall"]
+    cmdApp --> argocdProvider["internal/chart/providers/argocd"]
+
+    cmdCluster["cmd/cluster"] --> clusterPkg["internal/cluster"]
+    clusterPkg --> clusterProvider["internal/cluster/provider"]
+    clusterProvider --> k3dProv["providers/k3d"]
+    clusterProvider --> eksProv["providers/eks"]
+    clusterProvider --> gkeProv["providers/gke"]
+    eksProv --> terraformProv["providers/terraform"]
+    gkeProv --> terraformProv
+
+    cmdBootstrap["cmd/bootstrap"] --> bootstrapSvc["internal/bootstrap"]
+    bootstrapSvc --> clusterPkg
+    bootstrapSvc --> chartServices
+
+    chartServices --> helmProvider["internal/chart/providers/helm"]
+    chartServices --> gitProvider["internal/chart/providers/git"]
+    chartServices --> chartPrereq["internal/chart/prerequisites"]
+
+    cmdPrereq["cmd/prerequisites"] --> prereqFw["internal/prerequisites"]
+    clusterPkg --> clusterPrereqSets["internal/cluster/prerequisites"]
+    clusterPrereqSets --> prereqFw
+
+    cmdUpdate["cmd/update"] --> selfupdate["internal/shared/selfupdate"]
+    selfupdate --> download["internal/shared/download"]
+
+    everything["all cmd/internal packages"] --> executor["internal/shared/executor"]
+    everything --> sharedUI["internal/shared/ui"]
+    everything --> sharedErrors["internal/shared/errors"]
+    cmdCluster --> k8sPkg["internal/k8s"]
+    cmdApp --> k8sPkg

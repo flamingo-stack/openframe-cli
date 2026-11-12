@@ -4,7 +4,7 @@
 
 ## Role
 
-OpenFrame CLI is a **service** (go).
+OpenFrame CLI is a **service** (bash, go).
 
 ## Published artifacts
 
@@ -38,5 +38,5 @@ flowchart LR
 
 ## Index state
 
-- Snapshot: `cdf742dbf1d7` on `main`, indexed 2026-09-18T00:57:58.033+00:00
+- Snapshot: `23f0e2596407` on `main`, indexed 2026-11-12T03:08:22.063+00:00
 - Coverage: full (every other managed repository has a fresh graph, so a symbol with no consumer here has no consumer in the org)

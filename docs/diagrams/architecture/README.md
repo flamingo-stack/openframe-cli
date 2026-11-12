@@ -5,9 +5,8 @@ This directory contains Mermaid diagrams generated from architecture analysis.
 ## Diagrams
 
 - **[Architecture Diagram](./architecture-diagram.mmd)** - `.mmd` file
-- **[Dependency Diagram](./dependency-diagram.mmd)** - `.mmd` file
+- **[Component Relationships](./component-relationships.mmd)** - `.mmd` file
 - **[Bootstrap Sequence](./bootstrap-sequence.mmd)** - `.mmd` file
-- **[App Status Aggregation](./app-status-aggregation.mmd)** - `.mmd` file
 
 ## Viewing Diagrams
 

@@ -1,58 +1,51 @@
 # How to check the status of your OpenFrame cluster and app
 
-A person running OpenFrame locally or in the cloud uses the `openframe` command-line tool to confirm the Kubernetes cluster is reachable and that the OpenFrame platform (ArgoCD and its applications) is deployed and healthy on it.
+This task shows a platform operator or developer how to confirm that an OpenFrame cluster is reachable and that the OpenFrame application installed on it (ArgoCD plus the app-of-apps) is synced and healthy, using the `openframe` CLI.
 
 ## Prerequisites
 
-- The `openframe` CLI is installed and runs from your terminal (check with `openframe --help`).
-- A cluster already exists, created with `openframe cluster create` or `openframe bootstrap` (see [Create a kubernetes cluster with OpenFrame CLI](./create-a-kubernetes-cluster-with-openframe-cli.md)), or another cluster you can already reach with `kubectl`.
-- Your current kube-context points at the cluster you want to check, or you know the context name to pass with `--context`.
-- If you intend to check the application status (not just the cluster), OpenFrame should already have been installed onto the cluster with `openframe app install` (see [Install the OpenFrame platform onto a cluster](./install-the-openframe-platform-onto-a-cluster.md)).
-- Your terminal window is wide enough and interactive if you plan to use the `--watch` or `--interactive` view (these views refuse to run without an interactive terminal, and cannot be combined with the `--plain` flag).
+- The `openframe` CLI is installed and on your `$PATH`. Run `openframe --help` to confirm it runs.
+- You already have a cluster created with `openframe cluster create` (or `openframe bootstrap`), or any other reachable Kubernetes cluster you have a kube-context for.
+- Your kubectl context points at the cluster you want to check — `openframe app status` and `openframe cluster status` both default to the current kube-context when you don't pass one explicitly.
+- If you only want cluster-level health (nodes, resources) without checking the OpenFrame application, you can skip straight to `openframe cluster status`; if you want to know whether the OpenFrame platform itself (ArgoCD applications) is up, use `openframe app status`.
 
 ## Steps
 
-1. Open a terminal and run `openframe cluster status` to check the cluster itself. If you omit a cluster name, the CLI shows an interactive list of your managed clusters to pick from; alternatively run `openframe cluster status <NAME>` with the cluster's name.
-2. Add `-o json` or `-o yaml` to `openframe cluster status <NAME>` if you need the cluster status in a machine-readable format (a cluster name is required for this; the interactive picker is skipped).
-3. Run `openframe app status` to check whether the OpenFrame platform (ArgoCD and its applications) is up and running on the current cluster.
-4. Add `--context <CONTEXT_NAME>` (or `-c <CONTEXT_NAME>`) to `openframe app status` if you want to check a cluster other than the one your current kube-context points to.
-5. Add `--watch` (or `-w`) to `openframe app status` to keep the status on screen, refreshing automatically every few seconds; press Ctrl+C to stop watching.
-6. Add `--interactive` (or `-i`) to `openframe app status` instead, to open an interactive view where you can navigate the list of applications, inspect details, and trigger a sync.
-7. Add `-o json` or `-o yaml` to `openframe app status` if you need the platform status in a machine-readable format. This cannot be combined with `--watch` or `--interactive`.
-8. Read the printed table of applications and the summary line at the bottom to judge overall readiness, as described under Expected result below.
-9. If the status reports the platform is up (`READY`) and you want sign-in details for ArgoCD, run `openframe app access` to print the admin credentials and access instructions.
+1. Open a terminal and confirm which cluster/context you're about to check by running `kubectl config current-context`, or note the cluster name you created with `openframe cluster create`.
+2. Run `openframe cluster status` to see the Kubernetes-level health of a cluster. With no argument it opens an interactive cluster picker; pass a name directly, e.g. `openframe cluster status my-cluster`, to skip the picker.
+3. Add `--detailed` to the cluster status command if you want deeper node/resource information (this flag is surfaced through the command's own flags).
+4. Add `-o json` or `-o yaml` to `openframe cluster status my-cluster` if you want machine-readable output instead of the text view; machine output requires you to pass the cluster name explicitly (it will not fall back to the interactive picker).
+5. Run `openframe app status` to check the OpenFrame platform itself: cluster reachability, the list of ArgoCD applications with their sync and health state, and an overall readiness summary.
+6. Pass `--context <name>` to `openframe app status` if you want to check a cluster other than your current kube-context, for example `openframe app status --context k3d-openframe-dev`.
+7. Add `--watch` (or `-w`) to `openframe app status` to keep the status on screen, refreshing automatically every few seconds; press `Ctrl+C` to stop watching.
+8. Add `--interactive` (or `-i`) to `openframe app status` instead, to open the interactive status view where you can navigate the application list, inspect details, and trigger syncs.
+9. Add `-o json` or `-o yaml` to `openframe app status` if you need the status as structured output for scripts; this cannot be combined with `--watch` or `--interactive`.
+10. If the status reports a problem, follow the hint it prints — for example a "not installed yet" message suggests running `openframe app install`, which is covered in a separate task (see [Install the OpenFrame platform onto a cluster](./install-the-openframe-platform-onto-a-cluster.md)).
 
 ## Expected result
 
-For `openframe cluster status`, you see the cluster's health, node status, and related information printed to the screen (or as JSON/YAML when `-o json`/`-o yaml` is used).
+When `openframe app status` succeeds against a healthy platform, it prints:
 
-For `openframe app status` in the default text view, you see one of the following, depending on what is found:
+- A success line: `Cluster reachable (<ready>/<total> nodes ready)`.
+- A table with columns `APPLICATION`, `SYNC`, `HEALTH` listing every OpenFrame ArgoCD application and its state.
+- A one-line summary such as `<synced>/<total> synced, <healthy>/<total> healthy — READY` (shown as a success line) when every application is synced and healthy, or the same line ending in `NOT READY` (shown as a warning) otherwise.
+- If ArgoCD admin credentials are available, the status output also prints access details for signing in.
 
-- If the cluster cannot be reached at all and no applications were found, the message:
-  `Cluster is not reachable. Is it running and is your kube-context correct?`
-- If the application list did come back but node health could not be read (for example, an RBAC restriction), a warning:
-  `Cluster node health could not be read`
-- If the cluster is reachable, a success line such as:
-  `Cluster reachable (N/M nodes ready)`
+With `--watch`, the same information re-renders in place every 3 seconds with a header line showing the current time and a reminder that `Ctrl+C` exits.
 
-Then, if OpenFrame is installed, a table with columns `APPLICATION`, `SYNC`, and `HEALTH` listing every ArgoCD application, followed by a one-line summary such as `3/3 synced, 3/3 healthy — READY` (shown as a success line when ready, or as a warning with `NOT READY` when not every application is synced and healthy). If node health could not be read, the summary line additionally notes `(node health unavailable)`.
+With `-o json` or `-o yaml`, the output is a structured document with fields `reachable`, `nodesReady`, `nodesTotal`, `ready`, `summary`, `total`, `synced`, `healthy`, and an `applications` array of `{name, sync, health}` objects (plus `healthError` when node health could not be read).
 
-If no applications are found at all, you instead see the warning:
-`No OpenFrame applications found — is it installed? Run: openframe app install`
-
-When the platform is ready, the admin access information for ArgoCD is printed immediately after the summary line.
-
-With `--watch`, the same information refreshes in place every 3 seconds, with a header line showing the current time and `refresh 3s`, until you press Ctrl+C.
-
-With `-o json` or `-o yaml`, the output is a structured document instead of the table, containing the reachability, node counts, readiness, summary line, totals, and the list of applications with their names, sync state, and health state.
+`openframe cluster status` with no output flag prints cluster health, node status, installed applications, resource usage, and connectivity information as text; with `-o json` or `-o yaml` it prints the same `ClusterInfo` data as structured output.
 
 ## Troubleshooting
 
-- **`Cluster is not reachable. Is it running and is your kube-context correct?`** — The cluster could not be reached at all and no OpenFrame applications were found. Confirm the cluster is running and that your kube-context (or the `--context` value you passed) is correct.
-- **`Cluster node health could not be read`** — The ArgoCD application list came back, meaning the API server answered, but reading node health failed (commonly because the credential in use lacks permission to list nodes cluster-wide). The application table and summary are still shown; this is a partial-information warning, not a failed status check.
-- **`No OpenFrame applications found — is it installed? Run: openframe app install`** — The cluster is reachable but no OpenFrame applications exist on it yet. Install the platform with `openframe app install` before checking status again.
-- **`--watch/--interactive are live terminal views and cannot combine with --output <format>`** — Remove `--watch` or `--interactive` if you need `-o json`/`-o yaml` output, or drop the output flag if you want the live view.
-- **`--watch/--interactive need an interactive terminal (and cannot combine with --plain)`** — Run the command from an interactive terminal session without the `--plain` flag, or fall back to the plain `openframe app status` (without `--watch`/`--interactive`) when running in a non-interactive shell or script.
-- **`"openframe app status" takes no positional arguments (got "...") — use --context to target a cluster`** — Do not pass a cluster name directly after `status`; use `--context <CONTEXT_NAME>` instead to target a specific cluster.
-- **`invalid --output "<value>" (want "text", "json", or "yaml")`** (from `openframe cluster status`) — Use one of `text`, `json`, or `yaml` as the value for `-o`/`--output`.
-- **`--output <format> requires a cluster name`** (from `openframe cluster status`) — Pass the cluster name as an argument, for example `openframe cluster status my-cluster -o json`, since machine-readable output cannot use the interactive cluster picker.
+- **`Cluster is not reachable. Is it running and is your kube-context correct?`** — `openframe app status` could not reach the API server at all (no applications were listed either). Check that the cluster is running and that your kube-context is correct; the message is followed by a `cause` line showing the underlying error.
+- **`Cluster node health could not be read: <error>`** — the application list came back (the API server answered) but reading node health failed, commonly because your credential is namespace-scoped and lacks cluster-wide permission to list nodes. The application table is still shown; this does not mean the platform is down.
+- **`No OpenFrame applications found — is it installed? Run: openframe app install`** — the cluster is reachable but no OpenFrame applications exist yet. Install the platform first using the steps in [Install the OpenFrame platform onto a cluster](./install-the-openframe-platform-onto-a-cluster.md).
+- **`--watch/--interactive are live terminal views and cannot combine with --output <format>`** — remove `-o`/`--output` when using `--watch` or `--interactive`, or drop `--watch`/`--interactive` when you need machine output.
+- **`--watch/--interactive need an interactive terminal (and cannot combine with --plain)`** — these views require a real terminal session; run the command without `--plain` and outside of a non-interactive script/CI context, or use the plain `openframe app status` / `-o json` form instead.
+- **`invalid --output "<value>" (want "text", "json", or "yaml")`** — from `openframe cluster status`, pass one of the three supported values to `-o`/`--output`.
+- **`--output <format> requires a cluster name`** — when requesting `json` or `yaml` from `openframe cluster status`, you must pass the cluster name as an argument; it will not open the interactive picker for machine output.
+- **`"<command>" takes no positional arguments (got "<value>") — use --context to target a cluster`** — `openframe app status` (and other `app` subcommands) reject stray positional arguments; use the `--context` flag to target a specific cluster instead of passing its name as an argument.
+
+The material does not describe any other status-related failure messages beyond those shown above; if you see a different error, there is no documented explanation for it here.

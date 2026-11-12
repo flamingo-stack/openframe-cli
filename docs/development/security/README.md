@@ -1,209 +1,189 @@
 
 # Security
 
-OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is a local operator tool: it provisions Kubernetes clusters (k3d, EKS, GKE) and deploys the OpenFrame platform onto them via Helm and ArgoCD's app-of-apps pattern. It is not a hosted service — it runs on the operator's own machine, under the operator's own cloud/Kubernetes credentials. Its security surface is therefore dominated by three concerns: how it handles the credentials it shells out with (gcloud, aws, kubeconfig, git tokens), how it verifies the binaries and charts it installs, and how it avoids leaking secrets into logs, terminal output, or the process table.
+> OpenFrame CLI (`openframe`) is the bootstrap and lifecycle-management tool for the [OpenFrame](https://openframe.ai) platform built by [Flamingo](https://flamingo.run). It provisions Kubernetes clusters (locally via k3d, or in the cloud via GKE/EKS through Terraform) and installs the OpenFrame platform onto them via ArgoCD's app-of-apps pattern. The platform's own source lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository — this CLI only provisions infrastructure and drives the install.
 
-This document explains the authentication, data-handling, validation, and secrets-management patterns actually implemented in this codebase, and the practices expected of contributors. For general contribution workflow see [Contributing Guidelines](../contributing/guidelines.md); for the full architecture see [Architecture Overview](../architecture/README.md) and [Reference Architecture](../../reference/architecture/overview.md).
+This document covers how the CLI handles credentials, what it shells out to, how it validates input, the vulnerability classes most relevant to a CLI that wraps other CLIs, and how to report a real security issue.
 
-> **Scope note.** OpenFrame CLI has no recorded upstream or downstream dependents in the organization's dependency graph (per `get_repo_ecosystem`) — it is a leaf artifact. It links no application database, issues no user sessions, and stores no customer data of its own; the platform it deploys (OpenFrame itself) lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository, whose own security documentation should be consulted for the deployed platform's authentication/authorization model. This document covers only the CLI's own code.
+## 1. Threat Model for a Provisioning CLI
 
-## 1. Authentication and authorization patterns
+Unlike a web service, OpenFrame CLI's attack surface is primarily:
 
-The CLI does not implement its own identity system. It **delegates all authentication to the backing systems it drives** — cloud provider CLIs, Kubernetes, Git hosts — and layers a consistent, auditable flow on top of each.
+- **Credentials it handles on behalf of the user** — cloud provider auth (gcloud, aws), Git tokens for cloning the app-of-apps chart repository, ArgoCD admin credentials, kubeconfig contents.
+- **External processes it shells out to** — Docker, k3d, Helm, Terraform, `gcloud`, `aws`. Anything that reaches an `exec.Command` call is a potential command-injection surface if not handled carefully.
+- **Artifacts it downloads and executes** — pinned installers for k3d, Helm, Terraform, mkcert, infracost, and the CLI's own self-update binary.
+- **Generated infrastructure-as-code** — the Terraform root modules under `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf`, which provision real cloud resources with real IAM permissions.
 
-### 1.1 Cloud provider authentication (GKE / EKS)
+There is no network-facing API surface in this repository: per the organization's dependency graph (`get_repo_ecosystem`, coverage **full**), OpenFrame CLI publishes a single Go module (`github.com/flamingo-stack/openframe-cli`) and has no recorded downstream consumers — it is a standalone binary, not a library imported by other services. That means classic web-app concerns (sessions, CSRF, SQL injection) do not apply here; the concerns below are the ones that do.
 
-`internal/cluster/discovery/auth.go` implements `AuthFlow`, the single gcloud login flow every GKE-touching command goes through. Its `Ensure(ctx, requireADC)` method:
+```mermaid
+graph TB
+    subgraph user["Operator machine"]
+        CLI["openframe CLI"]
+    end
 
-1. Checks whether `gcloud` is installed at all (`CLIMissing`) and fails fast with an install link if not.
-2. Checks whether the primary account is authenticated, using `gcloud auth print-access-token --quiet` rather than `gcloud auth list` — the list command can report an **expired** account as still `ACTIVE`, so the CLI forces a real token refresh to catch this before it surfaces mid-Terraform-apply as a raw provider error.
-3. When `requireADC` is true (Terraform's `google` provider needs Application Default Credentials), separately verifies `gcloud auth application-default print-access-token`.
-4. In an interactive terminal, offers to run the relevant `gcloud auth login` / `gcloud auth application-default login` command right there, attached to the real stdin/stdout/stderr (browser-based flows need this). In a non-interactive session (CI), it **never prompts** — it returns an actionable error telling the operator which command to run manually.
+    subgraph external["External credentials / processes"]
+        GCloud["gcloud auth"]
+        AWS["aws CLI"]
+        GitRepo["Git HTTPS (app-of-apps repo)"]
+        K8sAPI[("Kubernetes API")]
+        GHRelease[("GitHub Releases + cosign")]
+    end
 
-AWS/EKS follows the equivalent pattern via `internal/cluster/prerequisites/aws/aws.go` and `internal/cluster/discovery/eks.go`, and `cmd/cluster/aws_identity.go` surfaces the resolved AWS identity so operators can confirm which account/role they are about to provision against before anything is created.
-
-```go
-// internal/cluster/discovery/auth.go — never prompts outside an interactive session
-func (f *AuthFlow) login(ctx context.Context, prompt string, args []string, verified func() bool, manualHint string) error {
-	if !f.interactive() {
-		return fmt.Errorf("%s", manualHint)
-	}
-	...
-}
+    CLI -->|"ADC / access token"| GCloud
+    CLI -->|"profile / IAM identity"| AWS
+    CLI -->|"PAT, masked in logs"| GitRepo
+    CLI -->|"kubeconfig, rest.Config"| K8sAPI
+    CLI -->|"checksum + signature verified"| GHRelease
 ```
 
-**Pattern for contributors:** any new cloud-facing command must go through the existing `AuthFlow`/prerequisite-checker pattern rather than shelling out to a provider CLI directly. Never assume credentials are present; always probe first and fail with an actionable message.
+## 2. Authentication and Authorization Patterns
 
-### 1.2 Kubernetes cluster access
+OpenFrame CLI does not implement its own authentication system — it **delegates** to the identity provider of whatever backend it is driving, and never stores a long-lived credential itself.
 
-`internal/k8s` isolates *read/inspect* access to an already-existing cluster from `internal/cluster`, which handles cluster *creation*. `RestConfigForContext` (`internal/k8s/restconfig.go`) builds a `rest.Config` from a named kubeconfig context — the CLI relies entirely on the operator's existing kubeconfig and RBAC permissions; it does not mint, store, or escalate credentials of its own. This means authorization for any cluster operation (install, status, uninstall) is enforced by the Kubernetes API server against whatever identity the operator's kubeconfig context already carries, not by the CLI.
+### 2.1 Cloud provider authentication
 
-This design has a direct authorization-safety consequence that `cmd/app/app.go` encodes explicitly: the `app` command group rejects stray positional arguments (`noPositionalArgs`), because Cobra's default `ArbitraryArgs` behavior would otherwise let `openframe app status my-eks` silently run against whichever kube-context happened to be active — destructively so for `uninstall`. Targeting a cluster must go through the explicit `--context` flag.
+- **GKE** — `internal/cluster/discovery/auth.go` implements `AuthFlow`, the single gcloud login flow every GKE-touching command goes through. `AuthFlow.Ensure(ctx, requireADC)`:
+  - Checks `gcloud` is installed (`CLIMissing`) and authenticated (`NotAuthenticated`) via the `GKEDiscoverer`.
+  - In an interactive session, offers to run `gcloud auth login` (and, when Terraform needs Application Default Credentials, `gcloud auth application-default login`) right there, using a terminal-attached subprocess (`runLogin`) so browser-based OAuth flows work.
+  - In a **non-interactive** session (CI), it never prompts — it returns an actionable error telling the operator to run the `gcloud` command manually.
+  - `hasFreshLogin` deliberately calls `gcloud auth print-access-token --quiet` rather than `gcloud auth list`, because `auth list` reports an **expired** account as still `ACTIVE` — the token-mint check is the only way to catch a stale-but-apparently-active login before it fails deep inside Terraform.
+- **EKS/AWS** — authentication flows through the `aws` CLI and the identity it resolves (profile or environment credentials); see `cmd/cluster/aws_identity.go` and `internal/cluster/prerequisites/aws/aws.go`. The CLI does not read or store AWS secret keys itself.
+- **Kubernetes** — `internal/k8s/accessor.go`, `internal/k8s/contexts.go`, and `internal/k8s/restconfig.go` build a `rest.Config` from the user's existing kubeconfig context; the CLI is read-only with respect to cluster health checks and relies on whatever RBAC the kubeconfig's identity already has.
 
-```go
-// cmd/app/app.go
-func noPositionalArgs(cmd *cobra.Command, args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("%q takes no positional arguments (got %q) — use --context to target a cluster",
-			cmd.CommandPath(), strings.Join(args, " "))
-	}
-	return nil
-}
-```
+### 2.2 Git authentication for the app-of-apps repository
 
-`ui.ShowContextHeader()` prints the active kube-context as a dim line before any destructive subcommand runs — the cheapest guard against operating on the wrong cluster.
+`internal/chart/providers/git/auth.go` isolates all Git HTTP credential handling:
 
-### 1.3 Git authentication (app-of-apps chart repository)
+- `extractGitAuth(rawURL)` parses a clone URL and separates any embedded credential from it, returning a `gitAuth{cleanURL, username, token}`. It specifically handles the common GitHub PAT shorthand `https://<token>@host` (a single-field userinfo with no password), promoting that single field to the token role rather than silently dropping it.
+- `gitAuth.buildAuth()` returns a go-git `transport.AuthMethod` (HTTP Basic) built **only in memory** — the token is handed to go-git directly, never written back into a URL, into `argv`, or onto disk. This keeps the token off `ps`/`/proc/<pid>/cmdline` and out of any credentials file.
+- `GitTokenUser = "x-access-token"` is the conventional username used when none is present in the URL (the token itself is the password).
+- `maskToken(s, token)` redacts every occurrence of the token in a string with `***`, used to make clone URLs safe to log.
 
-`internal/chart/providers/git/auth.go` implements credential handling for cloning the chart repository. Since the CLI supports only the OSS (`oss-tenant`) deployment, which is pulled from a **public** repository, `internal/chart/services/validation.go`'s `ConfigurationValidator.ValidateConfiguration` is intentionally a no-op — there are no credentials to validate for this deployment type. The git auth plumbing exists as the extension point for any future deployment type that does require a private repository and a token.
+Because the OSS deployment (`oss-tenant`) clones from a **public** repository, `internal/chart/services/validation.go`'s `ConfigurationValidator.ValidateConfiguration` is intentionally a no-op: no credentials are required for that path, and the comment in the code marks this as the extension point if a credentialed deployment type is added later.
 
-> If you are extending the CLI to support a private chart source, follow the pattern in `auth.go` precisely (see §2.1) rather than passing a token in a URL string or environment variable read ad hoc.
+### 2.3 ArgoCD and Helm authorization
 
-### 1.4 Self-update authenticity (supply-chain, not user auth)
+- `openframe app access` (`cmd/app/access.go`) is the one command that surfaces ArgoCD admin credentials to the operator, for logging into the ArgoCD UI directly.
+- `internal/chart/providers/argocd/` drives ArgoCD purely through its Kubernetes `Application` CRDs (sync/health polling, diagnostics) using the same `rest.Config` as the rest of the CLI — there is no separate ArgoCD API token management.
+- `internal/app/uninstall/uninstall.go` removes the platform in a deliberately safe order (Applications → Helm releases → finalizers → namespace) specifically to avoid leaving orphaned, improperly-deprovisioned resources that could linger with stale permissions.
 
-`internal/shared/selfupdate/` is the closest thing this CLI has to an authorization boundary against a hostile actor: it decides whether a downloaded binary is allowed to **replace the one currently running**. `internal/shared/selfupdate/cosign.go` performs cosign keyless signature verification (via `sigstore/sigstore-go`) before `update.go` applies a new binary, and `internal/shared/selfupdate/rollback.go` exists specifically so that a bad or unverifiable update can be reverted. Treat this verification path as security-critical: any change that weakens or bypasses it (e.g., skipping verification on a particular OS/arch, or falling back silently on verification failure) must be treated as a regression, not a convenience fix.
+> **Note:** `cmd/app/app.go` enforces `noPositionalArgs` on every `app` subcommand. This is a deliberate authorization-adjacent guard: Cobra's default `ArbitraryArgs` would otherwise let `openframe app status my-eks` **silently** run against whatever kube-context happens to be current instead of the one the operator named — destructively so, in the case of `uninstall`. Use `--context` to target a specific cluster instead of a bare positional argument.
 
-## 2. Data encryption and secure storage
+## 3. Data Encryption and Secure Storage
 
-OpenFrame CLI does not operate its own datastore, so "encryption at rest" in the traditional sense does not apply. The relevant concerns are: never persisting secrets to disk unnecessarily, keeping credentials out of process argument lists and logs, and verifying integrity of anything downloaded or cloned.
+OpenFrame CLI does not operate its own datastore or persist application data; "secure storage" here means **how it avoids persisting secrets it is only supposed to pass through**.
 
-### 2.1 Credentials never touch argv, files, or logs
-
-`internal/chart/providers/git/auth.go`'s `gitAuth` struct is the canonical pattern in this codebase for handling any credential:
-
-- `extractGitAuth` parses a clone URL and separates an embedded token from the URL itself, returning a `cleanURL` with no userinfo.
-- The token is handed to go-git **only as an in-memory `transport.AuthMethod`** (`buildAuth`, returning `githttp.BasicAuth`) — never written back into a URL string, never passed as a CLI argument (which would be visible via `ps` or `/proc/<pid>/cmdline`), and never written to a credentials file on disk.
-- `maskToken` redacts every occurrence of the token in a string before that string is used in logging or error output.
-- The code explicitly handles the common single-field GitHub PAT shorthand (`https://<token>@host/...`), promoting it to the token role rather than silently dropping it — so it is both used correctly for auth and reliably masked.
-
-```go
-// internal/chart/providers/git/auth.go
-type gitAuth struct {
-	cleanURL string // URL with any userinfo stripped
-	username string // username from the URL, if any
-	token    string // password / PAT; empty for public repos
-}
-```
-
-**This is the pattern to replicate** for any new credential-bearing input: parse and strip the secret from anything that might be logged or exec'd, carry it only in memory, and provide a masking helper alongside it.
-
-### 2.2 Centralized redaction
-
-`internal/shared/redact/redact.go` exposes a package-level `Redact(s string) string` helper used wherever command output might contain sensitive values before it reaches the terminal or a log line. It is called from `internal/chart/providers/helm/manager.go` (`InstallArgoCDWithProgress`) and from `internal/shared/executor/executor.go` (`RealCommandExecutor.ExecuteWithOptions`) — i.e., redaction is applied at the generic command-execution layer, not left to each individual caller to remember. Any new code path that streams subprocess output to the user should route through the executor's existing redaction rather than printing raw stdout/stderr directly.
-
-### 2.3 Integrity verification for downloaded tools
-
-`internal/shared/download/` is the CLI's substrate for fetching pinned third-party tool binaries (k3d, Helm, mkcert, Terraform, infracost — see `internal/shared/download/pins.go`). `VerifyChecksum` (`internal/shared/download/verify.go`) performs a SHA-256 comparison against an expected hex digest, and is called from `Downloader.FetchVerified` — meaning every pinned-tool download in this CLI is checksum-verified before use, not merely fetched and trusted. Do not add a new downloaded dependency without wiring it through `FetchVerified`/`VerifyChecksum`.
-
-### 2.4 Infrastructure-as-code secrets
-
-The Terraform root modules the CLI generates (`internal/cluster/providers/eks/templates/main.tf`, `internal/cluster/providers/gke/templates/main.tf`) mark cluster endpoint and CA data as `sensitive = true` outputs (see the GKE template's `cluster_endpoint` / `cluster_certificate_authority_data` outputs), so Terraform itself will not print these values in its own plan/apply output. Module versions in both templates are **pinned to exact versions**, not ranges — the EKS template's comment explains that a floating `~> 21.0` constraint once resolved to a new minor version whose changed defaults broke cluster creation in three independent ways. Pin exactly; bump deliberately.
-
-Both cloud templates also follow least-exposure patterns for the clusters they create:
-- The GKE template enables private nodes (`enable_private_nodes = true`, no external IPs) with egress routed through a dedicated Cloud NAT, keeping only the API endpoint public so the operator's machine can reach it without a VPN.
-- The EKS template sets `http_tokens = "required"` (IMDSv2 enforced) on node metadata options, narrowing the credential-exposure surface of the node's instance role.
-
-## 3. Input validation and sanitization
-
-Because this CLI's primary "input" is operator-supplied flags and interactive wizard answers that are turned into shell/Terraform/Kubernetes operations, validation focuses on: rejecting ambiguous targeting, fixed-argv command construction (no shell injection via string concatenation), and typed-name confirmation before destructive actions.
-
-### 3.1 No positional-argument ambiguity
-
-As shown in §1.2, `cmd/app/app.go`'s `noPositionalArgs` rejects any stray positional argument for the `app` command group, forcing explicit `--context` targeting. This is a direct input-validation control against an entire class of "ran against the wrong cluster" incidents.
-
-### 3.2 Typed-name confirmation for destructive operations
-
-Per `docs/reference/architecture/overview.md`, `openframe cluster delete [NAME]` requires **typed-name confirmation** for cloud clusters before deletion proceeds — an explicit control against fat-fingered or scripted accidental deletion of billed cloud infrastructure.
-
-### 3.3 Fixed-argv command construction
-
-`internal/cluster/discovery/auth.go`'s `runLogin` builds the `gcloud` invocation as a fixed argument slice passed to `exec.CommandContext`, not a shell string:
-
-```go
-// internal/cluster/discovery/auth.go
-cmd := osexec.CommandContext(ctx, "gcloud", args...) // #nosec G204 -- fixed argv assembled by this package, no user input
-```
-
-The `#nosec G204` annotation is paired with an explicit justification comment (fixed argv, no user input interpolated) rather than a blanket suppression — follow this convention if you need to suppress a linter security finding anywhere else in the codebase: justify it inline, scoped to the exact line.
-
-### 3.4 Executor abstraction as a validation chokepoint
-
-All shelled-out commands (Docker, k3d, Helm, Terraform, gcloud, aws) go through `internal/shared/executor`'s `CommandExecutor` abstraction rather than being invoked ad hoc throughout the codebase (per the architecture overview's dependency notes). This gives the codebase one place to enforce consistent argument handling, output capture, redaction (§2.2), and exit-code fidelity (§4.3) instead of many bespoke `exec.Command` call sites with inconsistent handling.
-
-## 4. Common security vulnerabilities and mitigations
-
-| Risk | Where it could arise | Mitigation implemented in this codebase |
+| Concern | Mechanism | Source |
 |---|---|---|
-| Token/secret leakage via process arguments | Git clone URLs with embedded PATs | `extractGitAuth` strips credentials from the URL before use; token passed only via in-memory `transport.AuthMethod` (`internal/chart/providers/git/auth.go`) |
-| Token/secret leakage via logs/output | Any command output containing a credential | `maskToken` (git auth) and the general-purpose `redact.Redact` called from the executor and Helm manager (`internal/shared/redact/redact.go`) |
-| Shell/argument injection | Shelling out to `gcloud`, `helm`, `terraform`, etc. | Fixed argv construction via `exec.CommandContext(ctx, name, args...)`, never shell string interpolation (`internal/cluster/discovery/auth.go`) |
-| Operating on the wrong cluster | Ambiguous CLI arguments defaulting to the current kube-context | `noPositionalArgs` validation plus `ui.ShowContextHeader()` before destructive subcommands (`cmd/app/app.go`) |
-| Accidental destruction of billed cloud resources | `cluster delete` on a cloud (EKS/GKE) cluster | Typed-name confirmation requirement (per `docs/reference/architecture/overview.md`) |
-| Tampered or corrupted downloaded binaries | k3d/Helm/mkcert/Terraform/infracost downloads | SHA-256 `VerifyChecksum` gate inside `Downloader.FetchVerified` (`internal/shared/download/verify.go`) |
-| Malicious or corrupted self-update binary | `openframe update` replacing the running binary | Cosign keyless signature verification (`internal/shared/selfupdate/cosign.go`) plus a `rollback` path (`internal/shared/selfupdate/rollback.go`) |
-| Expired-but-reported-active cloud credentials | `gcloud auth list` can report an expired account as `ACTIVE` | `AuthFlow.hasFreshLogin` forces a real token mint via `print-access-token` instead of trusting `auth list` (`internal/cluster/discovery/auth.go`) |
-| Retrying a destructive or already-failed operation blindly | Generic retry logic around install/upgrade | `NonRetryableError` interface lets an error veto retry outright, and `InstallationRetryPolicy` only matches specific transient substrings — pod-log/event text embedded in wait-failures is not blindly treated as retryable (`internal/shared/errors/retry_policy.go`) |
-| Unverified IaC module drift breaking cluster security posture | Terraform module version ranges | Exact version pins (not `~>` ranges) in both `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf`, with the reasoning documented inline |
-| Exit-code laundering hiding a failed external command's real status | Subprocess failures collapsed to a generic exit code | `executor.CommandError` preserves the original exit code through to `main.exitCode()` (`main.go`), enforced by rule `OPENFRAM-005` |
+| Git PAT for cloning the chart repo | Extracted from the URL, used via an in-memory `transport.AuthMethod`, never written to a URL, file, or argv | `internal/chart/providers/git/auth.go` |
+| Download integrity (k3d, Helm, Terraform, mkcert, infracost) | Pinned exact versions with SHA256 checksum verification before any binary is trusted or executed | `internal/shared/download/pins.go`, `internal/shared/download/verify.go` |
+| Self-update binary integrity | Checksum verification **and** cosign/Sigstore keyless signature verification before the running binary is replaced | `internal/shared/selfupdate/cosign.go`, `internal/shared/selfupdate/update.go` |
+| Self-update failure recovery | Explicit rollback path so a corrupted or malicious replacement cannot be left in place silently | `internal/shared/selfupdate/rollback.go` |
+| Terraform state secrets (cluster CA data, endpoint) | Marked `sensitive = true` in Terraform outputs for the GKE module | `internal/cluster/providers/gke/templates/main.tf` |
 
-### 4.1 Error wrapping discipline
+The EKS and GKE Terraform root modules (`internal/cluster/providers/eks/templates/main.tf`, `internal/cluster/providers/gke/templates/main.tf`) are **generated and owned by the CLI** — the header comment on each file explicitly says "do not edit by hand". Module versions are **exact pins**, not ranges: the EKS template's comment records that a floating `~> 21.0` constraint once resolved to a new minor release whose changed defaults broke cluster creation in three independent ways. Treat any change to these pins as a deliberate, tested action, not a routine bump.
 
-The organization-wide rule `FLEETMDM-002-2` ("Go errors must be wrapped with `fmt.Errorf(\"...: %w\", err)` at every call boundary") applies here and is a security-relevant practice, not just a style rule: unwrapped bare `return err` loses the context needed to tell whether a failure was a permission error, a network error, or something attacker-influenced, which in turn makes it harder to apply `classifyTransient` correctly in `internal/shared/errors/retry_policy.go` and harder for an operator to diagnose an auth failure versus a transient one.
+Notable hardening already baked into the generated infrastructure:
 
-### 4.2 Already-handled error sentinel (no duplicate/confusing output)
+- **EKS**: IMDS is required to use IMDSv2 (`http_tokens = "required"`) with a hop limit of 2 — high enough for the EBS CSI controller (which is not on host network) to reach instance metadata, but still IMDSv2-only rather than open.
+- **GKE**: nodes are private (`enable_private_nodes = true`, `enable_private_endpoint = false`) with no external IPs, egress routed through a dedicated Cloud NAT — compatible with organizations enforcing `constraints/compute.vmExternalIpAccess`. The API endpoint itself stays public so the operator's machine can reach it without a VPN.
+- Both templates tag every cluster-owned cloud resource (`openframe:cluster` / `openframe-cluster`) so the CLI's teardown logic (see `internal/cluster/providers/eks/teardown.go`, `internal/cluster/providers/gke/teardown.go`) can find and remove resources created outside Terraform state, such as CSI-provisioned EBS volumes.
 
-Rule `OPENFRAM-004` requires that any error already shown to the user via `sharedErrors.HandleGlobalError` be wrapped in `*sharederrors.AlreadyHandledError` before propagating to `main`. `main.go` checks for this sentinel with `errors.As` specifically to avoid re-printing an error the user already saw — relevant to security review because a double-printed or reformatted error message is a place where a redacted value could inadvertently be re-emitted in an unredacted form by a second print path.
+## 4. Secrets Handling and Redaction in Output
 
-### 4.3 Exit-code fidelity
+Because the CLI's entire job is to shell out to other tools and surface their output to the operator, accidental secret leakage into terminal output or logs is a first-class concern.
 
-`main.go`'s `exitCode` function unwraps `*executor.CommandError` to preserve a failed external command's real exit code (when it is a valid Unix code), rather than collapsing every failure to a generic `1`. This matters for CI/automation security gates that key off specific exit codes from Helm/Terraform/etc.
+- `internal/shared/redact/redact.go` exposes `Redact(s string)`, used to scrub sensitive substrings out of text before it is shown or logged. It is called from:
+  - `internal/chart/providers/helm/manager.go`'s `HelmManager.InstallArgoCDWithProgress` — redacting Helm's own progress/error output before it reaches the terminal.
+  - `internal/shared/executor/executor.go`'s `RealCommandExecutor.ExecuteWithOptions` — the single choke point through which **every** shelled-out command's output passes, making redaction apply uniformly regardless of which subcommand is running.
+- `maskToken` (see §2.2) is the Git-specific counterpart, used specifically for clone URLs that may embed a PAT.
+- `internal/shared/executor/lognoise.go` filters routine, non-sensitive noise from subprocess output separately from redaction — keep these concerns distinct when touching either file: filtering for readability is not a substitute for redacting secrets.
 
-## 5. Security testing and code review guidelines
+If you add a new code path that shells out to a tool capable of echoing a credential (a new cloud CLI, a new Helm plugin, etc.), route its output through the same `CommandExecutor` abstraction (`internal/shared/executor/executor.go`) rather than calling `os/exec` directly, so it inherits redaction automatically. `internal/cluster/discovery/auth.go` is a deliberate, documented exception: its `runLogin` seam calls `os/exec` directly because an OAuth browser flow must attach to the real terminal's stdin/stdout — bypass the capturing executor only for that same reason, never to avoid redaction.
 
-This repository enforces a set of automated, deterministic and judged review rules (see `get_code_rules`) on every change. The ones most relevant to a security-focused reviewer:
+## 5. Input Validation and Sanitization
 
-- **DUP-001** — a new or changed exported definition must not duplicate an existing one in the org. For security code specifically, this means: do not write a second ad hoc token-masking function or checksum verifier when `redact.Redact` or `download.VerifyChecksum` already exist — reuse them.
-- **TEST-001** — a new or changed exported definition should be referenced by a test. Security-sensitive helpers (auth flows, redaction, checksum verification) are exactly the kind of code this rule exists to protect; an untested change to `gitAuth`, `AuthFlow`, or `VerifyChecksum` should be treated as a review blocker even though the rule's own severity is `info`.
-- **OPENFRAM-001** — cross-package imports that would collide on their last path segment (e.g. two different `errors` or `config` packages) must use a disambiguating camelCase alias (`sharedErrors`, `uiCluster`, etc.). This is not cosmetic for security review: an unaliased import collision is exactly the kind of ambiguity that can cause a reviewer (or the author) to wire the wrong package's error-handling or config logic into a security-sensitive path.
-- **OPENFRAM-002 / OPENFRAM-002-11** — business logic lives in an unexported `Service` struct behind a `New<Name>Service` constructor, with dependencies (including executors) injected rather than derived internally. Applied to security code, this keeps things like `AuthFlow` constructible with fake seams for tests (see `NewAuthFlowWithSeams`) instead of hardcoding real `gcloud`/filesystem access that would make negative-path testing (expired token, missing CLI, non-interactive session) impractical.
-- **OPENFRAM-004** — see §4.2.
-- **OPENFRAM-005** — see §4.3.
-- **OPENFRAM-007** — all user-facing output must go through `pterm` printers or `internal/shared/ui`, never raw `fmt.Print*` to stdout. This matters for security because raw prints bypass the redaction and `--silent`/`--plain` behavior the shared UI layer provides.
+### 5.1 Command argument validation
 
-When reviewing a change that touches authentication, credential handling, download verification, or self-update, additionally check:
+- `cmd/app/app.go`'s `noPositionalArgs` (described in §2.3) rejects any stray positional argument on `app` subcommands with an explicit error naming `--context` as the correct way to target a cluster, instead of letting Cobra's default `ArbitraryArgs` silently ignore it.
+- Cluster names, cloud regions/projects/profiles, and node counts passed via flags (`--type`, `--nodes`, `--region`, `--project`, `--profile`, `--ha`, `--spot` on `cluster create`) are validated by the relevant provider and config-building code (`internal/cluster/models/flags.go`, `internal/chart/utils/config/builder.go`) before being interpolated into generated Terraform variables (`terraform.tfvars.json`) or passed to subprocess arguments.
 
-1. Does any new credential value ever reach a string that is logged, printed, or passed as a CLI argument unmasked?
-2. Is any new external-tool invocation built via fixed argv (`exec.CommandContext(ctx, name, args...)`) rather than a shell string, and if a `#nosec` suppression is needed, is it scoped and justified inline as in `internal/cluster/discovery/auth.go`?
-3. Does a new retryable-error classification risk retrying a destructive operation that should instead fail closed (see the `NonRetryableError` discussion in `internal/shared/errors/retry_policy.go`)?
-4. Does a new Terraform-generated resource expose a sensitive output without `sensitive = true`?
+### 5.2 Subprocess argument construction
 
-For the general test layout and how to run the test suite, see [Testing](../testing/README.md). For local environment setup used while developing security-sensitive code (credentials needed for GKE/EKS testing, etc.), see [Environment Setup](../setup/environment.md) and [Local Development](../setup/local-development.md).
+The CLI shells out extensively (Docker, k3d, Helm, Terraform, gcloud, aws). The consistent pattern across the codebase is:
 
-## 6. Environment variables and secrets management
+- Build argument lists as **fixed argv slices assembled by the CLI's own code**, not by interpolating untrusted strings into a shell string. `internal/cluster/discovery/auth.go`'s `runLogin` is explicit about this in its `#nosec G204` justification comment: "fixed argv assembled by this package, no user input" — the gocritic/gosec exception is scoped and documented, not blanket-suppressed.
+- Route execution through `internal/shared/executor/executor.go`'s `CommandExecutor` interface, which has a real implementation and a `MockCommandExecutor` (`internal/shared/executor/mock.go`) used throughout the test suite — this means every command invocation is unit-testable without actually invoking Docker/Terraform/etc., which in turn means argument-construction logic gets exercised by tests rather than only by manual QA.
 
-### 6.1 Reading environment-controlled behavior
+When adding a new subprocess call, follow the same pattern: construct the argv as a slice built from already-validated values, go through `CommandExecutor`, and add a `#nosec` justification comment only when the surrounding code genuinely has no untrusted input reaching the command line.
 
-`internal/shared/config/envbool.go` exposes `EnvBool(name string) bool`, the shared helper for interpreting boolean-valued environment variables consistently across the CLI (rather than each call site re-implementing its own truthy-string parsing). Any new environment-variable-gated behavior should be read through this helper for consistency.
+### 5.3 Downloaded artifact verification
 
-### 6.2 No credentials are owned by this CLI
+`internal/shared/download/` is the CLI's answer to "never `curl | bash`":
 
-OpenFrame CLI does not define, store, or distribute its own application secrets, API keys, or default credentials — it has no user database, no session store, and no bundled default login. All credentials it uses at runtime belong to the systems it drives:
+- `pins.go` holds exact pinned versions and SHA256 checksums for k3d, Helm, Terraform, mkcert, and infracost.
+- `verify.go` checks a downloaded artifact's checksum against the pin before it is treated as trusted.
+- `progress.go` handles user-facing download progress separately from verification, so verification is never skipped for the sake of a smoother progress bar.
 
-- **Cloud credentials** — `gcloud`'s own credential store and Application Default Credentials file, and the AWS CLI's own credential chain. The CLI probes and, interactively, offers to refresh these (§1.1), but never writes to or manages the underlying credential files itself beyond invoking the providers' own login commands.
-- **Kubernetes credentials** — the operator's existing kubeconfig, resolved per-context by `internal/k8s/restconfig.go`. The CLI reads this; it does not generate or store kubeconfig credentials.
-- **ArgoCD admin password** — per the architecture overview, `openframe app access` reads and prints the ArgoCD admin credentials (sourced from the `argocd-initial-admin-secret` Kubernetes secret, as referenced in the App Status Aggregation data flow) for the operator's own use; the CLI does not persist a copy of this password anywhere outside that read-and-display action.
-- **Git tokens** (for any future private chart source) — handled exclusively via the in-memory pattern in §2.1; never written to a credentials file by this CLI.
+Any new third-party binary the CLI needs to fetch should be added to `pins.go` with an explicit version and checksum, following the existing pattern, rather than downloaded "latest" and trusted implicitly.
 
-> Refer to your environment configuration for any default usernames, passwords, or endpoints — this document intentionally does not list any, since none are owned or hardcoded by the CLI.
+## 6. Common Security Vulnerabilities and Mitigations
 
-### 6.3 Signing material for self-update
+| Vulnerability class | Relevance to this CLI | Mitigation in place |
+|---|---|---|
+| Command injection via subprocess args | High — the CLI shells out to Docker/k3d/Helm/Terraform/gcloud/aws constantly | Fixed argv slices assembled internally, routed through `CommandExecutor`; `#nosec G204` only where justified and documented (`internal/cluster/discovery/auth.go`) |
+| Secret leakage in logs/terminal output | High — Helm, Terraform and Git all produce verbose output that can embed tokens | Central `Redact` function (`internal/shared/redact/redact.go`) wired into the single `CommandExecutor` choke point and into Helm's progress reporting |
+| Secrets in URLs / argv / disk | Medium — Git clone URLs and cloud CLI calls can embed credentials | `extractGitAuth`/`buildAuth` keep tokens in memory only (`internal/chart/providers/git/auth.go`) |
+| Supply-chain tampering of downloaded tools | Medium — k3d/Helm/Terraform/mkcert/infracost binaries are fetched and executed | Pinned versions + SHA256 verification (`internal/shared/download`) |
+| Supply-chain tampering of the CLI's own self-update | High — a compromised update would run with the operator's full local and cloud privileges | Checksum **and** cosign/Sigstore signature verification before applying (`internal/shared/selfupdate/cosign.go`), with a rollback path (`internal/shared/selfupdate/rollback.go`) |
+| Retrying a destructive or already-applied operation | Medium — naive retry-on-any-error could reinstall an already-installed ArgoCD, or resend a request that already landed | `NonRetryableError` interface explicitly vetoes retry regardless of error text (`internal/shared/errors/retry_policy.go`); structural classification (`classifyTransient`) is checked before any substring-matching fallback |
+| Targeting the wrong cluster | Medium (destructive for `uninstall`) | `noPositionalArgs` on `app` subcommands forces explicit `--context` targeting (`cmd/app/app.go`) |
+| Insecure generated cloud infrastructure | Medium — Terraform templates provision real IAM roles, network paths, and node metadata access | IMDSv2-only with a minimal hop limit (EKS), private nodes with no external IPs plus Cloud NAT egress (GKE), exact module version pins on both |
+| Orphaned cloud resources after teardown | Low/operational — CSI-provisioned volumes exist outside Terraform state | Cluster-name tagging (`openframe:cluster`) lets the CLI's orphan-sweep teardown logic find and remove them |
 
-The self-update signature verification in `internal/shared/selfupdate/cosign.go` relies on **cosign keyless verification**, meaning there is no long-lived private signing key that this CLI (or its operators) need to protect locally — verification is against the public Sigstore transparency log and OIDC-issued certificate chain, not a secret the CLI must manage. If this mechanism is ever extended to non-keyless signing, any resulting private key material must never be embedded in the repository or shipped inside the binary; follow the pattern already set by `internal/shared/download`'s checksum-pin approach (`internal/shared/download/pins.go`), which stores only public, verifiable digests.
+### Retry-safety as a security property
 
-### 6.4 Shell scripts
+`internal/shared/errors/retry_policy.go` deserves a specific callout: its `RetryableErrs` substring table only matches strings that the **actual tools in this stack** emit (verified against the Go standard library and Helm/kubectl behavior — the file's comments explicitly note that previously-listed substrings like `"tiller not ready"` and `"network timeout"` could never have matched anything real). An error-classification table that matches on vibes rather than verified tool output risks retrying an operation that already succeeded destructively, or failing to retry one that is genuinely transient — both are security-relevant failure modes for a tool that provisions and destroys infrastructure.
 
-`scripts/sign-binary.sh` is the one shell script in this repository's setup surface (per the verified repository facts). Signing credentials or tokens it may require at build/release time should be supplied exclusively via the CI environment's own secrets store, never committed to the script or to the repository.
+## 7. Security Testing and Code Review Guidelines
 
----
+### 7.1 Testability as a security control
 
-Because OpenFrame CLI has no recorded downstream consumers in the organization's dependency graph (coverage: partial — this is not proof that nothing anywhere depends on it, only that the indexed portion of the graph records none), there is no public Go API contract from this repository that other services import. Its `internal/` packages are private implementation detail, and security review of this repository can therefore focus entirely on the CLI's own runtime behavior described above rather than on a public interface contract.
+The `CommandExecutor` abstraction (`internal/shared/executor/executor.go`, with `MockCommandExecutor` in `internal/shared/executor/mock.go`) exists specifically so that command construction — the part of the codebase most exposed to injection risk — can be exercised by unit tests without touching a real shell. When adding or changing any code that shells out:
+
+- Write or extend tests that assert on the **exact argv** passed to the mock executor, not just on the final success/failure outcome.
+- Review the test helpers under `tests/testutil/` (`command_assertions.go`, `flag_contract.go`, `assertions.go`) and the integration test helpers under `tests/integration/common/` (`cli_runner.go`, `cluster_management.go`, `dependencies.go`) for existing patterns before writing new assertions from scratch.
+
+### 7.2 Code review checklist for security-relevant changes
+
+When reviewing a change that touches credentials, subprocess execution, or generated infrastructure, check for:
+
+- **No credential ever reaches `argv` or a file.** Any new auth flow should follow `internal/chart/providers/git/auth.go`'s pattern: parse, hold in memory, build an in-memory auth method, mask for logging.
+- **Any `#nosec` suppression carries a specific justification comment**, as in `internal/cluster/discovery/auth.go` ("fixed argv assembled by this package, no user input") — not a blanket suppression.
+- **New subprocess output flows through `CommandExecutor`**, so it inherits redaction, rather than calling `os/exec` directly (the one documented exception being an interactive OAuth login that must attach to the real terminal).
+- **New retryable-error substrings are verified against the tool's actual output**, not assumed, and anything that must never be retried (e.g., a result that may have already partially applied) implements `NonRetryableError` rather than relying on the substring table to simply not match.
+- **Changes to the generated Terraform templates are tested with a full create/delete pass**, per the EKS template's own comment about module version bumps — a change that "looks fine" in a plan can still alter defaults in ways that only surface at apply or destroy time.
+- **Non-interactive (CI) code paths never prompt.** Follow `AuthFlow.Ensure`'s pattern: check `interactive()` first, and return an actionable error with the manual command to run when it is false.
+
+### 7.3 Reporting a vulnerability
+
+This repository follows the organization-wide Flamingo AI Security Policy. Report a suspected vulnerability to **security@flamingo.run** — do not open a public GitHub issue, pull request, or discussion for a security problem, and do not post it in a community channel, since a public report puts every user at risk before a fix exists. Include the affected command or file, the version/commit, what an attacker could do with it, and reproduction steps.
+
+The policy commits to acknowledging a report within 3 business days, an initial severity assessment within 10 business days, and progress updates at least every 30 days until the issue is closed, with a target of 90 days to fix confirmed vulnerabilities. Security research under the policy's guidelines (test only against resources you own or have permission to use, stop immediately on encountering real credentials or another user's data, no denial-of-service testing) is treated as authorized.
+
+In scope for that policy: the source code in the public repositories of the flamingo-stack GitHub organization, including this CLI. Out of scope: vulnerabilities in third-party tools this CLI shells out to (Docker, k3d, Helm, Terraform, gcloud, aws) that are not caused by how this CLI invokes them — report those upstream, but tell Flamingo too if OpenFrame users are affected.
+
+## 8. Environment Variables and Secrets Management
+
+OpenFrame CLI's own configuration surface is deliberately small and does not define application secrets of its own — it is a provisioning tool that passes through credentials owned by other systems (cloud providers, Git hosts, Kubernetes clusters).
+
+- `internal/shared/config/envbool.go` centralizes how the CLI parses boolean environment-variable overrides, giving a single, tested definition of "truthy" across every flag that can also be set via environment variable rather than each call site inventing its own parsing.
+- `internal/shared/config/system.go` and `internal/shared/config/transport.go` hold other environment-derived system and transport configuration.
+- **Never pass a credential as a literal command-line flag value** if an environment variable or an interactively-prompted, in-memory value is available instead — flag values are visible in shell history and in `ps` output on multi-user systems, which is exactly the exposure that `internal/chart/providers/git/auth.go` goes out of its way to avoid for Git tokens.
+- The CLI relies on each underlying tool's own credential convention rather than reinventing one: `gcloud`'s own credential store for GKE, the `aws` CLI's profile/credential chain for EKS, and the operator's existing kubeconfig for cluster access. Do not add a new, CLI-specific credential file format without a clear reason — it adds another place secrets can be forgotten on disk.
+- When documenting or scripting against this CLI, prefer environment variables or the interactive prompts (`internal/shared/ui/prompts.go`) for anything secret, and never hardcode a credential, token, or password in an example — this document deliberately does not include any example credential values; refer to your environment configuration for the actual values used in your setup.
+
+## Related Reading
+
+For how the CLI's commands and providers fit together architecturally (useful context when assessing the blast radius of a given change), see the architecture overview. For environment and local development setup, including which tools must be installed before running the CLI against a real cluster, see the environment setup guide. For the test suite and how to extend it with new executor-mock assertions, see the testing guide. For the PR and commit conventions expected for any change, including security-relevant ones, see the contributing guidelines.
