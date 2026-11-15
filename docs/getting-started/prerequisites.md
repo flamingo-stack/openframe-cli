@@ -1,136 +1,149 @@
-## Overview
 
-Before you install or build the OpenFrame CLI, make sure your machine has the right tooling in place. The CLI (`openframe`) is a Go-based binary whose job is to provision a Kubernetes cluster (k3d locally, or EKS/GKE in the cloud via Terraform) and then deploy the [OpenFrame platform](https://openframe.ai) onto it — the platform's own source lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository, which this CLI clones and installs via ArgoCD's app-of-apps pattern at install/upgrade time.
+# Prerequisites
 
-Per the organization's dependency graph (`get_repo_ecosystem`, coverage: full), this repository has no recorded upstream dependencies on other internal repositories and no recorded downstream consumers — it publishes a single Go module (`github.com/flamingo-stack/openframe-cli`) and is a standalone, user-facing binary rather than a library other services import.
+This page lists what you need **before** installing and running the OpenFrame CLI (`openframe`), the Go-based command-line tool that provisions Kubernetes clusters (k3d, GKE, EKS) and deploys the OpenFrame platform onto them via ArgoCD's app-of-apps pattern.
 
-> For the full command reference and how these pieces fit together, see [`../reference/architecture/overview.md`](../reference/architecture/overview.md) and [`../reference/architecture/ecosystem.md`](../reference/architecture/ecosystem.md).
+> The OpenFrame platform application code (the services the CLI deploys) lives in a separate repository, [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant). This CLI clones that repository's Helm chart at install time — it is not vendored here. See `docs/reference/architecture/overview.md` for how the two repositories relate.
 
-## Required Software and Versions
+## What the CLI is built on
 
-| Software | Minimum Version | Why it's needed | Verify with |
+Per `go.mod`, the CLI is a single Go module (`github.com/flamingo-stack/openframe-cli`, Go `1.26.0`, toolchain `1.26.5`). It is distributed as a standalone binary via GitHub Releases, so **you do not need Go installed to use it** — only to build it from source. Per the organization's code graph, this repository has **no upstream dependencies and no downstream consumers** among internally-published artifacts: it is a self-contained CLI, not a library another repository imports.
+
+## Required software and versions
+
+| Tool | Why it's needed | Minimum / pinned version | Required for |
 |---|---|---|---|
-| Go | 1.26.0 (toolchain pinned to `1.26.5` in `go.mod`) | Building the CLI from source; `go.mod` pins the toolchain because Go 1.26.0/1.26.1 have a known crash on windows-amd64 (fixed in 1.26.2) | `go version` |
-| Docker | Recent stable release | Required by the local k3d cluster provider (`internal/cluster/prerequisites/docker/docker.go`); k3d nodes run as Docker containers | `docker version` |
-| k3d | Pinned version (checked/installed automatically by the CLI) | Creates and manages local Kubernetes clusters (`internal/cluster/providers/k3d`) | `k3d version` |
-| Helm | Pinned version (checked/installed automatically by the CLI) | Installs ArgoCD and the app-of-apps chart (`internal/chart/providers/helm`) | `helm version` |
-| Terraform | `>= 1.15.0` | Provisions EKS/GKE clusters (`internal/cluster/providers/terraform`, `internal/cluster/providers/eks`, `internal/cluster/providers/gke`) | `terraform version` |
-| kubectl / kubeconfig access | Any recent version compatible with your cluster | Reading cluster health and contexts (`internal/k8s`) | `kubectl version --client` |
-| `aws` CLI | Recent stable release | Required only for EKS clusters (`internal/cluster/prerequisites/aws/aws.go`, `cmd/cluster/aws_identity.go`) | `aws --version` |
-| `gcloud` CLI | Recent stable release | Required only for GKE clusters (`internal/cluster/prerequisites/gcloud/gcloud.go`) | `gcloud --version` |
-| infracost | Pinned version (checked/installed automatically by the CLI) | Cost estimation before cloud cluster creation (`internal/cluster/prerequisites/infracost`) | `infracost --version` |
-| golangci-lint | Recent stable release (contributors only) | Linting (`make lint` in the `Makefile`) | `golangci-lint --version` |
+| Go | Build the CLI from source (`go build`, `go install`) | `1.26.5` (toolchain pinned in `go.mod`; `1.26.0`/`1.26.1` have a known Windows GC crash) | Building from source only — not needed to run a released binary |
+| Docker | Backing engine for local k3d clusters | Any current Docker Desktop / Docker Engine with a running daemon | `openframe cluster create` (k3d), `openframe bootstrap` |
+| k3d | Local Kubernetes cluster provisioning | Auto-downloaded and checksum-verified by the CLI itself (see `internal/shared/download/pins.go`) | `openframe cluster create --type k3d`, `openframe bootstrap` |
+| Helm | Installs ArgoCD and the app-of-apps chart | Auto-downloaded and checksum-verified by the CLI | `openframe app install`, `openframe app upgrade` |
+| Terraform | Provisions GKE/EKS via the generated root modules | `>= 1.15.0` (required by `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf`); auto-downloaded by the CLI | `openframe cluster create --type eks\|gke` |
+| gcloud CLI | GCP authentication and project/API checks for GKE | Current version, authenticated | `openframe cluster create --type gke`, GKE discovery |
+| AWS CLI | AWS authentication for EKS | Current version, configured with credentials | `openframe cluster create --type eks`, EKS discovery |
+| infracost | Optional cost estimate shown before a cloud `terraform apply` | Auto-downloaded and checksum-verified by the CLI | Optional, shown during `openframe cluster create` for EKS/GKE |
+| kubectl context tooling (via `client-go`) | The CLI talks to the Kubernetes API natively — no separate `kubectl` binary required | n/a (built in) | All cluster-status and app operations |
 
-> Several of these — k3d, Helm, Terraform, and infracost — are **pinned and checksum-verified** by the CLI itself at `internal/shared/download/pins.go` rather than installed via `curl | bash`. Running `openframe prerequisites check` (or letting `openframe cluster create` / `openframe bootstrap` run their preflight) tells you exactly what is missing and installs what it can.
+> Docker, k3d, Helm, Terraform, and infracost binaries are pinned to exact versions with SHA256 digests in `internal/shared/download/pins.go` and verified by `internal/shared/download/verify.go` before use — never fetched via an unverified `curl \| bash`. Run `openframe prerequisites check` to see exactly which of these your machine is missing.
 
-### Notes on Go toolchain
+## System requirements
 
-`go.mod` specifies:
-
-```text
-module github.com/flamingo-stack/openframe-cli
-
-go 1.26.0
-toolchain go1.26.5
-```
-
-The `toolchain` line exists specifically to keep released Windows binaries off the buggy 1.26.0/1.26.1 runtimes (a GC stack-scanning bug that corrupts return addresses at random on windows-amd64). If you build from source, let Go resolve this toolchain automatically rather than pinning an older one.
-
-## System Requirements
+The CLI itself is a lightweight Go binary, but the local k3d cluster and the OpenFrame platform workloads it deploys (ArgoCD plus the app-of-apps services) need real headroom on the host running Docker.
 
 | Resource | Minimum | Recommended |
 |---|---|---|
 | RAM | 24 GB | 32 GB |
-| CPU cores | 6 | 12 |
-| Disk space | 50 GB | 100 GB |
+| CPU Cores | 6 | 12 |
+| Disk Space | 50 GB | 100 GB |
 
-These figures account for running a local k3d cluster alongside the full OpenFrame platform stack (the platform itself — Kafka, MongoDB, Cassandra, and related services — is provisioned onto the cluster by the CLI, not run by the CLI process itself). Cloud cluster creation (EKS/GKE) shifts most compute load off your local machine, but Docker, Terraform, and the CLI's own operations still need headroom locally.
+Supported operating systems:
 
-### Operating systems
+- **macOS** and **Linux** — the CLI runs natively; `internal/prerequisites/runner.go` auto-installs missing tools directly.
+- **Windows** — per `docs/reference/architecture/overview.md`, the native Windows build re-executes itself inside **WSL2** (`internal/shared/wsllauncher`) before any cluster command runs, because the local cluster (Docker + k3d) and the native Kubernetes client (`client-go`) need to share a network namespace that a native Windows process cannot reach reliably. On Windows, `openframe prerequisites install` prints manual installation links rather than auto-installing (prerequisites are auto-installed only on macOS/Linux, per `internal/prerequisites/runner.go`).
 
-- **macOS** and **Linux** are supported natively — Docker, k3d, and `client-go` run directly.
-- **Windows**: the native Windows build forwards execution into **WSL2** (`internal/shared/wsllauncher`), because Docker, k3d, and `client-go` do not work reliably on native Windows. Install and enable WSL2 before running cluster-creation commands on Windows.
+Download the Windows build directly if you are not building from source:
 
-## Account / Access Requirements
+```text
+https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip
+```
 
-Depending on which cluster backend you use, you'll need different credentials:
+## Account / access requirements
 
-| Cluster type | Access required |
+Depending on which cluster backend you target, you need:
+
+| Target | Access required |
 |---|---|
-| Local (k3d) | A working local Docker daemon — no cloud account needed |
-| AWS (EKS) | An AWS account and configured credentials/profile the `aws` CLI can use (`cmd/cluster/aws_identity.go` verifies the active identity before provisioning) |
-| GCP (GKE) | A GCP project and `gcloud` authenticated session (`internal/cluster/discovery/gke.go`, `internal/cluster/prerequisites/gcloud`) |
+| k3d (local) | Docker daemon access on the local machine (no cloud account needed) |
+| GKE | A Google Cloud project with the Compute Engine and Kubernetes Engine APIs enabled, and `gcloud` authenticated with permissions to create VPCs, subnets, Cloud NAT, and a GKE cluster (see `internal/cluster/providers/gke/templates/main.tf`) |
+| EKS | An AWS account/identity with permissions to create a VPC, an EKS cluster, a managed node group, and IAM roles (see `internal/cluster/providers/eks/templates/main.tf`); AWS CLI credentials configured |
+| OpenFrame platform install | Network access to clone the `flamingo-stack/openframe-oss-tenant` repository (public, no credentials required per `internal/chart/utils/config/builder.go`) |
+| `openframe update` | Network access to GitHub Releases; update binaries are verified via Sigstore/cosign keyless signatures (`internal/shared/selfupdate/cosign.go`), no GitHub account needed to consume releases |
 
-For installing the OpenFrame platform itself onto a cluster, `openframe app install` clones the app-of-apps chart repository from the external [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository (referenced as `RepoOSSTenant` in `internal/chart/models/repos.go`) — this is a public repository clone, not an authenticated API dependency, but network access to GitHub is required.
+> Docker registry credentials and ngrok credentials (for external ingress) are **optional**, collected only if you choose "Input custom Docker credentials" or "Use ngrok for External visibility" during `openframe app install`'s interactive configuration wizard (`internal/chart/ui/configuration/docker.go`, `internal/chart/ui/configuration/ingress.go`). If you need ngrok, you will be prompted to register at `https://dashboard.ngrok.com` and obtain an API key and auth token — refer to your own ngrok account for these values; this project does not issue them.
 
-If you intend to use a private Docker registry with your deployment, the interactive configuration wizard (`internal/chart/ui/configuration/docker.go`) will prompt for registry username, password/token, and email — collected only when you explicitly choose "Input custom Docker credentials"; otherwise no registry credentials are required.
+For AWS cost estimation, the EKS root module (`internal/cluster/providers/eks/templates/main.tf`) defaults to the Free-Tier-eligible `m7i-flex.large` instance type specifically so a new AWS account's Free plan does not reject the node group.
 
-> Refer to your environment configuration for any specific account credentials your organization requires — this document does not define or assume any default usernames or passwords.
+## Environment variables
 
-## Environment Variables
+Most environment variables used by the CLI are set automatically by the release/signing pipeline and are **not** something an end user needs to configure to run `openframe`. They are documented here for completeness and for anyone building/signing releases from source:
 
-| Variable | Purpose | Required? |
+| Variable | Used by | Purpose |
 |---|---|---|
-| `KUBECONFIG` | Overrides the default kubeconfig file location; respected when merging/removing cluster contexts (see `internal/cluster/providers/eks/kubeconfig.go`'s `mergeIntoDefaultKubeconfig`) | Optional — defaults to the standard kubeconfig path if unset |
-| `OPENFRAME_SIGN` | Enables binary signing during release builds (`scripts/sign-binary.sh`); only relevant to maintainers cutting a release, never to end users or local builds | Optional, maintainers only |
+| `OPENFRAME_SIGN` | `scripts/sign-binary.sh` | Must be `1` to trigger binary signing; unset or any other value makes the script a no-op, so local builds never attempt to sign |
+| `SIGNING_IDENTITY`, `KEYCHAIN_PATH`, `APPLE_ID_USERNAME`, `APPLE_ID_PASSWORD`, `APPLE_TEAM_ID` | `scripts/sign-binary.sh` (macOS) | codesign + notarytool signing/notarization of macOS binaries during release |
+| `JSIGN_JAR`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_CODE_SIGNING_ACCOUNT_NAME`, `AZURE_CERTIFICATE_PROFILE_NAME` | `scripts/sign-binary.sh` (Windows) | Azure Trusted Signing (Authenticode) of Windows binaries during release |
+| `CGO_ENABLED` | `Makefile` (`build`, `build-all`, `test-race`) | `0` for reproducible cross-compiled builds; `1` only when running `make test-race` (the race detector requires cgo) |
 
-Cloud-provider credentials (AWS access keys/profiles, GCP application-default credentials) are resolved through the standard `aws` and `gcloud` CLI mechanisms rather than OpenFrame-specific environment variables — configure those tools per their own documentation before running cloud cluster commands.
+None of these need to be set for a normal end-user install or for day-to-day `openframe` usage — they apply to the release pipeline that builds and signs the binaries you download.
 
-> Docker registry credentials and Ngrok tokens entered through the interactive configuration wizard are **never** read from environment variables; they are collected via masked terminal prompts and immediately registered with the CLI's secret redactor (`internal/shared/redact`) so they never appear in verbose logs.
+## Verification commands
 
-## Verification Commands
+Run these before your first `openframe` command to confirm your machine is ready.
 
-Run these checks before your first `openframe` command:
+Confirm Go is available (only needed if building from source):
 
 ```bash
-# Go toolchain (only needed if building from source)
 go version
-
-# Docker (required for local k3d clusters)
-docker version
-
-# Kubernetes CLI (optional but useful for manual inspection)
-kubectl version --client
-
-# Cloud CLIs (only if you plan to create EKS or GKE clusters)
-aws --version
-gcloud --version
 ```
 
-The CLI also ships its own built-in readiness check, which is the most reliable way to confirm you're ready — it inspects the current OS/architecture and reports exactly which required tools are missing or outdated:
+Build the CLI for your current platform (output goes to `build/`):
 
 ```bash
-# Check prerequisites for the default (k3d) cluster type
-openframe prerequisites check
-
-# Check prerequisites for a specific cluster type
-openframe prerequisites check --type k3d
-openframe prerequisites check --type eks
-openframe prerequisites check --type gke
-
-# Attempt to install missing prerequisites automatically
-openframe prerequisites install --type k3d
-```
-
-This maps to the `internal/prerequisites/runner.go` and `internal/cluster/prerequisites/checker.go` logic, which is OS-aware and shared across the `cluster`, `app`, and `prerequisites` command groups — the same check also runs automatically as a preflight step inside `openframe bootstrap` and `openframe cluster create`.
-
-## Building From Source (Optional)
-
-If you are contributing to the CLI rather than just using a released binary, confirm your build toolchain with:
-
-```bash
-# Build the binary for your current platform into build/
 make build
-
-# Run unit tests (vet on, excludes integration tests)
-make test-unit
-
-# Run go vet across all packages
-make vet
 ```
 
-`make test-integration` and `make test-tfvalidate` have additional prerequisites (a real Docker + k3d environment, and network access to download Terraform providers, respectively) and are opt-in via Go build tags — they are not required for basic CLI usage.
+Or install directly via Go:
 
-## Next Steps
+```bash
+go install github.com/flamingo-stack/openframe-cli@latest
+```
 
-Once your environment passes `openframe prerequisites check`, continue to the quick-start guide to create your first cluster and install the platform.
+Check that the resulting binary runs and report its version:
+
+```bash
+openframe --version
+```
+
+Let the CLI check all tool prerequisites for your target cluster type without installing or changing anything:
+
+```bash
+openframe prerequisites check
+```
+
+Narrow the check to a specific cluster backend:
+
+```bash
+openframe prerequisites check --type k3d
+openframe prerequisites check --type gke
+openframe prerequisites check --type eks
+```
+
+Install any missing prerequisites (auto-installs on macOS/Linux; prints manual links on Windows):
+
+```bash
+openframe prerequisites install
+```
+
+Confirm Docker is reachable (required for k3d clusters):
+
+```bash
+docker info
+```
+
+Confirm cloud CLIs are authenticated, if you plan to use GKE or EKS:
+
+```bash
+gcloud auth list
+aws sts get-caller-identity
+```
+
+Once prerequisites are satisfied, verify end-to-end readiness with a local bootstrap:
+
+```bash
+openframe bootstrap
+```
+
+This single command creates a local k3d cluster and installs the full OpenFrame platform (ArgoCD + app-of-apps), exercising the Docker, k3d, and Helm prerequisites together.
+
+## Next
+
+With prerequisites verified, continue to the quick start guide, or jump directly into the how-to guide for creating a new Kubernetes cluster with the OpenFrame CLI.

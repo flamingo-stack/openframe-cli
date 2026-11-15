@@ -1,307 +1,185 @@
-ic# Testing
 
-OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is a Go binary, and its test suite is built entirely on the standard `go test` toolchain plus `testify` assertions. There is no separate frontend or backend stack to test here — the repository publishes a single Go module (confirmed by the organization's dependency graph, which also shows **no recorded downstream consumers**: this CLI is a standalone, user-facing binary, not a library other repositories import). Everything described below lives inside `flamingo-stack/openframe-cli`; the platform it deploys is maintained separately in [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) and is out of scope for this document.
+# Testing
 
-> This CLI has no recorded downstream consumers in the organization's code graph (coverage: full), so changing an exported function's signature cannot silently break another repository — but it can still break the CLI's own command surface, which the contract and matrix tests below exist to catch.
+OpenFrame CLI (`github.com/flamingo-stack/openframe-cli`) is a Go service with no downstream consumers and no upstream internal dependencies recorded in the organization's code graph (coverage is `full`, so this is confirmed, not a gap). Its test suite is entirely self-contained: unit tests against the command tree and internal packages, a CLI invocation matrix against the real built binary, and a separate integration suite gated behind a build tag for scenarios that need Docker/k3d.
+
+This repository is the CLI that provisions Kubernetes clusters and installs the OpenFrame platform. The platform's application code itself lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository — its tests are out of scope here.
+
+> This document covers Go testing for the `openframe-cli` module. For the broader development workflow, see [Development](../README.md); for local environment setup, see [Local Development](../setup/local-development.md).
 
 ## Test structure and organization
 
-Tests in this repository fall into three layers, mirroring the `cmd/` → `internal/` → external-process architecture described in the [architecture overview](../../reference/architecture/overview.md):
+Tests live in three places, each with a distinct purpose:
 
-| Layer | Where | What it proves |
-|---|---|---|
-| Unit tests | `*_test.go` files beside the code they test, throughout `cmd/` and `internal/` | Individual functions, command structure, flag contracts — no external processes, no network, no cluster |
-| CLI matrix tests | `cli_matrix_test.go`, `main_test.go` (repository root) | The **built binary**, invoked as a subprocess with a spread of argument combinations, asserting exit codes and output — still hermetic (no docker/k3d/helm, no network) |
-| Integration tests | `tests/integration/common/` | Helpers for tests that build and run the real CLI binary against a real k3d cluster, Docker, or other external tools |
+| Location | Scope | Build tag | Runs with |
+|---|---|---|---|
+| `*_test.go` next to the code it tests (`cmd/**`, `internal/**`, root) | Unit tests of commands, services, and internal packages | none | `go test` / `make test-unit` |
+| Root-level `cli_matrix_test.go`, `main_test.go` | Builds the real binary and exercises it as a black box (exit codes, stdout/stderr, flag parsing) | none | `go test` (builds the binary itself) |
+| `tests/integration/**/*_test.go` | End-to-end scenarios that create real k3d clusters and shell out to real external binaries | `integration` | `make test-integration` |
+| `tests/testutil/` | Shared test helpers (assertions, flag-contract checks, mock executor wiring) — not tests themselves | none | imported by other tests |
 
-### Test support packages
+### Unit tests co-located with source
 
-Two shared packages carry the weight of keeping tests consistent across the codebase:
+Unit tests sit beside the code they exercise, following Go convention. Examples from the material:
 
-- **`tests/testutil/`** — helpers consumed by unit tests across `cmd/` and `internal/`:
-  - `tests/testutil/setup.go` — `InitializeTestMode()`, `NewTestMockExecutor()`, `CreateStandardTestFlags()`, `CreateIntegrationTestFlags()`, `SetVerboseMode()`
-  - `tests/testutil/assertions.go` — the fluent `AssertCommandOutput` chain (`NoError()`, `StdoutContains()`, `StderrContainsAny()`, etc.) plus `AssertCommandSuccess`/`AssertCommandFailure` shorthands
-  - `tests/testutil/command_assertions.go` — security-focused assertions against a `MockCommandExecutor`'s structured command log: `AssertNoArgContains`, `AssertNoBashCConcatenation`, `AssertArgIsDiscrete`, `AssertNoDeleteOf`, `AssertNoCurlPipeShell`, and the exported `HasShellMetachars()` helper
-  - `tests/testutil/flag_contract.go` — `FlagSpec`, `AssertFlag`, `AssertFlags`, `FindSubcommand`, `AssertSubcommands` for freezing a command's flag/subcommand surface
-  - `tests/testutil/patterns.go` — `TestClusterCommand()`, which runs four standard sub-tests (`Structure`, `Flags`, `CLI`, `Execution`) against any cluster command factory
-  - `tests/testutil/cluster.go` — `TestCommandStructure()`, `TestCLICommand()`, `TestFlags()`, `IntegrationFlags()`
-  - `tests/testutil/utilities.go` — `TestClusterConfig(name)`, a pre-populated `*models.ClusterConfig` for unit tests
+- `cmd/root_test.go` — root command structure, version string composition (`TestGetRootCmd`), VCS metadata backfill (`TestBackfillFromVCS`), and the `--verbose`/`--silent` debug-output wiring (`TestVerboseEnablesDebugOutput`).
+- `cmd/contract_test.go` — freezes the root command's persistent-flag and top-level subcommand surface (`TestRootContract_PersistentFlags`, `TestRootContract_TopLevelSubcommands`).
+- `cmd/help_matrix_test.go` — walks the **entire** command tree (`collectCommandPaths`) and asserts every command's `--help` prints a `Usage:` section, has a non-empty `Short` description, and every local flag has non-empty usage text. New commands are covered automatically with no per-command test to write.
+- `cmd/app/app_test.go` — structure of the `app` command group and a regression test (`TestAppGroup_PersistentPreRunEHonorsVerbose`) proving that group's own `PersistentPreRunE` (which shadows the root's, per cobra's "closest parent" rule) still applies the global `--verbose`/`--silent` contract.
 
-- **`tests/integration/common/`** — helpers specific to tests that exercise real infrastructure:
-  - `tests/integration/common/cli_runner.go` — `InitializeCLI()` (builds `build/openframe` with mod-time caching), `RunCLI(args...)`, `CleanupCLI()`, and the `CLIResult` type (`Success()`, `Failed()`, `Output()`, `ErrorMessage()`)
-  - `tests/integration/common/cluster_management.go` — k3d cluster lifecycle for tests: `GenerateTestClusterName()`, `CreateTestCluster()`, `DeleteTestCluster()`, `ClusterExists()`, `StopTestCluster()`, `CleanupTestCluster()`, `CleanupAllTestClusters()`
-  - `tests/integration/common/dependencies.go` — the `Dependency` type and `RequireOrSkip()`, plus predefined dependencies `Docker`, `K3d`, `Kubectl`, `Helm` and the convenience functions `RequireClusterDependencies()`, `RequireK8sDependencies()`, `RequireAllDependencies()`
+### Root-level CLI matrix tests
 
-### The executor abstraction makes unit testing possible
+`cli_matrix_test.go` and `main_test.go` at the module root build the actual `openframe` binary (via `go build`) and run it as a subprocess with a spread of argument combinations — version/help output, unknown commands and flags, parse-time flag validation, and command-level guards (e.g. mutually exclusive flags, uninstall confirmation). Everything in this file is deliberately **machine-independent**: no Docker, no k3d, no Helm, no network, no cluster, and no interactive prompts (stdin is closed, forcing the CLI into non-interactive mode). The harness sets a hermetic environment per run (`runMatrix` in `cli_matrix_test.go`):
 
-Every external process the CLI shells out to (`docker`, `k3d`, `helm`, `terraform`, `gcloud`, `aws`, …) goes through the `CommandExecutor` interface in `internal/shared/executor/executor.go`. Its test double, `internal/shared/executor/mock.go`, is what makes most of this repository testable without touching real infrastructure:
+- isolated `HOME`/`USERPROFILE` (no real `~/.openframe` state leaks in)
+- `KUBECONFIG` pointed at a path that does not exist
+- `OPENFRAME_NO_UPDATE_CHECK=1` to disable the self-update check
+- `OPENFRAME_NO_WSL_FORWARD=1` to keep the binary running natively even on Windows test runners
 
-- `MockCommandExecutor` is `sync.Mutex`-guarded (safe under `go test -race`) and keeps **two** logs of every execution: a flattened string (`GetExecutedCommands()`, legacy) and a structured `RecordedCommand` log (`Commands()`) that preserves `Name`, `Args []string`, `Env`, and `Stdin` as discrete elements.
-- Configure behavior with `SetResponse(pattern, result)` for specific commands, `SetDefaultResult(result)` for the fallback, and `SetShouldFail(fail, message)` to simulate a failing external tool.
-- Prefer `Commands()` over `GetExecutedCommands()` whenever a test needs to prove an argument was passed as a discrete argv element and not spliced into a shell string — the flattened log cannot tell `exec("bash", "-c", "helm install "+userInput)` apart from `exec("helm", "install", userInput)`, but the structured log can.
+`TestCLIMatrix_MachineOutputsOnStdout` specifically guards that script-facing output (`--version`, `completion bash`) lands on stdout, not stderr — breaking that would break any pipeline piping those outputs. `TestCLIMatrix_SilentVersion` guards that `--silent` never leaks the logo banner.
 
-```go
-exec := executor.NewMockCommandExecutor()
+Anything that needs real external tools (actual cluster creation, Helm installs, ArgoCD sync) belongs in the e2e workflow, not in this root-level matrix.
 
-exec.SetResponse("helm upgrade", &executor.CommandResult{
-    ExitCode: 0,
-    Stdout:   "Release deployed",
-})
+### Integration tests (`tests/integration/`)
 
-result, err := exec.Execute(ctx, "helm", "upgrade", "my-release", "./chart")
+Integration tests are reserved for scenarios that create real k3d clusters or run real external binaries. Code rule **OPENFRAM-006** (active, severity `error`) requires every file under `tests/integration/**/*_test.go` to carry `//go:build integration` as its first line — this is what keeps `go test ./...` / `make test-unit` from accidentally triggering them.
 
-for _, cmd := range exec.Commands() {
-    for _, arg := range cmd.Args {
-        if strings.Contains(arg, "$(") {
-            t.Errorf("shell injection in argv: %q", arg)
-        }
-    }
-}
+Shared helpers for this suite live in `tests/integration/common/`:
+
+- `cli_runner.go` — `InitializeCLI()` builds (and caches) the CLI binary into a `build/` directory under the project root, `RunCLI(args...)` executes it and returns a `CLIResult` (stdout, stderr, exit code, error) with helpers like `Success()`, `Failed()`, `ErrorMessage()`.
+- `cluster_management.go` — `GenerateTestClusterName()`, `CreateTestCluster`/`DeleteTestCluster`/`StopTestCluster` (shelling out to the real `k3d` binary), plus `CleanupAllTestClusters()` and Docker network/container cleanup helpers for clusters whose names match test-ish patterns (`test`, `integration`, `collision`, `stress`, etc.).
+- `dependencies.go` — a `Dependency` type (`Docker`, `K3d`, `Kubectl`, `Helm` are predefined) whose `RequireOrSkip(t, msg)` **skips** (never silently passes) a test when the tool isn't available, logging what to install. `RequireClusterDependencies`/`RequireK8sDependencies`/`RequireAllDependencies` bundle the common combinations.
+
+### Shared test utilities (`tests/testutil/`)
+
+`tests/testutil/` is imported by unit tests across the module (not itself a test package):
+
+- `setup.go` — `InitializeTestMode()` sets `ui.TestMode = true` to suppress logo/banner output during tests; `CreateStandardTestFlags()` builds a `cluster.FlagContainer` wired to a `MockCommandExecutor` with canned responses for common `k3d` commands (e.g. `k3d cluster list` → empty JSON array) and a mock k3d manager; `CreateIntegrationTestFlags()` builds a flag container with no mock injection, for real dependencies.
+- `cluster.go` — `TestCommandStructure`, `TestCLICommand` (executes a cobra command, captures output, asserts `contains` substrings), `TestFlags()`/`IntegrationFlags()`.
+- `patterns.go` — `TestClusterCommand(t, name, cmdFunc, setupFunc, teardownFunc)` runs a standard four-part suite (`Structure`, `Flags`, `CLI`, `Execution`) against a cluster subcommand, so adding a new cluster command means wiring it into this pattern rather than writing four bespoke tests.
+- `flag_contract.go` — `FlagSpec` + `AssertFlag`/`AssertFlags` freeze a flag's name, shorthand, type, and default value so a silent rename or dropped shorthand fails loudly; `AssertSubcommands` verifies a parent command exposes exactly the named subcommands.
+- `assertions.go` — a fluent `AssertCommandOutput` builder (`NoError()`, `HasError()`, `StdoutContains()`, `StderrContainsAny()`, `OutputContains()`, etc.) plus `AssertCommandSuccess`/`AssertCommandFailure` convenience wrappers.
+- `command_assertions.go` — security-focused assertions over a `*executor.MockCommandExecutor`'s **structured** command log (`executor.RecordedCommand`, which keeps argv as discrete elements rather than one flattened string): `AssertNoArgContains` (a secret never appears in any argv element), `AssertNoBashCConcatenation` and `AssertNoCurlPipeShell` (regression guards against building shell strings instead of passing discrete arguments), `AssertArgIsDiscrete`, `AssertNoDeleteOf` (a destructive command never targets a protected resource like `kube-system`).
+
+### The mock command executor
+
+`internal/shared/executor/mock.go` provides `MockCommandExecutor`, the seam that lets command and service tests run without any real `docker`/`k3d`/`helm`/`terraform`/`gcloud`/`aws` process. It records every invocation both as a flattened string (`GetExecutedCommands()`, `WasCommandExecuted(pattern)`) and as a structured `RecordedCommand{Name, Args, Env, Stdin}` (`Commands()`), is safe under `go test -race` (all state behind a `sync.Mutex`), and supports `SetResponse(pattern, result)` / `SetShouldFail(fail, message)` to script specific command outcomes.
+
+```mermaid
+flowchart TB
+    subgraph tests["Test layers"]
+        unit["Unit tests<br/>(cmd/**, internal/**)"]
+        matrix["CLI matrix tests<br/>(root-level *_test.go)"]
+        integ["Integration tests<br/>(tests/integration/**)"]
+    end
+    subgraph helpers["Shared helpers"]
+        testutil["tests/testutil"]
+        mock["internal/shared/executor<br/>MockCommandExecutor"]
+        common["tests/integration/common"]
+    end
+    unit --> testutil
+    unit --> mock
+    matrix --> built["go build ./... then exec the binary"]
+    integ --> common
+    integ --> real["real k3d / docker / kubectl / helm"]
 ```
 
 ## Running tests
 
-### Unit tests
+All commands below are run from the module root (where `go.mod` lives).
 
-The release pipeline's own quality gate (`.github/workflows/release.yml`) runs:
+### Unit tests only
 
 ```bash
 make test-unit
 ```
 
-before any tag is cut — a release is never published if this step fails. Described in that workflow as covering "unit tests (root, cmd, internal, tests/testutil)", this is the fast, hermetic layer: no Docker, no network, no real cluster.
+This is the gate the release workflow runs before any tag is cut (the release's "Gate: unit tests" step). It targets the root package plus `cmd`, `internal`, and `tests/testutil` while explicitly **excluding** `./tests/integration/...` — that exclusion, together with the `integration` build tag (OPENFRAM-006), is what keeps `go test ./...` from ever creating a real k3d cluster.
 
-To run the same layer directly with `go test` (for example while iterating on a single package):
-
-```bash
-go test ./cmd/... ./internal/... ./tests/testutil/...
-```
-
-Narrow to one package while developing:
+Without the Makefile target, the equivalent plain `go test` invocation covers the same packages:
 
 ```bash
-go test ./internal/shared/executor/...
-go test ./cmd/app/...
+go test ./... -short
 ```
 
-### CLI matrix and root-level tests
-
-`main_test.go` and `cli_matrix_test.go` live at the repository root and build the real binary as a subprocess:
-
-```bash
-go test .
-```
-
-`cli_matrix_test.go`'s `TestCLIMatrix` builds the CLI once (via `matrixBin`, guarded by `sync.Once`) and then runs a table of argument combinations through `runMatrix`, which executes the binary in a **hermetic environment**: an isolated `$HOME`/`$USERPROFILE` (a fresh `t.TempDir()`, so no `~/.openframe` state leaks between runs), a `$KUBECONFIG` pointed at a nonexistent file, `OPENFRAME_NO_UPDATE_CHECK=1`, `OPENFRAME_NO_WSL_FORWARD=1`, and closed stdin (so the CLI runs in its non-interactive mode, never blocking on a prompt). Everything in this file is machine-independent by construction; anything that genuinely needs Docker, k3d, or Helm belongs in the e2e workflow (`.github/workflows/test.yml`), not here.
-
-The matrix covers, among other cases:
-
-- the happy read-only surface (`--version`, `--help`, `app --help`, `cluster --help`, `update --help`, shell completions, `update rollback` with nothing saved)
-- unknown commands and flags (`bogus`, `--bogus`, a removed flag like `--github-branch`, a legacy flag like `--deployment-mode`)
-- flag/argument validation that must fail at parse time, before any cluster is touched (a non-numeric `--nodes`, a non-boolean `--prune`, too many positional args to `bootstrap`, an invalid cluster name)
-- command-level guards that must fail fast without contacting a cluster (`app upgrade --ref x --sync` being mutually exclusive, `app uninstall` requiring `--yes` in non-interactive mode, `app install --context no-such-context` failing before any network call)
-
-`main_test.go` additionally covers:
-
-- `TestExitCode` — pure unit coverage of `main.exitCode()`, proving a `*executor.CommandError`'s exit code is propagated (bare and wrapped with `fmt.Errorf`), and that out-of-range or non-failure codes (`0`, `-1`, `4294967295`) fall back to a generic `1`.
-- `TestMainIntegration` — builds a temporary test binary and exercises `--help`, `--version`, and an invalid flag end-to-end, with `OPENFRAME_NO_WSL_FORWARD=1` set so the native-Windows WSL-forwarding path is bypassed in environments that have no WSL installed.
-
-### Command-tree sweep (`cmd/help_matrix_test.go`)
-
-`TestEveryCommand_HelpWorks` and `TestEveryCommand_HasShortAndFlagUsages` in `cmd/help_matrix_test.go` walk the **entire** command tree returned by `GetRootCmd` (via `collectCommandPaths`) rather than hard-coding a list of commands, so every current and future command is covered automatically:
-
-- `<command path> --help` must succeed and print a `Usage:` section — help must never be blocked by a prerequisite gate, cluster access, or the network.
-- Every command must have a non-empty `Short` description (shown in its parent's command list).
-- Every locally declared flag must have a non-empty usage string.
-
-Run just this sweep:
-
-```bash
-go test ./cmd/... -run TestEveryCommand
-```
-
-### Contract tests
-
-`cmd/contract_test.go` freezes the root command's public surface: `TestRootContract_PersistentFlags` asserts `--verbose` (shorthand `v`, bool, default `false`) and `--silent` (bool, default `false`) exist with exactly these properties, and `TestRootContract_TopLevelSubcommands` asserts that `cluster`, `app`, `bootstrap`, `prerequisites`, and `update` are all present as top-level subcommands (using `testutil.FindSubcommand`). `tests/testutil/flag_contract.go`'s `FlagSpec`/`AssertFlag`/`AssertFlags`/`AssertSubcommands` exist specifically so that a renamed flag, a dropped shorthand, a changed default, or an added/removed subcommand fails loudly instead of silently breaking scripts and CI pipelines that depend on this CLI's argument surface.
+(The root-level `cli_matrix_test.go` and `main_test.go` are part of this run — they build the binary themselves via `go build`/`exec.Command("go", "build", ...)` and need no extra setup, no Docker, and no network.)
 
 ### Integration tests
 
-Integration tests build and run the real `openframe` binary against real external tools. `tests/integration/common/dependencies.go` lets a test **skip** (never silently pass) when a required tool is unavailable:
-
-```go
-func TestClusterProvisioning(t *testing.T) {
-    common.RequireClusterDependencies(t) // requires Docker + k3d
-    // ...
-}
+```bash
+make test-integration
 ```
 
-`RequireOrSkip` logs an install hint and calls `t.Skip()`, so a missing dependency is visibly recorded as "not run," distinct from a passing test. The predefined dependencies are `Docker` (`docker info`), `K3d` (`k3d version`), `Kubectl` (`kubectl version --client`), and `Helm` (`helm version`); `RequireClusterDependencies`, `RequireK8sDependencies`, and `RequireAllDependencies` bundle the common combinations.
+This adds `-tags integration` so the files under `tests/integration/` compile and run. These tests expect Docker to be running and `k3d` (plus `kubectl`/`helm` for some suites) to be installed — `tests/integration/common/dependencies.go`'s `RequireOrSkip` will **skip** (not fail) any test whose dependency is missing, logging what's absent. Run this leg only when you have Docker and k3d available locally; it provisions and tears down real clusters.
 
-`tests/integration/common/cli_runner.go`'s `InitializeCLI()` should be called once per test binary (typically from `TestMain`), and `CleanupCLI()` deferred:
+### Running a single test or package
 
-```go
-func TestMain(m *testing.M) {
-    if err := common.InitializeCLI(); err != nil {
-        log.Fatalf("setup failed: %v", err)
-    }
-    defer common.CleanupCLI()
-    os.Exit(m.Run())
-}
+Standard `go test` filtering works throughout:
+
+```bash
+go test ./cmd/... -run TestRootContract_PersistentFlags -v
+go test ./internal/shared/executor/... -v
+go test ./tests/testutil/... -v
 ```
 
-Cluster-level integration tests should generate a unique, disposable cluster name and clean it up unconditionally:
+For a single integration test, remember the build tag:
 
-```go
-name := common.GenerateTestClusterName()
-if err := common.CreateTestCluster(name); err != nil {
-    t.Fatalf("failed to create cluster: %v", err)
-}
-defer common.CleanupTestCluster(name)
+```bash
+go test -tags integration ./tests/integration/... -run TestSomeIntegrationScenario -v
 ```
 
-`CleanupAllTestClusters()` is available for suite-level teardown and removes every k3d cluster whose name matches common test-naming patterns (`test`, `integration`, `stress`, `collision`, `interrupt`, `multi-`, `debug`, and a handful of command-prefixed names), along with any leftover k3d Docker networks, containers, and registries.
+### Race detector
+
+Several shared pieces (`MockCommandExecutor`) are explicitly built to be race-safe. Run with `-race` when touching concurrency-sensitive code:
+
+```bash
+go test ./... -race
+```
+
+### Lint gate
+
+The release pipeline also runs `golangci-lint` before any unit-test gate. Keep code lint-clean alongside green tests; a release will not proceed past a failing lint or test gate (see the "Gate: lint" and "Gate: unit tests" steps the release workflow runs on every dispatch).
 
 ## Writing new tests
 
-### Unit tests for a new command
+### Prefer the shared helpers over ad hoc assertions
 
-Follow the pattern already used across `cmd/`: build the command with its `GetXxxCmd()`/`getXxxCmd()` factory (per the active rule `OPENFRAM-003`, command groups are always returned by a factory function, never constructed inline), then exercise it with `testutil.TestCommandStructure` and `testutil.TestCLICommand`:
+- Use `testutil.CreateStandardTestFlags()` (from `tests/testutil/setup.go`) to get a `cluster.FlagContainer` with a `MockCommandExecutor` already wired and pre-seeded with sane `k3d` responses, instead of constructing executor mocks by hand in every test.
+- Use `testutil.TestClusterCommand(t, name, cmdFunc, setupFunc, teardownFunc)` for a new cluster subcommand to automatically get structure, flag, CLI-arg, and execution checks, rather than writing four separate test functions.
+- Use `testutil.AssertFlags(t, cmd, []testutil.FlagSpec{...})` whenever a command's flags should be frozen as a contract — this is what prevents a flag rename or dropped default from slipping through unnoticed (see `cmd/contract_test.go` for the pattern against the root command).
+- For anything touching command construction (argv, env, stdin) — especially code that shells out to `docker`/`k3d`/`helm`/`terraform`/`gcloud`/`aws` — assert against the **structured** log (`executor.RecordedCommand` via `MockCommandExecutor.Commands()`), using `testutil.AssertNoArgContains`, `AssertNoBashCConcatenation`, `AssertNoCurlPipeShell`, `AssertArgIsDiscrete`, or `AssertNoDeleteOf` as appropriate. These exist specifically because a flattened command string cannot distinguish "passed as one literal argument" from "concatenated into a shell string," and that distinction is where injection bugs live.
 
-```go
-func TestMyCommand(t *testing.T) {
-    cmd := NewMyCommand()
+### New commands get help-matrix coverage for free
 
-    testutil.TestCommandStructure(t, cmd, "my-command", "Short description here")
+Because `cmd/help_matrix_test.go` walks the live command tree (`collectCommandPaths` against `GetRootCmd`), any new `cobra.Command` you add is automatically checked for: a working `--help` that prints `Usage:`, a non-empty `Short` description, and non-empty usage text on every locally declared flag. There is nothing extra to wire up for this coverage — just make sure the command has a `Short` description and real flag `Usage` strings when you write it.
 
-    testutil.TestCLICommand(t, cmd,
-        []string{"--flag", "value"},
-        false,             // expectErr
-        "expected output",
-    )
-}
-```
+### Respect the pterm/ui output rule in testable code
 
-For a cluster command specifically, prefer `testutil.TestClusterCommand`, which runs all four standard sub-tests (`Structure`, `Flags`, `CLI`, `Execution`) in one call:
+Code rule **OPENFRAM-007** (active, severity `warn`, applies to `internal/**/*.go` and `cmd/**/*.go`) requires all user-facing terminal output to go through `pterm` printers or the `internal/shared/ui` package rather than raw `fmt.Print*` to stdout. This matters for testing because `ui.TestMode = true` (set via `testutil.InitializeTestMode()` or in a package's own `init()`, as in `cmd/root_test.go` and `cmd/app/app_test.go`) and pterm's writer redirection rely on that discipline to suppress logo/banner noise and capture output deterministically in tests. Code that writes straight to stdout bypasses both `--silent`/`--plain` and this test capture — write new user-facing output through `pterm.Info`/`pterm.Success`/`pterm.Warning` or the `ui` helpers so it stays testable the same way.
 
-```go
-func TestCreateCommand(t *testing.T) {
-    testutil.TestClusterCommand(
-        t,
-        "create",
-        NewCreateCommand,
-        func() { /* setup: configure mocks/env */ },
-        func() { /* teardown */ },
-    )
-}
-```
+### Keep unit tests hermetic
 
-### Injecting a mock executor
+Follow the pattern in `cli_matrix_test.go`'s `runMatrix`: isolate `HOME`, point `KUBECONFIG` at a nonexistent path, and set `OPENFRAME_NO_UPDATE_CHECK=1` / `OPENFRAME_NO_WSL_FORWARD=1` for any new root-level matrix case so it can't pick up a developer's real `~/.openframe` state, real kube context, or trigger a real self-update check or WSL re-exec.
 
-Unit tests should never shell out to a real binary. Use `testutil.CreateStandardTestFlags()`, which wires a `MockCommandExecutor` pre-configured with responses for the common `k3d cluster list` / `k3d cluster get` paths:
+### New integration scenarios
 
-```go
-func TestMyCommand(t *testing.T) {
-    testutil.InitializeTestMode()
+Place new end-to-end scenarios under `tests/integration/`, start the file with `//go:build integration` (OPENFRAM-006), and build on `tests/integration/common`:
 
-    flags := testutil.CreateStandardTestFlags()
-    testutil.SetVerboseMode(flags, true)
+- `common.InitializeCLI()` once per suite to build the real binary, `common.RunCLI(args...)` to invoke it and get a `*CLIResult`.
+- `common.RequireClusterDependencies(t)` / `RequireK8sDependencies(t)` / `RequireAllDependencies(t)` at the top of any test needing Docker/k3d/kubectl/helm, so the test **skips** cleanly in an environment without them instead of failing.
+- `common.GenerateTestClusterName()` for a unique, collision-resistant cluster name, and `common.CleanupTestCluster(name)` / `common.CleanupAllTestClusters()` in a `defer` or test cleanup to avoid leaking k3d clusters, Docker networks, and containers between runs.
 
-    result, err := mycommand.Run(flags)
-    // assert...
-}
-```
+### Mocking external tools
 
-Call `testutil.InitializeTestMode()` (sets `ui.TestMode = true`) at the start of any test that touches `internal/shared/ui`, so UI components render in a test-safe way. Several existing test files call it from an `init()` function, as seen in `cmd/app/app_test.go` and `cmd/root_test.go`.
-
-### Asserting command output
-
-Chain assertions with `testutil.NewAssertCommandOutput` (or the shorthands):
-
-```go
-stdout, stderr, err := runCommand("openframe", "version")
-
-AssertCommandSuccess(t, stdout, stderr, err).
-    StdoutContains("openframe").
-    ContainsAll("version", "build")
-
-_, stderr, err = runCommand("openframe", "invalid-cmd")
-AssertCommandFailure(t, "", stderr, err).
-    StderrContainsAny("unknown command", "invalid-cmd")
-```
-
-### Writing a security-sensitive test
-
-Several of this CLI's commands build shell commands or pass secrets as arguments to external tools. Any test touching that surface should assert against the **structured** command log, not the flattened one, using `tests/testutil/command_assertions.go`:
-
-```go
-func TestHelmInstall_CredentialSafety(t *testing.T) {
-    mock := executor.NewMockCommandExecutor()
-    // ... run CLI code under test using mock ...
-
-    cmds := mock.Commands()
-
-    testutil.AssertNoArgContains(t, cmds, "ghp_secrettoken123")
-    testutil.AssertArgIsDiscrete(t, cmds, "my-release")
-    testutil.AssertNoBashCConcatenation(t, cmds, "my-release")
-    testutil.AssertNoDeleteOf(t, cmds, "kube-system")
-    testutil.AssertNoCurlPipeShell(t, cmds)
-}
-```
-
-These guard specific, previously-identified failure modes: a credential leaking into an argv element or command name (`AssertNoArgContains`), an argument-derived shell metacharacter reaching a `bash -c`/`sh -c` payload (`AssertNoBashCConcatenation`), an argument that should have been passed as a discrete argv element instead being spliced into a larger string (`AssertArgIsDiscrete`), a destructive command targeting a protected namespace such as `kube-system` (`AssertNoDeleteOf`), and a `curl | bash`-style remote-pipe-to-shell pattern (`AssertNoCurlPipeShell`).
-
-### Freezing a flag or subcommand contract
-
-When a command's flags or subcommands form part of the CLI's public, scriptable surface, lock it down with `tests/testutil/flag_contract.go`:
-
-```go
-func TestRootCommandContract(t *testing.T) {
-    cmd := NewRootCmd()
-
-    testutil.AssertSubcommands(t, cmd, "install", "upgrade", "version")
-
-    installCmd := testutil.FindSubcommand(t, cmd, "install")
-    testutil.AssertFlags(t, installCmd, []testutil.FlagSpec{
-        {Name: "namespace", Shorthand: "n", Type: "string", Default: "default"},
-        {Name: "dry-run",   Shorthand: "",  Type: "bool",   Default: "false"},
-    })
-}
-```
-
-### Repository conventions a new test must follow
-
-The repository's active code review rules (enforced by the automated reviewer) shape what a passing review expects from new Go test code in this area, in addition to the conventions already shown above:
-
-- **Command groups must be built by factory functions** (`OPENFRAM-003`): a test that needs a command instance should call its `Get<Group>Cmd()`/`get<Sub>Cmd()` factory, never construct a `cobra.Command` literal inline.
-- **A command group with its own `PersistentPreRunE` must call `ui.ApplyGlobalOutputFlags(cmd)`** (`OPENFRAM-005-10`): because cobra only runs the closest ancestor's hook, a group like `app` or `cluster` that defines its own hook must apply this call itself, or `--verbose`/`--silent` silently stop working for that whole subtree. `cmd/app/app_test.go`'s `TestAppGroup_PersistentPreRunEHonorsVerbose` is a working example of a regression test for exactly this.
-- **Commands targeting a cluster via a flag (e.g. `--context`) must reject stray positional arguments** with a named-flag hint (`OPENFRAM-009-8`), using a validator like `app.noPositionalArgs` — cobra's default `ArbitraryArgs` would otherwise silently ignore them, which is especially dangerous for a destructive command like `uninstall`.
-- **Errors already shown to the user must be (or wrap) `sharederrors.AlreadyHandledError`** before being returned up to `main` (`OPENFRAM-004`, `OPENFRAM-003-10`), so `main.go`'s `errors.As` check suppresses a second, redundant print.
-- **An external command's exit code must survive as `*executor.CommandError`**, not get collapsed to a generic `1` (`OPENFRAM-005`) — `main.exitCode()` is what unwraps it; `TestExitCode` in `main_test.go` is the regression test for this behavior.
-- **User-facing output must go through `pterm` printers or `internal/shared/ui`**, never raw `fmt.Println`/`fmt.Printf` to stdout (`OPENFRAM-007`) — this is what lets tests redirect pterm's writers (as `TestVerboseEnablesDebugOutput` in `cmd/root_test.go` does) and what makes `--silent`/`--plain` work at all.
-- **Cross-package imports that would collide on their last path segment** (two packages both named `config`, `ui`, `errors`, etc.) **must use a disambiguating camelCase alias** such as `sharedErrors` or `uiCluster` (`OPENFRAM-001`) — keep this in mind when a new test file imports both a package-under-test and a same-named shared package.
-
-See the [contributing guidelines](../contributing/guidelines.md) for the broader pull-request process these rules feed into.
+When a new package shells out to an external tool, accept a `executor.CommandExecutor` interface (as the existing cluster/chart/prerequisite packages do) so tests can inject `executor.NewMockCommandExecutor()` (or `testutil.NewTestMockExecutor()`) and script responses with `SetResponse`/`SetDefaultResult`/`SetShouldFail`, rather than requiring the real binary to be present.
 
 ## Coverage requirements
 
-This repository's release gate (`.github/workflows/release.yml`) enforces two mandatory checks before any tag is cut, both of which a contributor should run locally before opening a pull request:
+The material available for this repository does not define a numeric coverage threshold or a coverage-reporting command (no `go test -cover` invocation, badge, or CI coverage gate appears in the inlined workflow or Makefile targets referenced here). What **is** enforced mechanically:
 
-```bash
-# Gate: lint (golangci-lint, same version used in CI)
-golangci-lint run
+- **OPENFRAM-006** (error severity): every file under `tests/integration/**/*_test.go` must declare `//go:build integration`, keeping integration tests out of the default `go test ./...` / `make test-unit` run.
+- **OPENFRAM-007** (warn severity): user-facing output in `internal/**/*.go` and `cmd/**/*.go` must go through `pterm` or `internal/shared/ui`, which keeps that code capturable and assertable in tests (`ui.TestMode`, pterm writer redirection).
+- The release workflow's **"Gate: unit tests"** step (`make test-unit`) and **"Gate: lint"** step (`golangci-lint`) must both pass before any release is tagged — these are the closest thing to an enforced quality bar in the material shown, and they gate release, not every pull request merge.
+- `cmd/help_matrix_test.go` functions as a structural coverage floor for the command tree: it asserts there are at least 15 commands discovered (`len(paths) < 15` fails the test) and that every one of them has a working `--help`, a `Short` description, and documented flags — so the command surface cannot silently grow undocumented or broken.
 
-# Gate: unit tests
-make test-unit
-```
-
-A release is **not published** unless `make test-unit` passes — this is the hard floor the material defines; there is no separately documented numeric coverage percentage threshold for this repository, so the practical bar is: every unit test must pass, every command's `--help` must work (`cmd/help_matrix_test.go`'s tree-wide sweep), and the CLI matrix (`cli_matrix_test.go`) must continue to pass for its full table of argument combinations.
-
-In practice, that means a change is review-ready only when:
-
-- `go test ./cmd/... ./internal/... ./tests/testutil/...` passes (the same scope `make test-unit` covers, per the release workflow's own description — "unit tests (root, cmd, internal, tests/testutil)").
-- `go test .` passes at the repository root, covering `main_test.go` and `cli_matrix_test.go`.
-- Any new or changed command still satisfies `cmd/help_matrix_test.go`'s whole-tree sweep (`TestEveryCommand_HelpWorks`, `TestEveryCommand_HasShortAndFlagUsages`) — since this walks the live command tree rather than a hard-coded list, a new command is automatically covered, but it must still have a non-empty `Short` description and fully-described flags.
-- Any flag or subcommand that forms part of the CLI's scriptable contract has a corresponding `tests/testutil/flag_contract.go` assertion, as `cmd/contract_test.go` does for the root command's `--verbose`/`--silent` flags and its top-level subcommand list.
-- Security-sensitive command construction (anything touching credentials, shell concatenation, or destructive operations against cluster resources) is covered by the structured-log assertions in `tests/testutil/command_assertions.go`, not just the legacy flattened-string log.
-
-Beyond this CLI's own binary, the release workflow also runs a cross-cutting smoke test after `goreleaser release --clean` publishes artifacts: it verifies the darwin/arm64 binary in `dist/` actually reports the version that was just tagged (guarding the `-X cmd.version` ldflags injection) and that the released asset URLs (`openframe-cli_linux_amd64.tar.gz`, `checksums.txt`, `checksums.txt.bundle`) resolve — these are post-publish checks, not part of the `make test-unit` gate, but they are the final backstop that a broken release never reaches users silently.
+If your environment configuration or CI setup defines an additional coverage percentage gate beyond what's shown here, follow that configuration; it is not present in the material reviewed for this document.

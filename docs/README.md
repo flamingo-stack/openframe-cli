@@ -1,49 +1,42 @@
-
 # Project Documentation
 
 Welcome to the documentation for **OpenFrame CLI**.
 
-OpenFrame CLI (`openframe`) is the bootstrap and lifecycle-management tool for the [OpenFrame](https://openframe.ai) platform built by [Flamingo](https://flamingo.run). It provisions Kubernetes clusters — locally with k3d, or in the cloud on GKE/EKS — and installs/manages the OpenFrame platform on top of them.
+OpenFrame CLI (`openframe`) is the Go-based command-line tool that bootstraps and manages the lifecycle of the [OpenFrame](https://openframe.ai) platform by [Flamingo](https://flamingo.run).
 
 ## 📚 Table of Contents
 
 ### Getting Started
-- [Introduction](./getting-started/introduction.md) - OpenFrame CLI overview
-- [Prerequisites](./getting-started/prerequisites.md) - Go toolchain and other tooling needed before installing or building the CLI
-- [Quick Start](./getting-started/quick-start.md) - Bootstrap and lifecycle-management quick start for the OpenFrame CLI
-- [First Steps](./getting-started/first-steps.md) - First steps after installing the CLI
-- [Cloud Clusters (EKS / GKE)](./getting-started/cloud-clusters.md) - Provisioning managed clusters beyond local k3d with `openframe cluster create`
-- [GKE Workflow — from zero to a running cluster](./getting-started/gke-workflow.md) - The complete, in-order flow for working with Google Kubernetes Engine
-- [How to create a Kubernetes cluster with OpenFrame CLI](./getting-started/how-to/create-a-kubernetes-cluster-with-openframe-cli.md) - Provisioning a new cluster locally with k3d or in the cloud on GKE/EKS
-- [How to install the OpenFrame platform onto a cluster](./getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md) - Deploying ArgoCD plus the app-of-apps onto a cluster
-- [How to check the status of your OpenFrame cluster and app](./getting-started/how-to/check-the-status-of-your-openframe-cluster-and-app.md) - Confirming a cluster is reachable and the installed app is healthy
-- [How to uninstall OpenFrame and delete a cluster](./getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md) - Removing the OpenFrame platform and optionally deleting the cluster
-- [How to update the OpenFrame CLI to the latest version](./getting-started/how-to/update-the-openframe-cli-to-the-latest-version.md) - Updating the CLI binary to the latest release
+- [First Steps](./getting-started/first-steps.md) - What to do right after installing the OpenFrame CLI (`openframe`): the first commands to run and the configuration you'll typically touch
+- [Introduction](./getting-started/introduction.md) - What OpenFrame CLI is and how it bootstraps and manages the OpenFrame platform
+- [Prerequisites](./getting-started/prerequisites.md) - What you need before installing and running the OpenFrame CLI
+- [Quick Start](./getting-started/quick-start.md) - Fast path to getting OpenFrame CLI up and running
+- [How to check the status of your OpenFrame cluster and apps](./getting-started/how-to/check-the-status-of-your-openframe-cluster-and-apps.md) - Confirming whether the cluster is reachable and apps are healthy
+- [How to create a new Kubernetes cluster with OpenFrame CLI](./getting-started/how-to/create-a-new-kubernetes-cluster-with-openframe-cli.md) - Creating a new cluster using the `openframe` command
+- [How to install the OpenFrame platform onto a cluster](./getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md) - Installing ArgoCD plus the app-of-apps onto an existing Kubernetes cluster
+- [How to uninstall OpenFrame and delete a cluster](./getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md) - Tearing down an OpenFrame deployment and its cluster
+- [How to upgrade OpenFrame CLI and its installed apps](./getting-started/how-to/upgrade-openframe-cli-and-its-installed-apps.md) - Updating the `openframe` tool itself and upgrading the installed platform apps
 
 ### Development
-- [Development Overview](./development/README.md) - Entry point for contributing to OpenFrame CLI
-- [Architecture Overview](./development/architecture/README.md) - Bootstrap and lifecycle-management architecture of the CLI
-- [Contributing Guidelines](./development/contributing/guidelines.md) - How to contribute to OpenFrame CLI
-- [Development Environment Setup](./development/setup/environment.md) - Setting up a local development environment
-- [Local Development](./development/setup/local-development.md) - Cloning, building, running, and debugging the Go binary locally
-- [Testing](./development/testing/README.md) - Testing practices for the CLI
-- [Security](./development/security/README.md) - How the CLI handles credentials, shells out to other tools, and validates input
-- [Releasing](./development/releasing.md) - Automated versioning and release process
-- [Release Signing](./development/release-signing.md) - How release binaries are code-signed during `goreleaser release`
+- [Development](./development/README.md) - Entry point for anyone working on the OpenFrame CLI source code
+- [Architecture Overview](./development/architecture/README.md) - How OpenFrame CLI provisions Kubernetes clusters and deploys the OpenFrame platform
+- [Contributing Guidelines](./development/contributing/guidelines.md) - How to propose changes to the OpenFrame CLI
+- [Security](./development/security/README.md) - How the CLI handles authentication, secrets, and input validation
+- [Local Development](./development/setup/local-development.md) - Cloning, building, running, and debugging `openframe-cli` locally (including with k3d)
+- [Environment Setup](./development/setup/environment.md) - Setting up a local development environment for the OpenFrame CLI
+- [Testing](./development/testing/README.md) - Testing approach for the Go service, which has no downstream consumers or upstream internal dependencies recorded in the org
 
 ### Reference
 Reference docs are in `./reference/architecture/`:
-- [Ecosystem: OpenFrame CLI](./reference/architecture/ecosystem.md) - How OpenFrame CLI fits into the broader Flamingo/OpenFrame ecosystem
-- [openframe-cli Module Documentation](./reference/architecture/overview.md) - Overview of the bootstrap and lifecycle-management tool
+- [Ecosystem: OpenFrame CLI](./reference/architecture/ecosystem.md) - How OpenFrame CLI fits the wider system as a service (bash, go)
+- [openframe-cli Module Documentation](./reference/architecture/overview.md) - Overview of how OpenFrame CLI bootstraps and manages the OpenFrame platform lifecycle
 
 ### Diagrams
 Visual documentation - View Mermaid diagrams in: `./diagrams/architecture/`
-
-The following diagrams are available:
-- [Diagrams Overview](./diagrams/architecture/README.md) - Index of architecture diagrams
-- `./diagrams/architecture/architecture-diagram.mmd` - Overall architecture diagram
-- `./diagrams/architecture/bootstrap-sequence.mmd` - Bootstrap sequence diagram
-- `./diagrams/architecture/component-relationships.mmd` - Component relationships diagram
+- [Diagrams Overview](./diagrams/architecture/README.md) - Index of the architecture diagrams
+- `./diagrams/architecture/architecture-diagram.mmd` - High-level architecture diagram
+- `./diagrams/architecture/bootstrap-sequence.mmd` - Sequence diagram of the bootstrap flow
+- `./diagrams/architecture/component-relationships.mmd` - Diagram of relationships between components
 
 ### CLI Tools
 
@@ -52,6 +45,10 @@ The OpenFrame Main code Repository is maintained in a separate repository:
 - **Documentation**: [CLI Documentation](https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs)
 
 **Note**: CLI tools are NOT located in this repository. Always refer to the external repository for installation and usage.
+
+### Other documentation
+
+Documentation coming soon.
 
 ## 📖 Quick Links
 - [Project README](../README.md) - Main project README

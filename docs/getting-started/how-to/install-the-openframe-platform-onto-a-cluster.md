@@ -1,40 +1,56 @@
 # How to install the OpenFrame platform onto a cluster
 
-This tutorial shows an operator how to deploy the OpenFrame platform (ArgoCD plus the app-of-apps) onto a Kubernetes cluster using the `openframe` command-line tool.
+This tutorial shows an operator how to install the OpenFrame platform (ArgoCD plus the app-of-apps) onto an existing Kubernetes cluster using the `openframe` command-line tool, or how to create a cluster and install the platform in one step.
 
 ## Prerequisites
 
-Before you begin, check that:
+- You have the `openframe` CLI binary available on your machine. For Windows, download the AMD64 build from `https://github.com/flamingo-stack/openframe-cli/releases/latest/download/openframe-cli_windows_amd64.zip` and run the installer the same way you would on other operating systems. For macOS/Linux, download the matching build from the [Releases page](https://github.com/flamingo-stack/openframe-cli/releases) and place it on your `$PATH`, or install it from source with `go install github.com/flamingo-stack/openframe-cli@latest`.
+- Your machine meets the hardware requirements the platform needs to run comfortably:
 
-- You have a working terminal with the `openframe` CLI binary available on your `$PATH` (downloaded from the [Releases](https://github.com/flamingo-stack/openframe-cli/releases/latest) page for your platform, for example `openframe-cli_windows_amd64.zip` on Windows).
-- You already have a Kubernetes cluster to install onto. If you do not have one yet, create it first — the material for that is covered separately in [Create a Kubernetes cluster with OpenFrame CLI](./create-a-kubernetes-cluster-with-openframe-cli.md). The cluster can be one you created with `openframe cluster create`, one you created yourself, or any other cluster you can reach.
-- Your machine meets the recommended capacity for the cluster you are installing into: at least 6 CPU cores and 24GB of RAM. If the cluster you pick falls short, the CLI warns you but still lets you continue.
-- Your `kubectl` configuration (kubeconfig) already contains a context pointing at the target cluster, since the install command selects or accepts a kube-context rather than creating one.
-- You know which GitHub ref (branch or release tag) of the platform chart repository you want deployed, if you do not want the default branch. The platform's source lives in the separate `flamingo-stack/openframe-oss-tenant` repository, which the CLI clones during installation — you do not need a local copy of it.
+  | Resource | Minimum | Recommended |
+  |---|---|---|
+  | RAM | 24 GB | 32 GB |
+  | CPU Cores | 6 | 12 |
+  | Disk Space | 50 GB | 100 GB |
+
+- You already have a reachable Kubernetes cluster — one created with `openframe cluster create`, made by you directly, or any other cluster you can reach — unless you plan to use `openframe bootstrap`, which creates a local cluster for you as part of the same step.
+- Docker is installed and running if you intend to let the CLI create a local cluster (k3d-backed).
+- Helm is available to the CLI; the install flow regenerates certificates and installs Helm releases automatically, but the underlying tools (Docker, k3d, Helm, Terraform, gcloud, or the AWS CLI, depending on your target) must be present. Run `openframe prerequisites check` first to confirm what is missing.
+- You know which kube-context you want to install into if you are not going to let the CLI prompt you interactively. Check your current contexts with your usual kubeconfig tooling before you begin.
 
 ## Steps
 
-1. Open a terminal and confirm the CLI is installed by checking that the `openframe` command is available on your `$PATH`.
-2. Run `openframe app install` with no arguments to install onto a cluster interactively. The command shows the current kube-context in a dim header line and, when run bare (no cluster name, no `--non-interactive`, no `--dry-run`), prompts you to select which kube-context to install into.
-3. Alternatively, run `openframe app install my-cluster` naming a specific cluster if you already know which one to target.
-4. Alternatively, run `openframe app install --context <context-name>` to target an exact kube-context directly and skip the interactive selection prompt.
-5. When prompted to select a kube-context, choose the context for the cluster you prepared in the prerequisites. If the selected cluster has fewer resources than recommended (around 6 cores / 24GB RAM), read the warning the CLI prints and decide whether to continue.
-6. Watch the terminal as the command installs ArgoCD with its custom values, then installs the app-of-apps from the configured GitHub repository.
-7. If you need to deploy a specific branch or release tag instead of the default, rerun the command with the `--ref` flag, for example `openframe app install --ref 1.0.48` for a release tag or `openframe app install --ref develop` for a branch.
-8. If you are installing non-interactively (for example, in CI/CD) and already have an `openframe-helm-values.yaml` file prepared, run `openframe app install --non-interactive` to skip all prompts and reuse that file.
-9. If you want to see what would be installed without making changes, run `openframe app install --dry-run` first.
-10. If an installation needs to be forced even though charts already appear to exist, add the `--force` flag to the install command.
-11. Wait for the command to finish waiting for all ArgoCD applications to become synced and healthy before considering the install complete.
+1. Open a terminal and confirm the CLI is on your `$PATH` by running `openframe` with no arguments; it should print its help text and command list instead of a "command not found" error.
+2. Check what the installer needs by running `openframe prerequisites check` (optionally with `--type k3d`, `--type eks`, or `--type gke` to match your target), and resolve anything it reports as missing with `openframe prerequisites install`.
+3. Decide how you will get a cluster:
+   - If you do not yet have a cluster, run `openframe bootstrap [cluster-name]` to create a local k3d cluster and install the full OpenFrame platform (ArgoCD and the app-of-apps) in one step. Add `--non-interactive` for an unattended/CI run, or `--verbose` to see detailed ArgoCD sync progress.
+   - If you already have a cluster (local or cloud), continue with `openframe app install` below.
+4. If you already have a cluster, run `openframe app install` to install ArgoCD and the app-of-apps onto it:
+   - Run `openframe app install` with no arguments for interactive mode: the CLI prompts you to pick a kube-context, warns you if the selected cluster is smaller than the recommended ~6 cores / 24 GB, and proceeds once you confirm.
+   - Run `openframe app install my-cluster` to target a specific cluster by name.
+   - Add `--context <name>` to target an exact kube-context directly, skipping interactive selection.
+   - Add `--non-interactive` to skip all prompts and install using an existing `openframe-helm-values.yaml` file (for CI/CD).
+   - Add `--ref <branch-or-tag>` (for example `--ref develop` or `--ref 1.0.48`) to deploy a specific branch or release tag of the platform instead of the default branch.
+   - Add `--dry-run` to see what would be installed without executing anything.
+   - Add `--force` to force installation even if charts already exist.
+5. Watch the terminal while the install runs: it installs ArgoCD first, then the app-of-apps from the GitHub repository, then waits for every ArgoCD Application it creates to become ready. On an interactive terminal this appears as a live "Installing OpenFrame applications" panel with a progress bar and a count such as `14/17 ready`, alongside the names and statuses of applications still not ready.
+6. Once the command finishes, check what was installed by running `openframe app status` (add `--watch` to keep watching, or `--interactive` to open the interactive status view).
+7. Retrieve ArgoCD access by running `openframe app access`, which prints the ArgoCD admin credentials and the port-forward command needed to reach the ArgoCD UI in your browser.
 
 ## Expected result
 
-When the install succeeds, ArgoCD and the app-of-apps are installed on the targeted cluster and all its ArgoCD applications report as synced and healthy. You can follow up by running `openframe app status` to see application sync/health, or `openframe app access` to get the ArgoCD admin credentials and how to reach the ArgoCD UI — both are documented separately in [Check the status of your OpenFrame cluster and app](./check-the-status-of-your-openframe-cluster-and-app.md).
+- A successful `openframe app install` (or the install stage of `openframe bootstrap`) ends with every ArgoCD application reported as ready, shown during the run as a progress bar reaching `N/N ready` and finishing with a success line (optionally followed by which applications took longest to become ready).
+- Running `openframe app status` afterward reports the cluster as reachable and each ArgoCD application's sync and health status.
+- Running `openframe app access` prints the ArgoCD admin credentials and the exact port-forward command to reach the ArgoCD UI.
 
 ## Troubleshooting
 
-- **"`<command>` takes no positional arguments (got `<args>`) — use `--context` to target a cluster"**: you passed a stray positional argument on a command that targets a cluster by flag. Remove the extra argument or use `--context <name>` as the message suggests.
-- **A branch-not-found style failure when deploying with `--ref`**: the `--ref` value you supplied does not exist in the chart repository. Re-check the branch name or release tag (release tags have no `v` prefix, e.g. `1.0.48`) and rerun the install.
-- **"could not use context `<name>`"**: the `--context` value you passed does not match a context in your kubeconfig. Confirm the context name with your kubeconfig tooling and retry.
-- **A warning that the cluster is smaller than recommended (~6 cores / 24GB RAM)**: this does not stop the install — it only warns. Continue if you accept the smaller capacity, or point the install at a larger cluster.
-- **The command exits with a non-zero status after invoking an external tool**: the CLI preserves the failing tool's own exit code so automation can react to it; check the terminal output above the exit for the underlying message from that tool.
-- For failures not covered here, the material does not show a specific message or fix, so check the terminal output of the `openframe app install` command directly for the error reported.
+- **"`<command>` takes no positional arguments (got `<args>`) — use `--context` to target a cluster"**: you passed a stray positional argument to a command (such as `app status` or `app uninstall`) that only accepts a cluster via `--context`. Remove the extra argument and pass `--context <name>` instead.
+- **"could not use context `<name>`"**: the `--context` value you passed does not match a usable kube-context. Verify the context name against your kubeconfig and retry.
+- **"Cluster `<name>` is smaller than recommended (~6 cores / 24 GB RAM). Continuing anyway."**: this is a warning, not a failure — the interactive install detected your cluster is below the recommended size but will continue. Expect slower installs or instability on severely undersized clusters.
+- **Applications stuck as Degraded with a message that "will not recover on its own"**: the CLI has detected a workload that has stayed Degraded and synced for longer than its recovery window, and it stops waiting rather than running out the full timeout. The error names the affected application and recommends inspecting it with `kubectl get pods -n <namespace>` and `kubectl describe application <name> -n argocd`.
+- **An application reports it "cannot render its manifests from the deployed revision" and that the error "is deterministic — retrying or waiting cannot fix it"**: the `--ref` you deployed likely predates the chart layout this CLI expects. Use a different branch or release tag whose chart matches this CLI's expectations.
+- **The command exits with a specific non-zero code instead of a generic failure**: the CLI preserves the exit code of whatever external tool (Helm, Terraform, k3d, etc.) failed underneath it, so the number itself is a clue to which external command failed; re-run with `--verbose` for more detail.
+- The material does not show a documented command for recovering an ArgoCD repo-server stuck in `CrashLoopBackOff` beyond what the CLI retries automatically — if the install still fails after a retry, inspect ArgoCD pods directly with `kubectl` as the error messages suggest.
+
+The platform's application code (the app-of-apps chart and the services it deploys) lives in the separate `flamingo-stack/openframe-oss-tenant` repository, which this CLI clones at install time; this tutorial only covers running the `openframe` CLI against it.

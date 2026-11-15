@@ -1,63 +1,87 @@
+# Development
+
+This section is the entry point for anyone working on the **OpenFrame CLI** source code — the Go-based command-line tool (`openframe`) that provisions Kubernetes clusters and deploys the OpenFrame platform onto them. It covers how the repository is organized, how to set up a local build, how the test suite is structured, how contributions are reviewed, and where to look for architecture and security details.
+
+> **Scope note:** OpenFrame CLI is a standalone binary repository (`flamingo-stack/openframe-cli`). Per the organization's dependency graph, it publishes a single Go module (`github.com/flamingo-stack/openframe-cli`) and has **no recorded upstream dependencies and no downstream consumers** within the organization — it is a self-contained CLI distributed via GitHub Releases and `go install`, not a library consumed by other services. The platform it deploys (ArgoCD app-of-apps and the underlying services) lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository, which this CLI clones at install time — always treat that repository as external, never as a local subdirectory.
+
 ## Overview
 
-This section is the entry point for contributing to **OpenFrame CLI**, the Go-based command-line tool that provisions Kubernetes clusters (local k3d, or cloud GKE/EKS via Terraform) and deploys the OpenFrame platform onto them through ArgoCD's app-of-apps pattern.
+OpenFrame CLI is built in Go (module `github.com/flamingo-stack/openframe-cli`, declared in `go.mod` with toolchain `go1.26.5`). It is organized around three core domains:
 
-OpenFrame CLI is published to the Go ecosystem as `github.com/flamingo-stack/openframe-cli`. Per the repository graph, it is a leaf/terminal artifact: it has no recorded upstream dependencies on other repositories in this organization, and no repository is currently recorded as consuming it. Its functional dependencies are third-party Go modules (Cobra, client-go, pterm, huh, bubbletea, sigstore-go) and external CLI tools it shells out to (Docker, k3d, Helm, Terraform, gcloud, aws), not sibling repositories.
+- **`cmd/`** — Cobra command definitions (`bootstrap`, `cluster`, `app`, `prerequisites`, `update`, plus `cmd/root.go` as the entrypoint builder).
+- **`internal/`** — domain services and shared infrastructure: cluster provisioning (`internal/cluster/`), chart/ArgoCD installation (`internal/chart/`), Kubernetes read access (`internal/k8s/`), prerequisite tooling (`internal/prerequisites/`), and cross-cutting concerns under `internal/shared/` (UI, executor, errors, downloads, self-update, WSL launching).
+- **`tests/`** — integration test helpers (`tests/integration/common/`) and shared test utilities (`tests/testutil/`).
 
-> **Note on scope:** This document is the development hub for the `openframe-cli` repository itself. The broader OpenFrame platform that this CLI installs onto a cluster lives in the separate **flamingo-stack/openframe-oss-tenant** repository. If you are looking to develop or modify the platform charts/services deployed by `openframe app install`, refer to that repository directly rather than assuming its code lives in a subdirectory here.
+The repository also ships a single helper shell script, `scripts/sign-binary.sh`, used in the release/signing pipeline.
 
-Use this page to find the right doc for the task in front of you — setting up a local environment, understanding the architecture, running tests, following contribution guidelines, or reviewing security practices.
+Development here means working with a Cobra-based CLI that shells out to external tools (Docker, k3d, Helm, Terraform, gcloud, AWS CLI) through a testable `internal/shared/executor` abstraction, and that talks to Kubernetes directly via `client-go` rather than shelling out to `kubectl`. Binaries for pinned tools (k3d, Helm, mkcert, Terraform, infracost) are downloaded and SHA256-verified by the CLI itself (`internal/shared/download/`), and the CLI self-updates using Sigstore/cosign signature verification (`internal/shared/selfupdate/`).
 
-## Development documentation
+## What's in this section
 
-| Document | What it covers |
+The development documentation is split into focused topics. Use the table below to jump straight to what you need:
+
+| Doc | What it covers |
 |---|---|
-| [Environment Setup](./setup/environment.md) | Preparing your machine (Go toolchain, required external tools) before building the CLI |
-| [Local Development](./setup/local-development.md) | Building, running, and iterating on the CLI locally |
-| [Architecture](./architecture/README.md) | How `cmd/`, `internal/cluster`, `internal/chart`, `internal/app`, and shared packages fit together |
-| [Testing](./testing/README.md) | How the test suite under `tests/` and `tests/testutil/` is organized and run |
-| [Contributing Guidelines](./contributing/guidelines.md) | Conventions and process for submitting changes |
-| [Security](./security/README.md) | Security-relevant practices in the codebase (signature verification, credential handling, etc.) |
+| [Environment Setup](./setup/environment.md) | Preparing your machine (Go toolchain, required external tools) to build the CLI |
+| [Local Development](./setup/local-development.md) | Running, building, and iterating on the CLI from a local checkout |
+| [Architecture](./architecture/README.md) | How `cmd/`, `internal/`, and the provider packages fit together |
+| [Testing](./testing/README.md) | The `tests/integration/` and `tests/testutil/` structure and how to run the suite |
+| [Contributing Guidelines](./contributing/guidelines.md) | Code conventions and the process for submitting changes |
+| [Security](./security/README.md) | How signature verification, checksum pinning, and self-update integrity work |
+
+For the system-level architecture diagrams and the full module breakdown, see [Architecture Overview](../reference/architecture/overview.md) and the [Ecosystem](../reference/architecture/ecosystem.md) document. The repository-wide diagrams (component relationships, bootstrap sequence) are collected in [Architecture Diagrams](../diagrams/architecture/README.md).
 
 ## Quick navigation guide
 
-Use this guide to jump straight to what you need:
+Use this guide to decide where to start, depending on what you're trying to do:
 
-- **New to the project?** Start with [Introduction](../getting-started/introduction.md), check [Prerequisites](../getting-started/prerequisites.md), then follow the [Quick Start](../getting-started/quick-start.md) and [First Steps](../getting-started/first-steps.md).
-- **Setting up your machine to build the CLI?** Go to [Environment Setup](./setup/environment.md).
-- **Ready to build and run the code?** Go to [Local Development](./setup/local-development.md).
-- **Want to understand how the codebase is structured?** Read [Architecture](./architecture/README.md), and for the full module-level breakdown see [Architecture Overview](../reference/architecture/overview.md) and the [diagrams index](../diagrams/architecture/README.md).
-- **Need to see how this repository relates to the rest of the organization?** See [Ecosystem](../reference/architecture/ecosystem.md).
-- **Writing or running tests?** Go to [Testing](./testing/README.md).
-- **About to open a change?** Review [Contributing Guidelines](./contributing/guidelines.md).
-- **Handling credentials, signatures, or sensitive data?** Review [Security](./security/README.md).
-- **Trying the CLI end-to-end against a real cluster?** The getting-started how-to guides walk through the full lifecycle: [create a cluster](../getting-started/how-to/create-a-kubernetes-cluster-with-openframe-cli.md), [install the platform](../getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md), [check status](../getting-started/how-to/check-the-status-of-your-openframe-cluster-and-app.md), [update the CLI](../getting-started/how-to/update-the-openframe-cli-to-the-latest-version.md), and [uninstall / delete a cluster](../getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md).
+```mermaid
+flowchart TD
+    Start[I want to...] --> A{What is your goal?}
+    A -->|Set up my machine| Env[setup/environment.md]
+    A -->|Build and run the CLI locally| Local[setup/local-development.md]
+    A -->|Understand the codebase layout| Arch[architecture/README.md]
+    A -->|Write or run tests| Test[testing/README.md]
+    A -->|Submit a change| Contrib[contributing/guidelines.md]
+    A -->|Understand signing/verification| Sec[security/README.md]
+    A -->|Install the CLI as an end user| GS[getting-started/introduction.md]
+```
+
+- **New to the repository?** Start with [Environment Setup](./setup/environment.md), then [Local Development](./setup/local-development.md) to get a build running.
+- **Need the big picture before changing code?** Read [Architecture](./architecture/README.md) and the [Architecture Overview](../reference/architecture/overview.md) reference doc, which documents the `cmd/` → `internal/` → provider layering and the bootstrap sequence.
+- **Adding or changing behavior?** Check [Testing](./testing/README.md) for how `tests/testutil/` and `tests/integration/common/` are used, and [Contributing Guidelines](./contributing/guidelines.md) before opening a change.
+- **Touching downloads, releases, or self-update?** Read [Security](./security/README.md) first — these paths are covered by active code-review rules (checksum verification, Sigstore signing) and are easy to break silently.
+- **Just want to install and use the CLI, not develop it?** You want [Getting Started](../getting-started/introduction.md), [Prerequisites](../getting-started/prerequisites.md), and [Quick Start](../getting-started/quick-start.md) instead, plus the task-oriented how-to guides: [creating a cluster](../getting-started/how-to/create-a-new-kubernetes-cluster-with-openframe-cli.md), [checking cluster status](../getting-started/how-to/check-the-status-of-your-openframe-cluster-and-apps.md), [installing the platform](../getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md), [upgrading](../getting-started/how-to/upgrade-openframe-cli-and-its-installed-apps.md), and [uninstalling](../getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md).
 
 ## Repository layout at a glance
 
-The codebase is organized around three core abstractions — **cluster** provisioning, **app** deployment via ArgoCD, and **prerequisites** verification — plus shared infrastructure:
-
 ```text
-cmd/              Cobra command definitions (bootstrap, cluster, app, prerequisites, update)
-internal/cluster/ Cluster lifecycle: service.go, provider/ (k3d, EKS, GKE), discovery/, prerequisites/
-internal/chart/   ArgoCD/Helm/Git providers and chart install orchestration (services/)
-internal/app/     Platform status aggregation (status/) and uninstall (uninstall/)
-internal/k8s/     Kubeconfig context resolution and cluster health/resource access
-internal/prerequisites/ OS-aware check/install runner for required tools
-internal/shared/  executor, errors, ui, download, selfupdate, wsllauncher
-tests/            Integration tests and shared test utilities (tests/testutil/)
-main.go           Entry point
-go.mod            Module definition: github.com/flamingo-stack/openframe-cli, Go 1.26.0 (toolchain go1.26.5)
+cmd/                    Cobra command tree (bootstrap, cluster, app, prerequisites, update, root)
+internal/bootstrap/     Orchestrates "cluster create + app install" as one staged flow
+internal/cluster/       Cluster lifecycle: service, providers (k3d, eks, gke, terraform), discovery, UI
+internal/chart/         ArgoCD + app-of-apps installation via Helm, git-based chart repo cloning
+internal/app/           Platform status aggregation and uninstall orchestration
+internal/k8s/           Read-only Kubernetes access: health checks, kubeconfig context handling
+internal/prerequisites/ OS-aware tool detection/auto-install framework
+internal/shared/        Executor, downloads, errors, self-update, UI, WSL launcher — cross-cutting code
+tests/integration/      CLI-level integration test helpers
+tests/testutil/         Shared assertions, fixtures, and test patterns
+scripts/sign-binary.sh  Release signing helper
+main.go                 Process entrypoint; maps errors to exit codes
+go.mod                  Module definition, Go 1.26 toolchain, dependency pins
 ```
 
-For the full component-by-component breakdown, dependency diagrams, and sequence diagrams (bootstrap flow, app status aggregation), see [Architecture](./architecture/README.md) and [Architecture Overview](../reference/architecture/overview.md).
+> **Note on Windows development:** the native Windows build re-executes itself inside WSL2 (`internal/shared/wsllauncher/`) before any cluster command runs, because the local k3d cluster and the native `client-go` Kubernetes client need to share a network namespace that a native Windows process cannot reach reliably. Keep this in mind when developing or debugging cluster commands on Windows.
 
-## Working agreement
+## Conventions enforced in this codebase
 
-Before opening a pull request:
+A few conventions are consistently enforced across `cmd/` and `internal/` and are worth knowing before you start changing code (see [Contributing Guidelines](./contributing/guidelines.md) for the full list):
 
-1. Confirm your change builds and passes the suite described in [Testing](./testing/README.md).
-2. Follow the conventions in [Contributing Guidelines](./contributing/guidelines.md).
-3. For anything touching credential handling, binary verification, or self-update integrity, check [Security](./security/README.md) first.
+- Cobra command groups are wired in through `Get<Group>Cmd()` / `get<Sub>Cmd()` factory functions, never constructed inline in `cmd/root.go`.
+- Command groups that define their own `PersistentPreRunE` must call `ui.ApplyGlobalOutputFlags(cmd)`, since Cobra only runs the closest parent's hook — otherwise `--verbose`/`--silent` silently stop working for that subtree.
+- User-facing terminal output goes through `pterm` printers or the shared `internal/shared/ui` package, never raw `fmt.Print*` to stdout.
+- Errors already displayed to the user are returned as (or wrapping) `AlreadyHandledError` so `main` doesn't double-print them.
+- External command failures (helm, k3d, terraform, etc.) are preserved as `*executor.CommandError` so the original exit code reaches the OS, instead of collapsing to a generic `1`.
+- The root `cobra.Command` sets `SilenceErrors` and `SilenceUsage` to `true`, since error display is handled explicitly.
 
-This project does not use GitHub Issues or GitHub Discussions for coordination — day-to-day discussion happens on the OpenMSP Slack community.
+These rules are detailed further in [Contributing Guidelines](./contributing/guidelines.md) and [Architecture](./architecture/README.md).

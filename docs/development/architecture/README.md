@@ -1,32 +1,18 @@
-
 # Architecture Overview
 
-OpenFrame CLI (`openframe`) is the bootstrap and lifecycle-management tool for the [OpenFrame](https://openframe.ai) platform built by [Flamingo](https://flamingo.run). It provisions Kubernetes clusters — locally via k3d, or in the cloud via GKE/EKS through Terraform — and deploys OpenFrame onto them using ArgoCD's app-of-apps pattern, supporting both interactive wizards and non-interactive flags for CI/automation.
+OpenFrame CLI (`openframe`) is the Go-based command-line tool that provisions Kubernetes clusters and deploys the [OpenFrame](https://openframe.ai) platform by [Flamingo](https://flamingo.run) onto them. It provisions clusters locally via k3d or in the cloud via GKE/EKS through Terraform, then installs the platform using ArgoCD's app-of-apps pattern. The CLI also manages prerequisites, status monitoring, upgrades, teardown, and its own self-update, offering both interactive wizards and non-interactive flags for CI/automation.
 
-> The CLI deploys the platform whose source code lives in the separate [`flamingo-stack/openframe-oss-tenant`](https://github.com/flamingo-stack/openframe-oss-tenant) repository ("OpenFrame Main code Repository"). This repository owns only cluster provisioning, platform install/upgrade/uninstall, prerequisite management, and self-update — it never embeds or vendors that repository's code. When reading this document alongside the oss-tenant repository's own docs (`https://github.com/flamingo-stack/openframe-oss-tenant/tree/main/docs`), keep in mind they describe two separate, independently maintained codebases connected only at install time.
+The application code the CLI deploys lives in a separate, externally-maintained repository, [flamingo-stack/openframe-oss-tenant](https://github.com/flamingo-stack/openframe-oss-tenant) ("OpenFrame Main code Repository"). This CLI repository clones that repository's app-of-apps Helm chart at install/upgrade time and never embeds its source — treat it as an external dependency, not a local subdirectory.
 
-## Where this repository sits in the ecosystem
+> According to the organization's code graph, `openframe-cli` publishes a single Go module artifact — `github.com/flamingo-stack/openframe-cli` — and has **no recorded upstream dependencies on, nor downstream consumers from, any other repository the organization manages**. Index coverage for this fact is `full`, meaning the absence is confirmed rather than a gap in visibility. This is a standalone, user-facing CLI binary distributed via GitHub Releases and `go install`, not a library consumed by other services.
 
-Per the organization's dependency graph (coverage: **full**, meaning every other managed repository has a fresh graph and an absent consumer is a confirmed fact, not a gap):
+## High-Level Architecture
 
-- **Publishes** exactly one artifact: the Go module `github.com/flamingo-stack/openframe-cli`.
-- **Has no recorded upstream dependencies** on other repositories in the organization — only on third-party Go libraries (Cobra, client-go, pterm, huh, bubbletea, sigstore-go, go-git, terraform-exec) and external CLI binaries it shells out to (Docker, k3d, Helm, Terraform, gcloud, aws).
-- **Has no recorded downstream consumers.** No other repository imports this module's Go symbols — expected, since OpenFrame CLI is a standalone, user-facing binary rather than a library. Its only relationship to `openframe-oss-tenant` is operational: at install/upgrade time it clones that repository's app-of-apps Helm chart (via the `RepoOSSTenant` constant in `internal/chart/models/repos.go`), not a code-level import.
-
-```mermaid
-flowchart LR
-  r_cli["OpenFrame CLI"]
-  class r_cli roleService
-  classDef roleService stroke-width:2px
-```
-
-## High-level architecture
-
-OpenFrame CLI is organized around three core domain abstractions — **cluster** (provisioning), **app** (platform deployment via ArgoCD), and **prerequisites** (tool verification/installation) — plus shared infrastructure for UI, command execution, and self-update. Commands under `cmd/` are thin Cobra wrappers that delegate into domain services under `internal/`, which in turn drive provider-specific backends (k3d, EKS, GKE, Helm, ArgoCD) through a testable `CommandExecutor` abstraction (`internal/shared/executor/executor.go`).
+The CLI is organized around three core abstractions — **cluster** (provisioning), **app** (platform deployment via ArgoCD), and **prerequisites** (tool verification/installation) — plus shared infrastructure for UI, command execution, verified downloads, and self-update.
 
 ```mermaid
 graph TB
-    subgraph cliLayer["CLI Layer (cmd/)"]
+    subgraph "CLI Layer (cmd/)"
         Bootstrap[bootstrap]
         Cluster[cluster]
         App[app]
@@ -34,15 +20,15 @@ graph TB
         Update[update]
     end
 
-    subgraph domainLayer["Domain Services (internal/)"]
+    subgraph "Domain Services (internal/)"
         ClusterSvc["cluster.ClusterService"]
-        ChartSvc["chart/services.ChartService"]
+        ChartSvc["chart.services.ChartService"]
         AppStatus["app/status.Service"]
         PrereqFw["prerequisites.Runner"]
-        SelfUpdate["shared/selfupdate.Updater"]
+        SelfUpdate["selfupdate.Updater"]
     end
 
-    subgraph providerLayer["Providers"]
+    subgraph "Providers"
         K3d["k3d provider"]
         EKS["EKS provider (terraform)"]
         GKE["GKE provider (terraform)"]
@@ -50,11 +36,11 @@ graph TB
         Helm["Helm provider"]
     end
 
-    subgraph externalLayer["External Systems"]
+    subgraph "External Systems"
         Docker[("Docker")]
         K8sAPI[("Kubernetes API")]
         CloudAPI[("GCP / AWS APIs")]
-        GitHubRel[("GitHub Releases")]
+        GitHub[("GitHub Releases")]
     end
 
     Bootstrap --> ClusterSvc
@@ -76,166 +62,184 @@ graph TB
     GKE --> CloudAPI
     ArgoCD --> K8sAPI
     Helm --> K8sAPI
-    SelfUpdate --> GitHubRel
+    SelfUpdate --> GitHub
 ```
 
-## Core components
+> **Windows note:** on Windows, the native build re-executes itself inside WSL2 (`internal/shared/wsllauncher`) before any cluster command runs. The local cluster path (Docker + k3d) and the native Kubernetes client (`client-go`) must share a network namespace that a native Windows process cannot reach reliably, so cluster operations are forwarded into a Linux environment.
+
+A full-ecosystem view (this repository's published artifact and its organization-wide relationships) is available at `../../reference/architecture/ecosystem.md`; more granular, standalone Mermaid source files for the diagrams on this page live under `../../diagrams/architecture/README.md`.
+
+## Core Components
 
 | Component | Path | Responsibility |
 |---|---|---|
-| CLI entrypoint | `main.go`, `cmd/root.go` | Builds the root Cobra command, resolves build-time version info, exits with the failed child command's exit code |
-| Bootstrap command | `cmd/bootstrap/`, `internal/bootstrap/` | One-shot "create cluster + install platform" flow with a staged progress tracker and closing summary |
-| Cluster commands | `cmd/cluster/`, `internal/cluster/` | `create`/`delete`/`list`/`status`/`use`/`cleanup`; resolves the k3d/EKS/GKE backend via `internal/cluster/provider` |
-| App commands | `cmd/app/`, `internal/app/` | `install`/`upgrade`/`status`/`access`/`uninstall` against ArgoCD + app-of-apps on an existing cluster |
-| Chart services | `internal/chart/` | Installs ArgoCD and the app-of-apps Helm chart, clones the chart repo, validates Helm values, orchestrates retries |
-| Prerequisites framework | `internal/prerequisites/`, `internal/cluster/prerequisites/`, `internal/chart/prerequisites/` | OS-aware check/install of Docker, k3d, Helm, Terraform, cloud CLIs, certificates |
-| Cluster providers | `internal/cluster/providers/{k3d,eks,gke,terraform}` | Backend-specific `Provider` implementations behind a single interface |
-| Discovery | `internal/cluster/discovery/` | Finds external GKE/EKS clusters and handles gcloud/AWS auth flows |
-| k8s access layer | `internal/k8s/` | Reads kubeconfig contexts, builds `rest.Config`, checks cluster health/capacity — read-only, separate from cluster creation |
-| Self-update | `internal/shared/selfupdate/` | Checks GitHub releases, verifies cosign signatures + SHA256, applies/rolls back the binary |
-| Verified downloads | `internal/shared/download/` | Pinned-version, checksum-verified installers for k3d, Helm, Terraform, mkcert, infracost (no `curl \| bash`) |
-| Shared UI | `internal/shared/ui/` | pterm/huh/bubbletea wrappers: prompts, spinners, glyphs, `--silent`/`--plain`/`--verbose` contract, GitHub Actions annotations |
-| Executor abstraction | `internal/shared/executor/` | `CommandExecutor` interface wrapping all external process calls; `MockCommandExecutor` for tests |
-| WSL launcher | `internal/shared/wsllauncher/` | Forwards the native Windows build into WSL2, where Docker/k3d/client-go actually work |
-| Error handling | `internal/shared/errors/` | Structured error rendering, retry policy, friendly hints, `AlreadyHandledError` sentinel |
+| CLI entrypoint | `main.go`, `cmd/root.go` | Cobra root command, version metadata, global error/exit-code handling |
+| Bootstrap | `cmd/bootstrap/`, `internal/bootstrap/` | One-shot "create cluster + install platform" flow with staged progress tracking |
+| Cluster commands | `cmd/cluster/` | `create`, `delete`, `list`, `status`, `use`, `cleanup` subcommands |
+| Cluster service | `internal/cluster/` | Cluster lifecycle orchestration, provider selection, registry of managed clusters |
+| Cluster providers | `internal/cluster/providers/{k3d,eks,gke,terraform}` | Backend-specific cluster create/delete/status, unified behind the `provider.Provider` interface |
+| Cluster discovery | `internal/cluster/discovery/` | Read-only discovery of external GKE/EKS clusters and gcloud/AWS auth flows |
+| App commands | `cmd/app/` | `install`, `upgrade`, `status`, `access`, `uninstall` for the OpenFrame platform |
+| Chart services | `internal/chart/` | ArgoCD + app-of-apps installation via Helm, git-based chart repo cloning, prerequisites |
+| App status | `internal/app/status/`, `internal/app/status/tui/` | Aggregated platform health/sync report; k9s-style interactive TUI |
+| App uninstall | `internal/app/uninstall/` | Ordered teardown of ArgoCD Applications, Helm releases, namespace |
+| Prerequisites | `cmd/prerequisites/`, `internal/prerequisites/`, `internal/cluster/prerequisites/` | OS-aware tool detection/auto-install framework (Docker, k3d, helm, terraform, gcloud, aws) |
+| Kubernetes access | `internal/k8s/` | Kubeconfig context handling, health/resource checks — read-only inspection of an existing cluster |
+| Verified downloads | `internal/shared/download/` | SHA256-pinned, checksum-verified binary downloads (k3d, helm, mkcert, terraform, infracost) |
+| Self-update | `internal/shared/selfupdate/`, `cmd/update/` | GitHub release check, cosign/Sigstore signature verification, in-place binary replacement, rollback |
+| Command executor | `internal/shared/executor/` | Testable abstraction over external command execution (shell-out to docker/k3d/helm/terraform/gcloud/aws) |
+| Shared UI | `internal/shared/ui/` | pterm/huh/bubbletea-based prompts, spinners, themed status printers, GitHub Actions annotations |
+| Error handling | `internal/shared/errors/` | Structured error types, friendly hints, retry policy for transient failures |
+| WSL launcher | `internal/shared/wsllauncher/` | Forwards the native Windows binary into WSL2 and auto-installs the Linux binary there |
 
-### Component relationships
+### Component Relationships
 
 ```mermaid
-graph LR
-    cmdApp["cmd/app"] --> chartServices["internal/chart/services"]
-    cmdApp --> appStatus["internal/app/status"]
-    cmdApp --> appUninstall["internal/app/uninstall"]
-    cmdApp --> argocdProvider["internal/chart/providers/argocd"]
+flowchart TB
+    subgraph CmdLayer["cmd/ (Cobra commands)"]
+        CmdRoot[root.go]
+        CmdBootstrap[bootstrap]
+        CmdCluster[cluster]
+        CmdApp[app]
+        CmdPrereq[prerequisites]
+        CmdUpdate[update]
+    end
 
-    cmdCluster["cmd/cluster"] --> clusterPkg["internal/cluster"]
-    clusterPkg --> clusterProvider["internal/cluster/provider"]
-    clusterProvider --> k3dProv["providers/k3d"]
-    clusterProvider --> eksProv["providers/eks"]
-    clusterProvider --> gkeProv["providers/gke"]
-    eksProv --> terraformProv["providers/terraform"]
-    gkeProv --> terraformProv
+    subgraph Domain["internal/ domain packages"]
+        BootstrapSvc["bootstrap.Service"]
+        ClusterPkg["cluster.ClusterService"]
+        ChartPkg["chart.services.ChartService"]
+        AppStatusPkg["app/status.Service"]
+        AppUninstallPkg["app/uninstall.Service"]
+        PrereqPkg["prerequisites.Runner"]
+        K8sPkg["k8s.Accessor"]
+    end
 
-    cmdBootstrap["cmd/bootstrap"] --> bootstrapSvc["internal/bootstrap"]
-    bootstrapSvc --> clusterPkg
-    bootstrapSvc --> chartServices
+    subgraph Infra["internal/shared/ infrastructure"]
+        ExecutorPkg["executor.CommandExecutor"]
+        DownloadPkg["download.Downloader"]
+        SelfUpdatePkg["selfupdate.Updater"]
+        UIPkg[ui]
+        ErrorsPkg[errors]
+    end
 
-    chartServices --> helmProvider["internal/chart/providers/helm"]
-    chartServices --> gitProvider["internal/chart/providers/git"]
-    chartServices --> chartPrereq["internal/chart/prerequisites"]
+    CmdRoot --> CmdBootstrap
+    CmdRoot --> CmdCluster
+    CmdRoot --> CmdApp
+    CmdRoot --> CmdPrereq
+    CmdRoot --> CmdUpdate
 
-    cmdPrereq["cmd/prerequisites"] --> prereqFw["internal/prerequisites"]
-    clusterPkg --> clusterPrereqSets["internal/cluster/prerequisites"]
-    clusterPrereqSets --> prereqFw
+    CmdBootstrap --> BootstrapSvc
+    BootstrapSvc --> ClusterPkg
+    BootstrapSvc --> ChartPkg
 
-    cmdUpdate["cmd/update"] --> selfupdate["internal/shared/selfupdate"]
-    selfupdate --> download["internal/shared/download"]
+    CmdCluster --> ClusterPkg
+    ClusterPkg --> PrereqPkg
 
-    everything["all cmd/internal packages"] --> executor["internal/shared/executor"]
-    everything --> sharedUI["internal/shared/ui"]
-    everything --> sharedErrors["internal/shared/errors"]
-    cmdCluster --> k8sPkg["internal/k8s"]
-    cmdApp --> k8sPkg
+    CmdApp --> ChartPkg
+    CmdApp --> AppStatusPkg
+    CmdApp --> AppUninstallPkg
+    ChartPkg --> K8sPkg
+    AppStatusPkg --> K8sPkg
+
+    CmdPrereq --> PrereqPkg
+    PrereqPkg --> DownloadPkg
+
+    CmdUpdate --> SelfUpdatePkg
+    SelfUpdatePkg --> DownloadPkg
+
+    ClusterPkg --> ExecutorPkg
+    ChartPkg --> ExecutorPkg
+    PrereqPkg --> ExecutorPkg
+
+    ClusterPkg --> UIPkg
+    ChartPkg --> UIPkg
+    CmdRoot --> ErrorsPkg
 ```
 
-## Data flow: the bootstrap sequence
+The command layer (`cmd/`) never touches external tools directly. Every Cobra command delegates to a domain service in `internal/` (`cluster.ClusterService`, `chart.services.ChartService`, `app/status.Service`, `app/uninstall.Service`, `prerequisites.Runner`), and those services share the same `internal/shared/executor.CommandExecutor` abstraction to shell out to Docker, k3d, Helm, Terraform, gcloud, and the AWS CLI. This indirection is what lets the test suite under `tests/` substitute `internal/shared/executor/mock.go` for the real executor.
 
-`openframe bootstrap` is the CLI's flagship one-command flow: it creates a local k3d cluster and installs the OpenFrame platform onto it in a single staged operation, orchestrated by `internal/bootstrap/service.go`'s `Service.Execute` / `bootstrap` function.
+## Data Flow
+
+The sequence below traces `openframe bootstrap`, the CLI's primary end-to-end flow: it chains cluster creation and platform installation into one command, driven by `internal/bootstrap/service.go`.
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant CmdBootstrap as cmd/bootstrap
-    participant BootstrapSvc as internal/bootstrap.Service
-    participant ClusterSvc as cluster.ClusterService
-    participant K3dProvider as providers/k3d
-    participant ChartSvc as chart/services
-    participant ArgoCD as providers/argocd
-    participant K8sAPI as Kubernetes API
+    participant CLI as cmd/bootstrap
+    participant BS as bootstrap.Service
+    participant CS as cluster.ClusterService
+    participant Provider as k3d provider
+    participant Chart as chart.services.ChartService
+    participant Argo as ArgoCD provider
+    participant K8s as Kubernetes API
 
-    User->>CmdBootstrap: openframe bootstrap my-cluster
-    CmdBootstrap->>BootstrapSvc: Execute(cmd, args)
-    BootstrapSvc->>ChartSvc: ValidateHelmValuesFile()
-    BootstrapSvc->>ClusterSvc: CreateCluster(ctx, config)
-    ClusterSvc->>K3dProvider: CreateCluster(ctx, config)
-    K3dProvider-->>ClusterSvc: rest.Config
-    ClusterSvc-->>BootstrapSvc: rest.Config
-    BootstrapSvc->>ChartSvc: InstallChartsWithConfigContext(ctx, req)
-    ChartSvc->>ArgoCD: Install (Helm upgrade --install)
-    ArgoCD->>K8sAPI: apply ArgoCD manifests
-    ChartSvc->>ChartSvc: clone app-of-apps repo, install chart
-    ChartSvc->>ArgoCD: WaitForApplications(ctx, config)
-    ArgoCD->>K8sAPI: poll Application sync/health
-    K8sAPI-->>ArgoCD: synced/healthy
-    ArgoCD-->>ChartSvc: ready
-    ChartSvc-->>BootstrapSvc: success
-    BootstrapSvc-->>User: summary card (cluster, stages, status/access hints)
+    User->>CLI: openframe bootstrap my-cluster
+    CLI->>BS: Execute(cmd, args)
+    BS->>Chart: ValidateHelmValuesFile()
+    Chart-->>BS: ok
+    BS->>CS: CreateCluster(ctx, config)
+    CS->>Provider: CreateCluster(ctx, config)
+    Provider->>K8s: provision k3d nodes
+    K8s-->>Provider: rest.Config
+    Provider-->>CS: rest.Config
+    CS-->>BS: rest.Config
+    BS->>Chart: InstallChartsWithConfigContext(ctx, req)
+    Chart->>Argo: Install ArgoCD (Helm)
+    Argo->>K8s: apply ArgoCD manifests
+    Chart->>Argo: Install app-of-apps (git clone + Helm)
+    Argo->>K8s: apply Applications
+    Chart->>Argo: WaitForApplications(ctx, config)
+    Argo->>K8s: poll sync/health status
+    K8s-->>Argo: Synced/Healthy
+    Argo-->>Chart: ready
+    Chart-->>BS: success
+    BS-->>User: summary card (cluster, stages, access)
 ```
 
-Per `internal/bootstrap/.service.md`, the workflow runs a three-stage `steps.Tracker` (validate Helm values → create cluster → install platform), defaults the cluster name to `openframe-dev` when none is given, and emits a desktop notification plus a GitHub Actions Step Summary card on completion. The install request explicitly sets `KubeContext` to `k3d-<clusterName>` (not resolved dynamically from the current context), since bootstrap always creates a k3d cluster and must not risk matching an unrelated pre-existing context.
+A second everyday flow is `openframe app status`, implemented in `cmd/app/status.go`. It resolves a `rest.Config` for the target kube-context (`resolveRestConfig`), builds an ArgoCD manager (`newArgoCDManager`) and a Kubernetes accessor (`k8s.NewAccessorForConfig`), then wires both into `appstatus.NewService`. `Service.Report` (in `internal/app/status/status.go`) aggregates three independent, best-effort sources — cluster health, the ArgoCD application list, and the admin password — into one `Report`, failing hard only if the application list itself cannot be read. The same `Service` backs three presentations: a single text/JSON/YAML report, a `--watch` polling loop (`watchStatus`), and the `--interactive` k9s-style TUI in `internal/app/status/tui/tui.go`.
 
-A second, related sequence worth understanding is `openframe app uninstall` (`internal/app/uninstall/uninstall.go`), which removes the platform in a specific safe order: ArgoCD `Application` CRs are deleted **before** the Helm releases, so ArgoCD can cascade workload cleanup while it is still running; finalizers are stripped only **after** ArgoCD itself is gone, to unblock any CRs stuck in `Terminating`.
+`openframe app uninstall` (`cmd/app/uninstall.go`, orchestrated by `internal/app/uninstall/uninstall.go`) follows a deliberately ordered teardown: delete the ArgoCD `Application` resources first (so ArgoCD is still running to cascade workload cleanup), then uninstall the `app-of-apps` and `argocd` Helm releases in that order, then clear any finalizers left on stuck `Application` CRs, and only then optionally delete the `argocd` namespace. The cluster itself is never deleted by this path.
 
-```mermaid
-graph TD
-    A["DeleteApplications"] --> B["UninstallRelease: app-of-apps"]
-    B --> C["UninstallRelease: argocd"]
-    C --> D["RemoveApplicationFinalizers"]
-    D --> E{"DeleteNamespace?"}
-    E -->|"yes"| F["DeleteNamespace"]
-    E -->|"no"| G["Return Result"]
-    F --> G
-```
+## Key Design Decisions
 
-## CLI command surface
+- **Three abstractions, one executor.** Cluster provisioning, platform deployment, and prerequisite management are kept as separate domains (`internal/cluster/`, `internal/chart/`, `internal/prerequisites/`), but all of them shell out through the same `internal/shared/executor.CommandExecutor` interface. This keeps every external-tool interaction testable via `internal/shared/executor/mock.go` without duplicating process-invocation logic per domain.
+- **`client-go` over shelled-out `kubectl`.** The CLI uses `k8s.io/client-go` directly (`internal/k8s/`) for health checks, resource queries, and context resolution, rather than shelling out to `kubectl`, giving typed error handling and avoiding a `kubectl` dependency on the operator's machine.
+- **Provider interface unifies heterogeneous cluster backends.** `internal/cluster/provider/factory.go` selects among k3d (local, Docker-based), EKS, and GKE (cloud, Terraform-based) behind one `provider.Provider` interface, so `cluster.ClusterService` and the `cmd/cluster/` commands stay backend-agnostic.
+- **Pinned, exact Terraform module versions for cloud clusters.** Both `internal/cluster/providers/eks/templates/main.tf` and `internal/cluster/providers/gke/templates/main.tf` pin exact module versions rather than ranges. The EKS template's comments record that a floating `~> 21.0` constraint once resolved to a new minor version whose changed defaults broke cluster creation in three independent ways (no bootstrapped addons, an IMDS hop limit of 1, a gated `kubernetes_version` data source); version bumps are now deliberate, re-tested events.
+- **Checksum-verified, pinned downloads — never `curl | bash`.** `internal/shared/download/pins.go` pins exact versions and SHA256 digests for every tool the CLI downloads on the operator's behalf (k3d, helm, mkcert, terraform, infracost), and `internal/shared/download/verify.go` is the shared verification substrate every installer uses.
+- **Signed, verifiable self-update.** `openframe update` (`cmd/update/`, `internal/shared/selfupdate/`) checks GitHub Releases and verifies each downloaded binary's signature via Sigstore/cosign (`internal/shared/selfupdate/cosign.go`), anchored through TUF to the public-good Sigstore trust root, before replacing the running binary. `update rollback` reverts to the previously-installed version entirely offline, with no download.
+- **Exit-code fidelity for automation.** `main.go` distinguishes errors already shown to the user (the `AlreadyHandledError` sentinel, which suppresses a duplicate stderr print) from unexpected ones, and — via `exitCode()` — propagates a failed external command's real exit code instead of collapsing every failure to a generic `1`, so CI pipelines calling `openframe` can branch on the underlying tool's failure mode.
+- **WSL2 re-exec on Windows, not a native code path.** Rather than reimplementing cluster networking natively on Windows, `internal/shared/wsllauncher/launcher.go` forwards the native Windows binary into WSL2 (and auto-installs the Linux binary there) before any cluster command executes, reusing the same Linux-oriented k3d/Docker code path everywhere.
+- **Guarded destructive operations.** Commands that can destroy cluster-wide state — `app uninstall`, `cluster delete` — require either an interactive confirmation prompt or an explicit `--yes`/`--force` flag, and `cmd/app/app.go`'s `noPositionalArgs` helper rejects stray positional arguments so a command like `app status` or `app uninstall` cannot silently target the wrong cluster through a typo.
+- **Standalone binary, no internal consumers.** Per the organization's code graph (coverage: full), no other repository in the organization imports from or depends on `openframe-cli`, and it imports no other internally-published artifact. It is designed and distributed purely as an end-user binary (GitHub Releases, `go install`), not as a library for other services to embed.
 
-| Command | Summary |
+## Runtime and External Dependencies
+
+`go.mod` pins Go `1.26.0` with toolchain `1.26.5` — the module's own comment notes that Go `1.26.0`/`1.26.1` could crash intermittently on `windows-amd64` during GC stack scanning, and `1.26.5` is the toolchain that keeps shipped Windows binaries off that bug. Notable direct dependencies:
+
+| Dependency | Used for |
 |---|---|
-| `openframe bootstrap [cluster-name]` | Create a local k3d cluster and install the OpenFrame platform in one step (`--non-interactive` for CI) |
-| `openframe cluster create [NAME]` | Create a k3d/GKE/EKS cluster (interactive wizard or `--skip-wizard` with flags like `--type`, `--nodes`, `--region`, `--project`, `--profile`, `--ha`, `--spot`) |
-| `openframe cluster delete [NAME]` | Delete a cluster; cloud deletes require typed-name confirmation or `--force` |
-| `openframe cluster list [--all]` | List managed clusters; `--all` additionally discovers external GKE/EKS clusters |
-| `openframe cluster status [NAME]` | Detailed cluster health/resource info, `-o json\|yaml` supported |
-| `openframe cluster use [NAME]` | Switch the kubectl context (and gcloud config, for GKE) to a cluster |
-| `openframe cluster cleanup [NAME]` | Prune unused container images from cluster nodes (k3d only) |
-| `openframe app install [cluster-name]` | Install ArgoCD + app-of-apps onto an existing cluster (`--ref` to pick a branch/tag) |
-| `openframe app upgrade` | Change ref (`--ref`) or force a re-sync (`--sync`, optional `--prune`) of an installed platform |
-| `openframe app status [--watch\|--interactive]` | Report/monitor ArgoCD application sync/health; `--interactive` opens a k9s-style TUI |
-| `openframe app access` | Print ArgoCD admin credentials and how to reach the UI |
-| `openframe app uninstall` | Remove ArgoCD + apps from a cluster, keeping the cluster itself |
-| `openframe prerequisites check\|install [--type k3d\|eks\|gke]` | Report or install the tools required for a given cluster type |
-| `openframe update [version]`, `update check`, `update rollback` | Self-update the CLI binary, with checksum + cosign signature verification and offline rollback |
+| `github.com/spf13/cobra` | Command routing and flag parsing across the entire `cmd/` tree |
+| `k8s.io/client-go`, `k8s.io/api`, `k8s.io/apimachinery` | Native Kubernetes API access, replacing shelled-out `kubectl` calls |
+| `github.com/pterm/pterm` | Terminal rendering: tables, spinners, boxes, themed status printers |
+| `github.com/charmbracelet/huh`, `github.com/charmbracelet/bubbletea` | Interactive prompts/wizards and the `app status --interactive` TUI |
+| `github.com/sigstore/sigstore-go` | Cosign keyless signature verification for self-update integrity |
+| `github.com/hashicorp/terraform-exec`, `github.com/hashicorp/terraform-json` | Driving Terraform for the EKS/GKE cluster providers |
+| `github.com/go-git/go-git/v5` | Cloning the app-of-apps chart repository |
+| `golang.org/x/mod` | Semantic version comparison for update/downgrade decisions |
+| `sigs.k8s.io/yaml` | JSON/YAML round-tripping for `--output json|yaml` command output |
 
-## Key design decisions
+At runtime — not as Go dependencies, but orchestrated through `internal/shared/executor.CommandExecutor` — the CLI also shells out to Docker, k3d, Helm, Terraform, gcloud, and the AWS CLI.
 
-**Provider abstraction behind a single interface.** `internal/cluster/provider/factory.go` resolves one `Provider` implementation by `ClusterType` (k3d, EKS, GKE), so `cmd/cluster` and `internal/bootstrap` never branch on cluster type directly — all the k3d/EKS/GKE-specific logic lives in `internal/cluster/providers/`. EKS and GKE both delegate to a shared `providers/terraform` engine.
+## Hardware Requirements
 
-**Terraform modules are pinned, not floating ranges.** The generated workspace in `internal/cluster/providers/eks/templates/main.tf` pins the `terraform-aws-modules/eks/aws` module to an exact version (`21.24.1`), with an inline comment recording that a previously floating `~> 21.0` constraint once resolved to a new minor version whose changed defaults broke cluster creation in three independent ways (no bootstrapped addons, IMDS hop limit 1, a gated `kubernetes_version` data source). The same deliberate-pin discipline applies to the GKE template's `terraform-google-modules` sources.
+| Resource | Minimum | Recommended |
+|---|---|---|
+| RAM | 24 GB | 32 GB |
+| CPU Cores | 6 | 12 |
+| Disk Space | 50 GB | 100 GB |
 
-**Every addon a working EKS cluster needs is declared explicitly.** Because the EKS module sets `bootstrap_self_managed_addons = false`, `main.tf` declares `vpc-cni` (with `before_compute = true`), `kube-proxy`, `coredns`, and `aws-ebs-csi-driver` itself — without the EBS CSI addon, every `PersistentVolumeClaim` the OpenFrame platform creates (Kafka, MongoDB, Cassandra, etc.) would stay `Pending` forever.
+## Where to Go Next
 
-**Free-Tier-friendly defaults.** The EKS template defaults `instance_type` to `m7i-flex.large` instead of `m6i.large` specifically because new AWS accounts on the Free plan refuse to launch non-eligible instance types — a comment in the template records that the larger type caused the node group to die roughly 30 minutes into a first-run path.
-
-**Verified, pinned downloads instead of `curl | bash`.** `internal/shared/download/` installs k3d, Helm, Terraform, mkcert, and infracost at pinned versions with SHA256 checksum verification, rather than piping an install script from the internet.
-
-**A single `CommandExecutor` abstraction for every external process call.** `internal/shared/executor/executor.go` defines the interface every package shells out through (Docker, k3d, Helm, Terraform, gcloud, aws), with `internal/shared/executor/mock.go` providing a `MockCommandExecutor` for tests — this keeps cluster/chart logic testable without actually invoking external binaries.
-
-**WSL2 forwarding for the Windows build.** `internal/shared/wsllauncher/` forwards the native Windows binary into WSL2, because Docker, k3d, and `client-go` do not work natively on Windows; this is also why the Windows release artifact is distributed as a `.zip` rather than a bare binary.
-
-**Cosign/Sigstore-verified self-update with rollback.** `internal/shared/selfupdate/` checks GitHub Releases, verifies the downloaded binary's cosign keyless signature and SHA256 checksum via `github.com/sigstore/sigstore-go`, and supports an offline rollback (`openframe update rollback`) if an update turns out to be bad.
-
-**Explicit `--context` over positional cluster-name ambiguity for destructive app commands.** `cmd/app/app.go`'s `noPositionalArgs` rejects any positional argument on `app` subcommands, with an error naming `--context` as the correct way to target a cluster — the in-code comment notes that without this guard, Cobra's default `ArbitraryArgs` behavior meant a command like `openframe app status my-eks` would silently run against whatever the current kube-context happened to be, which is especially dangerous for `uninstall`.
-
-**Consistent `--silent`/`--verbose` handling despite Cobra's hook-shadowing.** Because the `app` command group defines its own `PersistentPreRunE` (which shadows the root command's, since Cobra only runs the closest parent's hook), `cmd/app/app.go` explicitly re-applies `ui.ApplyGlobalOutputFlags(cmd)` — a comment there records that an earlier version replicated only the silent half of this contract, leaving `app install --verbose` with no debug output while `bootstrap --verbose` printed everything.
-
-**Mutually exclusive upgrade modes, explicitly rejected rather than silently merged.** `cmd/app/upgrade.go` treats `--ref` (deploy a new git ref) and `--sync` (force re-sync the current ref) as mutually exclusive and returns an error if both are set — an in-code comment explains that silently preferring `--sync` previously force-synced the *current* ref and discarded an explicit `--ref`, leaving the user believing they had deployed a new version when they had not.
-
-**Credentials are never baked into the app-of-apps Git URL.** `internal/chart/models/appofapps.go`'s `GetGitURL()` always strips any embedded username/password (e.g. an `x-access-token:PAT@` prefix) from the repository URL before handing it to the `helm-git` plugin, to prevent token leakage through Helm's logs or process arguments.
-
-**Safe-ordered, two-phase platform uninstall.** As shown in the uninstall sequence above, `internal/app/uninstall/uninstall.go` deletes ArgoCD `Application` resources before removing the Helm releases (`app-of-apps` before `argocd` itself), and only strips stuck finalizers after ArgoCD is gone — ensuring cascading workload cleanup happens while the controller that performs it is still running.
-
-**Exit-code fidelity for automation.** `main.go` preserves a failed external command's real exit code (when it is a valid Unix code in the 1–255 range) rather than collapsing every failure to a generic `1`, and distinguishes already-user-facing errors (the `AlreadyHandledError` sentinel) from errors that still need to be printed — so CI pipelines consuming `openframe`'s exit status get meaningful signal.
-
-## Further reading
-
-For a narrower look at how individual domains are wired, see `../../reference/architecture/overview.md` (module-level breakdown with additional key-files tables) and `../../reference/architecture/ecosystem.md` (the organization's dependency-graph facts for this repository). The source `.mmd` diagram files referenced throughout this document are also available individually under `../../diagrams/architecture/README.md`.
+For prerequisites and first-run setup, see `../../getting-started/introduction.md`, `../../getting-started/prerequisites.md`, and `../../getting-started/quick-start.md`. Task-specific walkthroughs are available for creating a cluster (`../../getting-started/how-to/create-a-new-kubernetes-cluster-with-openframe-cli.md`), installing the platform (`../../getting-started/how-to/install-the-openframe-platform-onto-a-cluster.md`), checking cluster/app status (`../../getting-started/how-to/check-the-status-of-your-openframe-cluster-and-apps.md`), upgrading (`../../getting-started/how-to/upgrade-openframe-cli-and-its-installed-apps.md`), and uninstalling (`../../getting-started/how-to/uninstall-openframe-and-delete-a-cluster.md`). For contribution workflow and local development, see `../README.md`, `../setup/environment.md`, and `../setup/local-development.md`.

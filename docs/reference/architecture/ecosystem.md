@@ -38,5 +38,5 @@ flowchart LR
 
 ## Index state
 
-- Snapshot: `23f0e2596407` on `main`, indexed 2026-11-12T03:08:22.063+00:00
+- Snapshot: `92a2f3da9635` on `main`, indexed 2026-11-14T03:55:43.554+00:00
 - Coverage: full (every other managed repository has a fresh graph, so a symbol with no consumer here has no consumer in the org)

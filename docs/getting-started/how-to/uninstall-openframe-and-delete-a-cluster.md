@@ -1,41 +1,40 @@
 # How to uninstall OpenFrame and delete a cluster
 
-This guide walks a cluster operator through removing the OpenFrame platform from a cluster and, optionally, deleting the cluster itself using the OpenFrame CLI (`openframe`).
+This guide shows the person operating an OpenFrame deployment (e.g., a platform admin or developer who ran `openframe bootstrap` or `openframe cluster create`) how to remove the OpenFrame application from a cluster and, if needed, delete the cluster itself, using the `openframe` CLI.
 
 ## Prerequisites
 
-- The OpenFrame CLI (`openframe`) is installed and on your `$PATH`. You can confirm this by running `openframe --help` and seeing the command list.
-- You have a working `kubectl` context pointing at the cluster you want to clean up, or you know the cluster's kube-context name to pass with `--context`.
-- The cluster is reachable (Helm and the Kubernetes API must respond) if you intend to run `openframe app uninstall`.
-- For a local cluster created with `openframe cluster create` or `openframe bootstrap`, Docker is running.
-- For a cloud cluster (EKS or GKE), you have valid cloud credentials configured (AWS or gcloud) and know the exact cluster name as it appears in `openframe cluster list`, since cloud deletions ask you to re-type the name.
-- You understand the difference between the two operations covered here: `openframe app uninstall` removes the OpenFrame application (ArgoCD and its apps) but leaves the cluster running; `openframe cluster delete` removes the cluster itself and its underlying infrastructure.
+Before you start, confirm the following:
+
+- You have the `openframe` CLI installed and on your `$PATH` (check with `openframe --version`). If you don't have it yet, see [Create a new Kubernetes cluster with OpenFrame CLI](./create-a-new-kubernetes-cluster-with-openframe-cli.md) and [Install the OpenFrame platform onto a cluster](./install-the-openframe-platform-onto-a-cluster.md) for how it was set up.
+- You know which cluster you want to act on. Run `openframe cluster list` to see the clusters the CLI manages, or `openframe cluster list --all` to also discover external GKE/EKS clusters.
+- Your current kube-context points at the cluster you intend to change — the CLI prints a dim line naming the active kube-context before `app` subcommands run. Use the `--context` flag on `openframe app uninstall` if you need to target a context other than the current one.
+- For a cloud cluster (GKE or EKS), the CLI's type-aware prerequisite check requires the matching tools (Terraform plus `gcloud` for GKE, or the AWS CLI for EKS) to be available, the same checks used when the cluster was created.
+- You understand the scope of each command: `openframe app uninstall` removes ArgoCD and the OpenFrame apps but leaves the cluster running; `openframe cluster delete` destroys the cluster and all its resources. Decide which one (or both, in order) you need.
 
 ## Steps
 
-1. Open a terminal and confirm which cluster/context you are about to act on by running `kubectl config current-context`, or decide which `--context` value you will pass to the CLI.
-2. Run `openframe app uninstall` to remove the OpenFrame application from the cluster. Add `--context <context-name>` if you want to target a context other than the current one, for example `openframe app uninstall --context k3d-openframe-dev`.
-3. When prompted "Remove ArgoCD and all OpenFrame apps from the current kube-context? The cluster itself is kept.", confirm by answering yes, or avoid the prompt entirely by adding the `--yes` flag (`openframe app uninstall --yes`), which is useful for automation.
-4. Optionally add the `--delete-namespace` flag (for example `openframe app uninstall --yes --delete-namespace`) if you also want the `argocd` namespace removed once the applications and Helm releases are gone.
-5. Wait for the CLI to report "Uninstalling OpenFrame..." followed by a summary of how many applications and Helm releases were removed. At this point the OpenFrame application is gone but the cluster is still running.
-6. Decide whether you also want to delete the cluster. If you only wanted to remove OpenFrame and keep the cluster, stop here — the CLI already told you it left the cluster running and that you can reinstall with `openframe app install`.
-7. To delete the cluster, run `openframe cluster delete [NAME]`. Pass the cluster's name as the positional argument (for example `openframe cluster delete my-cluster`), or run `openframe cluster delete` with no name to pick the cluster from an interactive selection list.
-8. Confirm the deletion when prompted. For a local (k3d) cluster this is a general confirmation; for a cloud cluster (EKS or GKE) you must re-type the exact cluster name to confirm, because destroying cloud infrastructure is irreversible. You can skip either prompt non-interactively by adding `--force` (for example `openframe cluster delete my-cluster --force`).
-9. Wait for the CLI to show the operation start message, run the type-aware prerequisite checks for that cluster's type, and perform the deletion, which stops intercepts, deletes the cluster, cleans up Docker resources (for k3d) or the underlying cloud infrastructure (for EKS/GKE), and removes the cluster's local configuration.
-10. Confirm success by watching for the CLI's operation-success message for the delete action against your cluster name.
+1. Check which clusters exist by running `openframe cluster list` (add `--all` to also list external GKE/EKS clusters discovered read-only).
+2. Remove the OpenFrame application from the cluster by running `openframe app uninstall`. Add `--context <name>` to target a cluster other than the current kube-context, and add `--delete-namespace` if you also want the `argocd` namespace removed.
+3. Confirm the destructive action when prompted: "Remove ArgoCD and all OpenFrame apps from the current kube-context (or from context "<name>")? The cluster itself is kept." Type `y` to continue, or re-run the command with the `--yes` (`-y`) flag to skip this prompt in automation.
+4. Wait for the uninstall to run. The CLI prints "Uninstalling OpenFrame..." while it deletes the ArgoCD Applications, then uninstalls the `app-of-apps` Helm release, then the ArgoCD Helm release itself, in that order.
+5. Decide whether the cluster itself should also be deleted. If you only wanted the OpenFrame application removed, stop here — the cluster keeps running and you can reinstall later with `openframe app install`.
+6. To delete the cluster as well, run `openframe cluster delete [NAME]`. Omit the name to pick the cluster interactively from the list of managed clusters.
+7. Confirm the cluster deletion when prompted. For a local (k3d) cluster this is the standard yes/no confirmation. For a cloud cluster (GKE or EKS) you must re-type the exact cluster name to confirm, because destroying cloud infrastructure is irreversible; pass `--force` only in automation where no interactive prompt can run.
+8. Wait for the CLI to finish stopping intercepts, deleting the cluster, cleaning up Docker resources (for k3d), and removing the cluster's configuration entry.
+9. Optionally, if you only want to reclaim disk space from a k3d cluster's nodes without removing the cluster or its apps, run `openframe cluster cleanup [NAME]` instead of deleting anything — this prunes unused container images only.
 
 ## Expected result
 
-- After `openframe app uninstall` completes successfully, you see an "Uninstalling OpenFrame..." message followed by a line such as "Removed `<N>` application(s) and `<N>` Helm release(s)." If you passed `--delete-namespace`, you also see a confirmation that the `argocd` namespace was deleted. The CLI then prints that the cluster was left running and that you can reinstall any time with `openframe app install`.
-- After `openframe cluster delete` completes successfully, the CLI shows an operation-start message for the delete action, followed by an operation-success message once the cluster and its associated resources (Docker resources for k3d, or cloud infrastructure for EKS/GKE) have been removed.
-- If you cancel the `openframe app uninstall` confirmation prompt, the CLI prints "Uninstall cancelled." and makes no changes.
-- If you decline a cloud cluster's typed-name confirmation during `openframe cluster delete` (the name you typed does not match), the CLI prints "Cluster name did not match — nothing was deleted" and the cluster is left untouched.
+- After `openframe app uninstall` completes successfully, you see a success message of the form "Removed `<N>` application(s) and `<N>` Helm release(s)." followed, if `--delete-namespace` was used, by "Deleted the argocd namespace." and then "The cluster was left running. Re-install any time with: openframe app install".
+- If you answered "no" to the uninstall confirmation, you see "Uninstall cancelled." and nothing is changed.
+- After `openframe cluster delete` completes successfully, the CLI shows a friendly success message for the delete operation and the cluster no longer appears in `openframe cluster list`.
+- If you declined the cloud-cluster name confirmation, you see "Cluster name did not match — nothing was deleted" and the cluster is left untouched.
 
 ## Troubleshooting
 
-- **"`<command>` takes no positional arguments (got `<args>`) — use `--context` to target a cluster"** — you passed a stray argument to an `app` subcommand such as `uninstall`. Remove the extra argument and use the `--context` flag instead to target a specific cluster.
-- **"could not connect to the cluster"** during `openframe app uninstall` — the CLI could not resolve or reach the kube-context. Verify `kubectl config current-context` points at a reachable cluster, or pass the correct `--context` value.
-- **"uninstall failed: ..."** — the uninstall stopped partway through (for example while removing ArgoCD applications, uninstalling a Helm release, or clearing application finalizers). Re-run `openframe app uninstall` once the underlying issue is resolved; the operation is designed to be safe to retry since it removes resources in a fixed order (Applications, then Helm releases, then finalizers, then optionally the namespace).
-- **"refusing to destroy cloud cluster '`<name>`' non-interactively; pass `--force` to confirm"** — you ran `openframe cluster delete` against an EKS or GKE cluster in a non-interactive session without `--force`. Re-run the command with `--force`, or run it interactively so you can type the cluster name to confirm.
-- **"failed to list clusters" / "failed to detect cluster type"** — the CLI could not read your cluster configuration or determine whether the target is k3d, EKS, or GKE. Confirm the cluster name is correct and that any required cloud credentials (AWS or gcloud) are configured, since the material does not describe further diagnostics beyond this message.
-- The material does not show how to verify the Helm releases or namespace were actually removed from the cluster afterward (for example via `kubectl` or `helm` commands); check your cluster directly if you need that confirmation.
+- **"`<command>` takes no positional arguments (got `<args>`) — use --context to target a cluster"**: you passed a stray argument to `openframe app uninstall` (which only accepts `--context`, not a positional cluster name). Re-run the command using `--context <name>` instead.
+- **"refusing to destroy cloud cluster '`<name>`' non-interactively; pass --force to confirm"**: you ran `openframe cluster delete` against a GKE or EKS cluster in a non-interactive session without `--force`. Add `--force` only when you are certain, since there is no prompt to catch a mistake.
+- **"could not connect to the cluster"**: `openframe app uninstall` could not resolve a working connection to the target cluster context. Verify your kube-context (or the `--context` value you passed) actually points at a reachable cluster before retrying.
+- **"uninstall failed: ..."**: the uninstall stopped partway through deleting ArgoCD Applications, uninstalling a Helm release, or clearing finalizers. The material does not show a general recovery procedure for this case beyond re-running the command; check the specific error text printed after this prefix for the underlying cause.
+- **"failed to list clusters" / "failed to detect cluster type"**: `openframe cluster delete` or `openframe cluster cleanup` could not read the cluster registry or determine whether the cluster is k3d, EKS, or GKE. The material does not document a specific fix beyond confirming the cluster you named still exists and is visible to `openframe cluster list`.
