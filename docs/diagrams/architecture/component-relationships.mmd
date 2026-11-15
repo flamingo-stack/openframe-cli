@@ -1,0 +1,60 @@
+flowchart TB
+    subgraph CmdLayer["cmd/ (Cobra commands)"]
+        CmdRoot[root.go]
+        CmdBootstrap[bootstrap]
+        CmdCluster[cluster]
+        CmdApp[app]
+        CmdPrereq[prerequisites]
+        CmdUpdate[update]
+    end
+
+    subgraph Domain["internal/ domain packages"]
+        BootstrapSvc[bootstrap.Service]
+        ClusterPkg[cluster.ClusterService]
+        ChartPkg[chart.services.ChartService]
+        AppStatusPkg[app/status.Service]
+        AppUninstallPkg[app/uninstall.Service]
+        PrereqPkg[prerequisites.Runner]
+        K8sPkg[k8s.Accessor]
+    end
+
+    subgraph Infra["internal/shared/ infrastructure"]
+        ExecutorPkg[executor.CommandExecutor]
+        DownloadPkg[download.Downloader]
+        SelfUpdatePkg[selfupdate.Updater]
+        UIPkg[ui]
+        ErrorsPkg[errors]
+    end
+
+    CmdRoot --> CmdBootstrap
+    CmdRoot --> CmdCluster
+    CmdRoot --> CmdApp
+    CmdRoot --> CmdPrereq
+    CmdRoot --> CmdUpdate
+
+    CmdBootstrap --> BootstrapSvc
+    BootstrapSvc --> ClusterPkg
+    BootstrapSvc --> ChartPkg
+
+    CmdCluster --> ClusterPkg
+    ClusterPkg --> PrereqPkg
+
+    CmdApp --> ChartPkg
+    CmdApp --> AppStatusPkg
+    CmdApp --> AppUninstallPkg
+    ChartPkg --> K8sPkg
+    AppStatusPkg --> K8sPkg
+
+    CmdPrereq --> PrereqPkg
+    PrereqPkg --> DownloadPkg
+
+    CmdUpdate --> SelfUpdatePkg
+    SelfUpdatePkg --> DownloadPkg
+
+    ClusterPkg --> ExecutorPkg
+    ChartPkg --> ExecutorPkg
+    PrereqPkg --> ExecutorPkg
+
+    ClusterPkg --> UIPkg
+    ChartPkg --> UIPkg
+    CmdRoot --> ErrorsPkg
